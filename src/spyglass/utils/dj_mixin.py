@@ -13,7 +13,7 @@ from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
-from datajoint.utils import get_master, user_choice
+from datajoint.utils import get_master, to_camel_case, user_choice
 from networkx import NetworkXError
 from pymysql.err import DataError
 
@@ -92,6 +92,33 @@ class SpyglassMixin:
                 "Table definition matches Merge but does not inherit class: "
                 + self.full_table_name
             )
+
+    # -------------------------- Misc helper methods --------------------------
+
+    @property
+    def camel_name(self):
+        """Return table name in camel case."""
+        return to_camel_case(self.table_name)
+
+    def _auto_increment(self, key, pk, *args, **kwargs):
+        """Auto-increment primary key."""
+        if not key.get(pk):
+            key[pk] = (dj.U().aggr(self, n=f"max({pk})").fetch1("n") or 0) + 1
+        return key
+
+    def file_like(self, name=None, **kwargs):
+        """Convenience method for wildcard search on file name fields."""
+        if not name:
+            return self & True
+        attr = None
+        for field in self.heading.names:
+            if "file" in field:
+                attr = field
+                break
+        if not attr:
+            logger.error(f"No file-like field found in {self.full_table_name}")
+            return
+        return self & f"{attr} LIKE '%{name}%'"
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -203,6 +230,26 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_merge ------------------------
 
+    def import_merge_tables(self):
+        """Import all merge tables downstream of self."""
+        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
+        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
+        from spyglass.linearization.merge import (
+            LinearizedPositionOutput,
+        )  # noqa F401
+        from spyglass.position.position_merge import PositionOutput  # noqa F401
+        from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
+            SpikeSortingOutput,
+        )
+
+        _ = (
+            DecodingOutput(),
+            LFPOutput(),
+            LinearizedPositionOutput(),
+            PositionOutput(),
+            SpikeSortingOutput(),
+        )
+
     @cached_property
     def _merge_tables(self) -> Dict[str, dj.FreeTable]:
         """Dict of merge tables downstream of self: {full_table_name: FreeTable}.
@@ -215,10 +262,6 @@ class SpyglassMixin:
         visited = set()
 
         def search_descendants(parent):
-            # TODO: Add check that parents are in the graph. If not, raise error
-            #       asking user to import the table.
-            # TODO: Make a `is_merge_table` helper, and check for false
-            #       positives in the mixin init.
             for desc in parent.descendants(as_objects=True):
                 if (
                     MERGE_PK not in desc.heading.names
@@ -235,12 +278,16 @@ class SpyglassMixin:
 
         try:
             _ = search_descendants(self)
-        except NetworkXError as e:
-            table_name = "".join(e.args[0].split("`")[1:4])
-            raise ValueError(f"Please import {table_name} and try again.")
+        except NetworkXError:
+            try:  # Attempt to import missing table
+                self.import_merge_tables()
+                _ = search_descendants(self)
+            except NetworkXError as e:
+                table_name = "".join(e.args[0].split("`")[1:4])
+                raise ValueError(f"Please import {table_name} and try again.")
 
         logger.info(
-            f"Building merge cache for {self.table_name}.\n\t"
+            f"Building merge cache for {self.camel_name}.\n\t"
             + f"Found {len(merge_tables)} downstream merge tables"
         )
 
@@ -716,27 +763,7 @@ class SpyglassMixin:
             self._log_fetch(*args, **kwargs)
         return ret
 
-    # ------------------------- Other helper methods -------------------------
-
-    def _auto_increment(self, key, pk, *args, **kwargs):
-        """Auto-increment primary key."""
-        if not key.get(pk):
-            key[pk] = (dj.U().aggr(self, n=f"max({pk})").fetch1("n") or 0) + 1
-        return key
-
-    def file_like(self, name=None, **kwargs):
-        """Convenience method for wildcard search on file name fields."""
-        if not name:
-            return self & True
-        attr = None
-        for field in self.heading.names:
-            if "file" in field:
-                attr = field
-                break
-        if not attr:
-            logger.error(f"No file-like field found in {self.full_table_name}")
-            return
-        return self & f"{attr} LIKE '%{name}%'"
+    # ------------------------------ Restrict by ------------------------------
 
     def restrict_from_upstream(self, key, **kwargs):
         """Recursive function to restrict a table based on secondary keys of upstream tables"""

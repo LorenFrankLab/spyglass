@@ -44,9 +44,7 @@ def test_chain_str(chain):
 def test_chain_repr(chain):
     """Test that the repr of a TableChain object is as expected."""
     repr_got = repr(chain)
-    repr_ext = "Chain: " + chain._link_symbol.join(
-        [t.table_name for t in chain.objects]
-    )
+    repr_ext = "Chain: " + chain._link_symbol.join(chain.names)
     assert repr_got == repr_ext, "Unexpected repr of TableChain object."
 
 

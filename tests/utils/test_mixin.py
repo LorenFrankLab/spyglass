@@ -1,7 +1,7 @@
 import datajoint as dj
 import pytest
 
-from tests.conftest import VERBOSE
+from tests.conftest import TEARDOWN, VERBOSE
 
 
 @pytest.fixture(scope="module")
@@ -18,7 +18,10 @@ def Mixin():
     Mixin().drop_quick()
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+@pytest.mark.skipif(
+    not VERBOSE or not TEARDOWN,
+    reason="Error only on verbose or new declare.",
+)
 def test_bad_prefix(caplog, dj_conn, Mixin):
     schema_bad = dj.Schema("badprefix", {}, connection=dj_conn)
     schema_bad(Mixin)

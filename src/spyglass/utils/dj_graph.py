@@ -3,186 +3,14 @@
 NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
-from abc import ABC, abstractmethod
-from typing import Dict, List, Union
+from typing import Dict, List
 
-from datajoint import FreeTable
-from datajoint.condition import make_condition
 from datajoint.table import Table
 from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
-from spyglass.utils import logger
+from spyglass.utils.dj_graph_abs import AbstractGraph
 from spyglass.utils.dj_helper_fn import unique_dicts
-
-
-class AbstractGraph(ABC):
-    def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
-        """Abstract class for graph traversal and restriction application.
-
-        Parameters
-        ----------
-        seed_table : Table
-            Table to use to establish connection and graph
-        verbose : bool, optional
-            Whether to print verbose output. Default False
-        """
-        self.connection = seed_table.connection
-        self.graph = seed_table.connection.dependencies
-        self.graph.load()
-
-        self.verbose = verbose
-        self.visited = set()
-        self.to_visit = set()
-        self.cascaded = False
-
-    def _log_truncate(self, log_str, max_len=80):
-        """Truncate log lines to max_len and print if verbose."""
-        if not self.verbose:
-            return
-        logger.info(
-            log_str[:max_len] + "..." if len(log_str) > max_len else log_str
-        )
-
-    @abstractmethod
-    def cascade(self):
-        """Cascade restrictions through graph."""
-        raise NotImplementedError("Child class mut implement `cascade` method")
-
-    def _get_node(self, table):
-        """Get node from graph."""
-        if not (node := self.graph.nodes.get(table)):
-            raise ValueError(
-                f"Table {table} not found in graph."
-                + "\n\tPlease import this table and rerun"
-            )
-        return node
-
-    def _set_node(self, table, attr="ft", value=None):
-        """Set attribute on node. General helper for various attributes."""
-        _ = self._get_node(table)  # Ensure node exists
-        self.graph.nodes[table][attr] = value
-
-    def _get_restr(self, table):
-        """Get restriction from graph node."""
-        table = table if isinstance(table, str) else table.full_table_name
-        return self._get_node(table).get("restr", "False")
-
-    def _set_restr(self, table, restriction):
-        """Add restriction to graph node. If one exists, merge with new."""
-        ft = self._get_ft(table)
-        restriction = (  # Convert to condition if list or dict
-            make_condition(ft, restriction, set())
-            if not isinstance(restriction, str)
-            else restriction
-        )
-        if existing := self._get_restr(table):
-            if existing == restriction:
-                return
-            join = ft & [existing, restriction]
-            if len(join) == len(ft & existing):
-                return  # restriction is a subset of existing
-            restriction = make_condition(
-                ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
-            )
-
-        self._set_node(table, "restr", restriction)
-
-    def _get_ft(self, table, with_restr=False):
-        """Get FreeTable from graph node. If one doesn't exist, create it."""
-        table = table if isinstance(table, str) else table.full_table_name
-        restr = self._get_restr(table) if with_restr else True
-        if ft := self._get_node(table).get("ft"):
-            return ft & restr
-        ft = FreeTable(self.connection, table)
-        self._set_node(table, "ft", ft)
-        return ft & restr
-
-    @property
-    def all_ft(self):
-        """Get restricted FreeTables from all visited nodes."""
-        self.cascade()
-        return [self._get_ft(table, with_restr=True) for table in self.visited]
-
-    def get_restr_ft(self, table: Union[int, str]):
-        """Get restricted FreeTable from graph node.
-
-        Currently used for testing.
-
-        Parameters
-        ----------
-        table : Union[int, str]
-            Table name or index in visited set
-        """
-        if isinstance(table, int):
-            table = list(self.visited)[table]
-        return self._get_ft(table, with_restr=True)
-
-    def _child_to_parent(
-        self,
-        child,
-        parent,
-        restriction,
-        attr_map=None,
-        primary=True,
-        **kwargs,
-    ) -> List[Dict[str, str]]:
-        """Given a child, child's restr, and parent, get parent's restr.
-
-        Parameters
-        ----------
-        child : str
-            child table name
-        parent : str
-            parent table name
-        restriction : str
-            restriction to apply to child
-        attr_map : dict, optional
-            dictionary mapping aliases across parend/child, as pulled from
-            DataJoint-assembled graph. Default None. Func will flip this dict
-            to convert from child to parent fields.
-        primary : bool, optional
-            Is parent in child's primary key? Default True. Also derived from
-            DataJoint-assembled graph. If True, project only primary key fields
-            to avoid secondary key collisions.
-
-        Returns
-        -------
-        List[Dict[str, str]]
-            List of dicts containing primary key fields for restricted parent
-            table.
-        """
-
-        # Need to flip attr_map to respect parent's fields
-        attr_reverse = (
-            {v: k for k, v in attr_map.items() if k != v} if attr_map else {}
-        )
-        child_ft = self._get_ft(child)
-        parent_ft = self._get_ft(parent).proj()
-        restr = restriction or self._get_restr(child_ft) or True
-        restr_child = child_ft & restr
-
-        if primary:  # Project only primary key fields to avoid collisions
-            join = restr_child.proj(**attr_reverse) * parent_ft
-        else:  # Include all fields
-            join = restr_child.proj(..., **attr_reverse) * parent_ft
-
-        ret = unique_dicts(join.fetch(*parent_ft.primary_key, as_dict=True))
-
-        if len(ret) == len(parent_ft):
-            self._log_truncate(f"NULL restr {parent}")
-
-        return ret
-
-    @property
-    def as_dict(self) -> List[Dict[str, str]]:
-        """Return as a list of dictionaries of table_name: restriction"""
-        self.cascade()
-        return [
-            {"table_name": table, "restriction": self._get_restr(table)}
-            for table in self.visited
-            if self._get_restr(table)
-        ]
 
 
 class RestrGraph(AbstractGraph):
@@ -217,7 +45,6 @@ class RestrGraph(AbstractGraph):
         """
         super().__init__(seed_table, verbose=verbose)
 
-        self.ancestors = set()
         self.leaves = set()
         self.analysis_pk = AnalysisNwbfile().primary_key
 
@@ -239,20 +66,7 @@ class RestrGraph(AbstractGraph):
         """Get restricted FreeTables from graph leaves."""
         return [self._get_ft(table, with_restr=True) for table in self.leaves]
 
-    def _get_files(self, table):
-        """Get analysis files from graph node."""
-        return self._get_node(table).get("files", [])
-
-    def cascade_files(self):
-        """Set node attribute for analysis files."""
-        for table in self.visited:
-            ft = self._get_ft(table)
-            if not set(self.analysis_pk).issubset(ft.heading.names):
-                continue
-            files = (ft & self._get_restr(table)).fetch(*self.analysis_pk)
-            self._set_node(table, "files", files)
-
-    def cascade1(self, table, restriction):
+    def old_cascade1(self, table, restriction, direction="up"):
         """Cascade a restriction up the graph, recursively on parents.
 
         Parameters
@@ -265,7 +79,13 @@ class RestrGraph(AbstractGraph):
         self._set_restr(table, restriction)
         self.visited.add(table)
 
-        for parent, data in self.graph.parents(table).items():
+        next_nodes = (
+            self.graph.parents(table)
+            if direction == "up"
+            else self.graph.children(table)
+        )
+
+        for parent, data in next_nodes.items():
             if parent in self.visited:
                 continue
 
@@ -279,7 +99,11 @@ class RestrGraph(AbstractGraph):
                 **data,
             )
 
-            self.cascade1(parent, parent_restr)  # Parent set on recursion
+            self.cascade1(
+                table=parent,
+                restriction=parent_restr,
+                direction=direction,
+            )
 
     def cascade(self, show_progress=None) -> None:
         """Cascade all restrictions up the graph.
@@ -301,7 +125,7 @@ class RestrGraph(AbstractGraph):
             restr = self._get_restr(table)
             self._log_truncate(f"Start     {table}: {restr}")
             self.cascade1(table, restr)
-        if not self.visited == self.ancestors:
+        if not self.visited == self.to_visit:
             raise RuntimeError(
                 "Cascade: FAIL - incomplete cascade. Please post issue."
             )
@@ -322,7 +146,7 @@ class RestrGraph(AbstractGraph):
         self.cascaded = False
 
         new_ancestors = set(self._get_ft(table_name).ancestors())
-        self.ancestors |= new_ancestors  # Add to total ancestors
+        self.to_visit |= new_ancestors  # Add to total ancestors
         self.visited -= new_ancestors  # Remove from visited to revisit
 
         self.leaves.add(table_name)
@@ -371,23 +195,29 @@ class RestrGraph(AbstractGraph):
             self.cascade()
             self.cascade_files()
 
+    # ----------------------------- File Handling -----------------------------
+
+    def _get_files(self, table):
+        """Get analysis files from graph node."""
+        return self._get_node(table).get("files", [])
+
+    def cascade_files(self):
+        """Set node attribute for analysis files."""
+        for table in self.visited:
+            ft = self._get_ft(table)
+            if not set(self.analysis_pk).issubset(ft.heading.names):
+                continue
+            files = list((ft & self._get_restr(table)).fetch(*self.analysis_pk))
+            self._set_node(table, "files", files)
+
     @property
     def file_dict(self) -> Dict[str, List[str]]:
         """Return dictionary of analysis files from all visited nodes.
 
         Currently unused, but could be useful for debugging.
         """
-        if not self.cascaded:
-            logger.warning("Uncascaded graph. Using leaves only.")
-            table_list = self.leaves
-        else:
-            table_list = self.visited
-
-        return {
-            table: self._get_files(table)
-            for table in table_list
-            if any(self._get_files(table))
-        }
+        self.cascade()
+        return self._get_attr_dict("files", default_factory=lambda: [])
 
     @property
     def file_paths(self) -> List[str]:
@@ -397,11 +227,10 @@ class RestrGraph(AbstractGraph):
         directly by the user.
         """
         self.cascade()
-        unique_files = set(
-            [file for table in self.visited for file in self._get_files(table)]
-        )
         return [
             {"file_path": AnalysisNwbfile().get_abs_path(file)}
-            for file in unique_files
+            for file in set(
+                [f for files in self.file_dict.values() for f in files]
+            )
             if file is not None
         ]

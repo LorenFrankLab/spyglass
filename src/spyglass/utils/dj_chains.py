@@ -6,9 +6,11 @@ import datajoint as dj
 import networkx as nx
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
-from datajoint.utils import get_master, to_camel_case
+from datajoint.utils import to_camel_case
 
+from spyglass.utils.dj_graph_abs import AbstractGraph, _fuzzy_get
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_merge_tables import is_merge_table
 from spyglass.utils.logging import logger
 
 # Tables that should be excluded from the undirected graph when finding paths
@@ -88,23 +90,21 @@ class TableChains:
 
     def __getitem__(self, index: Union[int, str]):
         """Return FreeTable object at index."""
-        if isinstance(index, str):
-            for i, part in enumerate(self.part_names):
-                if index in part:
-                    return self.chains[i]
-        return self.chains[index]
+        return _fuzzy_get(index, self.part_names, self.chains)
 
-    def join(self, restriction=None) -> List[QueryExpression]:
+    def join(
+        self, restriction=None, reverse_order=False
+    ) -> List[QueryExpression]:
         """Return list of joins for each chain in self.chains."""
         restriction = restriction or self.parent.restriction or True
         joins = []
         for chain in self.chains:
-            if joined := chain.join(restriction):
+            if joined := chain.join(restriction, reverse_order=reverse_order):
                 joins.append(joined)
         return joins
 
 
-class TableChain:
+class TableChain(AbstractGraph):
     """Class for representing a chain of tables.
 
     A chain is a sequence of tables from parent to child identified by
@@ -117,9 +117,6 @@ class TableChain:
         Parent or origin of chain.
     child : Table
         Child or destination of chain.
-    _connection : datajoint.Connection, optional
-        Connection to database used to create FreeTable objects. Defaults to
-        parent.connection.
     _link_symbol : str
         Symbol used to represent the link between parent and child. Hardcoded
         to " -> ".
@@ -134,10 +131,6 @@ class TableChain:
         Directed graph of parent's dependencies from datajoint.connection.
     names : List[str]
         List of full table names in chain.
-    objects : List[dj.FreeTable]
-        List of FreeTable objects for each table in chain.
-    attr_maps : List[dict]
-        List of attribute maps for each link in chain.
     path : OrderedDict[str, Dict[str, Union[dj.FreeTable,dict]]]
         Dictionary of full table names in chain. Keys are self.names
         Values are a dict of free_table (self.objects) and
@@ -162,29 +155,24 @@ class TableChain:
         Return join of tables in chain with restriction applied to parent.
     """
 
-    def __init__(self, parent: Table, child: Table, connection=None):
-        self._connection = connection or parent.connection
-        self.graph = self._connection.dependencies
-        self.graph.load()
-
-        if (  # if child is a merge table
-            get_master(child.full_table_name) == ""
-            and MERGE_PK in child.heading.names
-        ):
+    def __init__(
+        self,
+        parent: Table,
+        child: Table,
+        verbose: bool = True,
+    ):
+        if is_merge_table(child):
             raise TypeError("Child is a merge table. Use TableChains instead.")
+
+        super().__init__(seed_table=parent, verbose=verbose)
+        _ = self._get_node(child.full_table_name)  # ensure child is in graph
 
         self._link_symbol = " -> "
         self.parent = parent
         self.child = child
         self.link_type = None
         self._searched = False
-
-        if child.full_table_name not in self.graph.nodes:
-            logger.warning(
-                "Can't find item in graph. Try importing: "
-                + f"{child.full_table_name}"
-            )
-            self._searched = True
+        self.undirect_graph = None
 
     def __str__(self):
         """Return string representation of chain: parent -> child."""
@@ -200,9 +188,7 @@ class TableChain:
         """Return full representation of chain: parent -> {links} -> child."""
         if not self.has_link:
             return "No link"
-        return "Chain: " + self._link_symbol.join(
-            [t.table_name for t in self.objects]
-        )
+        return "Chain: " + self._link_symbol.join(self.names)
 
     def __len__(self):
         """Return number of tables in chain."""
@@ -210,15 +196,8 @@ class TableChain:
             return 0
         return len(self.names)
 
-    def __getitem__(self, index: Union[int, str]) -> dj.FreeTable:
-        """Return FreeTable object at index."""
-        if not self.has_link:
-            return None
-        if isinstance(index, str):
-            for i, name in enumerate(self.names):
-                if index in name:
-                    return self.objects[i]
-        return self.objects[index]
+    def __getitem__(self, index: Union[int, str]):
+        return _fuzzy_get(index, self.names, self.objects)
 
     @property
     def has_link(self) -> bool:
@@ -230,15 +209,6 @@ class TableChain:
         if not self._searched:
             _ = self.path
         return self.link_type is not None
-
-    def pk_link(self, src, trg, data) -> float:
-        """Return 1 if data["primary"] else float("inf").
-
-        Currently unused. Preserved for future debugging. shortest_path accepts
-        an option weight callable parameter.
-        nx.shortest_path(G, source, target,weight=pk_link)
-        """
-        return 1 if data["primary"] else float("inf")
 
     def find_path(self, directed=True) -> OrderedDict:
         """Return list of full table names in chain.
@@ -265,16 +235,22 @@ class TableChain:
         source code for comments on alias nodes.
         """
         source, target = self.parent.full_table_name, self.child.full_table_name
+
         if not directed:
-            self.graph = self.graph.to_undirected()
-            self.graph.remove_nodes_from(PERIPHERAL_TABLES)
+            self.undirect_graph = self.graph.to_undirected()
+            self.undirect_graph.remove_nodes_from(PERIPHERAL_TABLES)
+
+        search_graph = self.graph if directed else self.undirect_graph
+
         try:
-            path = nx.shortest_path(self.graph, source, target)
+            path = nx.shortest_path(search_graph, source, target)
         except nx.NetworkXNoPath:
             return None
         except nx.NodeNotFound:
             self._searched = True
             return None
+
+        self.no_visit.update(set(self.graph.nodes) - set(path))
 
         ret = OrderedDict()
         prev_table = None
@@ -288,7 +264,7 @@ class TableChain:
                     attr_map = self.graph[prev_table][table]["attr_map"]
                 ret[prev_table]["attr_map"] = attr_map
             else:
-                free_table = dj.FreeTable(self._connection, table)
+                free_table = dj.FreeTable(self.connection, table)
                 ret[table] = {"free_table": free_table, "attr_map": {}}
                 prev_table = table
         return ret
@@ -323,19 +299,32 @@ class TableChain:
         """
         if not self.has_link:
             return None
-        return [v["free_table"] for v in self.path.values()]
+        return [self._get_ft(table, with_restr=False) for table in self.names]
 
-    @cached_property
-    def attr_maps(self) -> List[dict]:
-        """Return list of attribute maps for each table in chain.
+    def cascade(self, restriction: str = None, direction: str = "up"):
+        if direction == "up":
+            start, end = self.child, self.parent
+        else:
+            start, end = self.parent, self.child
+        self.cascade1(
+            table=start.full_table_name,
+            restriction=start.restriction,
+            direction=direction,
+        )
+        return self._get_ft(end.full_table_name, with_restr=True)
 
-        Unused. Preserved for future debugging.
-        """
-        if not self.has_link:
-            return None
-        return [v["attr_map"] for v in self.path.values()]
+        return self._get_ft(self.parent.full_table_name, with_restr=True)
 
     def join(
+        self, restriction: str = None, reverse_order: bool = False
+    ) -> dj.expression.QueryExpression:
+        if not self.has_link:
+            return None
+
+        direction = "down" if reverse_order else "up"
+        return self.cascade(restriction, direction)
+
+    def old_join(
         self, restriction: str = None, reverse_order: bool = False
     ) -> dj.expression.QueryExpression:
         """Return join of tables in chain with restriction applied to parent.

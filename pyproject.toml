@@ -122,7 +122,7 @@ minversion = "7.0"
 addopts = [
     "-sv",
     "--sw", # stepwise: resume with next test after failure
-    "--pdb", # drop into debugger on failure
+    # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     "--no-teardown", # don't teardown the database after tests
     # "--quiet-spy",                  # don't show logging from spyglass
