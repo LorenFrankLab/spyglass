@@ -315,6 +315,7 @@ class SpyglassMixin:
         # that the merge table with the longest chain is the most downstream.
         # A more sophisticated approach would order by length from self to
         # each merge part independently, but this is a good first approximation.
+
         return OrderedDict(
             sorted(
                 merge_chains.items(), key=lambda x: x[1].max_len, reverse=True
@@ -377,20 +378,20 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         if reload_cache:
-            del self._merge_tables
-            del self._merge_chains
+            for attr in ["_merge_tables", "_merge_chains"]:
+                _ = self.__dict__.pop(attr, None)
 
         restriction = restriction or self.restriction or True
 
         merge_join_dict = {}
         for name, chain in self._merge_chains.items():
-            join = chain.join(restriction)
+            join = chain.cascade(restriction, direction="down")
             if join:
                 merge_join_dict[name] = join
 
         if not merge_join_dict and not disable_warning:
             logger.warning(
-                f"No merge deletes found w/ {self.table_name} & "
+                f"No merge deletes found w/ {self.camel_name} & "
                 + f"{restriction}.\n\tIf this is unexpected, try importing "
                 + " Merge table(s) and running with `reload_cache`."
             )

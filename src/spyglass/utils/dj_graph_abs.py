@@ -70,7 +70,9 @@ class AbstractGraph(ABC):
         }
 
     def _get_attr_map_btwn(self, child, parent):
-        """Get attribute map between child and parent."""
+        """Get attribute map between child and parent.
+
+        Currently used for debugging."""
         child = child if isinstance(child, str) else child.full_table_name
         parent = parent if isinstance(parent, str) else parent.full_table_name
 
@@ -88,14 +90,27 @@ class AbstractGraph(ABC):
             attr_map = self.graph[child][path[1]]["attr_map"]
         except KeyError:
             attr_map = self.graph[path[1]][child]["attr_map"]
-        return attr_map if not reverse else {v: k for k, v in attr_map.items()}
+
+        return self._parse_attr_map(attr_map, reverse=reverse)
+
+    def _parse_attr_map(self, attr_map, reverse=False):
+        """Parse attribute map. Remove self-references."""
+        if not attr_map:
+            return {}
+        if reverse:
+            return {v: k for k, v in attr_map.items() if k != v}
+        return {k: v for k, v in attr_map.items() if k != v}
 
     def _get_restr(self, table):
-        """Get restriction from graph node."""
+        """Get restriction from graph node.
+
+        Defaults to False if no restriction is set so that it doesn't appear
+        in attrs like `all_ft`.
+        """
         table = table if isinstance(table, str) else table.full_table_name
         return self._get_node(table).get("restr", "False")
 
-    def _set_restr(self, table, restriction):
+    def _set_restr(self, table, restriction, merge_existing=True):
         """Add restriction to graph node. If one exists, merge with new."""
         ft = self._get_ft(table)
         restriction = (  # Convert to condition if list or dict
@@ -103,7 +118,8 @@ class AbstractGraph(ABC):
             if not isinstance(restriction, str)
             else restriction
         )
-        if existing := self._get_restr(table):
+        existing = self._get_restr(table)
+        if merge_existing and existing != "False":  # False is default
             if existing == restriction:
                 return
             join = ft & [existing, restriction]
@@ -163,49 +179,28 @@ class AbstractGraph(ABC):
         self,
         table1: str,
         table2: str,
-        restr1: str,
+        restr: str,
         attr_map: dict = None,
         primary: bool = True,
-    ):
-        ft1 = self._get_ft(table1)
-        ft2 = self._get_ft(table2)
-        if attr_map is None:
-            attr_map = self._get_attr_map_btwn(table1, table2)
-
-        if table1 in ft2.children():
-            table1, table2 = table2, table1
-            ft1, ft2 = ft2, ft1
-
-        if primary:
-            join = ft1.proj(**attr_map) * ft2
-        else:
-            join = ft1.proj(..., **attr_map) * ft2
-
-        return unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
-
-    def _child_to_parent(
-        self,
-        child,
-        parent,
-        restriction,
-        attr_map=None,
-        primary=True,
         **kwargs,
-    ) -> List[Dict[str, str]]:
-        """Given a child, child's restr, and parent, get parent's restr.
+    ):
+        """Given two tables and a restriction, return restriction for table2.
+
+        Similar to ((table1 & restr) * table2).fetch(*table2.primary_key)
+        but with the ability to resolve aliases across tables. One table should
+        be the parent of the other. Replaces previous _child_to_parent.
 
         Parameters
         ----------
-        child : str
-            child table name
-        parent : str
-            parent table name
-        restriction : str
-            restriction to apply to child
+        table1 : str
+            Table name. Restriction always applied to this table.
+        table2 : str
+            Table name. Restriction pulled from this table.
+        restr : str
+            Restriction to apply to table1.
         attr_map : dict, optional
-            dictionary mapping aliases across parend/child, as pulled from
-            DataJoint-assembled graph. Default None. Func will flip this dict
-            to convert from child to parent fields.
+            dictionary mapping aliases across tables, as pulled from
+            DataJoint-assembled graph. Default None.
         primary : bool, optional
             Is parent in child's primary key? Default True. Also derived from
             DataJoint-assembled graph. If True, project only primary key fields
@@ -214,28 +209,38 @@ class AbstractGraph(ABC):
         Returns
         -------
         List[Dict[str, str]]
-            List of dicts containing primary key fields for restricted parent
-            table.
+            List of dicts containing primary key fields for restricted table2.
         """
+        ft1 = self._get_ft(table1) & restr
+        ft2 = self._get_ft(table2)
 
-        # Need to flip attr_map to respect parent's fields
-        attr_reverse = (
-            {v: k for k, v in attr_map.items() if k != v} if attr_map else {}
-        )
-        child_ft = self._get_ft(child)
-        parent_ft = self._get_ft(parent).proj()
-        restr = restriction or self._get_restr(child_ft) or True
-        restr_child = child_ft & restr
+        if len(ft1) == 0:
+            logger.warning(f"Empty table {table1} with restriction {restr}")
+            return ["False"]
 
-        if primary:  # Project only primary key fields to avoid collisions
-            join = restr_child.proj(**attr_reverse) * parent_ft
-        else:  # Include all fields
-            join = restr_child.proj(..., **attr_reverse) * parent_ft
+        attr_map = self._parse_attr_map(attr_map) if attr_map else {}
 
-        ret = unique_dicts(join.fetch(*parent_ft.primary_key, as_dict=True))
+        if table1 in ft2.parents():
+            flip = False
+            child, parent = ft2, ft1
+        else:  # table2 in ft1.children()
+            flip = True
+            child, parent = ft1, ft2
 
-        if len(ret) == len(parent_ft):
-            self._log_truncate(f"NULL restr {parent}")
+        if primary:
+            join = (parent.proj(**attr_map) * child).proj()
+        else:
+            join = (parent.proj(..., **attr_map) * child).proj()
+
+        if set(ft2.primary_key).isdisjoint(set(join.heading.names)):
+            join = join.proj(**self._parse_attr_map(attr_map, reverse=True))
+
+        ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
+
+        if self.verbose and len(ft2) and len(ret) == len(ft2):
+            self._log_truncate(f"NULL restr {table2}")
+        if self.verbose and attr_map:
+            self._log_truncate(f"attr_map {table1} -> {table2}: {flip}")
 
         return ret
 
@@ -249,32 +254,35 @@ class AbstractGraph(ABC):
         restriction : str
             restriction to apply
         """
+
         self._set_restr(table, restriction)
         self.visited.add(table)
 
-        next_nodes = (
-            self.graph.parents(table)
-            if direction == "up"
-            else self.graph.children(table)
+        next_func = (
+            self.graph.parents if direction == "up" else self.graph.children
         )
 
-        for next_table, data in next_nodes.items():
-            if next_table in self.visited or next_table in self.no_visit:
+        for next_table, data in next_func(table).items():
+            if next_table.isnumeric():
+                next_table, data = next_func(next_table).popitem()
+
+            if (
+                next_table in self.visited
+                or next_table in self.no_visit
+                or table == next_table
+            ):
                 continue
 
-            if next_table.isnumeric():
-                next_table, data = self.graph.parents(next_table).popitem()
-
-            parent_restr = self._child_to_parent(
-                child=table,
-                parent=next_table,
-                restriction=restriction,
+            next_restr = self._bridge_restr(
+                table1=table,
+                table2=next_table,
+                restr=restriction,
                 **data,
             )
 
             self.cascade1(
                 table=next_table,
-                restriction=parent_restr,
+                restriction=next_restr,
                 direction=direction,
             )
 

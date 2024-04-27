@@ -103,6 +103,15 @@ class TableChains:
                 joins.append(joined)
         return joins
 
+    def cascade(self, restriction: str = None, direction: str = "down"):
+        """Return list of cascades for each chain in self.chains."""
+        restriction = restriction or self.parent.restriction or True
+        cascades = []
+        for chain in self.chains:
+            if joined := chain.cascade(restriction, direction):
+                cascades.append(joined)
+        return cascades
+
 
 class TableChain(AbstractGraph):
     """Class for representing a chain of tables.
@@ -159,7 +168,7 @@ class TableChain(AbstractGraph):
         self,
         parent: Table,
         child: Table,
-        verbose: bool = True,
+        verbose: bool = False,
     ):
         if is_merge_table(child):
             raise TypeError("Child is a merge table. Use TableChains instead.")
@@ -188,7 +197,7 @@ class TableChain(AbstractGraph):
         """Return full representation of chain: parent -> {links} -> child."""
         if not self.has_link:
             return "No link"
-        return "Chain: " + self._link_symbol.join(self.names)
+        return "Chain: " + self._link_symbol.join(self.path)
 
     def __len__(self):
         """Return number of tables in chain."""
@@ -250,46 +259,25 @@ class TableChain(AbstractGraph):
             self._searched = True
             return None
 
-        self.no_visit.update(set(self.graph.nodes) - set(path))
+        ignore_nodes = self.graph.nodes - set(path)
+        self.no_visit.update(ignore_nodes)
 
-        ret = OrderedDict()
-        prev_table = None
-        for i, table in enumerate(path):
-            if table.isnumeric():  # get proj() attribute map for alias node
-                if not prev_table:
-                    raise ValueError("Alias node found without prev table.")
-                try:
-                    attr_map = self.graph[table][prev_table]["attr_map"]
-                except KeyError:  # Why is this only DLCCentroid??
-                    attr_map = self.graph[prev_table][table]["attr_map"]
-                ret[prev_table]["attr_map"] = attr_map
-            else:
-                free_table = dj.FreeTable(self.connection, table)
-                ret[table] = {"free_table": free_table, "attr_map": {}}
-                prev_table = table
-        return ret
+        return path
 
     @cached_property
-    def path(self) -> OrderedDict:
+    def path(self) -> list:
         """Return list of full table names in chain."""
         if self._searched and not self.has_link:
             return None
 
-        link = None
-        if link := self.find_path(directed=True):
+        path = None
+        if path := self.find_path(directed=True):
             self.link_type = "directed"
-        elif link := self.find_path(directed=False):
+        elif path := self.find_path(directed=False):
             self.link_type = "undirected"
         self._searched = True
 
-        return link
-
-    @cached_property
-    def names(self) -> List[str]:
-        """Return list of full table names in chain."""
-        if not self.has_link:
-            return None
-        return list(self.path.keys())
+        return path
 
     @cached_property
     def objects(self) -> List[dj.FreeTable]:
@@ -299,21 +287,24 @@ class TableChain(AbstractGraph):
         """
         if not self.has_link:
             return None
-        return [self._get_ft(table, with_restr=False) for table in self.names]
+        return [self._get_ft(table, with_restr=False) for table in self.path]
 
     def cascade(self, restriction: str = None, direction: str = "up"):
+        _ = self.path
+        if not self.has_link:
+            return None
         if direction == "up":
             start, end = self.child, self.parent
         else:
             start, end = self.parent, self.child
-        self.cascade1(
-            table=start.full_table_name,
-            restriction=start.restriction,
-            direction=direction,
-        )
+        if not self.cascaded:
+            self.cascade1(
+                table=start.full_table_name,
+                restriction=restriction,
+                direction=direction,
+            )
+            self.cascaded = True
         return self._get_ft(end.full_table_name, with_restr=True)
-
-        return self._get_ft(self.parent.full_table_name, with_restr=True)
 
     def join(
         self, restriction: str = None, reverse_order: bool = False

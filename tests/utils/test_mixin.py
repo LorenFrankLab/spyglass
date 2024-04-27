@@ -43,6 +43,17 @@ def test_merge_detect(Nwbfile, pos_merge_tables):
     ), "Merges not detected by mixin."
 
 
+def test_merge_chain_join(Nwbfile, pos_merge_tables):
+    """Test that the mixin can join merge chains."""
+    all_chains = [
+        chains.cascade(True, direction="down")
+        for chains in Nwbfile._merge_chains.values()
+    ]
+    end_len = [len(chain[0]) for chain in all_chains if chain]
+
+    assert end_len == [1, 1, 2], "Merge chains not joined correctly."
+
+
 def test_get_chain(Nwbfile, pos_merge_tables):
     """Test that the mixin can get the chain of a merge."""
     lin_parts = Nwbfile._get_chain("linear").part_names
@@ -53,7 +64,28 @@ def test_get_chain(Nwbfile, pos_merge_tables):
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_ddm_warning(Nwbfile, caplog):
     """Test that the mixin warns on empty delete_downstream_merge."""
-    (Nwbfile & "nwb_file_name LIKE 'BadName'").delete_downstream_merge(
+    (Nwbfile.file_like("BadName")).delete_downstream_merge(
         reload_cache=True, disable_warnings=False
     )
     assert "No merge deletes found" in caplog.text, "No warning issued."
+
+
+def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables):
+    """Test that the mixin can dry run delete_downstream_merge."""
+    param_field = "trodes_pos_params_name"
+    trodes_params = sgp.v1.TrodesPosParams()
+    rft = next(
+        iter(
+            (trodes_params & f'{param_field} LIKE "%ups%"').ddm(
+                reload_cache=True, dry_run=True, return_parts=True
+            )
+        )
+    )[0]
+    assert len(rft) == 1, "ddm did not return restricted table."
+
+    table_name = pos_merge_tables[0].parts()[-1]
+    assert table_name == rft.full_table_name, "ddm didn't grab right table."
+
+    assert (
+        rft.fetch1(param_field) == "single_led_upsampled"
+    ), "ddm didn't grab right row."
