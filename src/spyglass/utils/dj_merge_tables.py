@@ -1,4 +1,3 @@
-import re
 from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
@@ -25,23 +24,12 @@ MERGE_DEFINITION = (
 
 
 def is_merge_table(table):
-    """Return True if table definition matches the default Merge table.
-
-    Regex removes comments and blank lines before comparison.
-    """
+    """Return True if table fields exactly match Merge table."""
     if not isinstance(table, dj.Table):
         return False
-    if isinstance(table, dj.FreeTable):
-        fields, pk = table.heading.names, table.primary_key
-        return fields == [
-            RESERVED_PRIMARY_KEY,
-            RESERVED_SECONDARY_KEY,
-        ] and pk == [RESERVED_PRIMARY_KEY]
-    return MERGE_DEFINITION == re.sub(
-        r"\n\s*\n",
-        "\n",
-        re.sub(r"#.*\n", "\n", getattr(table, "definition", "")),
-    )
+    return table.primary_key == [
+        RESERVED_PRIMARY_KEY
+    ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
 
 
 class Merge(dj.Manual):
@@ -74,14 +62,8 @@ class Merge(dj.Manual):
                     )
         self._source_class_dict = {}
 
-    def _remove_comments(self, definition):
-        """Use regular expressions to remove comments and blank lines"""
-        return re.sub(  # First remove comments, then blank lines
-            r"\n\s*\n", "\n", re.sub(r"#.*\n", "\n", definition)
-        )
-
     @staticmethod
-    def _part_name(part=None):
+    def _part_name(part):
         """Return the CamelCase name of a part table"""
         if not isinstance(part, str):
             part = part.table_name
@@ -140,9 +122,6 @@ class Merge(dj.Manual):
         """
 
         cls._ensure_dependencies_loaded()
-
-        if not restriction:
-            restriction = True
 
         # Normalize restriction to sql string
         restr_str = make_condition(cls(), restriction, set())
@@ -387,8 +366,7 @@ class Merge(dj.Manual):
 
         Otherwise parts returns none
         """
-        if not dj.conn.connection.dependencies._loaded:
-            dj.conn.connection.dependencies.load()
+        dj.conn.connection.dependencies.load()
 
     def insert(self, rows: list, **kwargs):
         """Merges table specific insert, ensuring data exists in part parents.
@@ -783,7 +761,7 @@ class Merge(dj.Manual):
                 "No merge_fetch results.\n\t"
                 + "If not restricting, try: `M.merge_fetch(True,'attr')\n\t"
                 + "If restricting by source, use dict: "
-                + "`M.merge_fetch({'source':'X'})"
+                + "`M.merge_fetch({'source':'X'}"
             )
         return results[0] if len(results) == 1 else results
 
@@ -821,6 +799,33 @@ class Merge(dj.Manual):
             self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
+    # ------------------------------ Restrict by ------------------------------
+
+    # TODO: TEST THIS
+    # TODO: Allow (Table & restriction).merge_xxx() syntax
+    def restrict_from_upstream(self, restriction=True, **kwargs):
+        """Restrict self based on upstream table."""
+        from spyglass.utils.dj_graph import FindKeyGraph
+
+        if restriction is True:
+            return self._merge_repr()
+
+        graph = FindKeyGraph(
+            seed_table=self,
+            restriction=restriction,
+            leaves=self.parts(),
+            cascade=True,
+            verbose=False,
+            **kwargs,
+        )
+
+        self_restrict = [
+            leaf.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
+            for leaf in graph.leaf_ft
+        ]
+
+        return self & self_restrict
+
 
 _Merge = Merge
 
@@ -830,10 +835,6 @@ _Merge = Merge
 
 def delete_downstream_merge(
     table: dj.Table,
-    restriction: str = None,
-    dry_run=True,
-    recurse_level=2,
-    disable_warning=False,
     **kwargs,
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
@@ -858,12 +859,15 @@ def delete_downstream_merge(
     List[Tuple[dj.Table, dj.Table]]
         Entries in merge/part tables downstream of table input.
     """
+    logger.warning(
+        "DEPRECATED: This function will be removed in `0.6`. "
+        + "Use AnyTable().delete_downstream_merge() instead."
+    )
+
     from spyglass.utils.dj_mixin import SpyglassMixin
 
     if not isinstance(table, SpyglassMixin):
         raise ValueError("Input must be a Spyglass Table.")
     table = table if isinstance(table, dj.Table) else table()
 
-    return table.delete_downstream_merge(
-        restriction=restriction, dry_run=dry_run, **kwargs
-    )
+    return table.delete_downstream_merge(**kwargs)

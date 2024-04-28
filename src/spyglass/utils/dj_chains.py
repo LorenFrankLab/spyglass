@@ -4,35 +4,18 @@ from typing import List, Union
 
 import datajoint as dj
 import networkx as nx
-from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from datajoint.utils import to_camel_case
 
-from spyglass.utils.dj_graph_abs import AbstractGraph, _fuzzy_get
-from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_graph_abs import AbstractGraph
+from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES, fuzzy_get
 from spyglass.utils.dj_merge_tables import is_merge_table
-from spyglass.utils.logging import logger
-
-# Tables that should be excluded from the undirected graph when finding paths
-# to maintain valid joins.
-PERIPHERAL_TABLES = [
-    "`common_interval`.`interval_list`",
-    "`common_nwbfile`.`__analysis_nwbfile_kachery`",
-    "`common_nwbfile`.`__nwbfile_kachery`",
-    "`common_nwbfile`.`analysis_nwbfile_kachery_selection`",
-    "`common_nwbfile`.`analysis_nwbfile_kachery`",
-    "`common_nwbfile`.`analysis_nwbfile`",
-    "`common_nwbfile`.`kachery_channel`",
-    "`common_nwbfile`.`nwbfile_kachery_selection`",
-    "`common_nwbfile`.`nwbfile_kachery`",
-    "`common_nwbfile`.`nwbfile`",
-]
 
 
 class TableChains:
     """Class for representing chains from parent to Merge table via parts.
 
-    Functions as a plural version of TableChain, allowing a single `join`
+    Functions as a plural version of TableChain, allowing a single `cascade`
     call across all chains from parent -> Merge table.
 
     Attributes
@@ -64,8 +47,8 @@ class TableChains:
         Return number of chains with links.
     __getitem__(index: Union[int, str])
         Return TableChain object at index, or use substring of table name.
-    join(restriction: str = None)
-        Return list of joins for each chain in self.chains.
+    cascade(restriction: str = None)
+        Return list of cascade for each chain in self.chains.
     """
 
     def __init__(self, parent, child, connection=None):
@@ -90,18 +73,7 @@ class TableChains:
 
     def __getitem__(self, index: Union[int, str]):
         """Return FreeTable object at index."""
-        return _fuzzy_get(index, self.part_names, self.chains)
-
-    def join(
-        self, restriction=None, reverse_order=False
-    ) -> List[QueryExpression]:
-        """Return list of joins for each chain in self.chains."""
-        restriction = restriction or self.parent.restriction or True
-        joins = []
-        for chain in self.chains:
-            if joined := chain.join(restriction, reverse_order=reverse_order):
-                joins.append(joined)
-        return joins
+        return fuzzy_get(index, self.part_names, self.chains)
 
     def cascade(self, restriction: str = None, direction: str = "down"):
         """Return list of cascades for each chain in self.chains."""
@@ -160,8 +132,10 @@ class TableChain(AbstractGraph):
         True, uses directed graph. If False, uses undirected graph. Undirected
         excludes PERIPHERAL_TABLES like interval_list, nwbfile, etc. to maintain
         valid joins.
-    join(restriction: str = None)
-        Return join of tables in chain with restriction applied to parent.
+    cascade(restriction: str = None, direction: str = "up")
+        Given a restriction at the beginning, return a restricted FreeTable
+        object at the end of the chain. If direction is 'up', start at the child
+        and move up to the parent. If direction is 'down', start at the parent.
     """
 
     def __init__(
@@ -203,10 +177,10 @@ class TableChain(AbstractGraph):
         """Return number of tables in chain."""
         if not self.has_link:
             return 0
-        return len(self.names)
+        return len(self.path)
 
     def __getitem__(self, index: Union[int, str]):
-        return _fuzzy_get(index, self.names, self.objects)
+        return fuzzy_get(index, self.path, self.all_ft)
 
     @property
     def has_link(self) -> bool:
@@ -280,7 +254,7 @@ class TableChain(AbstractGraph):
         return path
 
     @cached_property
-    def objects(self) -> List[dj.FreeTable]:
+    def all_ft(self) -> List[dj.FreeTable]:
         """Return list of FreeTable objects for each table in chain.
 
         Unused. Preserved for future debugging.
@@ -302,52 +276,7 @@ class TableChain(AbstractGraph):
                 table=start.full_table_name,
                 restriction=restriction,
                 direction=direction,
+                replace=True,
             )
             self.cascaded = True
         return self._get_ft(end.full_table_name, with_restr=True)
-
-    def join(
-        self, restriction: str = None, reverse_order: bool = False
-    ) -> dj.expression.QueryExpression:
-        if not self.has_link:
-            return None
-
-        direction = "down" if reverse_order else "up"
-        return self.cascade(restriction, direction)
-
-    def old_join(
-        self, restriction: str = None, reverse_order: bool = False
-    ) -> dj.expression.QueryExpression:
-        """Return join of tables in chain with restriction applied to parent.
-
-        Parameters
-        ----------
-        restriction : str, optional
-            Restriction to apply to first table in the order.
-            Defaults to self.parent.restriction.
-        reverse_order : bool, optional
-            If True, join tables in reverse order. Defaults to False.
-        """
-        if not self.has_link:
-            return None
-
-        restriction = restriction or self.parent.restriction or True
-        path = (
-            OrderedDict(reversed(self.path.items()))
-            if reverse_order
-            else self.path
-        ).copy()
-
-        _, first_val = path.popitem(last=False)
-        join = first_val["free_table"] & restriction
-        for i, val in enumerate(path.values()):
-            attr_map, free_table = val["attr_map"], val["free_table"]
-            try:
-                join = (join.proj() * free_table).proj(**attr_map)
-            except dj.DataJointError as e:
-                attribute = str(e).split("attribute ")[-1]
-                logger.error(
-                    f"{str(self)} at {free_table.table_name} with {attribute}"
-                )
-                return None
-        return join

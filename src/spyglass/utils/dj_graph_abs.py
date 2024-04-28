@@ -4,7 +4,9 @@ from typing import Dict, List, Union
 from datajoint import FreeTable, logger
 from datajoint.condition import make_condition
 from datajoint.table import Table
-from networkx import NetworkXNoPath, NodeNotFound, shortest_path
+from networkx import NetworkXNoPath, shortest_path
+
+from spyglass.utils.dj_helper_fn import unique_dicts
 
 
 class AbstractGraph(ABC):
@@ -23,6 +25,7 @@ class AbstractGraph(ABC):
         self.graph.load()
 
         self.verbose = verbose
+        self.leaves = set()
         self.visited = set()
         self.to_visit = set()
         self.no_visit = set()
@@ -110,7 +113,7 @@ class AbstractGraph(ABC):
         table = table if isinstance(table, str) else table.full_table_name
         return self._get_node(table).get("restr", "False")
 
-    def _set_restr(self, table, restriction, merge_existing=True):
+    def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
         ft = self._get_ft(table)
         restriction = (  # Convert to condition if list or dict
@@ -119,7 +122,7 @@ class AbstractGraph(ABC):
             else restriction
         )
         existing = self._get_restr(table)
-        if merge_existing and existing != "False":  # False is default
+        if not replace and existing != "False":  # False is default
             if existing == restriction:
                 return
             join = ft & [existing, restriction]
@@ -215,10 +218,9 @@ class AbstractGraph(ABC):
         ft2 = self._get_ft(table2)
 
         if len(ft1) == 0:
-            logger.warning(f"Empty table {table1} with restriction {restr}")
             return ["False"]
 
-        attr_map = self._parse_attr_map(attr_map) if attr_map else {}
+        attr_map = self._parse_attr_map(attr_map)
 
         if table1 in ft2.parents():
             flip = False
@@ -244,7 +246,7 @@ class AbstractGraph(ABC):
 
         return ret
 
-    def cascade1(self, table, restriction, direction="up"):
+    def cascade1(self, table, restriction, direction="up", replace=False):
         """Cascade a restriction up the graph, recursively on parents.
 
         Parameters
@@ -255,7 +257,7 @@ class AbstractGraph(ABC):
             restriction to apply
         """
 
-        self._set_restr(table, restriction)
+        self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
         next_func = (
@@ -284,19 +286,5 @@ class AbstractGraph(ABC):
                 table=next_table,
                 restriction=next_restr,
                 direction=direction,
+                replace=replace,
             )
-
-
-def unique_dicts(list_of_dict):
-    """Remove duplicate dictionaries from a list."""
-    return [dict(t) for t in {tuple(d.items()) for d in list_of_dict}]
-
-
-def _fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
-    """Given lists of items/names, return item at index or by substring."""
-    if isinstance(index, int):
-        return sources[index]
-    for i, part in enumerate(names):
-        if index in part:
-            return sources[i]
-    return None

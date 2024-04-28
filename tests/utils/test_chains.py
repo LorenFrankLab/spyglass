@@ -44,24 +44,24 @@ def test_chain_str(chain):
 def test_chain_repr(chain):
     """Test that the repr of a TableChain object is as expected."""
     repr_got = repr(chain)
-    repr_ext = "Chain: " + chain._link_symbol.join(chain.names)
+    repr_ext = "Chain: " + chain._link_symbol.join(chain.path)
     assert repr_got == repr_ext, "Unexpected repr of TableChain object."
 
 
 def test_chain_len(chain):
     """Test that the len of a TableChain object is as expected."""
-    assert len(chain) == len(chain.names), "Unexpected len of TableChain."
+    assert len(chain) == len(chain.path), "Unexpected len of TableChain."
 
 
 def test_chain_getitem(chain):
     """Test getitem of TableChain object."""
     by_int = chain[0]
-    by_str = chain[chain.names[0]]
+    by_str = chain[chain.path[0]]
     assert by_int == by_str, "Getitem by int and str not equal."
 
 
 def test_nolink_join(no_link_chain):
-    assert no_link_chain.join() is None, "Unexpected join of no link chain."
+    assert no_link_chain.cascade() is None, "Unexpected join of no link chain."
 
 
 def test_chain_str_no_link(no_link_chain):

@@ -230,7 +230,7 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_merge ------------------------
 
-    def import_merge_tables(self):
+    def _import_merge_tables(self):
         """Import all merge tables downstream of self."""
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
         from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
@@ -280,7 +280,7 @@ class SpyglassMixin:
             _ = search_descendants(self)
         except NetworkXError:
             try:  # Attempt to import missing table
-                self.import_merge_tables()
+                self._import_merge_tables()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
@@ -385,8 +385,7 @@ class SpyglassMixin:
 
         merge_join_dict = {}
         for name, chain in self._merge_chains.items():
-            join = chain.cascade(restriction, direction="down")
-            if join:
+            if join := chain.cascade(restriction, direction="down"):
                 merge_join_dict[name] = join
 
         if not merge_join_dict and not disable_warning:
@@ -766,88 +765,30 @@ class SpyglassMixin:
 
     # ------------------------------ Restrict by ------------------------------
 
-    def restrict_from_upstream(self, key, **kwargs):
-        """Recursive function to restrict a table based on secondary keys of upstream tables"""
-        return restrict_from_upstream(self, key, **kwargs)
+    def __mod__(self, restriction):
+        """Restriction by upstream operator e.g. ``q1 % q2``.
 
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_from_upstream(restriction)
 
-def restrict_from_upstream(table, key, max_recursion=3):
-    """Recursive function to restrict a table based on secondary keys of upstream tables"""
-    print(f"table: {table.full_table_name}, key: {key}")
-    # Tables not to recurse through because too big or central
-    blacklist = [
-        "`common_nwbfile`.`analysis_nwbfile`",
-    ]
+    def restrict_from_upstream(self, restriction=True, **kwargs):
+        """Restrict self based on upstream table."""
+        from spyglass.utils.dj_graph import FindKeyGraph
 
-    # Case: MERGE table
-    if (table := table & key) and max_recursion:
-        if isinstance(table, Merge):
-            parts = table.parts(as_objects=True)
-            restricted_parts = [
-                restrict_from_upstream(part, key, max_recursion - 1)
-                for part in parts
-            ]
-            # only keep entries from parts that got restricted
-            restricted_parts = [
-                r_part.proj("merge_id")
-                for r_part, part in zip(restricted_parts, parts)
-                if (
-                    not len(r_part) == len(part)
-                    or check_complete_restrict(r_part, key)
-                )
-            ]
-            # return the merge of the restricted parts
-            merge_keys = []
-            for r_part in restricted_parts:
-                merge_keys.extend(r_part.fetch("merge_id", as_dict=True))
-            return table & merge_keys
+        if restriction is True:
+            return self
 
-        # Case: regular table
-        upstream_tables = table.parents(as_objects=True)
-        # prevent a loop where call Merge master table from part
-        upstream_tables = [
-            parent
-            for parent in upstream_tables
-            if not (
-                isinstance(parent, Merge)
-                and table.full_table_name in parent.parts()
-            )
-            and (parent.full_table_name not in blacklist)
-        ]
-        for parent in upstream_tables:
-            print(parent.full_table_name)
-            print(len(parent))
-            r_parent = restrict_from_upstream(parent, key, max_recursion - 1)
-            if len(r_parent) == len(parent):
-                continue  # skip joins with uninformative tables
-            table = safe_join(table, r_parent)
-            if check_complete_restrict(table, key) or not table:
-                print(len(table))
-                break
-    return table
-
-
-def check_complete_restrict(table, key):
-    """Checks all keys in a restriction dictionary are used in a table"""
-    if all([k in table.heading.names for k in key.keys()]):
-        print("FOUND")
-    return all([k in table.heading.names for k in key.keys()])
-
-
-# Utility Function
-def safe_join(table_1, table_2):
-    """enables joining of two tables with overlapping secondary keys"""
-    secondary_1 = [
-        name
-        for name in table_1.heading.names
-        if name not in table_1.primary_key
-    ]
-    secondary_2 = [
-        name
-        for name in table_2.heading.names
-        if name not in table_2.primary_key
-    ]
-    overlap = [name for name in secondary_1 if name in secondary_2]
-    return table_1 * table_2.proj(
-        *[name for name in table_2.heading.names if name not in overlap]
-    )
+        graph = FindKeyGraph(
+            seed_table=self,
+            table_name=self.full_table_name,
+            restriction=restriction,
+            cascade=True,
+            verbose=False,
+            **kwargs,
+        )
+        return graph.leaf_ft[0]

@@ -83,7 +83,7 @@ def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables):
     )[0]
     assert len(rft) == 1, "ddm did not return restricted table."
 
-    table_name = pos_merge_tables[0].parts()[-1]
+    table_name = [p for p in pos_merge_tables[0].parts() if "trode" in p][0]
     assert table_name == rft.full_table_name, "ddm didn't grab right table."
 
     assert (
