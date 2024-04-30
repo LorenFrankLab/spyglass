@@ -295,7 +295,6 @@ class FindKeyGraph(RestrGraph):
                 replace=True,
             )
 
-    # TODO: Add restrict_from_upstream method to Merge class, leaf per part
     def cascade1_search(
         self,
         table: str,

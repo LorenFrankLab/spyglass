@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Union
+from itertools import chain as iter_chain
+from typing import Dict, List, Tuple, Union
 
 from datajoint import FreeTable, logger
 from datajoint.condition import make_condition
 from datajoint.table import Table
-from networkx import NetworkXNoPath, shortest_path
+from datajoint.utils import to_camel_case
+from networkx import NetworkXNoPath, all_simple_paths, shortest_path
 
 from spyglass.utils.dj_helper_fn import unique_dicts
 
@@ -72,37 +74,37 @@ class AbstractGraph(ABC):
             for t in self.visited
         }
 
-    def _get_attr_map_btwn(self, child, parent):
-        """Get attribute map between child and parent.
+    def _get_edge(self, child, parent) -> Tuple[bool, Dict[str, str]]:
+        """Get edge data between child and parent.
 
-        Currently used for debugging."""
+        Returns
+        -------
+        Tuple[bool, Dict[str, str]]
+            Tuple of boolean indicating direction and edge data. True if child
+            is child of parent.
+        """
         child = child if isinstance(child, str) else child.full_table_name
         parent = parent if isinstance(parent, str) else parent.full_table_name
 
-        reverse = False
-        try:
-            path = shortest_path(self.graph, child, parent)
-        except NetworkXNoPath:
-            reverse, child, parent = True, parent, child
-            path = shortest_path(self.graph, child, parent)
+        if edge := self.graph.get_edge_data(parent, child):
+            return False, edge
+        elif edge := self.graph.get_edge_data(child, parent):
+            return True, edge
 
-        if len(path) != 2 and not path[1].isnumeric():
-            raise ValueError(f"{child} -> {parent} not direct path: {path}")
+        # Handle alias nodes. `shortest_path` doesn't work with aliases
+        p1 = all_simple_paths(self.graph, child, parent)
+        p2 = all_simple_paths(self.graph, parent, child)
+        paths = [p for p in iter_chain(p1, p2)]  # list for error handling
+        for path in paths:
+            if len(path) > 3 or (len(path) > 2 and not path[1].isnumeric()):
+                continue
+            return self._get_edge(path[0], path[1])
 
-        try:
-            attr_map = self.graph[child][path[1]]["attr_map"]
-        except KeyError:
-            attr_map = self.graph[path[1]][child]["attr_map"]
+        raise ValueError(f"{child} -> {parent} not direct path: {paths}")
 
-        return self._parse_attr_map(attr_map, reverse=reverse)
-
-    def _parse_attr_map(self, attr_map, reverse=False):
+    def _rev_attrs(self, attr_map):
         """Parse attribute map. Remove self-references."""
-        if not attr_map:
-            return {}
-        if reverse:
-            return {v: k for k, v in attr_map.items() if k != v}
-        return {k: v for k, v in attr_map.items() if k != v}
+        return {v: k for k, v in attr_map.items()}
 
     def _get_restr(self, table):
         """Get restriction from graph node.
@@ -154,6 +156,14 @@ class AbstractGraph(ABC):
             if not table.isnumeric()
         ]
 
+    def _print_restr(self, leaves=False):
+        """Print restrictions for each table in visited set."""
+        mylist = self.leaves if leaves else self.visited
+        for table in mylist:
+            self._log_truncate(
+                f"{table.split('.')[-1]:>35} {self._get_restr(table)}"
+            )
+
     def get_restr_ft(self, table: Union[int, str]):
         """Get restricted FreeTable from graph node.
 
@@ -183,8 +193,10 @@ class AbstractGraph(ABC):
         table1: str,
         table2: str,
         restr: str,
+        direction: str = None,
         attr_map: dict = None,
-        primary: bool = True,
+        primary: bool = None,
+        aliased: bool = None,
         **kwargs,
     ):
         """Given two tables and a restriction, return restriction for table2.
@@ -214,35 +226,48 @@ class AbstractGraph(ABC):
         List[Dict[str, str]]
             List of dicts containing primary key fields for restricted table2.
         """
-        ft1 = self._get_ft(table1) & restr
+        # Direction UP: table1 -> table2, parent -> child
+        if not all([direction, attr_map, primary, aliased]):
+            dir_bool, edge = self._get_edge(table1, table2)
+            direction = "up" if dir_bool else "down"
+            attr_map = edge.get("attr_map")
+            primary = edge.get("primary")
+            aliased = edge.get("aliased")
+
+        ft1 = self._get_ft(table1)
+        rt1 = ft1 & restr
         ft2 = self._get_ft(table2)
 
         if len(ft1) == 0:
             return ["False"]
 
-        attr_map = self._parse_attr_map(attr_map)
+        adjust = bool(set(attr_map.values()) - set(ft1.heading.names))
+        if adjust:
+            attr_map = self._rev_attrs(attr_map)
 
-        if table1 in ft2.parents():
-            flip = False
-            child, parent = ft2, ft1
-        else:  # table2 in ft1.children()
-            flip = True
-            child, parent = ft1, ft2
-
-        if primary:
-            join = (parent.proj(**attr_map) * child).proj()
-        else:
-            join = (parent.proj(..., **attr_map) * child).proj()
-
-        if set(ft2.primary_key).isdisjoint(set(join.heading.names)):
-            join = join.proj(**self._parse_attr_map(attr_map, reverse=True))
+        join = rt1.proj(**attr_map) * ft2
 
         ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
 
-        if self.verbose and len(ft2) and len(ret) == len(ft2):
-            self._log_truncate(f"NULL restr {table2}")
-        if self.verbose and attr_map:
-            self._log_truncate(f"attr_map {table1} -> {table2}: {flip}")
+        null = None
+        if self.verbose:
+            dir = "Up" if direction == "up" else "Dn"
+            prim = "Pri" if primary else "Sec"
+            adjust = "Flip" if adjust else "NoFp"
+            aliaa = "Alias" if aliased else "NoAli"
+            null = (
+                "NULL"
+                if len(ret) == 0
+                else "FULL" if len(ft2) == len(ret) else "part"
+            )
+            strt = f"{to_camel_case(table1.table_name)}"
+            endp = f"{to_camel_case(table2.table_name)}"
+            self._log_truncate(
+                f"{dir} {prim} {aliaa} {adjust}: {null} {strt} -> {endp}"
+            )
+        if null and null != "part":
+            pass
+            # __import__("pdb").set_trace()
 
         return ret
 
@@ -279,6 +304,7 @@ class AbstractGraph(ABC):
                 table1=table,
                 table2=next_table,
                 restr=restriction,
+                direction=direction,
                 **data,
             )
 

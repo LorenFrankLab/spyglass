@@ -2,6 +2,7 @@ from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
+from re import sub as re_sub
 from time import time
 from typing import Union
 
@@ -27,6 +28,15 @@ def is_merge_table(table):
     """Return True if table fields exactly match Merge table."""
     if not isinstance(table, dj.Table):
         return False
+    if not table.is_declared:
+        if tbl_def := getattr(table, "definition", None):
+            return MERGE_DEFINITION == re_sub(
+                r"\n\s*\n",
+                "\n",
+                re_sub(r"#.*\n", "\n", tbl_def.strip()),
+            )
+        logger.warning(f"Cannot determine merge table status for {table}")
+        return True
     return table.primary_key == [
         RESERVED_PRIMARY_KEY
     ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
