@@ -4,20 +4,6 @@ from pynwb import NWBHDF5IO
 
 
 @pytest.fixture(scope="session")
-def lfp(common):
-    from spyglass import lfp
-
-    return lfp
-
-
-@pytest.fixture(scope="session")
-def lfp_band(lfp):
-    from spyglass.lfp.analysis.v1 import lfp_band
-
-    return lfp_band
-
-
-@pytest.fixture(scope="session")
 def firfilters_table(common):
     return common.FirFilterParameters()
 

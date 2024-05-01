@@ -1,3 +1,10 @@
+"""Configuration for pytest, including fixtures and command line options.
+
+Fixtures in this script are mad available to all tests in the test suite.
+conftest.py files in subdirectories have fixtures that are only available to
+tests in that subdirectory.
+"""
+
 import os
 import sys
 import warnings
@@ -13,11 +20,12 @@ from datajoint.logging import logger as dj_logger
 
 from .container import DockerMySQLManager
 
-# ---------------------- CONSTANTS ---------------------
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+
+# ------------------------------- TESTS CONFIG -------------------------------
 
 # globals in pytest_configure:
 #       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 
 
 def pytest_addoption(parser):
@@ -131,7 +139,7 @@ def pytest_unconfigure(config):
         SERVER.stop()
 
 
-# ------------------- FIXTURES -------------------
+# ---------------------------- FIXTURES, TEST ENV ----------------------------
 
 
 @pytest.fixture(scope="session")
@@ -143,6 +151,27 @@ def verbose():
 @pytest.fixture(scope="session", autouse=True)
 def verbose_context(verbose):
     """Verbosity context for suppressing Spyglass logging."""
+
+    class QuietStdOut:
+        """Used to quiet all prints and logging as context manager."""
+
+        def __init__(self):
+            from spyglass.utils import logger as spyglass_logger
+
+            self.spy_logger = spyglass_logger
+            self.previous_level = None
+
+        def __enter__(self):
+            self.previous_level = self.spy_logger.getEffectiveLevel()
+            self.spy_logger.setLevel("CRITICAL")
+            self._original_stdout = sys.stdout
+            sys.stdout = open(os.devnull, "w")
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.spy_logger.setLevel(self.previous_level)
+            sys.stdout.close()
+            sys.stdout = self._original_stdout
+
     yield nullcontext() if verbose else QuietStdOut()
 
 
@@ -191,6 +220,9 @@ def base_dir():
 def raw_dir(base_dir):
     # could do settings.raw_dir, but this is faster while server booting
     yield base_dir / "raw"
+
+
+# ------------------------------- FIXTURES, DATA -------------------------------
 
 
 @pytest.fixture(scope="session")
@@ -264,6 +296,8 @@ def mini_insert(mini_path, teardown, server, load_config):
     )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
+    _ = SpikeSortingOutput()
+
     LabMember().insert1(
         ["Root User", "Root", "User"], skip_duplicates=not teardown
     )
@@ -287,8 +321,7 @@ def mini_insert(mini_path, teardown, server, load_config):
     yield
 
     close_nwb_files()
-    # Note: no need to run deletes in teardown, since we are using teardown
-    # will remove the container
+    # Note: no need to run deletes in teardown, bc removing the container
 
 
 @pytest.fixture(scope="session")
@@ -299,6 +332,9 @@ def mini_restr(mini_path):
 @pytest.fixture(scope="session")
 def mini_dict(mini_copy_name):
     yield {"nwb_file_name": mini_copy_name}
+
+
+# --------------------------- FIXTURES, SUBMODULES ---------------------------
 
 
 @pytest.fixture(scope="session")
@@ -323,17 +359,34 @@ def settings(dj_conn):
 
 
 @pytest.fixture(scope="session")
+def sgp(common):
+    from spyglass import position
+
+    yield position
+
+
+@pytest.fixture(scope="session")
+def lfp(common):
+    from spyglass import lfp
+
+    return lfp
+
+
+@pytest.fixture(scope="session")
+def lfp_band(lfp):
+    from spyglass.lfp.analysis.v1 import lfp_band
+
+    return lfp_band
+
+
+@pytest.fixture(scope="session")
 def populate_exception():
     from spyglass.common.errors import PopulateException
 
     yield PopulateException
 
 
-@pytest.fixture(scope="session")
-def sgp(common):
-    from spyglass import position
-
-    yield position
+# ------------------------- FIXTURES, POSITION TABLES -------------------------
 
 
 @pytest.fixture(scope="session")
@@ -446,25 +499,9 @@ def pos_merge_key(pos_merge, trodes_pos_v1, trodes_sel_keys):
     yield pos_merge.merge_get_part(trodes_sel_keys[-1]).fetch1("KEY")
 
 
-# ------------------ GENERAL FUNCTION ------------------
+# --------------------------- FIXTURES, LFP TABLES ---------------------------
 
 
-class QuietStdOut:
-    """If quiet_spy, used to quiet prints, teardowns and table.delete prints"""
-
-    def __init__(self):
-        from spyglass.utils import logger as spyglass_logger
-
-        self.spy_logger = spyglass_logger
-        self.previous_level = None
-
-    def __enter__(self):
-        self.previous_level = self.spy_logger.getEffectiveLevel()
-        self.spy_logger.setLevel("CRITICAL")
-        self._original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, "w")
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.spy_logger.setLevel(self.previous_level)
-        sys.stdout.close()
-        sys.stdout = self._original_stdout
+@pytest.fixture(scope="module")
+def lfp_band_v1(lfp_band):
+    yield lfp_band.LFPBandV1()

@@ -4,9 +4,11 @@ from typing import Dict, List, Tuple, Union
 
 from datajoint import FreeTable, logger
 from datajoint.condition import make_condition
+from datajoint.dependencies import unite_master_parts
 from datajoint.table import Table
 from datajoint.utils import to_camel_case
 from networkx import NetworkXNoPath, all_simple_paths, shortest_path
+from networkx.algorithms.dag import topological_sort
 
 from spyglass.utils.dj_helper_fn import unique_dicts
 
@@ -113,7 +115,7 @@ class AbstractGraph(ABC):
         in attrs like `all_ft`.
         """
         table = table if isinstance(table, str) else table.full_table_name
-        return self._get_node(table).get("restr", "False")
+        return self._get_node(table).get("restr")
 
     def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
@@ -124,8 +126,8 @@ class AbstractGraph(ABC):
             else restriction
         )
         existing = self._get_restr(table)
-        if not replace and existing != "False":  # False is default
-            if existing == restriction:
+        if not replace and existing:
+            if restriction == existing:
                 return
             join = ft & [existing, restriction]
             if len(join) == len(ft & existing):
@@ -134,17 +136,36 @@ class AbstractGraph(ABC):
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
 
+        self._log_truncate(f"Set {table.split('.')[-1]} {restriction}")
+        # if "#pk_node" in table:
+        #     __import__("pdb").set_trace()
         self._set_node(table, "restr", restriction)
 
     def _get_ft(self, table, with_restr=False):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
         table = table if isinstance(table, str) else table.full_table_name
-        restr = self._get_restr(table) if with_restr else True
+
+        if with_restr:
+            restr = self._get_restr(table)
+            if not restr:
+                logger.warning(f"No restriction for {table}")
+                restr = False
+        else:
+            restr = True
+
         if ft := self._get_node(table).get("ft"):
             return ft & restr
         ft = FreeTable(self.connection, table)
         self._set_node(table, "ft", ft)
         return ft & restr
+
+    def topological_sort(self, nodes=None) -> List[str]:
+        """Get topological sort of visited nodes. From datajoint.diagram"""
+        nodes = nodes or self.visited
+        nodes = [n for n in nodes if not n.isnumeric()]
+        return unite_master_parts(
+            list(topological_sort(self.graph.subgraph(nodes)))
+        )
 
     @property
     def all_ft(self):
@@ -152,8 +173,7 @@ class AbstractGraph(ABC):
         self.cascade()
         return [
             self._get_ft(table, with_restr=True)
-            for table in self.visited
-            if not table.isnumeric()
+            for table in self.topological_sort()
         ]
 
     def _print_restr(self, leaves=False):
@@ -260,14 +280,14 @@ class AbstractGraph(ABC):
                 if len(ret) == 0
                 else "FULL" if len(ft2) == len(ret) else "part"
             )
-            strt = f"{to_camel_case(table1.table_name)}"
-            endp = f"{to_camel_case(table2.table_name)}"
+            strt = f"{to_camel_case(ft1.table_name)}"
+            endp = f"{to_camel_case(ft2.table_name)}"
             self._log_truncate(
                 f"{dir} {prim} {aliaa} {adjust}: {null} {strt} -> {endp}"
             )
         if null and null != "part":
             pass
-            # __import__("pdb").set_trace()
+        # __import__("pdb").set_trace()
 
         return ret
 

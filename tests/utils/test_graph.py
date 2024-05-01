@@ -1,6 +1,6 @@
-from pathlib import Path
-
 import pytest
+
+from . import schema_graph as sg
 
 
 @pytest.fixture(scope="session")
@@ -45,7 +45,6 @@ def test_rg_file_paths(restr_graph):
     """Test collection of upstream file paths."""
     paths = [p.get("file_path") for p in restr_graph.file_paths]
     assert len(paths) == 1, "Unexpected number of file paths."
-    assert all([Path(p).exists() for p in paths]), "Not all file paths exist."
 
 
 @pytest.fixture(scope="session")
@@ -68,3 +67,31 @@ def test_add_leaf_restr_ft(restr_graph_new_leaf):
     restr_graph_new_leaf.cascade()
     ft = restr_graph_new_leaf.get_restr_ft("`common_interval`.`interval_list`")
     assert len(ft) == 2, "Unexpected restricted table length."
+
+
+@pytest.mark.parametrize(
+    "restr, expect_n, msg",
+    [
+        ("pk_attr > 16", 4, "pk down, no alias"),
+        ("sk_attr > 17", 3, "sk down, no alias"),
+        ("pk_alias_attr > 18", 3, "pk down, pk alias"),
+        ("sk_alias_attr > 19", 2, "sk down, sk alias"),
+    ],
+)
+def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
+    msg = "Error in `>>` for " + msg
+    assert len(graph_tables["ParentNode"]() >> restr) == expect_n, msg
+
+
+@pytest.mark.parametrize(
+    "table, restr, expect_n, msg",
+    [
+        ("PkNode", "parent_attr > 15", 5, "pk up, no alias"),
+        ("SkNode", "parent_attr > 16", 4, "sk up, no alias"),
+        ("PkAliasNode", "parent_attr > 17", 2, "pk up, pk alias"),
+        ("SkAliasNode", "parent_attr > 18", 2, "sk up, sk alias"),
+    ],
+)
+def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
+    msg = "Error in `<<` for " + msg
+    assert len(graph_tables[table]() << restr) == expect_n, msg

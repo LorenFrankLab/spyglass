@@ -765,8 +765,8 @@ class SpyglassMixin:
 
     # ------------------------------ Restrict by ------------------------------
 
-    def __mod__(self, restriction):
-        """Restriction by upstream operator e.g. ``q1 % q2``.
+    def __lshift__(self, restriction):
+        """Restriction by upstream operator e.g. ``q1 << q2``.
 
         Returns
         -------
@@ -774,21 +774,47 @@ class SpyglassMixin:
             A restricted copy of the query expression using the nearest upstream
             table for which the restriction is valid.
         """
-        return self.restrict_from_upstream(restriction)
+        return self.restrict_from(restriction, direction="up")
 
-    def restrict_from_upstream(self, restriction=True, **kwargs):
+    def __rshift__(self, restriction):
+        """Restriction by downstream operator e.g. ``q1 >> q2``.
+
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_from(restriction, direction="down")
+
+    def restrict_from(self, restriction=True, direction="up", **kwargs):
+        """Restrict self based on upstream table."""
+        ret = self.restrict_graph(restriction, direction, **kwargs).leaf_ft[0]
+        if len(ret) == len(self):
+            logger.warning("Restriction did not limit table.")
+        return ret
+
+    def restrict_graph(self, restriction=True, direction="up", **kwargs):
         """Restrict self based on upstream table."""
         from spyglass.utils.dj_graph import FindKeyGraph
 
         if restriction is True:
             return self
+        try:  # Save time if restriction is already valid
+            ret = self.restrict(restriction)
+            logger.warning("Restriction valid for this table. Using as is.")
+            return ret
+        except DataJointError:
+            pass  # Could avoid try if assert_join_compatible returned a bool
+            logger.info("Restriction not valid. Attempting to cascade.")
 
         graph = FindKeyGraph(
             seed_table=self,
             table_name=self.full_table_name,
             restriction=restriction,
+            direction=direction,
             cascade=True,
-            verbose=False,
+            verbose=True,
             **kwargs,
         )
-        return graph.leaf_ft[0]
+        return graph

@@ -1,6 +1,8 @@
 import datajoint as dj
 import pytest
 
+from . import schema_graph
+
 
 @pytest.fixture(scope="module")
 def merge_table(pos_merge_tables):
@@ -56,3 +58,17 @@ def no_link_chain(Nwbfile):
     from spyglass.utils.dj_chains import TableChain
 
     yield TableChain(Nwbfile, InsertError())
+
+
+@pytest.fixture(scope="module")
+def graph_tables(dj_conn):
+    schema = dj.Schema(context=schema_graph.LOCALS_GRAPH)
+
+    for table in schema_graph.LOCALS_GRAPH.values():
+        schema(table)
+
+    schema.activate("test_graph", connection=dj_conn)
+
+    yield schema_graph.LOCALS_GRAPH
+
+    schema.drop(force=True)
