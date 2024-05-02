@@ -2,7 +2,7 @@ from inspect import isclass as inspect_isclass
 
 import datajoint as dj
 
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, _Merge
 
 # Ranges are offset from one another to create unique list of entries for each
 # table while respecting the foreign key constraints.
@@ -147,9 +147,33 @@ class SkAliasNode(SpyglassMixin, dj.Lookup):
     ]
 
 
+class MergeOutput(_Merge, SpyglassMixin):
+    definition = """
+    merge_id: uuid
+    ---
+    source: varchar(32)
+    """
+
+    class PkNode(dj.Part):
+        definition = """
+        -> MergeOutput
+        ---
+        -> PkNode
+        """
+
+
+class MergeChild(SpyglassMixin, dj.Manual):
+    definition = """
+    -> MergeOutput
+    merge_child_id: int
+    ---
+    merge_child_attr: int
+    """
+
+
 LOCALS_GRAPH = {
     k: v
     for k, v in locals().items()
-    if inspect_isclass(v) and k != "SpyglassMixin"
+    if inspect_isclass(v) and k not in ["SpyglassMixin", "_Merge"]
 }
 __all__ = list(LOCALS_GRAPH)

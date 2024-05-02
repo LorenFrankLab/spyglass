@@ -37,7 +37,7 @@ def test_rg_ft(restr_graph):
 
 def test_rg_restr_ft(restr_graph):
     """Test get restricted free tables."""
-    ft = restr_graph.get_restr_ft(1)
+    ft = restr_graph._get_ft(list(restr_graph.visited)[1], with_restr=True)
     assert len(ft) == 1, "Unexpected restricted table length."
 
 
@@ -65,17 +65,40 @@ def test_add_leaf_cascade(restr_graph_new_leaf):
 
 def test_add_leaf_restr_ft(restr_graph_new_leaf):
     restr_graph_new_leaf.cascade()
-    ft = restr_graph_new_leaf.get_restr_ft("`common_interval`.`interval_list`")
+    ft = restr_graph_new_leaf._get_ft(
+        "`common_interval`.`interval_list`", with_restr=True
+    )
     assert len(ft) == 2, "Unexpected restricted table length."
+
+
+@pytest.fixture(scope="session")
+def restr_graph_root(restr_graph, common, lfp_band):
+    from spyglass.utils.dj_graph import RestrGraph
+
+    yield RestrGraph(
+        seed_table=common.Session(),
+        table_name=common.Session.full_table_name,
+        restriction="True",
+        direction="down",
+        cascade=True,
+        verbose=False,
+    )
+
+
+def test_rg_root(restr_graph_root):
+    assert (
+        len(restr_graph_root.all_ft) == 29
+    ), "Unexpected number of cascaded tables."
 
 
 @pytest.mark.parametrize(
     "restr, expect_n, msg",
     [
-        ("pk_attr > 16", 4, "pk down, no alias"),
-        ("sk_attr > 17", 3, "sk down, no alias"),
-        ("pk_alias_attr > 18", 3, "pk down, pk alias"),
-        ("sk_alias_attr > 19", 2, "sk down, sk alias"),
+        ("pk_attr > 16", 4, "pk no alias"),
+        ("sk_attr > 17", 3, "sk no alias"),
+        ("pk_alias_attr > 18", 3, "pk pk alias"),
+        ("sk_alias_attr > 19", 2, "sk sk alias"),
+        ("merge_child_attr > 21", 2, "merge child down"),
     ],
 )
 def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
@@ -86,10 +109,11 @@ def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
 @pytest.mark.parametrize(
     "table, restr, expect_n, msg",
     [
-        ("PkNode", "parent_attr > 15", 5, "pk up, no alias"),
-        ("SkNode", "parent_attr > 16", 4, "sk up, no alias"),
-        ("PkAliasNode", "parent_attr > 17", 2, "pk up, pk alias"),
-        ("SkAliasNode", "parent_attr > 18", 2, "sk up, sk alias"),
+        ("PkNode", "parent_attr > 15", 5, "pk no alias"),
+        ("SkNode", "parent_attr > 16", 4, "sk no alias"),
+        ("PkAliasNode", "parent_attr > 17", 2, "pk pk alias"),
+        ("SkAliasNode", "parent_attr > 18", 2, "sk sk alias"),
+        ("MergeChild", "parent_attr > 18", 2, "merge child"),
     ],
 )
 def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):

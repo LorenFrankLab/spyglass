@@ -9,6 +9,7 @@ from typing import Union
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
+from datajoint.expression import QueryExpression
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
@@ -26,15 +27,17 @@ MERGE_DEFINITION = (
 
 def is_merge_table(table):
     """Return True if table fields exactly match Merge table."""
+
+    def trim_def(definition):
+        return re_sub(
+            r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
+        )
+
     if not isinstance(table, dj.Table):
         return False
     if not table.is_declared:
         if tbl_def := getattr(table, "definition", None):
-            return MERGE_DEFINITION == re_sub(
-                r"\n\s*\n",
-                "\n",
-                re_sub(r"#.*\n", "\n", tbl_def.strip()),
-            )
+            return trim_def(MERGE_DEFINITION) == trim_def(tbl_def)
         logger.warning(f"Cannot determine merge table status for {table}")
         return True
     return table.primary_key == [
@@ -60,8 +63,8 @@ class Merge(dj.Manual):
             if not is_merge_table(self):  # Check definition
                 logger.warn(
                     "Merge table with non-default definition\n"
-                    + f"Expected: {MERGE_DEFINITION.strip()}\n"
-                    + f"Actual  : {self.definition.strip()}"
+                    + f"Expected:\n{MERGE_DEFINITION.strip()}\n"
+                    + f"Actual  :\n{self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
@@ -811,23 +814,81 @@ class Merge(dj.Manual):
 
     # ------------------------------ Restrict by ------------------------------
 
-    # TODO: TEST THIS
-    # TODO: Allow (Table & restriction).merge_xxx() syntax
-    def restrict_from_upstream(self, restriction=True, **kwargs):
-        """Restrict self based on upstream table."""
+    def __lshift__(self, restriction) -> QueryExpression:
+        """Restriction by upstream operator e.g. ``q1 << q2``.
+
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_by(restriction, direction="up")
+
+    def __rshift__(self, restriction) -> QueryExpression:
+        """Restriction by downstream operator e.g. ``q1 >> q2``.
+
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_by(restriction, direction="down")
+
+    def restrict_by(
+        self,
+        restriction: str = True,
+        direction: str = "up",
+        return_graph: bool = False,
+        verbose: bool = False,
+        **kwargs,
+    ) -> QueryExpression:
+        """Restrict self based on up/downstream table.
+
+        Parameters
+        ----------
+        restriction : str
+            Restriction to apply to the some table up/downstream of self.
+        direction : str, optional
+            Direction to search for valid restriction. Default 'up'.
+        return_graph : bool, optional
+            If True, return FindKeyGraph object. Default False, returns
+            restricted version of present table.
+        verbose : bool, optional
+            If True, print verbose output. Default False.
+
+        Returns
+        -------
+        Union[QueryExpression, FindKeyGraph]
+            Restricted version of present table or FindKeyGraph object. If
+            return_graph, use all_ft attribute to see all tables in cascade.
+        """
         from spyglass.utils.dj_graph import FindKeyGraph
 
         if restriction is True:
             return self._merge_repr()
 
+        try:  # Save time if restriction is already valid
+            ret = self.restrict(restriction)
+            logger.warning("Restriction valid for this table. Using as is.")
+            return ret
+        except DataJointError:
+            pass  # Could avoid try if assert_join_compatible returned a bool
+            logger.debug("Restriction not valid. Attempting to cascade.")
+
         graph = FindKeyGraph(
             seed_table=self,
             restriction=restriction,
             leaves=self.parts(),
+            direction=direction,
             cascade=True,
             verbose=False,
             **kwargs,
         )
+
+        if return_graph:
+            return graph
 
         self_restrict = [
             leaf.fetch(RESERVED_PRIMARY_KEY, as_dict=True)

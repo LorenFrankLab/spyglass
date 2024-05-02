@@ -18,7 +18,6 @@ from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
@@ -305,6 +304,8 @@ class SpyglassMixin:
         with a new restriction. To recompute, add `reload_cache=True` to
         delete_downstream_merge call.
         """
+        from spyglass.utils.dj_chains import TableChains  # noqa F401
+
         merge_chains = {}
         for name, merge_table in self._merge_tables.items():
             chains = TableChains(self, merge_table, connection=self.connection)
@@ -322,7 +323,7 @@ class SpyglassMixin:
             )
         )
 
-    def _get_chain(self, substring) -> TableChains:
+    def _get_chain(self, substring):
         """Return chain from self to merge table with substring in name."""
         for name, chain in self._merge_chains.items():
             if substring.lower() in name:
@@ -471,8 +472,10 @@ class SpyglassMixin:
         return exp_missing + exp_present
 
     @cached_property
-    def _session_connection(self) -> Union[TableChain, bool]:
+    def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
+        from spyglass.utils.dj_chains import TableChain  # noqa F401
+
         connection = TableChain(parent=self._delete_deps[-1], child=self)
         return connection if connection.has_link else False
 
@@ -765,7 +768,7 @@ class SpyglassMixin:
 
     # ------------------------------ Restrict by ------------------------------
 
-    def __lshift__(self, restriction):
+    def __lshift__(self, restriction) -> QueryExpression:
         """Restriction by upstream operator e.g. ``q1 << q2``.
 
         Returns
@@ -774,9 +777,9 @@ class SpyglassMixin:
             A restricted copy of the query expression using the nearest upstream
             table for which the restriction is valid.
         """
-        return self.restrict_from(restriction, direction="up")
+        return self.restrict_by(restriction, direction="up")
 
-    def __rshift__(self, restriction):
+    def __rshift__(self, restriction) -> QueryExpression:
         """Restriction by downstream operator e.g. ``q1 >> q2``.
 
         Returns
@@ -785,17 +788,36 @@ class SpyglassMixin:
             A restricted copy of the query expression using the nearest upstream
             table for which the restriction is valid.
         """
-        return self.restrict_from(restriction, direction="down")
+        return self.restrict_by(restriction, direction="down")
 
-    def restrict_from(self, restriction=True, direction="up", **kwargs):
-        """Restrict self based on upstream table."""
-        ret = self.restrict_graph(restriction, direction, **kwargs).leaf_ft[0]
-        if len(ret) == len(self):
-            logger.warning("Restriction did not limit table.")
-        return ret
+    def restrict_by(
+        self,
+        restriction: str = True,
+        direction: str = "up",
+        return_graph: bool = False,
+        verbose: bool = False,
+        **kwargs,
+    ) -> QueryExpression:
+        """Restrict self based on up/downstream table.
 
-    def restrict_graph(self, restriction=True, direction="up", **kwargs):
-        """Restrict self based on upstream table."""
+        Parameters
+        ----------
+        restriction : str
+            Restriction to apply to the some table up/downstream of self.
+        direction : str, optional
+            Direction to search for valid restriction. Default 'up'.
+        return_graph : bool, optional
+            If True, return FindKeyGraph object. Default False, returns
+            restricted version of present table.
+        verbose : bool, optional
+            If True, print verbose output. Default False.
+
+        Returns
+        -------
+        Union[QueryExpression, FindKeyGraph]
+            Restricted version of present table or FindKeyGraph object. If
+            return_graph, use all_ft attribute to see all tables in cascade.
+        """
         from spyglass.utils.dj_graph import FindKeyGraph
 
         if restriction is True:
@@ -806,7 +828,7 @@ class SpyglassMixin:
             return ret
         except DataJointError:
             pass  # Could avoid try if assert_join_compatible returned a bool
-            logger.info("Restriction not valid. Attempting to cascade.")
+            logger.debug("Restriction not valid. Attempting to cascade.")
 
         graph = FindKeyGraph(
             seed_table=self,
@@ -814,7 +836,14 @@ class SpyglassMixin:
             restriction=restriction,
             direction=direction,
             cascade=True,
-            verbose=True,
+            verbose=verbose,
             **kwargs,
         )
-        return graph
+
+        if return_graph:
+            return graph
+
+        ret = graph.leaf_ft[0]
+        if len(ret) == len(self):
+            logger.warning("Restriction did not limit table.")
+        return ret

@@ -7,7 +7,7 @@ import networkx as nx
 from datajoint.table import Table
 from datajoint.utils import to_camel_case
 
-from spyglass.utils.dj_graph_abs import AbstractGraph
+from spyglass.utils.dj_graph import AbstractGraph
 from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES, fuzzy_get
 from spyglass.utils.dj_merge_tables import is_merge_table
 
@@ -228,9 +228,9 @@ class TableChain(AbstractGraph):
         try:
             path = nx.shortest_path(search_graph, source, target)
         except nx.NetworkXNoPath:
-            return None
+            return None  # No path found, parent func may do undirected search
         except nx.NodeNotFound:
-            self._searched = True
+            self._searched = True  # No path found, don't search again
             return None
 
         ignore_nodes = self.graph.nodes - set(path)

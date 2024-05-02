@@ -62,12 +62,23 @@ def no_link_chain(Nwbfile):
 
 @pytest.fixture(scope="module")
 def graph_tables(dj_conn):
-    schema = dj.Schema(context=schema_graph.LOCALS_GRAPH)
+    lg = schema_graph.LOCALS_GRAPH
 
-    for table in schema_graph.LOCALS_GRAPH.values():
+    schema = dj.Schema(context=lg)
+
+    for table in lg.values():
         schema(table)
 
     schema.activate("test_graph", connection=dj_conn)
+
+    merge_keys = lg["PkNode"].fetch("KEY", offset=1, as_dict=True)
+    lg["MergeOutput"].insert(merge_keys, skip_duplicates=True)
+    merge_child_keys = lg["MergeOutput"].merge_fetch(True, "merge_id", offset=1)
+    merge_child_inserts = [
+        (i, j, k + 10)
+        for i, j, k in zip(merge_child_keys, range(4), range(10, 15))
+    ]
+    lg["MergeChild"].insert(merge_child_inserts, skip_duplicates=True)
 
     yield schema_graph.LOCALS_GRAPH
 
