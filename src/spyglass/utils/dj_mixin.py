@@ -304,11 +304,11 @@ class SpyglassMixin:
         with a new restriction. To recompute, add `reload_cache=True` to
         delete_downstream_merge call.
         """
-        from spyglass.utils.dj_chains import TableChains  # noqa F401
+        from spyglass.utils.dj_graph import TableChains  # noqa F401
 
         merge_chains = {}
         for name, merge_table in self._merge_tables.items():
-            chains = TableChains(self, merge_table, connection=self.connection)
+            chains = TableChains(self, merge_table)
             if len(chains):
                 merge_chains[name] = chains
 
@@ -474,7 +474,7 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
-        from spyglass.utils.dj_chains import TableChain  # noqa F401
+        from spyglass.utils.dj_graph import TableChain  # noqa F401
 
         connection = TableChain(parent=self._delete_deps[-1], child=self)
         return connection if connection.has_link else False
@@ -800,6 +800,26 @@ class SpyglassMixin:
     ) -> QueryExpression:
         """Restrict self based on up/downstream table.
 
+        If fails to restrict table, the shortest path may not have been correct.
+        Check the output to see where the restriction was applied.
+        Try the following:
+
+        >>> from spyglass.utils.dj_graph import TableChain
+        >>>
+        >>> my_chain = TableChain(
+        >>>     child=MyChildTable(), # or parent=MyParentTable
+        >>>     search_restr=restriction,
+        >>>     allow_merge=True, # If child is Merge
+        >>>     verbose=True, # Detailed output
+        >>>     banned_tables=[UnwantedTable1, UnwantedTable2],
+        >>> )
+        >>>
+        >>> my_chain.endpoint # for the table that meets the restriction
+        >>> my_chain.all_ft # for all restricted tables in the chain
+
+        When providing a restriction of the parent, use 'up' direction. When
+        providing a restriction of the child, use 'down' direction.
+
         Parameters
         ----------
         restriction : str
@@ -818,23 +838,31 @@ class SpyglassMixin:
             Restricted version of present table or FindKeyGraph object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import FindKeyGraph
+        from spyglass.utils.dj_graph import TableChain  # noqa: F401
 
         if restriction is True:
             return self
-        try:  # Save time if restriction is already valid
-            ret = self.restrict(restriction)
+        try:
+            ret = self.restrict(restriction)  # Save time trying first
             logger.warning("Restriction valid for this table. Using as is.")
             return ret
         except DataJointError:
-            pass  # Could avoid try if assert_join_compatible returned a bool
+            pass  # Could avoid try/except if assert_join_compatible return bool
             logger.debug("Restriction not valid. Attempting to cascade.")
 
-        graph = FindKeyGraph(
-            seed_table=self,
-            table_name=self.full_table_name,
-            restriction=restriction,
+        if direction == "up":
+            parent, child = None, self
+        elif direction == "down":
+            parent, child = self, None
+        else:
+            raise ValueError("Direction must be 'up' or 'down'.")
+
+        graph = TableChain(
+            parent=parent,
+            child=child,
             direction=direction,
+            search_restr=restriction,
+            allow_merge=True,
             cascade=True,
             verbose=verbose,
             **kwargs,
@@ -844,6 +872,10 @@ class SpyglassMixin:
             return graph
 
         ret = graph.leaf_ft[0]
-        if len(ret) == len(self):
-            logger.warning("Restriction did not limit table.")
+        if len(ret) == len(self) or len(ret) == 0:
+            logger.warning(
+                f"Failed to restrict with path: {graph.path_str}\n"
+                + "See help(YourTable.restrict_by)"
+            )
+
         return ret

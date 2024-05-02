@@ -75,6 +75,30 @@ Some caveats to this function:
 2. This function will raise an error if it attempts to check a table that has
     not been imported into the current namespace. It is best used for exploring
     and debugging, not for production code.
+3. It's hard to determine the attributes in a mixed dictionary/string
+    restriction. If you are having trouble, try using a pure string
+    restriction.
+4. The most direct path to your restriction may not be the path took, especially
+    when using Merge Tables. When the result is empty see the warning about the
+    path used. To ban nodes from the search, try the following:
+
+```python
+from spyglass.utils.dj_graph import TableChain
+
+my_chain = TableChain(
+    child=MyChildTable(),  # or parent=MyParentTable()
+    search_restr="my_str_restriction",
+    allow_merge=True,  # If child is a Merge Table
+    verbose=True,  # Detailed output will show the search history
+    banned_tables=[UnwantedTable1, UnwantedTable2],
+)
+
+my_chain.endpoint  # for the table that meets the restriction
+my_chain.all_ft  # for all restricted tables in the chain
+```
+
+When providing a restriction of the parent, use 'up' direction. When providing a
+restriction of the child, use 'down' direction.
 
 ## Delete Functionality
 

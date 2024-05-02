@@ -9,7 +9,6 @@ from typing import Union
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
-from datajoint.expression import QueryExpression
 from datajoint.preview import repr_html
 from datajoint.utils import from_camel_case, to_camel_case
 from IPython.core.display import HTML
@@ -811,91 +810,6 @@ class Merge(dj.Manual):
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_use(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
-
-    # ------------------------------ Restrict by ------------------------------
-
-    def __lshift__(self, restriction) -> QueryExpression:
-        """Restriction by upstream operator e.g. ``q1 << q2``.
-
-        Returns
-        -------
-        QueryExpression
-            A restricted copy of the query expression using the nearest upstream
-            table for which the restriction is valid.
-        """
-        return self.restrict_by(restriction, direction="up")
-
-    def __rshift__(self, restriction) -> QueryExpression:
-        """Restriction by downstream operator e.g. ``q1 >> q2``.
-
-        Returns
-        -------
-        QueryExpression
-            A restricted copy of the query expression using the nearest upstream
-            table for which the restriction is valid.
-        """
-        return self.restrict_by(restriction, direction="down")
-
-    def restrict_by(
-        self,
-        restriction: str = True,
-        direction: str = "up",
-        return_graph: bool = False,
-        verbose: bool = False,
-        **kwargs,
-    ) -> QueryExpression:
-        """Restrict self based on up/downstream table.
-
-        Parameters
-        ----------
-        restriction : str
-            Restriction to apply to the some table up/downstream of self.
-        direction : str, optional
-            Direction to search for valid restriction. Default 'up'.
-        return_graph : bool, optional
-            If True, return FindKeyGraph object. Default False, returns
-            restricted version of present table.
-        verbose : bool, optional
-            If True, print verbose output. Default False.
-
-        Returns
-        -------
-        Union[QueryExpression, FindKeyGraph]
-            Restricted version of present table or FindKeyGraph object. If
-            return_graph, use all_ft attribute to see all tables in cascade.
-        """
-        from spyglass.utils.dj_graph import FindKeyGraph
-
-        if restriction is True:
-            return self._merge_repr()
-
-        try:  # Save time if restriction is already valid
-            ret = self.restrict(restriction)
-            logger.warning("Restriction valid for this table. Using as is.")
-            return ret
-        except DataJointError:
-            pass  # Could avoid try if assert_join_compatible returned a bool
-            logger.debug("Restriction not valid. Attempting to cascade.")
-
-        graph = FindKeyGraph(
-            seed_table=self,
-            restriction=restriction,
-            leaves=self.parts(),
-            direction=direction,
-            cascade=True,
-            verbose=False,
-            **kwargs,
-        )
-
-        if return_graph:
-            return graph
-
-        self_restrict = [
-            leaf.fetch(RESERVED_PRIMARY_KEY, as_dict=True)
-            for leaf in graph.leaf_ft
-        ]
-
-        return self & self_restrict
 
 
 _Merge = Merge

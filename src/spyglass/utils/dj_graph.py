@@ -6,26 +6,53 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 from abc import ABC, abstractmethod
 from collections.abc import KeysView
 from enum import Enum
+from functools import cached_property
 from itertools import chain as iter_chain
 from typing import Any, Dict, List, Set, Tuple, Union
 
+import datajoint as dj
 from datajoint import FreeTable, Table
 from datajoint.condition import make_condition
 from datajoint.dependencies import unite_master_parts
 from datajoint.utils import get_master, to_camel_case
-from networkx import all_simple_paths
+from networkx import (
+    NetworkXNoPath,
+    NodeNotFound,
+    all_simple_paths,
+    shortest_path,
+)
 from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
-from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES, unique_dicts
+from spyglass.utils.dj_helper_fn import (
+    PERIPHERAL_TABLES,
+    fuzzy_get,
+    unique_dicts,
+)
+from spyglass.utils.dj_merge_tables import is_merge_table
 
 
 class Direction(Enum):
-    """Cascade direction enum."""
+    """Cascade direction enum. Calling Up returns True. Inverting flips."""
 
     UP = "up"
     DOWN = "down"
+    NONE = None
+
+    def __str__(self):
+        return self.value
+
+    def __invert__(self) -> "Direction":
+        """Invert the direction."""
+        if self.value is None:
+            logger.warning("Inverting NONE direction")
+            return Direction.NONE
+        return Direction.UP if self.value == "down" else Direction.DOWN
+
+    def __bool__(self) -> bool:
+        """Return True if direction is UP."""
+        return self.value is not None
 
 
 class AbstractGraph(ABC):
@@ -33,11 +60,11 @@ class AbstractGraph(ABC):
 
     Inherited by...
     - RestrGraph: Cascade restriction(s) through a graph
-    - FindKeyGraph: Iherits from RestrGraph. Cascades through the graph to
-        find where a restriction works, and cascades back across visited
-        nodes.
     - TableChain: Takes parent and child nodes, finds the shortest path,
-        and applies a restriction across the path.
+        and applies a restriction across the path. If either parent or child
+        is a merge table, use TableChains instead. If either parent or child
+        are not provided, search_restr is required to find the path to the
+        missing table.
 
     Methods
     -------
@@ -61,9 +88,16 @@ class AbstractGraph(ABC):
         verbose : bool, optional
             Whether to print verbose output. Default False
         """
+        self.seed_table = seed_table
         self.connection = seed_table.connection
+
+        # Undirected graph may not be needed, but adding FT to the graph
+        # prevents `to_undirected` from working. If using undirected, remove
+        # PERIPHERAL_TABLES from the graph.
         self.graph = seed_table.connection.dependencies
         self.graph.load()
+        self.undirect_graph = self.graph.to_undirected()
+        self.undirect_graph.remove_nodes_from(PERIPHERAL_TABLES)
 
         self.verbose = verbose
         self.leaves = set()
@@ -72,10 +106,14 @@ class AbstractGraph(ABC):
         self.no_visit = set()
         self.cascaded = False
 
+    # --------------------------- Abstract Methods ---------------------------
+
     @abstractmethod
     def cascade(self):
         """Cascade restrictions through graph."""
         raise NotImplementedError("Child class mut implement `cascade` method")
+
+    # ---------------------------- Logging Helpers ----------------------------
 
     def _log_truncate(self, log_str: str, max_len: int = 80):
         """Truncate log lines to max_len and print if verbose."""
@@ -85,9 +123,32 @@ class AbstractGraph(ABC):
             log_str[:max_len] + "..." if len(log_str) > max_len else log_str
         )
 
-    def _ensure_name(self, table: Union[str, Table]) -> str:
+    def _camel(self, table):
+        """Convert table name(s) to camel case."""
+        if isinstance(table, KeysView):
+            table = list(table)
+        if not isinstance(table, list):
+            table = [table]
+        ret = [to_camel_case(t.split(".")[-1].strip("`")) for t in table]
+        return ret[0] if len(ret) == 1 else ret
+
+    def _print_restr(self):
+        """Print restrictions for debugging."""
+        for table in self.visited:
+            if restr := self._get_restr(table):
+                logger.info(f"{table}: {restr}")
+
+    # ------------------------------ Graph Nodes ------------------------------
+
+    def _ensure_name(self, table: Union[str, Table] = None) -> str:
         """Ensure table is a string."""
-        return table if isinstance(table, str) else table.full_table_name
+        if table is None:
+            return None
+        if isinstance(table, str):
+            return table
+        if isinstance(table, list):
+            return [self._ensure_name(t) for t in table]
+        return getattr(table, "full_table_name", None)
 
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph."""
@@ -107,7 +168,8 @@ class AbstractGraph(ABC):
     def _get_edge(self, child: str, parent: str) -> Tuple[bool, Dict[str, str]]:
         """Get edge data between child and parent.
 
-        Used as a fallback for _bridge_restr. Not required in typical use.
+        Used as a fallback for _bridge_restr. Required for Maser/Part links to
+        temporarily flip direction.
 
         Returns
         -------
@@ -174,31 +236,16 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    @property
-    def all_ft(self):
-        """Get restricted FreeTables from all visited nodes.
+    def _and_parts(self, table):
+        """Return table, its master and parts."""
+        ret = [table]
+        if master := get_master(table):
+            ret.append(master)
+        if parts := self._get_ft(table).parts():
+            ret.extend(parts)
+        return ret
 
-        Topological sort logic adopted from datajoint.diagram.
-        """
-        self.cascade()
-        nodes = [n for n in self.visited if not n.isnumeric()]
-        sorted_nodes = unite_master_parts(
-            list(topological_sort(self.graph.subgraph(nodes)))
-        )
-        all_ft = [
-            self._get_ft(table, with_restr=True) for table in sorted_nodes
-        ]
-        return [ft for ft in all_ft if len(ft) > 0]
-
-    @property
-    def as_dict(self) -> List[Dict[str, str]]:
-        """Return as a list of dictionaries of table_name: restriction"""
-        self.cascade()
-        return [
-            {"table_name": table, "restriction": self._get_restr(table)}
-            for table in self.visited
-            if self._get_restr(table)
-        ]
+    # ---------------------------- Graph Traversal -----------------------------
 
     def _bridge_restr(
         self,
@@ -248,41 +295,70 @@ class AbstractGraph(ABC):
         if len(ft1) == 0:
             return ["False"]
 
-        if rev_attr := bool(set(attr_map.values()) - set(ft1.heading.names)):
+        if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
         join = ft1.proj(**attr_map) * ft2
         ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            partial = (
-                "NULL"
+            result = (
+                "EMPTY"
                 if len(ret) == 0
-                else "FULL" if len(ft2) == len(ret) else "part"
+                else "FULL" if len(ft2) == len(ret) else "partial"
             )
-            flipped = "Fliped" if rev_attr else "NoFlip"
-            dir = "Up" if direction == "up" else "Dn"
-            strt = f"{to_camel_case(ft1.table_name)}"
-            endp = f"{to_camel_case(ft2.table_name)}"
-            self._log_truncate(
-                f"{partial} {dir} {flipped}: {strt} -> {endp}, {len(ret)}"
-            )
+            path = f"{self._camel(table1)} -> {self._camel(table2)}"
+            self._log_truncate(f"Bridge Link: {path}: result {result}")
 
         return ret
 
-    def _camel(self, table):
-        if isinstance(table, KeysView):
-            table = list(table)
-        if not isinstance(table, list):
-            table = [table]
-        ret = [to_camel_case(t.split(".")[-1].strip("`")) for t in table]
-        return ret[0] if len(ret) == 1 else ret
+    def _get_next_tables(self, table: str, direction: Direction) -> Tuple:
+        """Get next tables/func based on direction.
+
+        Used in cascade1 and cascade1_search to add master and parts. Direction
+        is intentionally omitted to force _get_edge to determine the edge for
+        this gap before resuming desired direction. Nextfunc is used to get
+        relevant parent/child tables after aliast node.
+
+        Parameters
+        ----------
+        table : str
+            Table name
+        direction : Direction
+            Direction to cascade
+
+        Returns
+        -------
+        Tuple[Dict[str, Dict[str, str]], Callable
+            Tuple of next tables and next function to get parent/child tables.
+        """
+        G = self.graph
+        dir_dict = {"direction": direction}
+
+        bonus = {}
+        direction = Direction(direction)
+        if direction == Direction.UP:
+            next_func = G.parents
+            bonus.update({part: {} for part in self._get_ft(table).parts()})
+        elif direction == Direction.DOWN:
+            next_func = G.children
+            if (master_name := get_master(table)) != "":
+                bonus = {master_name: {}}
+        else:
+            raise ValueError(f"Invalid direction: {direction}")
+
+        next_tables = {
+            k: {**v, **dir_dict} for k, v in next_func(table).items()
+        }
+        next_tables.update(bonus)
+
+        return next_tables, next_func
 
     def cascade1(
         self,
         table: str,
         restriction: str,
-        direction: Direction = "up",
+        direction: Direction = Direction.UP,
         replace=False,
         count=0,
         **kwargs,
@@ -306,36 +382,10 @@ class AbstractGraph(ABC):
         self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
-        G = self.graph
-        next_func = G.parents if direction == "up" else G.children
-        dir_dict = {"direction": direction}
-        dir_name = "Parents" if direction == "up" else "Children"
+        next_tables, next_func = self._get_next_tables(table, direction)
 
-        # Master/Parts added will go in opposite direction for one link.
-        # Direction is intentionally not passed to _bridge_restr in this case.
-        if direction == "up":
-            next_tables = {
-                k: {**v, **dir_dict} for k, v in next_func(table).items()
-            }
-            next_tables.update(
-                {part: {} for part in self._get_ft(table).parts()}
-            )
-        else:
-            next_tables = {
-                k: {**v, **dir_dict} for k, v in next_func(table).items()
-            }
-            if (master_name := get_master(table)) != "":
-                next_tables[master_name] = {}
-
-        log_dict = {
-            "Table   ": self._camel(table),
-            f"{dir_name}": self._camel(next_func(table).keys()),
-            "Parts   ": self._camel(self._get_ft(table).parts()),
-            "Master  ": self._camel(get_master(table)),
-        }
-        logger.info(
-            f"Cascade1: {count}\n\t\t\t   "
-            + "\n\t\t\t   ".join(f"{k}: {v}" for k, v in log_dict.items())
+        self._log_truncate(
+            f"Checking {count:>2}: {self._camel(next_tables.keys())}"
         )
         for next_table, data in next_tables.items():
             if next_table.isnumeric():  # Skip alias nodes
@@ -346,14 +396,12 @@ class AbstractGraph(ABC):
                 or next_table in self.no_visit  # Subclasses can set this
                 or table == next_table
             ):
-                path = f"{self._camel(table)} -> {self._camel(next_table)}"
-                if next_table in self.visited:
-                    self._log_truncate(f"SkipVist: {path}")
-                if next_table in self.no_visit:
-                    self._log_truncate(f"NoVisit : {path}")
-                if table == next_table:
-                    self._log_truncate(f"Self    : {path}")
-
+                reason = (
+                    "Already saw"
+                    if next_table in self.visited
+                    else "Banned Tbl "
+                )
+                self._log_truncate(f"{reason}: {self._camel(next_table)}")
                 continue
 
             next_restr = self._bridge_restr(
@@ -370,6 +418,34 @@ class AbstractGraph(ABC):
                 replace=replace,
                 count=count + 1,
             )
+
+    # ---------------------------- Graph Properties ----------------------------
+
+    @property
+    def all_ft(self):
+        """Get restricted FreeTables from all visited nodes.
+
+        Topological sort logic adopted from datajoint.diagram.
+        """
+        self.cascade()
+        nodes = [n for n in self.visited if not n.isnumeric()]
+        sorted_nodes = unite_master_parts(
+            list(topological_sort(self.graph.subgraph(nodes)))
+        )
+        all_ft = [
+            self._get_ft(table, with_restr=True) for table in sorted_nodes
+        ]
+        return [ft for ft in all_ft if len(ft) > 0]
+
+    @property
+    def as_dict(self) -> List[Dict[str, str]]:
+        """Return as a list of dictionaries of table_name: restriction"""
+        self.cascade()
+        return [
+            {"table_name": table, "restriction": self._get_restr(table)}
+            for table in self.visited
+            if self._get_restr(table)
+        ]
 
 
 class RestrGraph(AbstractGraph):
@@ -600,53 +676,241 @@ class RestrGraph(AbstractGraph):
         ]
 
 
-class FindKeyGraph(RestrGraph):
+class TableChains:
+    """Class for representing chains from parent to Merge table via parts.
+
+    Functions as a plural version of TableChain, allowing a single `cascade`
+    call across all chains from parent -> Merge table.
+
+    Attributes
+    ----------
+    parent : Table
+        Parent or origin of chains.
+    child : Table
+        Merge table or destination of chains.
+    connection : datajoint.Connection, optional
+        Connection to database used to create FreeTable objects. Defaults to
+        parent.connection.
+    part_names : List[str]
+        List of full table names of child parts.
+    chains : List[TableChain]
+        List of TableChain objects for each part in child.
+    has_link : bool
+        Cached attribute to store whether parent is linked to child via any of
+        child parts. False if (a) child is not in parent.descendants or (b)
+        nx.NetworkXNoPath is raised by nx.shortest_path for all chains.
+
+    Methods
+    -------
+    __init__(parent, child, connection=None)
+        Initialize TableChains with parent and child tables.
+    __repr__()
+        Return full representation of chains.
+        Multiline parent -> child for each chain.
+    __len__()
+        Return number of chains with links.
+    __getitem__(index: Union[int, str])
+        Return TableChain object at index, or use substring of table name.
+    cascade(restriction: str = None)
+        Return list of cascade for each chain in self.chains.
+    """
+
+    def __init__(self, parent, child, direction=Direction.DOWN):
+        self.parent = parent
+        self.child = child
+        self.connection = parent.connection
+        self.part_names = child.parts()
+        self.chains = [
+            TableChain(parent, part, direction=direction)
+            for part in self.part_names
+        ]
+        self.has_link = any([chain.has_link for chain in self.chains])
+
+    # --------------------------- Dunder Properties ---------------------------
+
+    def __repr__(self):
+        l_str = ",\n\t".join([str(c) for c in self.chains]) + "\n"
+        return f"{self.__class__.__name__}(\n\t{l_str})"
+
+    def __len__(self):
+        return len([c for c in self.chains if c.has_link])
+
+    def __getitem__(self, index: Union[int, str]):
+        """Return FreeTable object at index."""
+        return fuzzy_get(index, self.part_names, self.chains)
+
+    # ---------------------------- Public Properties --------------------------
+
+    @property
+    def max_len(self):
+        """Return length of longest chain."""
+        return max([len(chain) for chain in self.chains])
+
+    # ------------------------------ Graph Traversal --------------------------
+
+    def cascade(
+        self, restriction: str = None, direction: Direction = Direction.DOWN
+    ):
+        """Return list of cascades for each chain in self.chains."""
+        restriction = restriction or self.parent.restriction or True
+        cascades = []
+        for chain in self.chains:
+            if joined := chain.cascade(restriction, direction):
+                cascades.append(joined)
+        return cascades
+
+
+class TableChain(RestrGraph):
+    """Class for representing a chain of tables.
+
+    A chain is a sequence of tables from parent to child identified by
+    networkx.shortest_path. Parent -> Merge should use TableChains instead to
+    handle multiple paths to the respective parts of the Merge table.
+
+    Attributes
+    ----------
+    parent : str
+        Parent or origin of chain.
+    child : str
+        Child or destination of chain.
+    has_link : bool
+        Cached attribute to store whether parent is linked to child.
+    path : List[str]
+        Names of tables along the path from parent to child.
+    all_ft : List[dj.FreeTable]
+        List of FreeTable objects for each table in chain with restriction
+        applied.
+
+    Methods
+    -------
+    find_path(directed=True)
+        Returns path OrderedDict of full table names in chain. If directed is
+        True, uses directed graph. If False, uses undirected graph. Undirected
+        excludes PERIPHERAL_TABLES like interval_list, nwbfile, etc. to maintain
+        valid joins.
+    cascade(restriction: str = None, direction: str = "up")
+        Given a restriction at the beginning, return a restricted FreeTable
+        object at the end of the chain. If direction is 'up', start at the child
+        and move up to the parent. If direction is 'down', start at the parent.
+    """
+
     def __init__(
         self,
-        seed_table: Table,
-        table_name: str = None,
-        restriction: str = None,
-        leaves: List[Dict[str, str]] = None,
-        direction: Direction = "up",
+        parent: Table = None,
+        child: Table = None,
+        direction: Direction = Direction.NONE,
+        search_restr: str = None,
         cascade: bool = False,
         verbose: bool = False,
+        allow_merge: bool = False,
+        banned_tables: List[str] = None,
         **kwargs,
     ):
-        """Graph to restrict leaf by upstream keys.
+        if not allow_merge and child and is_merge_table(child):
+            raise TypeError("Child is a merge table. Use TableChains instead.")
 
-        Parameters
-        ----------
-        seed_table : Table
-            Table to use to establish connection and graph
-        table_name : str, optional
-            Table name of single leaf, default seed_table.full_table_name
-        restriction : str, optional
-            Restriction to apply to leaf. default None, True
-        verbose : bool, optional
-            Whether to print verbose output. Default False
-        """
+        self.parent = self._ensure_name(parent)
+        self.child = self._ensure_name(child)
 
-        super().__init__(seed_table, verbose=verbose)
+        if not self.parent and not self.child:
+            raise ValueError("Parent or child table required.")
+        if not search_restr and not (self.parent and self.child):
+            raise ValueError("Search restriction required to find path.")
 
-        self.direction = direction
-        self.searched = set()
-        self.found = False
-
-        if restriction and table_name:
-            self._set_find_restr(table_name, restriction)
-            self.add_leaf(table_name, True, cascade=False, direction=direction)
-        self.add_leaves(
-            leaves,
-            default_restriction=restriction,
-            cascade=False,
-            direction=direction,
-        )
+        super().__init__(seed_table=parent or child, verbose=verbose)
 
         self.no_visit.update(PERIPHERAL_TABLES)
+        self.no_visit.update(self._ensure_name(banned_tables) or [])
+        self.searched_tables = set()
+        self.found_restr = False
+        self.link_type = None
+        self.searched_path = False
+        self._link_symbol = " -> "
 
-        if cascade and restriction:
+        self.search_restr = search_restr
+        self.direction = Direction(direction)
+
+        self.leaf = None
+        if search_restr and not parent:
+            self.direction = Direction.UP
+            self.leaf = self.child
+        if search_restr and not child:
+            self.direction = Direction.DOWN
+            self.leaf = self.parent
+
+        if self.leaf:
+            self._set_find_restr(self.leaf, search_restr)
+            self.add_leaf(self.leaf, True, cascade=False, direction=direction)
+
+        if cascade and search_restr:
+            self.cascade_search()
             self.cascade()
             self.cascaded = True
+
+    # --------------------------- Dunder Properties ---------------------------
+
+    def __str__(self):
+        """Return string representation of chain: parent -> child."""
+        if not self.has_link:
+            return "No link"
+        return (
+            self._camel(self.parent)
+            + self._link_symbol
+            + self._camel(self.child)
+        )
+
+    def __repr__(self):
+        """Return full representation of chain: parent -> {links} -> child."""
+        if not self.has_link:
+            return "No link"
+        return "Chain: " + self.path_str
+
+    def __len__(self):
+        """Return number of tables in chain."""
+        if not self.has_link:
+            return 0
+        return len(self.path)
+
+    def __getitem__(self, index: Union[int, str]):
+        return fuzzy_get(index, self.path, self.all_ft)
+
+    # ---------------------------- Public Properties --------------------------
+
+    @property
+    def has_link(self) -> bool:
+        """Return True if parent is linked to child.
+
+        If not searched, search for path. If searched and no link is found,
+        return False. If searched and link is found, return True.
+        """
+        if not self.searched_path:
+            _ = self.path
+        return self.link_type is not None
+
+    @cached_property
+    def all_ft(self) -> List[dj.FreeTable]:
+        """Return list of FreeTable objects for each table in chain.
+
+        Unused. Preserved for future debugging.
+        """
+        if not self.has_link:
+            return None
+        return [
+            self._get_ft(table, with_restr=False)
+            for table in self.path
+            if not table.isnumeric()
+        ]
+
+    @property
+    def path_str(self) -> str:
+        return self._link_symbol.join([self._camel(t) for t in self.path])
+
+    @property
+    def endpoint(self) -> str:
+        """Return endpoint of chain."""
+        return self.leaf_ft[0]
+
+    # ------------------------------ Graph Nodes ------------------------------
 
     def _set_find_restr(self, table_name, restriction):
         """Set restr to look for from leaf node."""
@@ -665,114 +929,161 @@ class FindKeyGraph(RestrGraph):
         node = self._get_node(table)
         return node.get("find_restr", False), node.get("restr_attrs", set())
 
-    def add_leaves(
-        self,
-        leaves=None,
-        default_restriction=None,
-        cascade=False,
-        direction=None,
-    ):
-        leaves = self._process_leaves(
-            leaves=leaves, default_restriction=default_restriction
-        )
-        for leaf in leaves:  # Multiple leaves
-            self._set_find_restr(**leaf)
-            self.add_leaf(
-                leaf["table_name"],
-                True,
-                cascade=False,
-                direction=direction,
-            )
+    # ---------------------------- Graph Traversal ----------------------------
 
-    def cascade(self, direction=None, show_progress=None) -> None:
-        direction = direction or self.direction
+    def cascade_search(self) -> None:
         if self.cascaded:
             return
-        for table in self.leaves:
-            restriction, restr_attrs = self._get_find_restr(table)
-            self.cascade1_search(
-                table=table,
-                restriction=restriction,
-                restr_attrs=restr_attrs,
-                replace=True,
+        restriction, restr_attrs = self._get_find_restr(self.leaf)
+        self.cascade1_search(
+            table=self.leaf,
+            restriction=restriction,
+            restr_attrs=restr_attrs,
+            replace=True,
+        )
+        if not self.found_restr:
+            searched = (
+                "parents" if self.direction == Direction.UP else "children"
             )
-        self.cascaded = True
-        if not self.found:
-            searched = "parents" if direction == "up" else "children"
             logger.warning(
                 f"Restriction could not be applied to any {searched}.\n\t"
                 + f"From: {self.leaves}\n\t"
                 + f"Restr: {restriction}"
             )
 
-    def _ban_unsearched(self):
-        """After found match, ignore others for cascade back to leaf."""
-        all_tables = set([n for n in self.graph.nodes])
-        unsearched = all_tables - self.searched
-        camel_searched = self._camel(list(self.searched))
-        logger.info(f"Searched: {camel_searched}")
-        self.no_visit.update(unsearched)
+    def _set_found_vars(self, table):
+        """Set found_restr and searched_tables."""
+        self._set_restr(table, self.search_restr, replace=True)
+        self.found_restr = True
+        self.searched_tables.update(set(self._and_parts(table)))
+
+        if self.direction == Direction.UP:
+            self.parent = table
+        elif self.direction == Direction.DOWN:
+            self.child = table
+
+        self.direction = ~self.direction
+        _ = self.path  # Reset path
 
     def cascade1_search(
         self,
         table: str = None,
         restriction: str = True,
         restr_attrs: Set[str] = None,
-        direction: Direction = None,
         replace: bool = True,
         limit: int = 100,
+        **kwargs,
     ):
-        if self.found or not table or limit < 1 or table in self.searched:
+        if (
+            self.found_restr
+            or not table
+            or limit < 1
+            or table in self.searched_tables
+        ):
             return
 
-        self.searched.add(table)
+        self.searched_tables.add(table)
+        next_tables, next_func = self._get_next_tables(table, self.direction)
 
-        direction = direction or self.direction
-        next_func = (
-            self.graph.parents if direction == "up" else self.graph.children
-        )
-
-        next_searches = set()
-        for next_table, data in next_func(table).items():
-            self._log_truncate(
-                f"Search: {self._camel(table)} -> {self._camel(next_table)}"
-            )
+        for next_table, data in next_tables.items():
             if next_table.isnumeric():
                 next_table, data = next_func(next_table).popitem()
+            self._log_truncate(
+                f"Search Link: {self._camel(table)} -> {self._camel(next_table)}"
+            )
 
             if next_table in self.no_visit or table == next_table:
+                reason = "Already Saw" if next_table == table else "Banned Tbl "
+                self._log_truncate(f"{reason}: {self._camel(next_table)}")
                 continue
 
             next_ft = self._get_ft(next_table)
             if restr_attrs.issubset(set(next_ft.heading.names)):
-                self.searched.add(next_table)
-                # self.searched.add(get_master(next_table))
-                self.searched.update(next_ft.parts())
-                self.found = True
-                self._ban_unsearched()
-                self.cascade1(
-                    table=next_table,
-                    restriction=restriction,
-                    direction="down" if direction == "up" else "up",
-                    replace=replace,
-                    **data,
-                )
+                self._set_found_vars(next_table)
                 return
 
-            next_searches.update(
-                set([*next_ft.parts(), get_master(next_table), next_table])
-            )
-
-        for next_table in next_searches:
-            if not next_table:
-                continue  # Skip None from get_master
             self.cascade1_search(
                 table=next_table,
                 restriction=restriction,
                 restr_attrs=restr_attrs,
-                direction=direction,
                 replace=replace,
                 limit=limit - 1,
+                **data,
             )
-            if self.found:
+            if self.found_restr:
                 return
+
+    # ------------------------------ Path Finding ------------------------------
+
+    def find_path(self, directed=True) -> List[str]:
+        """Return list of full table names in chain.
+
+        Parameters
+        ----------
+        directed : bool, optional
+            If True, use directed graph. If False, use undirected graph.
+            Defaults to True. Undirected permits paths to traverse from merge
+            part-parent -> merge part -> merge table. Undirected excludes
+            PERIPHERAL_TABLES like interval_list, nwbfile, etc.
+
+        Returns
+        -------
+        List[str]
+            List of names in the path.
+        """
+        source, target = self.parent, self.child
+        search_graph = self.graph if directed else self.undirect_graph
+        search_graph.remove_nodes_from(self.no_visit)
+
+        try:
+            path = shortest_path(search_graph, source, target)
+        except NetworkXNoPath:
+            return None  # No path found, parent func may do undirected search
+        except NodeNotFound:
+            self.searched_path = True  # No path found, don't search again
+            return None
+
+        ignore_nodes = self.graph.nodes - set(path)
+        self.no_visit.update(ignore_nodes)
+
+        return path
+
+    @cached_property
+    def path(self) -> list:
+        """Return list of full table names in chain."""
+        if self.searched_path and not self.has_link:
+            return None
+
+        path = None
+        if path := self.find_path(directed=True):
+            self.link_type = "directed"
+        elif path := self.find_path(directed=False):
+            self.link_type = "undirected"
+        self.searched_path = True
+
+        return path
+
+    def cascade(self, restriction: str = None, direction: Direction = None):
+        if not self.has_link:
+            return
+
+        _ = self.path
+
+        direction = direction or self.direction
+        if direction == Direction.UP:
+            start, end = self.child, self.parent
+        else:
+            start, end = self.parent, self.child
+
+        self.cascade1(
+            table=start,
+            restriction=restriction or self._get_restr(start),
+            direction=direction,
+            replace=True,
+        )
+
+        return self._get_ft(end, with_restr=True)
+
+    def restrict_by(self, *args, **kwargs) -> None:
+        """Cascade passthrough."""
+        return self.cascade(*args, **kwargs)
