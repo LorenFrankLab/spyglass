@@ -1,6 +1,23 @@
 import os
 import dandi.organize
 
+import datajoint as dj
+
+from .common_usage import Export
+
+schema = dj.schema("common_dandi")
+
+
+@schema
+class DandiPath(dj.Manual):
+    definition = """
+    -> Export.File
+    ---
+    dandiset_id: int
+    filename: varchar(255)
+    dandi_path: varchar(255)
+    """
+
 
 def _get_metadata(path):
     # taken from definition within dandi.organize.organize
