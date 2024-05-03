@@ -51,7 +51,7 @@ class Direction(Enum):
         return Direction.UP if self.value == "down" else Direction.DOWN
 
     def __bool__(self) -> bool:
-        """Return True if direction is UP."""
+        """Return True if direction is not None."""
         return self.value is not None
 
 

@@ -55,7 +55,7 @@ def chain(chains):
 def no_link_chain(Nwbfile):
     """Return example TableChain object with no link."""
     from spyglass.common.common_usage import InsertError
-    from spyglass.utils.dj_chains import TableChain
+    from spyglass.utils.dj_graph import TableChain
 
     yield TableChain(Nwbfile, InsertError())
 

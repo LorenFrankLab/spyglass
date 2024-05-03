@@ -4,7 +4,7 @@ from datajoint.utils import to_camel_case
 
 @pytest.fixture(scope="session")
 def TableChain():
-    from spyglass.utils.dj_chains import TableChain
+    from spyglass.utils.dj_graph import TableChain
 
     return TableChain
 

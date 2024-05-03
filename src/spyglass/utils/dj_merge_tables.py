@@ -75,7 +75,7 @@ class Merge(dj.Manual):
         self._source_class_dict = {}
 
     @staticmethod
-    def _part_name(part):
+    def _part_name(part=None):
         """Return the CamelCase name of a part table"""
         if not isinstance(part, str):
             part = part.table_name

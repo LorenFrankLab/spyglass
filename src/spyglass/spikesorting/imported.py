@@ -51,8 +51,9 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
 
         self.insert1(key, skip_duplicates=True)
 
+        part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(
-            [orig_key], part_name=self.camel_name, skip_duplicates=True
+            [orig_key], part_name=part_name, skip_duplicates=True
         )
 
     @classmethod

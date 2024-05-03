@@ -1,5 +1,17 @@
 # Change Log
 
+## \[Unreleased\]
+
+### Release Nodes
+
+<!--
+Add `alter` snippets here, to be deleted before release.
+-->
+
+### Infrastructure
+
+- Add long-distance restrictions via `<<` and `>>` operators. #943
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
