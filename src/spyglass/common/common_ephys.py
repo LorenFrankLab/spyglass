@@ -267,7 +267,7 @@ class Raw(SpyglassMixin, dj.Imported):
             logger.info("Estimating sampling rate...")
             # NOTE: Only use first 1e6 timepoints to save time
             sampling_rate = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
+                rawdata.timestamps[: int(1e6)], 1.5, verbose=True
             )
         key["sampling_rate"] = sampling_rate
 
@@ -281,7 +281,7 @@ class Raw(SpyglassMixin, dj.Imported):
         else:
             # get the list of valid times given the specified sampling rate.
             interval_dict["valid_times"] = get_valid_intervals(
-                timestamps=np.asarray(rawdata.timestamps),
+                timestamps=rawdata.timestamps[:],
                 sampling_rate=key["sampling_rate"],
                 gap_proportion=1.75,
                 min_valid_len=0,

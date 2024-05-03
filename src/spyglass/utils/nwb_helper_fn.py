@@ -92,8 +92,18 @@ def get_config(nwb_file_path):
         return __configs[nwb_file_path]
 
     p = Path(nwb_file_path)
-    # NOTE use p.stem[:-1] to remove the underscore that was added to the file
-    config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+    nn = p.stem
+    if nn.endswith("_"):
+        # this is the case of identifier_.nwb
+        nn = nn[:-1]
+    elif nn.endswith("_.nwb.lindi"):
+        # this is the case of identifier_.nwb.lindi.json
+        nn = nn[: -len("_.nwb.lindi")]
+    config_path = p.parent / (nn + "_spyglass_config.yaml")
+
+    # # NOTE use p.stem[:-1] to remove the underscore that was added to the file
+    # config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+
     if not os.path.exists(config_path):
         logger.info(f"No config found at file path {config_path}")
         return dict()
@@ -448,7 +458,7 @@ def _get_pos_dict(
             spatial_series = all_spatial_series[index]
             valid_times = None
             if incl_times:  # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
+                timestamps = spatial_series.timestamps[:]
                 sampling_rate = estimate_sampling_rate(
                     timestamps, verbose=verbose, filename=session_id
                 )

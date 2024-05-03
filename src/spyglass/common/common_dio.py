@@ -102,8 +102,8 @@ class DIOEvents(SpyglassMixin, dj.Imported):
                         va="bottom",
                     )
             ax.step(
-                np.asarray(event["dio"].timestamps),
-                np.asarray(event["dio"].data),
+                event["dio"].timestamps[:],
+                event["dio"].data[:],
                 where="post",
                 color="black",
             )
