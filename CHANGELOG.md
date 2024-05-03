@@ -1,5 +1,9 @@
 # Change Log
 
+## [Unreleased]
+
+- Add support for .nwb.lindi.json files #947
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure

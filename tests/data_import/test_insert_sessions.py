@@ -6,6 +6,8 @@ import pynwb
 import pytest
 from hdmf.backends.warnings import BrokenLinkWarning
 
+from spyglass.utils import H5pyFile
+
 
 @pytest.fixture(scope="session")
 def copy_nwb_link_raw_ephys(data_import):
@@ -33,7 +35,8 @@ def test_copy_link(mini_path, settings, mini_closed, copy_nwb_link_raw_ephys):
     shutil.move(new_path, new_moved)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
-        with pynwb.NWBHDF5IO(path=str(new_moved), mode="r") as io:
-            with pytest.warns(BrokenLinkWarning):
-                nwb_acq = io.read().acquisition
+        with H5pyFile(str(new_moved), "r") as h5f:
+            with pynwb.NWBHDF5IO(file=h5f, mode="r") as io:
+                with pytest.warns(BrokenLinkWarning):
+                    nwb_acq = io.read().acquisition
     assert "e-series" not in nwb_acq, "Ephys link still exists after move"

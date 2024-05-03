@@ -15,7 +15,7 @@ from hdmf.common import DynamicTable
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
@@ -48,6 +48,9 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
+    nwb_file_url = "": varchar(512)  # optional URL for the file
+    nwb_file_description = "": varchar(2000)  # an optional description of this file
+
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
@@ -161,6 +164,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     analysis_file_description = "": varchar(2000)  # an optional description of this analysis
     analysis_parameters = NULL: blob               # additional relevant parameters. Currently used only for analyses
                                                    # that span multiple NWB files
+    analysis_file_url = "": varchar(512)           # optional URL for the file
+
     INDEX (analysis_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@...
@@ -190,35 +195,37 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
-        with pynwb.NWBHDF5IO(
-            path=nwb_file_abspath, mode="r", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            # pop off the unnecessary elements to save space
-            nwb_fields = nwbf.fields
-            for field in nwb_fields:
-                if field not in NWB_KEEP_FIELDS:
-                    nwb_object = getattr(nwbf, field)
-                    if isinstance(nwb_object, pynwb.core.LabelledDict):
-                        for module in list(nwb_object.keys()):
-                            nwb_object.pop(module)
-            # add the version of spyglass that created this file
-            if nwbf.source_script is None:
-                nwbf.source_script = f"spyglass={sg_version}"
-            else:
-                alter_source_script = True
-
-            analysis_file_name = self.__get_new_file_name(nwb_file_name)
-            # write the new file
-            logger.info(f"Writing new NWB file {analysis_file_name}")
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-                analysis_file_name
-            )
-            # export the new NWB file
+        with H5pyFile(nwb_file_abspath, "r") as h5f:
             with pynwb.NWBHDF5IO(
-                path=analysis_file_abs_path, mode="w", manager=io.manager
-            ) as export_io:
-                export_io.export(io, nwbf)
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                # pop off the unnecessary elements to save space
+                nwb_fields = nwbf.fields
+                for field in nwb_fields:
+                    if field not in NWB_KEEP_FIELDS:
+                        nwb_object = getattr(nwbf, field)
+                        if isinstance(nwb_object, pynwb.core.LabelledDict):
+                            for module in list(nwb_object.keys()):
+                                nwb_object.pop(module)
+                # add the version of spyglass that created this file
+                if nwbf.source_script is None:
+                    nwbf.source_script = f"spyglass={sg_version}"
+                else:
+                    alter_source_script = True
+
+                analysis_file_name = self.__get_new_file_name(nwb_file_name)
+                # write the new file
+                logger.info(f"Writing new NWB file {analysis_file_name}")
+                analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                    analysis_file_name
+                )
+                # export the new NWB file
+                with H5pyFile(analysis_file_abs_path, "w") as h5f_out:
+                    with pynwb.NWBHDF5IO(
+                        file=h5f_out, mode="w", manager=io.manager
+                    ) as export_io:
+                        export_io.export(io, nwbf)
         if alter_source_script:
             self._alter_spyglass_version(analysis_file_abs_path)
 
@@ -277,24 +284,28 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
-        with pynwb.NWBHDF5IO(
-            path=nwb_file_abspath, mode="r", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            # get the current number of analysis files related to this nwb file
-            query = AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
-            original_nwb_file_name = query.fetch("nwb_file_name")[0]
-            analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
-            # write the new file
-            logger.info(f"Writing new NWB file {analysis_file_name}...")
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-                analysis_file_name
-            )
-            # export the new NWB file
+        with H5pyFile(nwb_file_abspath, "r") as h5f:
             with pynwb.NWBHDF5IO(
-                path=analysis_file_abs_path, mode="w", manager=io.manager
-            ) as export_io:
-                export_io.export(io, nwbf)
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                # get the current number of analysis files related to this nwb file
+                query = AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
+                original_nwb_file_name = query.fetch("nwb_file_name")[0]
+                analysis_file_name = cls.__get_new_file_name(
+                    original_nwb_file_name
+                )
+                # write the new file
+                logger.info(f"Writing new NWB file {analysis_file_name}...")
+                analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+                    analysis_file_name
+                )
+                # export the new NWB file
+                with H5pyFile(analysis_file_abs_path, "w") as h5f_out:
+                    with pynwb.NWBHDF5IO(
+                        file=h5f_out, mode="w", manager=io.manager
+                    ) as export_io:
+                        export_io.export(io, nwbf)
 
         return analysis_file_name
 
@@ -381,23 +392,24 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         nwb_object_id : str
             The NWB object ID of the added object.
         """
-        with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name),
-            mode="a",
-            load_namespaces=True,
-        ) as io:
-            nwbf = io.read()
-            if isinstance(nwb_object, pd.DataFrame):
-                dt_object = DynamicTable.from_dataframe(
-                    name=table_name, df=nwb_object
-                )
-                nwbf.add_scratch(dt_object)
-                io.write(nwbf)
-                return dt_object.object_id
-            else:
-                nwbf.add_scratch(nwb_object)
-                io.write(nwbf)
-                return nwb_object.object_id
+        with H5pyFile(self.get_abs_path(analysis_file_name), "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f,
+                mode="a",
+                load_namespaces=True,
+            ) as io:
+                nwbf = io.read()
+                if isinstance(nwb_object, pd.DataFrame):
+                    dt_object = DynamicTable.from_dataframe(
+                        name=table_name, df=nwb_object
+                    )
+                    nwbf.add_scratch(dt_object)
+                    io.write(nwbf)
+                    return dt_object.object_id
+                else:
+                    nwbf.add_scratch(nwb_object)
+                    io.write(nwbf)
+                    return nwb_object.object_id
 
     def add_units(
         self,
@@ -433,82 +445,89 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         units_object_id, waveforms_object_id : str, str
             The NWB object id of the Units object and the object id of the waveforms object ('' if None)
         """
-        with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name),
-            mode="a",
-            load_namespaces=True,
-        ) as io:
-            nwbf = io.read()
-            sort_intervals = list()
-            if len(units.keys()):
-                # Add spike times and valid time range for the sort
-                for id in units.keys():
-                    nwbf.add_unit(
-                        spike_times=units[id],
-                        id=id,
-                        # waveform_mean = units_templates[id],
-                        obs_intervals=units_valid_times[id],
-                    )
-                    sort_intervals.append(units_sort_interval[id])
-                # Add a column for the sort interval (subset of valid time)
-                nwbf.add_unit_column(
-                    name="sort_interval",
-                    description="the interval used for spike sorting",
-                    data=sort_intervals,
-                )
-                # If metrics were specified, add one column per metric
-                if metrics is not None:
-                    for metric in metrics:
-                        if metrics[metric]:
-                            unit_ids = np.array(list(metrics[metric].keys()))
-                            metric_values = np.array(
-                                list(metrics[metric].values())
-                            )
-
-                            # sort by unit_ids and apply that sorting to values
-                            # to ensure that things go in the right order
-
-                            metric_values = metric_values[np.argsort(unit_ids)]
-                            logger.info(
-                                f"Adding metric {metric} : {metric_values}"
-                            )
-                            nwbf.add_unit_column(
-                                name=metric,
-                                description=f"{metric} metric",
-                                data=metric_values,
-                            )
-                if labels is not None:
-                    unit_ids = np.array(list(units.keys()))
-                    for unit in unit_ids:
-                        if unit not in labels:
-                            labels[unit] = ""
-                    label_values = np.array(list(labels.values()))
-                    label_values = label_values[np.argsort(unit_ids)].tolist()
+        with H5pyFile(self.get_abs_path(analysis_file_name), "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f,
+                mode="a",
+                load_namespaces=True,
+            ) as io:
+                nwbf = io.read()
+                sort_intervals = list()
+                if len(units.keys()):
+                    # Add spike times and valid time range for the sort
+                    for id in units.keys():
+                        nwbf.add_unit(
+                            spike_times=units[id],
+                            id=id,
+                            # waveform_mean = units_templates[id],
+                            obs_intervals=units_valid_times[id],
+                        )
+                        sort_intervals.append(units_sort_interval[id])
+                    # Add a column for the sort interval (subset of valid time)
                     nwbf.add_unit_column(
-                        name="label",
-                        description="label given during curation",
-                        data=label_values,
+                        name="sort_interval",
+                        description="the interval used for spike sorting",
+                        data=sort_intervals,
                     )
-                # If the waveforms were specified, add them as a dataframe to scratch
-                waveforms_object_id = ""
-                if units_waveforms is not None:
-                    waveforms_df = pd.DataFrame.from_dict(
-                        units_waveforms, orient="index"
-                    )
-                    waveforms_df.columns = ["waveforms"]
-                    nwbf.add_scratch(
-                        waveforms_df,
-                        name="units_waveforms",
-                        notes="spike waveforms for each unit",
-                    )
-                    waveforms_object_id = nwbf.scratch[
-                        "units_waveforms"
-                    ].object_id
+                    # If metrics were specified, add one column per metric
+                    if metrics is not None:
+                        for metric in metrics:
+                            if metrics[metric]:
+                                unit_ids = np.array(
+                                    list(metrics[metric].keys())
+                                )
+                                metric_values = np.array(
+                                    list(metrics[metric].values())
+                                )
 
-                io.write(nwbf)
-                return nwbf.units.object_id, waveforms_object_id
-            else:
-                return ""
+                                # sort by unit_ids and apply that sorting to values
+                                # to ensure that things go in the right order
+
+                                metric_values = metric_values[
+                                    np.argsort(unit_ids)
+                                ]
+                                logger.info(
+                                    f"Adding metric {metric} : {metric_values}"
+                                )
+                                nwbf.add_unit_column(
+                                    name=metric,
+                                    description=f"{metric} metric",
+                                    data=metric_values,
+                                )
+                    if labels is not None:
+                        unit_ids = np.array(list(units.keys()))
+                        for unit in unit_ids:
+                            if unit not in labels:
+                                labels[unit] = ""
+                        label_values = np.array(list(labels.values()))
+                        label_values = label_values[
+                            np.argsort(unit_ids)
+                        ].tolist()
+                        nwbf.add_unit_column(
+                            name="label",
+                            description="label given during curation",
+                            data=label_values,
+                        )
+                    # If the waveforms were specified, add them as a dataframe to scratch
+                    waveforms_object_id = ""
+                    if units_waveforms is not None:
+                        waveforms_df = pd.DataFrame.from_dict(
+                            units_waveforms, orient="index"
+                        )
+                        waveforms_df.columns = ["waveforms"]
+                        nwbf.add_scratch(
+                            waveforms_df,
+                            name="units_waveforms",
+                            notes="spike waveforms for each unit",
+                        )
+                        waveforms_object_id = nwbf.scratch[
+                            "units_waveforms"
+                        ].object_id
+
+                    io.write(nwbf)
+                    return nwbf.units.object_id, waveforms_object_id
+                else:
+                    return ""
 
     def add_units_waveforms(
         self,
@@ -535,71 +554,74 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The NWB object id of the Units object
         """
 
-        with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name),
-            mode="a",
-            load_namespaces=True,
-        ) as io:
-            nwbf = io.read()
-            for id in waveform_extractor.sorting.get_unit_ids():
-                # (spikes, samples, channels)
-                waveforms = waveform_extractor.get_waveforms(unit_id=id)
-                # (channels, spikes, samples)
-                waveforms = np.moveaxis(waveforms, source=2, destination=0)
-                nwbf.add_unit(
-                    spike_times=waveform_extractor.sorting.get_unit_spike_train(
-                        unit_id=id
-                    ),
-                    id=id,
-                    electrodes=waveform_extractor.recording.get_channel_ids(),
-                    waveforms=waveforms,
-                )
-
-            # The following is a rough sketch of AnalysisNwbfile().add_waveforms
-            # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-            # or
-            # nwbfile = pynwb.NWBFile(...)
-            # (channels, spikes, samples)
-            # wfs = [
-            #         [     # elec 1
-            #             [1, 2, 3],  # spike 1, [sample 1, sample 2, sample 3]
-            #             [1, 2, 3],  # spike 2
-            #             [1, 2, 3],  # spike 3
-            #             [1, 2, 3]   # spike 4
-            #         ], [  # elec 2
-            #             [1, 2, 3],  # spike 1
-            #             [1, 2, 3],  # spike 2
-            #             [1, 2, 3],  # spike 3
-            #             [1, 2, 3]   # spike 4
-            #         ], [  # elec 3
-            #             [1, 2, 3],  # spike 1
-            #             [1, 2, 3],  # spike 2
-            #             [1, 2, 3],  # spike 3
-            #             [1, 2, 3]   # spike 4
-            #         ]
-            # ]
-            # elecs = ... # DynamicTableRegion referring to three electrodes (rows) of the electrodes table
-            # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)
-
-            # If metrics were specified, add one column per metric
-            if metrics is not None:
-                for metric_name, metric_dict in metrics.items():
-                    logger.info(f"Adding metric {metric_name} : {metric_dict}")
-                    metric_data = metric_dict.values().to_list()
-                    nwbf.add_unit_column(
-                        name=metric_name,
-                        description=metric_name,
-                        data=metric_data,
+        with H5pyFile(self.get_abs_path(analysis_file_name), "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f,
+                mode="a",
+                load_namespaces=True,
+            ) as io:
+                nwbf = io.read()
+                for id in waveform_extractor.sorting.get_unit_ids():
+                    # (spikes, samples, channels)
+                    waveforms = waveform_extractor.get_waveforms(unit_id=id)
+                    # (channels, spikes, samples)
+                    waveforms = np.moveaxis(waveforms, source=2, destination=0)
+                    nwbf.add_unit(
+                        spike_times=waveform_extractor.sorting.get_unit_spike_train(
+                            unit_id=id
+                        ),
+                        id=id,
+                        electrodes=waveform_extractor.recording.get_channel_ids(),
+                        waveforms=waveforms,
                     )
-            if labels is not None:
-                nwbf.add_unit_column(
-                    name="label",
-                    description="label given during curation",
-                    data=labels,
-                )
 
-            io.write(nwbf)
-            return nwbf.units.object_id
+                # The following is a rough sketch of AnalysisNwbfile().add_waveforms
+                # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
+                # or
+                # nwbfile = pynwb.NWBFile(...)
+                # (channels, spikes, samples)
+                # wfs = [
+                #         [     # elec 1
+                #             [1, 2, 3],  # spike 1, [sample 1, sample 2, sample 3]
+                #             [1, 2, 3],  # spike 2
+                #             [1, 2, 3],  # spike 3
+                #             [1, 2, 3]   # spike 4
+                #         ], [  # elec 2
+                #             [1, 2, 3],  # spike 1
+                #             [1, 2, 3],  # spike 2
+                #             [1, 2, 3],  # spike 3
+                #             [1, 2, 3]   # spike 4
+                #         ], [  # elec 3
+                #             [1, 2, 3],  # spike 1
+                #             [1, 2, 3],  # spike 2
+                #             [1, 2, 3],  # spike 3
+                #             [1, 2, 3]   # spike 4
+                #         ]
+                # ]
+                # elecs = ... # DynamicTableRegion referring to three electrodes (rows) of the electrodes table
+                # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)
+
+                # If metrics were specified, add one column per metric
+                if metrics is not None:
+                    for metric_name, metric_dict in metrics.items():
+                        logger.info(
+                            f"Adding metric {metric_name} : {metric_dict}"
+                        )
+                        metric_data = metric_dict.values().to_list()
+                        nwbf.add_unit_column(
+                            name=metric_name,
+                            description=metric_name,
+                            data=metric_data,
+                        )
+                if labels is not None:
+                    nwbf.add_unit_column(
+                        name="label",
+                        description="label given during curation",
+                        data=labels,
+                    )
+
+                io.write(nwbf)
+                return nwbf.units.object_id
 
     def add_units_metrics(self, analysis_file_name, metrics):
         """Add units to analysis NWB file along with the waveforms
@@ -618,24 +640,27 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         """
         metric_names = list(metrics.keys())
         unit_ids = list(metrics[metric_names[0]].keys())
-        with pynwb.NWBHDF5IO(
-            path=self.get_abs_path(analysis_file_name),
-            mode="a",
-            load_namespaces=True,
-        ) as io:
-            nwbf = io.read()
-            for id in unit_ids:
-                nwbf.add_unit(id=id)
+        with H5pyFile(self.get_abs_path(analysis_file_name), "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f,
+                mode="a",
+                load_namespaces=True,
+            ) as io:
+                nwbf = io.read()
+                for id in unit_ids:
+                    nwbf.add_unit(id=id)
 
-            for metric_name, metric_dict in metrics.items():
-                logger.info(f"Adding metric {metric_name} : {metric_dict}")
-                metric_data = list(metric_dict.values())
-                nwbf.add_unit_column(
-                    name=metric_name, description=metric_name, data=metric_data
-                )
+                for metric_name, metric_dict in metrics.items():
+                    logger.info(f"Adding metric {metric_name} : {metric_dict}")
+                    metric_data = list(metric_dict.values())
+                    nwbf.add_unit_column(
+                        name=metric_name,
+                        description=metric_name,
+                        data=metric_data,
+                    )
 
-            io.write(nwbf)
-            return nwbf.units.object_id
+                io.write(nwbf)
+                return nwbf.units.object_id
 
     @classmethod
     def get_electrode_indices(cls, analysis_file_name, electrode_ids):

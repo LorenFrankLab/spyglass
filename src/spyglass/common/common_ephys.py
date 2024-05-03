@@ -18,7 +18,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -267,7 +267,7 @@ class Raw(SpyglassMixin, dj.Imported):
             logger.info("Estimating sampling rate...")
             # NOTE: Only use first 1e6 timepoints to save time
             sampling_rate = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
+                rawdata.timestamps[: int(1e6)], 1.5, verbose=True
             )
         key["sampling_rate"] = sampling_rate
 
@@ -281,7 +281,7 @@ class Raw(SpyglassMixin, dj.Imported):
         else:
             # get the list of valid times given the specified sampling rate.
             interval_dict["valid_times"] = get_valid_intervals(
-                timestamps=np.asarray(rawdata.timestamps),
+                timestamps=rawdata.timestamps[:],
                 sampling_rate=key["sampling_rate"],
                 gap_proportion=1.75,
                 min_valid_len=0,
@@ -792,27 +792,28 @@ class LFPBand(SpyglassMixin, dj.Computed):
         )
 
         # now that the LFP is filtered, we create an electrical series for it and add it to the file
-        with pynwb.NWBHDF5IO(
-            path=lfp_band_file_abspath, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            # get the indices of the electrodes in the electrode table of the file to get the right values
-            elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
-            electrode_table_region = nwbf.create_electrode_table_region(
-                elect_index, "filtered electrode table"
-            )
-            eseries_name = "filtered data"
-            # TODO: use datatype of data
-            es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
-                data=filtered_data,
-                electrodes=electrode_table_region,
-                timestamps=new_timestamps,
-            )
-            # Add the electrical series to the scratch area
-            nwbf.add_scratch(es)
-            io.write(nwbf)
-            filtered_data_object_id = es.object_id
+        with H5pyFile(lfp_band_file_abspath, "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="a", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                # get the indices of the electrodes in the electrode table of the file to get the right values
+                elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
+                electrode_table_region = nwbf.create_electrode_table_region(
+                    elect_index, "filtered electrode table"
+                )
+                eseries_name = "filtered data"
+                # TODO: use datatype of data
+                es = pynwb.ecephys.ElectricalSeries(
+                    name=eseries_name,
+                    data=filtered_data,
+                    electrodes=electrode_table_region,
+                    timestamps=new_timestamps,
+                )
+                # Add the electrical series to the scratch area
+                nwbf.add_scratch(es)
+                io.write(nwbf)
+                filtered_data_object_id = es.object_id
         #
         # add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_band_file_name)

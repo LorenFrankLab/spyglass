@@ -19,7 +19,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -624,36 +624,37 @@ def _write_recording_to_nwb(
 
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
-    with pynwb.NWBHDF5IO(
-        path=analysis_nwb_file_abs_path,
-        mode="a",
-        load_namespaces=True,
-    ) as io:
-        nwbfile = io.read()
-        table_region = nwbfile.create_electrode_table_region(
-            region=[i for i in recording.get_channel_ids()],
-            description="Sort group",
-        )
-        data_iterator = SpikeInterfaceRecordingDataChunkIterator(
-            recording=recording, return_scaled=False, buffer_gb=5
-        )
-        timestamps_iterator = TimestampsDataChunkIterator(
-            recording=TimestampsExtractor(timestamps), buffer_gb=5
-        )
-        processed_electrical_series = pynwb.ecephys.ElectricalSeries(
-            name="ProcessedElectricalSeries",
-            data=data_iterator,
-            electrodes=table_region,
-            timestamps=timestamps_iterator,
-            filtering="Bandpass filtered for spike band",
-            description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
-            conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
-        )
-        nwbfile.add_acquisition(processed_electrical_series)
-        recording_object_id = nwbfile.acquisition[
-            "ProcessedElectricalSeries"
-        ].object_id
-        io.write(nwbfile)
+    with H5pyFile(analysis_nwb_file_abs_path, "a") as h5f:
+        with pynwb.NWBHDF5IO(
+            file=h5f,
+            mode="a",
+            load_namespaces=True,
+        ) as io:
+            nwbfile = io.read()
+            table_region = nwbfile.create_electrode_table_region(
+                region=[i for i in recording.get_channel_ids()],
+                description="Sort group",
+            )
+            data_iterator = SpikeInterfaceRecordingDataChunkIterator(
+                recording=recording, return_scaled=False, buffer_gb=5
+            )
+            timestamps_iterator = TimestampsDataChunkIterator(
+                recording=TimestampsExtractor(timestamps), buffer_gb=5
+            )
+            processed_electrical_series = pynwb.ecephys.ElectricalSeries(
+                name="ProcessedElectricalSeries",
+                data=data_iterator,
+                electrodes=table_region,
+                timestamps=timestamps_iterator,
+                filtering="Bandpass filtered for spike band",
+                description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
+                conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
+            )
+            nwbfile.add_acquisition(processed_electrical_series)
+            recording_object_id = nwbfile.acquisition[
+                "ProcessedElectricalSeries"
+            ].object_id
+            io.write(nwbfile)
     return analysis_nwb_file, recording_object_id
 
 

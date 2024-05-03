@@ -5,6 +5,7 @@ import uuid
 from typing import Iterable
 
 import datajoint as dj
+from isort import file
 import numpy as np
 import pynwb
 import spikeinterface as si
@@ -22,7 +23,7 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     SpikeSortingRecordingSelection,
     _consolidate_intervals,
 )
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -329,11 +330,12 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
-        with pynwb.NWBHDF5IO(
-            analysis_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            units = nwbf.units.to_dataframe()
+        with H5pyFile(analysis_file_abs_path, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                units = nwbf.units.to_dataframe()
         units_dict_list = [
             {
                 unit_id: np.searchsorted(recording.get_times(), spike_times)
@@ -376,34 +378,35 @@ def _write_sorting_to_nwb(
 
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
-    with pynwb.NWBHDF5IO(
-        path=analysis_nwb_file_abs_path,
-        mode="a",
-        load_namespaces=True,
-    ) as io:
-        nwbf = io.read()
-        if sorting.get_num_units() == 0:
-            nwbf.units = pynwb.misc.Units(
-                name="units", description="Empty units table."
-            )
-        else:
-            nwbf.add_unit_column(
-                name="curation_label",
-                description="curation label applied to a unit",
-            )
-            obs_interval = (
-                sort_interval
-                if sort_interval.ndim == 2
-                else sort_interval.reshape(1, 2)
-            )
-            for unit_id in sorting.get_unit_ids():
-                spike_times = sorting.get_unit_spike_train(unit_id)
-                nwbf.add_unit(
-                    spike_times=timestamps[spike_times],
-                    id=unit_id,
-                    obs_intervals=obs_interval,
-                    curation_label="uncurated",
+    with H5pyFile(analysis_nwb_file_abs_path, "a") as h5f:
+        with pynwb.NWBHDF5IO(
+            file=h5f,
+            mode="a",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            if sorting.get_num_units() == 0:
+                nwbf.units = pynwb.misc.Units(
+                    name="units", description="Empty units table."
                 )
-        units_object_id = nwbf.units.object_id
-        io.write(nwbf)
+            else:
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description="curation label applied to a unit",
+                )
+                obs_interval = (
+                    sort_interval
+                    if sort_interval.ndim == 2
+                    else sort_interval.reshape(1, 2)
+                )
+                for unit_id in sorting.get_unit_ids():
+                    spike_times = sorting.get_unit_spike_train(unit_id)
+                    nwbf.add_unit(
+                        spike_times=timestamps[spike_times],
+                        id=unit_id,
+                        obs_intervals=obs_interval,
+                        curation_label="uncurated",
+                    )
+            units_object_id = nwbf.units.object_id
+            io.write(nwbf)
     return analysis_nwb_file, units_object_id

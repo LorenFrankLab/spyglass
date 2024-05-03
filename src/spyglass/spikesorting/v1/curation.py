@@ -18,6 +18,7 @@ from spyglass.spikesorting.v1.recording import (
 )
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import H5pyFile
 
 schema = dj.schema("spikesorting_v1_curation")
 
@@ -208,11 +209,12 @@ class CurationV1(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
-        with pynwb.NWBHDF5IO(
-            analysis_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            units = nwbf.units.to_dataframe()
+        with H5pyFile(analysis_file_abs_path, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                units = nwbf.units.to_dataframe()
         units_dict_list = [
             {
                 unit_id: np.searchsorted(recording.get_times(), spike_times)
@@ -254,12 +256,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
             sampling_frequency=recording.get_sampling_frequency(),
         )
 
-        with pynwb.NWBHDF5IO(
-            sorting_analysis_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbfile = io.read()
-            nwb_sorting = nwbfile.objects[curation_key["object_id"]]
-            merge_groups = nwb_sorting["merge_groups"][:]
+        with H5pyFile(sorting_analysis_file_abs_path, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbfile = io.read()
+                nwb_sorting = nwbfile.objects[curation_key["object_id"]]
+                merge_groups = nwb_sorting["merge_groups"][:]
 
         if merge_groups:
             units_to_merge = _merge_dict_to_list(merge_groups)
@@ -347,11 +350,10 @@ def _write_sorting_to_nwb_with_curation(
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
         (SpikeSorting & {"sorting_id": sorting_id}).fetch1("analysis_file_name")
     )
-    with pynwb.NWBHDF5IO(
-        sorting_analysis_file_abs_path, "r", load_namespaces=True
-    ) as io:
-        nwbf = io.read()
-        units = nwbf.units.to_dataframe()
+    with H5pyFile(sorting_analysis_file_abs_path, "r") as h5f:
+        with pynwb.NWBHDF5IO(file=h5f, mode="r", load_namespaces=True) as io:
+            nwbf = io.read()
+            units = nwbf.units.to_dataframe()
     units_dict = {
         unit_id: spike_times
         for unit_id, spike_times in zip(units.index, units["spike_times"])
@@ -371,61 +373,62 @@ def _write_sorting_to_nwb_with_curation(
 
     # create new analysis nwb file
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
-    with pynwb.NWBHDF5IO(
-        path=analysis_nwb_file_abs_path,
-        mode="a",
-        load_namespaces=True,
-    ) as io:
-        nwbf = io.read()
-        # write sorting to the nwb file
-        for unit_id in unit_ids:
-            # spike_times = sorting.get_unit_spike_train(unit_id)
-            nwbf.add_unit(
-                spike_times=units_dict[unit_id],
-                id=unit_id,
-            )
-        # add labels, merge groups, metrics
-        if labels is not None:
-            label_values = []
+    with H5pyFile(analysis_nwb_file_abs_path, "a") as h5f:
+        with pynwb.NWBHDF5IO(
+            file=h5f,
+            mode="a",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            # write sorting to the nwb file
             for unit_id in unit_ids:
-                if unit_id not in labels:
-                    label_values.append([])
-                else:
-                    label_values.append(labels[unit_id])
-            nwbf.add_unit_column(
-                name="curation_label",
-                description="curation label",
-                data=label_values,
-                index=True,
-            )
-        if merge_groups is not None:
-            merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
-            merge_groups_list = [
-                [""] if value == [] else value
-                for value in merge_groups_dict.values()
-            ]
-            nwbf.add_unit_column(
-                name="merge_groups",
-                description="merge groups",
-                data=merge_groups_list,
-                index=True,
-            )
-        if metrics is not None:
-            for metric, metric_dict in metrics.items():
-                metric_values = []
-                for unit_id in unit_ids:
-                    if unit_id not in metric_dict:
-                        metric_values.append([])
-                    else:
-                        metric_values.append(metric_dict[unit_id])
-                nwbf.add_unit_column(
-                    name=metric,
-                    description=metric,
-                    data=metric_values,
+                # spike_times = sorting.get_unit_spike_train(unit_id)
+                nwbf.add_unit(
+                    spike_times=units_dict[unit_id],
+                    id=unit_id,
                 )
+            # add labels, merge groups, metrics
+            if labels is not None:
+                label_values = []
+                for unit_id in unit_ids:
+                    if unit_id not in labels:
+                        label_values.append([])
+                    else:
+                        label_values.append(labels[unit_id])
+                nwbf.add_unit_column(
+                    name="curation_label",
+                    description="curation label",
+                    data=label_values,
+                    index=True,
+                )
+            if merge_groups is not None:
+                merge_groups_dict = _list_to_merge_dict(merge_groups, unit_ids)
+                merge_groups_list = [
+                    [""] if value == [] else value
+                    for value in merge_groups_dict.values()
+                ]
+                nwbf.add_unit_column(
+                    name="merge_groups",
+                    description="merge groups",
+                    data=merge_groups_list,
+                    index=True,
+                )
+            if metrics is not None:
+                for metric, metric_dict in metrics.items():
+                    metric_values = []
+                    for unit_id in unit_ids:
+                        if unit_id not in metric_dict:
+                            metric_values.append([])
+                        else:
+                            metric_values.append(metric_dict[unit_id])
+                    nwbf.add_unit_column(
+                        name=metric,
+                        description=metric,
+                        data=metric_values,
+                    )
 
-        units_object_id = nwbf.units.object_id
-        io.write(nwbf)
+            units_object_id = nwbf.units.object_id
+            io.write(nwbf)
     return analysis_nwb_file, units_object_id
 
 

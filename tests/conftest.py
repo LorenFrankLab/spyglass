@@ -11,6 +11,8 @@ import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
 
+from spyglass.utils import H5pyFile
+
 from .container import DockerMySQLManager
 
 # ---------------------- CONSTANTS ---------------------
@@ -224,12 +226,11 @@ def mini_copy_name(mini_path):
 
 @pytest.fixture(scope="session")
 def mini_content(mini_path):
-    with pynwb.NWBHDF5IO(
-        path=str(mini_path), mode="r", load_namespaces=True
-    ) as io:
-        nwbfile = io.read()
-        assert nwbfile is not None, "NWBFile empty."
-        yield nwbfile
+    with H5pyFile(str(mini_path), "r") as h5f:
+        with pynwb.NWBHDF5IO(file=h5f, mode="r", load_namespaces=True) as io:
+            nwbfile = io.read()
+            assert nwbfile is not None, "NWBFile empty."
+            yield nwbfile
 
 
 @pytest.fixture(scope="session")
@@ -239,10 +240,9 @@ def mini_open(mini_content):
 
 @pytest.fixture(scope="session")
 def mini_closed(mini_path):
-    with pynwb.NWBHDF5IO(
-        path=str(mini_path), mode="r", load_namespaces=True
-    ) as io:
-        nwbfile = io.read()
+    with H5pyFile(str(mini_path), "r") as h5f:
+        with pynwb.NWBHDF5IO(file=h5f, mode="r", load_namespaces=True) as io:
+            nwbfile = io.read()
     yield nwbfile
 
 

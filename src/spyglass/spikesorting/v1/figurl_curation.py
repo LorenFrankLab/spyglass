@@ -11,7 +11,7 @@ from sortingview.SpikeSortingView import SpikeSortingView
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 
 schema = dj.schema("spikesorting_v1_figurl_curation")
 
@@ -69,16 +69,17 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]
         )
-        with pynwb.NWBHDF5IO(
-            analysis_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbfile = io.read()
-            nwb_sorting = nwbfile.objects[
-                curation_key["object_id"]
-            ].to_dataframe()
-            unit_ids = list(nwb_sorting.index)
-            labels = list(nwb_sorting["curation_label"])
-            merge_groups = list(nwb_sorting["merge_groups"])
+        with H5pyFile(analysis_file_abs_path, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbfile = io.read()
+                nwb_sorting = nwbfile.objects[
+                    curation_key["object_id"]
+                ].to_dataframe()
+                unit_ids = list(nwb_sorting.index)
+                labels = list(nwb_sorting["curation_label"])
+                merge_groups = list(nwb_sorting["merge_groups"])
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]
 
@@ -140,12 +141,17 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         curation_uri = sel_query.fetch1("curation_uri")
 
         metric_dict = {}
-        with pynwb.NWBHDF5IO(sorting_fpath, "r", load_namespaces=True) as io:
-            nwbf = io.read()
-            nwb_sorting = nwbf.objects[object_id].to_dataframe()
-            unit_ids = nwb_sorting.index
-            for metric in metrics_figurl:
-                metric_dict[metric] = dict(zip(unit_ids, nwb_sorting[metric]))
+        with H5pyFile(sorting_fpath, "r") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="r", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                nwb_sorting = nwbf.objects[object_id].to_dataframe()
+                unit_ids = nwb_sorting.index
+                for metric in metrics_figurl:
+                    metric_dict[metric] = dict(
+                        zip(unit_ids, nwb_sorting[metric])
+                    )
 
         unit_metrics = _reformat_metrics(metric_dict)
 

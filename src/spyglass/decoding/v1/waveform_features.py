@@ -12,7 +12,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, H5pyFile
 
 schema = dj.schema("decoding_waveform_features")
 
@@ -366,32 +366,33 @@ def _write_waveform_features_to_nwb(
     # create new analysis nwb file
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
-    with pynwb.NWBHDF5IO(
-        path=analysis_nwb_file_abs_path,
-        mode="a",
-        load_namespaces=True,
-    ) as io:
-        nwbf = io.read()
-        # Write waveforms to the nwb file
-        for unit_id in unit_ids:
-            nwbf.add_unit(
-                spike_times=spike_times.loc[unit_id],
-                id=unit_id,
-            )
-
-        if waveform_features is not None:
-            for metric, metric_dict in waveform_features.items():
-                metric_values = [
-                    metric_dict[unit_id] if unit_id in metric_dict else []
-                    for unit_id in unit_ids
-                ]
-                nwbf.add_unit_column(
-                    name=metric,
-                    description=metric,
-                    data=metric_values,
+    with H5pyFile(analysis_nwb_file_abs_path, "a") as h5f:
+        with pynwb.NWBHDF5IO(
+            file=h5f,
+            mode="a",
+            load_namespaces=True,
+        ) as io:
+            nwbf = io.read()
+            # Write waveforms to the nwb file
+            for unit_id in unit_ids:
+                nwbf.add_unit(
+                    spike_times=spike_times.loc[unit_id],
+                    id=unit_id,
                 )
 
-        units_object_id = nwbf.units.object_id
-        io.write(nwbf)
+            if waveform_features is not None:
+                for metric, metric_dict in waveform_features.items():
+                    metric_values = [
+                        metric_dict[unit_id] if unit_id in metric_dict else []
+                        for unit_id in unit_ids
+                    ]
+                    nwbf.add_unit_column(
+                        name=metric,
+                        description=metric,
+                        data=metric_values,
+                    )
+
+            units_object_id = nwbf.units.object_id
+            io.write(nwbf)
 
     return analysis_nwb_file, units_object_id

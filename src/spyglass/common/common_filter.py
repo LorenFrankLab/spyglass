@@ -9,7 +9,7 @@ import psutil
 import pynwb
 import scipy.signal as signal
 
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, logger, H5pyFile
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
 schema = dj.schema("common_filter")
@@ -316,106 +316,111 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             output_shape_list[time_axis] += shape[time_axis]
 
         # Create dynamic table region and electrode series, write/close file
-        with pynwb.NWBHDF5IO(
-            path=analysis_file_abs_path, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
+        with H5pyFile(analysis_file_abs_path, "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="a", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
 
-            # get the indices of the electrodes in the electrode table
-            elect_ind = get_electrode_indices(nwbf, electrode_ids)
+                # get the indices of the electrodes in the electrode table
+                elect_ind = get_electrode_indices(nwbf, electrode_ids)
 
-            electrode_table_region = nwbf.create_electrode_table_region(
-                elect_ind, "filtered electrode table"
-            )
-            es = pynwb.ecephys.ElectricalSeries(
-                name="filtered data",
-                data=np.empty(tuple(output_shape_list), dtype=data_dtype),
-                electrodes=electrode_table_region,
-                timestamps=np.empty(output_shape_list[time_axis]),
-                description=description,
-            )
-            if data_type == "LFP":
-                ecephys_module = nwbf.create_processing_module(
-                    name="ecephys", description=description
+                electrode_table_region = nwbf.create_electrode_table_region(
+                    elect_ind, "filtered electrode table"
                 )
-                ecephys_module.add(pynwb.ecephys.LFP(electrical_series=es))
-            else:
-                nwbf.add_scratch(es)
+                es = pynwb.ecephys.ElectricalSeries(
+                    name="filtered data",
+                    data=np.empty(tuple(output_shape_list), dtype=data_dtype),
+                    electrodes=electrode_table_region,
+                    timestamps=np.empty(output_shape_list[time_axis]),
+                    description=description,
+                )
+                if data_type == "LFP":
+                    ecephys_module = nwbf.create_processing_module(
+                        name="ecephys", description=description
+                    )
+                    ecephys_module.add(pynwb.ecephys.LFP(electrical_series=es))
+                else:
+                    nwbf.add_scratch(es)
 
-            io.write(nwbf)
+                io.write(nwbf)
 
         # Reload NWB file to get h5py objects for data/timestamps
         # NOTE: CBroz - why io context within io context? Unindenting
-        with pynwb.NWBHDF5IO(
-            path=analysis_file_abs_path, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            es = nwbf.objects[es.object_id]
-            filtered_data = es.data
-            new_timestamps = es.timestamps
-            indices = np.array(indices, ndmin=2)
-            # Filter and write the output dataset
-            ts_offset = 0
+        with H5pyFile(analysis_file_abs_path, "a") as h5f:
+            with pynwb.NWBHDF5IO(
+                file=h5f, mode="a", load_namespaces=True
+            ) as io:
+                nwbf = io.read()
+                es = nwbf.objects[es.object_id]
+                filtered_data = es.data
+                new_timestamps = es.timestamps
+                indices = np.array(indices, ndmin=2)
+                # Filter and write the output dataset
+                ts_offset = 0
 
-            logger.info("Filtering data")
-            for ii, (start, stop) in enumerate(indices):
-                # Calc size of timestamps + data, check if < 90% of RAM
-                interval_samples = stop - start
-                req_mem = interval_samples * (
-                    timestamps_on_disk[0].itemsize
-                    + n_electrodes * data_on_disk[0][0].itemsize
-                )
-                if req_mem < MEM_USE_LIMIT * psutil.virtual_memory().available:
-                    logger.info(f"Interval {ii}: loading data into memory")
-                    timestamps = np.asarray(
-                        timestamps_on_disk[start:stop],
-                        dtype=timestamps_on_disk[0].dtype,
+                logger.info("Filtering data")
+                for ii, (start, stop) in enumerate(indices):
+                    # Calc size of timestamps + data, check if < 90% of RAM
+                    interval_samples = stop - start
+                    req_mem = interval_samples * (
+                        timestamps_on_disk[0].itemsize
+                        + n_electrodes * data_on_disk[0][0].itemsize
                     )
-                    if time_axis == 0:
-                        data = np.asarray(
-                            data_on_disk[start:stop, :], dtype=data_dtype
+                    if (
+                        req_mem
+                        < MEM_USE_LIMIT * psutil.virtual_memory().available
+                    ):
+                        logger.info(f"Interval {ii}: loading data into memory")
+                        timestamps = np.asarray(
+                            timestamps_on_disk[start:stop],
+                            dtype=timestamps_on_disk[0].dtype,
                         )
+                        if time_axis == 0:
+                            data = np.asarray(
+                                data_on_disk[start:stop, :], dtype=data_dtype
+                            )
+                        else:
+                            data = np.asarray(
+                                data_on_disk[:, start:stop], dtype=data_dtype
+                            )
+                        extracted_ts = timestamps[0::decimation]
+                        new_timestamps[
+                            ts_offset : ts_offset + len(extracted_ts)
+                        ] = extracted_ts
+                        ts_offset += len(extracted_ts)
+                        input_index_bounds = [0, interval_samples - 1]
+
                     else:
-                        data = np.asarray(
-                            data_on_disk[:, start:stop], dtype=data_dtype
-                        )
-                    extracted_ts = timestamps[0::decimation]
-                    new_timestamps[
-                        ts_offset : ts_offset + len(extracted_ts)
-                    ] = extracted_ts
-                    ts_offset += len(extracted_ts)
-                    input_index_bounds = [0, interval_samples - 1]
+                        logger.info(f"Interval {ii}: leaving data on disk")
+                        data = data_on_disk
+                        timestamps = timestamps_on_disk
+                        extracted_ts = timestamps[start:stop:decimation]
+                        new_timestamps[
+                            ts_offset : ts_offset + len(extracted_ts)
+                        ] = extracted_ts
+                        ts_offset += len(extracted_ts)
+                        input_index_bounds = [start, stop]
 
-                else:
-                    logger.info(f"Interval {ii}: leaving data on disk")
-                    data = data_on_disk
-                    timestamps = timestamps_on_disk
-                    extracted_ts = timestamps[start:stop:decimation]
-                    new_timestamps[
-                        ts_offset : ts_offset + len(extracted_ts)
-                    ] = extracted_ts
-                    ts_offset += len(extracted_ts)
-                    input_index_bounds = [start, stop]
+                    # filter the data
+                    gsp.filter_data_fir(
+                        data,
+                        filter_coeff,
+                        axis=time_axis,
+                        input_index_bounds=input_index_bounds,
+                        output_index_bounds=[
+                            filter_delay,
+                            filter_delay + stop - start,
+                        ],
+                        ds=decimation,
+                        input_dim_restrictions=input_dim_restrictions,
+                        outarray=filtered_data,
+                        output_offset=output_offsets[ii],
+                    )
 
-                # filter the data
-                gsp.filter_data_fir(
-                    data,
-                    filter_coeff,
-                    axis=time_axis,
-                    input_index_bounds=input_index_bounds,
-                    output_index_bounds=[
-                        filter_delay,
-                        filter_delay + stop - start,
-                    ],
-                    ds=decimation,
-                    input_dim_restrictions=input_dim_restrictions,
-                    outarray=filtered_data,
-                    output_offset=output_offsets[ii],
-                )
+                start_end = [new_timestamps[0], new_timestamps[-1]]
 
-            start_end = [new_timestamps[0], new_timestamps[-1]]
-
-            io.write(nwbf)
+                io.write(nwbf)
 
         return es.object_id, start_end
 
