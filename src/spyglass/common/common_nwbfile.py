@@ -48,6 +48,9 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     nwb_file_name: varchar(64)   # name of the NWB file
     ---
     nwb_file_abs_path: filepath@raw
+    nwb_file_url = "": varchar(512)  # optional URL for the file
+    nwb_file_description = "": varchar(2000)  # an optional description of this file
+
     INDEX (nwb_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
@@ -161,6 +164,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     analysis_file_description = "": varchar(2000)  # an optional description of this analysis
     analysis_parameters = NULL: blob               # additional relevant parameters. Currently used only for analyses
                                                    # that span multiple NWB files
+    analysis_file_url = "": varchar(512)           # optional URL for the file
+
     INDEX (analysis_file_abs_path)
     """
     # NOTE the INDEX above is implicit from filepath@...
