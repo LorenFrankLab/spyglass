@@ -19,6 +19,7 @@ import dandi.organize
 from dandi.organize import OrganizeInvalid
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common_dandi import DandiPath, validate_dandiset
 from spyglass.settings import export_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_graph import RestrGraph
@@ -433,17 +434,18 @@ class Export(SpyglassMixin, dj.Computed):
         for file in source_files:
             os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
 
+        # validate the dandiset
+        validate_dandiset(destination_dir, ignore_external_files=True)
+
         # given dandiset_id, download the dandiset to the export_dir
         url = f"https://gui-staging.dandiarchive.org/dandiset/{dandiset_id}/draft"  # TODO: this is the dev server of dandi
         dandi.download.download(url, output_dir=f"{export_dir}")
 
-        # organize the files in the export_dir
+        # organize the files in the dandiset directory
         dandiset_dir = f"{export_dir}/{dandiset_id}"
         dandi.organize.organize(
             destination_dir, dandiset_dir, invalid=OrganizeInvalid.WARN
         )
-
-        # TODO: validate the dandiset using dandi_validate
 
         # get the dandi name translations
         from .common_dandi import translate_name_to_dandi
@@ -453,8 +455,6 @@ class Export(SpyglassMixin, dj.Computed):
         # TODO: upload the dandiset to the dandi server
 
         # insert the translations into the dandi table
-        from .common_dandi import DandiPath
-
         translations = [
             {**key, **t, "dandiset_id": dandiset_id} for t in translations
         ]

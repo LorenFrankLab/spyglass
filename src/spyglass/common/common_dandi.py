@@ -1,5 +1,7 @@
 import os
 import dandi.organize
+import dandi.validate
+from dandi.validate_types import Severity
 
 import datajoint as dj
 
@@ -63,3 +65,32 @@ def translate_name_to_dandi(folder):
         }
         translations.append(translation)
     return translations
+
+
+def validate_dandiset(
+    folder, min_severity="ERROR", ignore_external_files=False
+):
+    """Validate the dandiset directory"""
+    validator_result = dandi.validate.validate(folder)
+    min_severity = "ERROR"
+    min_severity_value = Severity[min_severity].value
+
+    filtered_results = [
+        i
+        for i in validator_result
+        if i.severity is not None and i.severity.value >= min_severity_value
+    ]
+
+    if ignore_external_files:
+        # ignore external file errors. will be resolved during organize step
+        filtered_results = [
+            i
+            for i in filtered_results
+            if not i.message.startswith("Path is not inside")
+        ]
+
+    for result in filtered_results:
+        print(result.severity, result.message, result.path)
+
+    if filtered_results:
+        raise ValueError("Validation failed")
