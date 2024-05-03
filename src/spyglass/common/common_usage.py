@@ -6,12 +6,17 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
+import os
 from pathlib import Path
 from typing import List, Union
 
 import datajoint as dj
 from datajoint import FreeTable
 from datajoint import config as dj_config
+
+import dandi.download
+import dandi.organize
+from dandi.organize import OrganizeInvalid
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import export_dir
@@ -408,3 +413,25 @@ class Export(SpyglassMixin, dj.Computed):
         )
 
         # TODO: export conda env
+
+    def compile_dandiset(self, key: dict, dandiset_id: str):
+        """Compile a Dandiset from the export."""
+        key = (self & key).fetch1("KEY")
+        paper_id = key["paper_id"]
+
+        # make a temp dir with symbolic links to the export files
+        source_files = (self.File() & key).fetch("file_path")
+        destination_dir = f"{export_dir}/dandiset_{paper_id}"
+        os.makedirs(destination_dir, exist_ok=True)
+        for file in source_files:
+            os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
+
+        # given dandiset_id, download the dandiset to the export_dir
+        url = f"https://gui-staging.dandiarchive.org/dandiset/{dandiset_id}/draft"  # TODO: this is the dev server of dandi
+        dandi.download.download(url, output_dir=f"{export_dir}")
+
+        # organize the files in the export_dir
+        dandiset_dir = f"{export_dir}/{dandiset_id}"
+        dandi.organize.organize(
+            destination_dir, dandiset_dir, invalid=OrganizeInvalid.WARN
+        )
