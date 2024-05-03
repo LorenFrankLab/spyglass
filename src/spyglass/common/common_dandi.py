@@ -2,10 +2,15 @@ import os
 import dandi.organize
 import dandi.validate
 from dandi.validate_types import Severity
+import fsspec
+import pynwb
+import h5py
+from fsspec.implementations.cached import CachingFileSystem
 
 import datajoint as dj
 
-from .common_usage import Export
+from spyglass.common.common_usage import Export
+from spyglass.settings import export_dir
 
 schema = dj.schema("common_dandi")
 
@@ -19,6 +24,37 @@ class DandiPath(dj.Manual):
     filename: varchar(255)
     dandi_path: varchar(255)
     """
+
+    def fetch_file_from_dandi(self, key: dict):
+        key = (self & key).fetch1("KEY")
+        dandiset_id = (self & key).fetch1("dandiset_id")
+        dandi_path = (self & key).fetch1("dandi_path")
+
+        # get the s3 url from Dandi
+        from dandi.dandiapi import DandiAPIClient
+
+        with DandiAPIClient() as client:
+            asset = client.get_dandiset(dandiset_id, "draft").get_asset_by_path(
+                dandi_path
+            )
+            s3_url = asset.get_content_url(follow_redirects=1, strip_query=True)
+
+        # stream the file from s3
+        # first, create a virtual filesystem based on the http protocol
+        fs = fsspec.filesystem("http")
+
+        # create a cache to save downloaded data to disk (optional)
+        fs = CachingFileSystem(
+            fs=fs,
+            cache_storage=f"{export_dir}/nwb-cache",  # Local folder for the cache
+        )
+
+        # Open and return the file
+        f = fs.open(s3_url, "rb")
+        file = h5py.File(f)
+        io = pynwb.NWBHDF5IO(file=file)
+        nwbfile = io.read()
+        return (io, nwbfile)
 
 
 def _get_metadata(path):
@@ -70,7 +106,17 @@ def translate_name_to_dandi(folder):
 def validate_dandiset(
     folder, min_severity="ERROR", ignore_external_files=False
 ):
-    """Validate the dandiset directory"""
+    """Validate the dandiset directory
+    Parameters
+    ----------
+    folder : str
+        location of dandiset to be validated
+    min_severity : str
+        minimum severity level for errors to be reported
+    ignore_external_files : bool
+        whether to ignore external file errors. Used if validating
+        before the organize step
+    """
     validator_result = dandi.validate.validate(folder)
     min_severity = "ERROR"
     min_severity_value = Severity[min_severity].value

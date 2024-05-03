@@ -10,6 +10,7 @@ import pynwb
 import yaml
 
 from spyglass.utils.logging import logger
+from spyglass.common.common_dandi import DandiPath
 
 # dict mapping file path to an open NWBHDF5IO object in read mode and its NWBFile
 __open_nwb_files = dict()
@@ -61,7 +62,17 @@ def get_nwb_file(nwb_file_path):
             if not AnalysisNwbfileKachery.download_file(
                 os.path.basename(nwb_file_path)
             ):
-                return None
+                # Dandi fallback SB 2024-04-03
+                dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath & dandi_key:
+                    # If not in Dandi, then we can't find the file
+                    return None
+                io, nwbfile = DandiPath.fetch_file_from_dandi(
+                    dandi_key
+                )  # TODO: consider case where file in multiple dandisets
+                __open_nwb_files[nwb_file_path] = (io, nwbfile)
+                return
+
         # now open the file
         io = pynwb.NWBHDF5IO(
             path=nwb_file_path, mode="r", load_namespaces=True
