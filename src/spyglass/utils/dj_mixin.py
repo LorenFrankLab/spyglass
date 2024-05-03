@@ -70,6 +70,8 @@ class SpyglassMixin:
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
+    _banned_search_tables = set()  # Tables to avoid in restrict_by
+
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
 
@@ -790,6 +792,25 @@ class SpyglassMixin:
         """
         return self.restrict_by(restriction, direction="down")
 
+    def _ensure_names(self, tables) -> List[str]:
+        """Ensure table is a string in a list."""
+        if not isinstance(tables, (list, tuple, set)):
+            tables = [tables]
+        for table in tables:
+            return [getattr(table, "full_table_name", table) for t in tables]
+
+    def ban_search_table(self, table):
+        """Ban table from search in restrict_by."""
+        self._banned_search_tables.update(self._ensure_names(table))
+
+    def unban_search_table(self, table):
+        """Unban table from search in restrict_by."""
+        self._banned_search_tables.difference_update(self._ensure_names(table))
+
+    def see_banned_tables(self):
+        """Print banned tables."""
+        logger.info(f"Banned tables: {self._banned_search_tables}")
+
     def restrict_by(
         self,
         restriction: str = True,
@@ -801,24 +822,15 @@ class SpyglassMixin:
         """Restrict self based on up/downstream table.
 
         If fails to restrict table, the shortest path may not have been correct.
-        Check the output to see where the restriction was applied.
-        Try the following:
+        If there's a different path that should be taken, ban unwanted tables.
 
-        >>> from spyglass.utils.dj_graph import TableChain
+        >>> my_table = MyTable() # must be instantced
+        >>> my_table.ban_search_table(UnwantedTable1)
+        >>> my_table.ban_search_table([UnwantedTable2, UnwantedTable3])
+        >>> my_table.unban_search_table(UnwantedTable3)
+        >>> my_table.see_banned_tables()
         >>>
-        >>> my_chain = TableChain(
-        >>>     child=MyChildTable(), # or parent=MyParentTable
-        >>>     search_restr=restriction,
-        >>>     allow_merge=True, # If child is Merge
-        >>>     verbose=True, # Detailed output
-        >>>     banned_tables=[UnwantedTable1, UnwantedTable2],
-        >>> )
-        >>>
-        >>> my_chain.endpoint # for the table that meets the restriction
-        >>> my_chain.all_ft # for all restricted tables in the chain
-
-        When providing a restriction of the parent, use 'up' direction. When
-        providing a restriction of the child, use 'down' direction.
+        >>> my_table << my_restriction
 
         Parameters
         ----------
@@ -838,7 +850,10 @@ class SpyglassMixin:
             Restricted version of present table or FindKeyGraph object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+        from spyglass.utils.dj_graph import (
+            TableChain,
+            TableChains,
+        )  # noqa: F401
 
         if restriction is True:
             return self
@@ -862,6 +877,7 @@ class SpyglassMixin:
             child=child,
             direction=direction,
             search_restr=restriction,
+            banned_tables=self._banned_search_tables,
             allow_merge=True,
             cascade=True,
             verbose=verbose,
@@ -874,8 +890,8 @@ class SpyglassMixin:
         ret = graph.leaf_ft[0]
         if len(ret) == len(self) or len(ret) == 0:
             logger.warning(
-                f"Failed to restrict with path: {graph.path_str}\n"
-                + "See help(YourTable.restrict_by)"
+                f"Failed to restrict with path: {graph.path_str}\n\t"
+                + "See `help(YourTable.restrict_by)`"
             )
 
         return ret

@@ -2,7 +2,7 @@ import pytest
 from numpy import array_equal
 
 
-def test_invalid_device(common, populate_exception):
+def test_invalid_device(common, populate_exception, mini_insert):
     device_dict = common.DataAcquisitionDevice.fetch(as_dict=True)[0]
     device_dict["other"] = "invalid"
     with pytest.raises(populate_exception):

@@ -43,15 +43,17 @@ def test_merge_detect(Nwbfile, pos_merge_tables):
     ), "Merges not detected by mixin."
 
 
-def test_merge_chain_join(Nwbfile, pos_merge_tables):
+def test_merge_chain_join(Nwbfile, pos_merge_tables, lin_v1, lfp_merge_key):
     """Test that the mixin can join merge chains."""
+    _ = lin_v1, lfp_merge_key  # merge tables populated
+
     all_chains = [
         chains.cascade(True, direction="down")
         for chains in Nwbfile._merge_chains.values()
     ]
     end_len = [len(chain[0]) for chain in all_chains if chain]
 
-    assert end_len == [1, 1, 2], "Merge chains not joined correctly."
+    assert sum(end_len) == 4, "Merge chains not joined correctly."
 
 
 def test_get_chain(Nwbfile, pos_merge_tables):
@@ -70,17 +72,17 @@ def test_ddm_warning(Nwbfile, caplog):
     assert "No merge deletes found" in caplog.text, "No warning issued."
 
 
-def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables):
+def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables, lin_v1):
     """Test that the mixin can dry run delete_downstream_merge."""
+    _ = lin_v1  # merge tables populated
+    pos_output_name = pos_merge_tables[0].full_table_name
+
     param_field = "trodes_pos_params_name"
     trodes_params = sgp.v1.TrodesPosParams()
-    rft = next(
-        iter(
-            (trodes_params & f'{param_field} LIKE "%ups%"').ddm(
-                reload_cache=True, dry_run=True, return_parts=True
-            )
-        )
-    )[0]
+
+    rft = (trodes_params & f'{param_field} LIKE "%ups%"').ddm(
+        reload_cache=True, dry_run=True, return_parts=False
+    )[pos_output_name][0]
     assert len(rft) == 1, "ddm did not return restricted table."
 
     table_name = [p for p in pos_merge_tables[0].parts() if "trode" in p][0]

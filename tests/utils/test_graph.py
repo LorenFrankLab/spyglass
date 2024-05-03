@@ -1,7 +1,5 @@
 import pytest
 
-from . import schema_graph as sg
-
 
 @pytest.fixture(scope="session")
 def leaf(lin_merge):
@@ -9,15 +7,17 @@ def leaf(lin_merge):
 
 
 @pytest.fixture(scope="session")
-def restr_graph(leaf):
+def restr_graph(leaf, verbose, lin_merge_key):
     from spyglass.utils.dj_graph import RestrGraph
+
+    _ = lin_merge_key  # linearization merge table populated
 
     yield RestrGraph(
         seed_table=leaf,
         table_name=leaf.full_table_name,
         restriction=True,
         cascade=True,
-        verbose=True,
+        verbose=verbose,
     )
 
 
@@ -31,8 +31,9 @@ def test_rg_repr(restr_graph, leaf):
 
 def test_rg_ft(restr_graph):
     """Test FreeTable attribute of RestrGraph."""
-    assert len(restr_graph.leaf_ft) == 1, "Unexpected number of leaf tables."
-    assert len(restr_graph.all_ft) == 9, "Unexpected number of cascaded tables."
+    assert len(restr_graph.leaf_ft) == 1, "Unexpected # of leaf tables."
+    assert len(restr_graph.all_ft) == 15, "Unexpected # of cascaded tables."
+    assert len(restr_graph["spatial"]) == 2, "Unexpected cascaded table length."
 
 
 def test_rg_restr_ft(restr_graph):
@@ -44,7 +45,7 @@ def test_rg_restr_ft(restr_graph):
 def test_rg_file_paths(restr_graph):
     """Test collection of upstream file paths."""
     paths = [p.get("file_path") for p in restr_graph.file_paths]
-    assert len(paths) == 1, "Unexpected number of file paths."
+    assert len(paths) == 2, "Unexpected number of file paths."
 
 
 @pytest.fixture(scope="session")
@@ -87,7 +88,7 @@ def restr_graph_root(restr_graph, common, lfp_band):
 
 def test_rg_root(restr_graph_root):
     assert (
-        len(restr_graph_root.all_ft) == 29
+        len(restr_graph_root.all_ft) == 25
     ), "Unexpected number of cascaded tables."
 
 

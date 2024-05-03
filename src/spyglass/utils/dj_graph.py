@@ -96,8 +96,6 @@ class AbstractGraph(ABC):
         # PERIPHERAL_TABLES from the graph.
         self.graph = seed_table.connection.dependencies
         self.graph.load()
-        self.undirect_graph = self.graph.to_undirected()
-        self.undirect_graph.remove_nodes_from(PERIPHERAL_TABLES)
 
         self.verbose = verbose
         self.leaves = set()
@@ -497,15 +495,28 @@ class RestrGraph(AbstractGraph):
         if cascade:
             self.cascade(direction=direction)
 
+    # --------------------------- Dunder Properties ---------------------------
+
     def __repr__(self):
         l_str = ",\n\t".join(self.leaves) + "\n" if self.leaves else ""
         processed = "Cascaded" if self.cascaded else "Uncascaded"
         return f"{processed} {self.__class__.__name__}(\n\t{l_str})"
 
+    def __getitem__(self, index: Union[int, str]):
+        all_ft_names = [t.full_table_name for t in self.all_ft]
+        return fuzzy_get(index, all_ft_names, self.all_ft)
+
+    def __len__(self):
+        return len(self.all_ft)
+
+    # ---------------------------- Public Properties --------------------------
+
     @property
     def leaf_ft(self):
         """Get restricted FreeTables from graph leaves."""
         return [self._get_ft(table, with_restr=True) for table in self.leaves]
+
+    # ------------------------------- Add Nodes -------------------------------
 
     def add_leaf(
         self, table_name=None, restriction=True, cascade=False, direction="up"
@@ -593,6 +604,8 @@ class RestrGraph(AbstractGraph):
         if cascade:
             self.cascade()
 
+    # ------------------------------ Graph Traversal --------------------------
+
     def cascade(self, show_progress=None, direction="up") -> None:
         """Cascade all restrictions up the graph.
 
@@ -615,7 +628,7 @@ class RestrGraph(AbstractGraph):
             restr = self._get_restr(table)
             self._log_truncate(f"Start     {table}: {restr}")
             self.cascade1(table, restr, direction=direction)
-        if not self.visited == self.to_visit:
+        if self.to_visit - self.visited:
             raise RuntimeError(
                 "Cascade: FAIL - incomplete cascade. Please post issue."
             )
@@ -715,13 +728,13 @@ class TableChains:
         Return list of cascade for each chain in self.chains.
     """
 
-    def __init__(self, parent, child, direction=Direction.DOWN):
+    def __init__(self, parent, child, direction=Direction.DOWN, verbose=False):
         self.parent = parent
         self.child = child
         self.connection = parent.connection
         self.part_names = child.parts()
         self.chains = [
-            TableChain(parent, part, direction=direction)
+            TableChain(parent, part, direction=direction, verbose=verbose)
             for part in self.part_names
         ]
         self.has_link = any([chain.has_link for chain in self.chains])
@@ -806,7 +819,7 @@ class TableChain(RestrGraph):
         banned_tables: List[str] = None,
         **kwargs,
     ):
-        if not allow_merge and child and is_merge_table(child):
+        if not allow_merge and child is not None and is_merge_table(child):
             raise TypeError("Child is a merge table. Use TableChains instead.")
 
         self.parent = self._ensure_name(parent)
@@ -817,10 +830,12 @@ class TableChain(RestrGraph):
         if not search_restr and not (self.parent and self.child):
             raise ValueError("Search restriction required to find path.")
 
-        super().__init__(seed_table=parent or child, verbose=verbose)
+        seed_table = parent if isinstance(parent, Table) else child
+        super().__init__(seed_table=seed_table, verbose=verbose)
 
         self.no_visit.update(PERIPHERAL_TABLES)
         self.no_visit.update(self._ensure_name(banned_tables) or [])
+        self.no_visit.difference_update([self.parent, self.child])
         self.searched_tables = set()
         self.found_restr = False
         self.link_type = None
@@ -837,14 +852,13 @@ class TableChain(RestrGraph):
         if search_restr and not child:
             self.direction = Direction.DOWN
             self.leaf = self.parent
-
         if self.leaf:
             self._set_find_restr(self.leaf, search_restr)
             self.add_leaf(self.leaf, True, cascade=False, direction=direction)
 
         if cascade and search_restr:
             self.cascade_search()
-            self.cascade()
+            self.cascade(restriction=search_restr)
             self.cascaded = True
 
     # --------------------------- Dunder Properties ---------------------------
@@ -903,12 +917,9 @@ class TableChain(RestrGraph):
 
     @property
     def path_str(self) -> str:
+        if not self.path:
+            return "No link"
         return self._link_symbol.join([self._camel(t) for t in self.path])
-
-    @property
-    def endpoint(self) -> str:
-        """Return endpoint of chain."""
-        return self.leaf_ft[0]
 
     # ------------------------------ Graph Nodes ------------------------------
 
@@ -962,6 +973,8 @@ class TableChain(RestrGraph):
         elif self.direction == Direction.DOWN:
             self.child = table
 
+        self._log_truncate(f"FVars: {self._camel(table)}")
+
         self.direction = ~self.direction
         _ = self.path  # Reset path
 
@@ -999,6 +1012,7 @@ class TableChain(RestrGraph):
 
             next_ft = self._get_ft(next_table)
             if restr_attrs.issubset(set(next_ft.heading.names)):
+                self._log_truncate(f"Found: {self._camel(next_table)}")
                 self._set_found_vars(next_table)
                 return
 
@@ -1032,7 +1046,13 @@ class TableChain(RestrGraph):
             List of names in the path.
         """
         source, target = self.parent, self.child
-        search_graph = self.graph if directed else self.undirect_graph
+        search_graph = self.graph
+
+        if not directed:
+            self.connection.dependencies.load()
+            self.undirect_graph = self.connection.dependencies.to_undirected()
+            search_graph = self.undirect_graph
+
         search_graph.remove_nodes_from(self.no_visit)
 
         try:
@@ -1043,9 +1063,12 @@ class TableChain(RestrGraph):
             self.searched_path = True  # No path found, don't search again
             return None
 
+        self._log_truncate(f"Path Found : {path}")
+
         ignore_nodes = self.graph.nodes - set(path)
         self.no_visit.update(ignore_nodes)
 
+        self._log_truncate(f"Ignore     : {ignore_nodes}")
         return path
 
     @cached_property
@@ -1069,11 +1092,13 @@ class TableChain(RestrGraph):
 
         _ = self.path
 
-        direction = direction or self.direction
+        direction = Direction(direction) or self.direction
         if direction == Direction.UP:
             start, end = self.child, self.parent
-        else:
+        elif direction == Direction.DOWN:
             start, end = self.parent, self.child
+        else:
+            raise ValueError(f"Invalid direction: {direction}")
 
         self.cascade1(
             table=start,

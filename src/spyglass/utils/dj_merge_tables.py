@@ -10,7 +10,7 @@ import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.preview import repr_html
-from datajoint.utils import from_camel_case, to_camel_case
+from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
@@ -32,16 +32,21 @@ def is_merge_table(table):
             r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
         )
 
+    if isinstance(table, str):
+        table = dj.FreeTable(dj.conn(), table)
     if not isinstance(table, dj.Table):
         return False
+    if get_master(table.full_table_name):
+        return False  # Part tables are not merge tables
     if not table.is_declared:
         if tbl_def := getattr(table, "definition", None):
             return trim_def(MERGE_DEFINITION) == trim_def(tbl_def)
         logger.warning(f"Cannot determine merge table status for {table}")
         return True
-    return table.primary_key == [
+    ret = table.primary_key == [
         RESERVED_PRIMARY_KEY
     ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
+    return ret
 
 
 class Merge(dj.Manual):

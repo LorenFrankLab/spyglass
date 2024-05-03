@@ -80,21 +80,16 @@ Some caveats to this function:
     restriction.
 4. The most direct path to your restriction may not be the path took, especially
     when using Merge Tables. When the result is empty see the warning about the
-    path used. To ban nodes from the search, try the following:
+    path used. Then, ban tables from the search to force a different path.
 
 ```python
-from spyglass.utils.dj_graph import TableChain
+my_table = MyTable()  # must be instantced
+my_table.ban_search_table(UnwantedTable1)
+my_table.ban_search_table([UnwantedTable2, UnwantedTable3])
+my_table.unban_search_table(UnwantedTable3)
+my_table.see_banned_tables()
 
-my_chain = TableChain(
-    child=MyChildTable(),  # or parent=MyParentTable()
-    search_restr="my_str_restriction",
-    allow_merge=True,  # If child is a Merge Table
-    verbose=True,  # Detailed output will show the search history
-    banned_tables=[UnwantedTable1, UnwantedTable2],
-)
-
-my_chain.endpoint  # for the table that meets the restriction
-my_chain.all_ft  # for all restricted tables in the chain
+my_table << my_restriction
 ```
 
 When providing a restriction of the parent, use 'up' direction. When providing a
