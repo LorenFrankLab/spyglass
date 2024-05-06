@@ -1,5 +1,15 @@
 # Change Log
 
+## [0.5.3] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+### Infrastructure
+
+- Create class `SpyglassGroupPart` to aid delete propagations #899
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
@@ -227,3 +237,4 @@
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
+[0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3

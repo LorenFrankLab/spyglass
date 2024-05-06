@@ -737,3 +737,15 @@ class SpyglassMixin:
             logger.error(f"No file-like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+
+class SpyglassMixinPart(SpyglassMixin, dj.Part):
+    """
+    A part table for Spyglass Group tables. Assists in propagating
+    delete calls from upstreeam tables to downstream tables.
+    """
+
+    def delete(self, *args, **kwargs):
+        """Delete master and part entries."""
+        restriction = self.restriction or True  # for (tbl & restr).delete()
+        (self.master & restriction).delete(*args, **kwargs)

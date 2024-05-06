@@ -6,7 +6,7 @@ from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 
 schema = dj.schema("spikesorting_group_v1")
 
@@ -51,7 +51,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     sorted_spikes_group_name: varchar(80)
     """
 
-    class Units(SpyglassMixin, dj.Part):
+    class Units(SpyglassMixinPart):
         definition = """
         -> master
         -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
