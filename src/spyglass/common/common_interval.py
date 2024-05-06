@@ -86,6 +86,12 @@ class IntervalList(SpyglassMixin, dj.Manual):
     def _pk_from_key(self, key):
         return {k: v for k, v in key.items() if k in self.primary_key}
 
+    def _times_match(self, times1, times2) -> bool:
+        """Check match of valid_times between two interval lists."""
+        len_match = len(times1) == len(times2)
+        content_match = np.equal(times1, times2).all()
+        return len_match and content_match
+
     def key_exists(
         self,
         key: dict,
@@ -117,6 +123,22 @@ class IntervalList(SpyglassMixin, dj.Manual):
         """
 
         start_time = time()
+
+        # Exact search
+        query = self & key
+        if len(query) == 1:
+            if self._times_match(
+                query.fetch1("valid_times"), key["valid_times"]
+            ):
+                return True, key
+            elif downstream := self.cleanup(query.restriction, dry_run=False):
+                raise ValueError(
+                    "List with key exists and is used elsewhere:\n\t"
+                    + f"Key: {key}\n\tDownstream: {downstream}"
+                )
+                # Alternatively, adjust the name and insert?
+
+        # Approx name search
         query = self & {"nwb_file_name": key.get("nwb_file_name")}
         if approx_name is True:
             approx_name = self._generalize_name(key["interval_list_name"])
@@ -131,10 +153,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
         for candidate in candidates:
             if time() - start_time > time_limit:
                 return False, key
-            if (
-                not len(candidate["valid_times"]) == len(key["valid_times"])
-            ) or (
-                not np.equal(candidate["valid_times"], key["valid_times"]).all()
+            if not self._times_match(
+                candidate["valid_times"], key["valid_times"]
             ):
                 continue
             logger.info(
@@ -169,6 +189,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             The maximum time to search for an existing interval list before
             inserting a new one. Defaults to 5.0.
         """
+
         exists, new_key = self._check_existing(
             key, approx_name, time_limit, *args, **kwargs
         )
@@ -223,7 +244,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         all_ft = restr_graph.all_ft
 
         if dry_run:
-            return all_ft
+            return all_ft if len(all_ft) > 1 else None
 
         if len(all_ft) == 1 and all_ft[0] == self.full_table_name:
             logger.info(f"Deleting orphaned entries\n\t{all_ft[0]}")
