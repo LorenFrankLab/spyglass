@@ -5,6 +5,7 @@ from dandi.validate_types import Severity
 import fsspec
 import pynwb
 import h5py
+from uuid import uuid4
 from fsspec.implementations.cached import CachingFileSystem
 
 import datajoint as dj
@@ -140,3 +141,22 @@ def validate_dandiset(
 
     if filtered_results:
         raise ValueError("Validation failed")
+
+
+def make_file_obj_id_unique(nwb_path: str):
+    """Make the top-level object_id attribute of the file unique
+
+    Parameters
+    ----------
+    nwb_path : str
+        path to the NWB file
+
+    Returns
+    -------
+    str
+        the new object_id
+    """
+    new_id = str(uuid4())
+    with h5py.File(nwb_path, "a") as f:
+        f.attrs["object_id"] = new_id
+    return new_id
