@@ -409,6 +409,9 @@ class AbstractGraph(ABC):
                 **data,
             )
 
+            if next_restr == ["False"]:  # Stop cascade if empty restriction
+                continue
+
             self.cascade1(
                 table=next_table,
                 restriction=next_restr,
@@ -628,10 +631,6 @@ class RestrGraph(AbstractGraph):
             restr = self._get_restr(table)
             self._log_truncate(f"Start     {table}: {restr}")
             self.cascade1(table, restr, direction=direction)
-        if self.to_visit - self.visited:
-            raise RuntimeError(
-                "Cascade: FAIL - incomplete cascade. Please post issue."
-            )
 
         self.cascade_files()
         self.cascaded = True

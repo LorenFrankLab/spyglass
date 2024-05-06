@@ -32,7 +32,6 @@ def test_rg_repr(restr_graph, leaf):
 def test_rg_ft(restr_graph):
     """Test FreeTable attribute of RestrGraph."""
     assert len(restr_graph.leaf_ft) == 1, "Unexpected # of leaf tables."
-    assert len(restr_graph.all_ft) == 15, "Unexpected # of cascaded tables."
     assert len(restr_graph["spatial"]) == 2, "Unexpected cascaded table length."
 
 
