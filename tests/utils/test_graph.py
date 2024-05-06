@@ -38,8 +38,8 @@ def test_rg_ft(restr_graph):
 
 def test_rg_restr_ft(restr_graph):
     """Test get restricted free tables."""
-    ft = restr_graph._get_ft(list(restr_graph.visited)[1], with_restr=True)
-    assert len(ft) == 1, "Unexpected restricted table length."
+    ft = restr_graph["spatial_series"]
+    assert len(ft) == 2, "Unexpected restricted table length."
 
 
 def test_rg_file_paths(restr_graph):
@@ -73,7 +73,7 @@ def test_add_leaf_restr_ft(restr_graph_new_leaf):
 
 
 @pytest.fixture(scope="session")
-def restr_graph_root(restr_graph, common, lfp_band):
+def restr_graph_root(restr_graph, common, lfp_band, lin_v1):
     from spyglass.utils.dj_graph import RestrGraph
 
     yield RestrGraph(
@@ -88,8 +88,8 @@ def restr_graph_root(restr_graph, common, lfp_band):
 
 def test_rg_root(restr_graph_root):
     assert (
-        len(restr_graph_root.all_ft) == 25
-    ), "Unexpected number of cascaded tables."
+        len(restr_graph_root["trodes_pos_v1"]) == 2
+    ), "Incomplete cascade from root."
 
 
 @pytest.mark.parametrize(

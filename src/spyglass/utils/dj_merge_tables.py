@@ -41,12 +41,13 @@ def is_merge_table(table):
     if not table.is_declared:
         if tbl_def := getattr(table, "definition", None):
             return trim_def(MERGE_DEFINITION) == trim_def(tbl_def)
-        logger.warning(f"Cannot determine merge table status for {table}")
+        logger.warning(
+            f"Cannot determine merge table status for {table.table_name}"
+        )
         return True
-    ret = table.primary_key == [
+    return table.primary_key == [
         RESERVED_PRIMARY_KEY
     ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
-    return ret
 
 
 class Merge(dj.Manual):

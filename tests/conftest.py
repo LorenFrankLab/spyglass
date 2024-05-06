@@ -284,18 +284,15 @@ def load_config(dj_conn, base_dir):
     from spyglass.settings import SpyglassConfig
 
     yield SpyglassConfig().load_config(
-        base_dir=base_dir, test_mode=True, force_reload=True
+        base_dir=base_dir, debug_mode=False, test_mode=True, force_reload=True
     )
 
 
 @pytest.fixture(autouse=True, scope="session")
-def mini_insert(mini_path, mini_content, teardown, server, load_config):
-    from spyglass.common import (  # noqa: E402
-        DataAcquisitionDevice,
-        LabMember,
-        Nwbfile,
-        Session,
-    )
+def mini_insert(
+    dj_conn, mini_path, mini_content, teardown, server, load_config
+):
+    from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
         SpikeSortingOutput,
@@ -319,7 +316,6 @@ def mini_insert(mini_path, mini_content, teardown, server, load_config):
     if len(Nwbfile()) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
     else:
-        DataAcquisitionDevice().insert_from_nwbfile(mini_content, {})
         insert_sessions(mini_path.name)
 
     if len(Session()) == 0:
