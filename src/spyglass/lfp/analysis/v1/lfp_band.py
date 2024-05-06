@@ -367,10 +367,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
-        # - --------------------------------------------------------------
-
         AnalysisNwbfile().log(key, table=self.full_table_name)
-
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):
