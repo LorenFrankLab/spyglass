@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
 
 from .common_session import Session  # noqa: F401
 
@@ -195,6 +196,49 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 inserts.append(new_key)
         self.insert(inserts, *args, **kwargs)
         return [self._pk_from_key(key) for key in inserts]
+
+    def cleanup(
+        self, restriction: str, dry_run: bool = True
+    ) -> Union[None, List[dj.FreeTable]]:
+        """Find all entries associated with a given restriction.
+
+        If dry_run, return list of FreeTables with associated entries."""
+        from spyglass.utils.dj_graph import RestrGraph
+
+        raise NotImplementedError("This method requires #949.")
+
+        restr_self = self & restriction  # raises exception if invalid
+
+        restr_graph = RestrGraph(
+            seed_table=self,
+            table_name=self.full_table_name,
+            restriction=restriction,
+            direction="down",
+            cascade=True,
+        )
+        all_ft = restr_graph.all_ft
+
+        if dry_run:
+            return all_ft
+
+        if len(all_ft) == 1 and all_ft[0] == self.full_table_name:
+            logger.info(f"Deleting orphaned entries\n\t{all_ft[0]}")
+            restr_self.super_delete(warn=False)
+        else:
+            logger.info(f"Found associated entries: \n\t{all_ft}")
+
+    def nightly_cleanup(self, dry_run: bool = True):
+        """Delete orphaned entries in the IntervalList table.
+
+        NOTE: Does not catch all orphans in testing.
+        """
+        child_tables = get_child_tables(self)
+        orphans = self - child_tables
+
+        if dry_run:
+            return orphans
+
+        orphans.delete_quick()
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)
