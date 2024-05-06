@@ -325,26 +325,52 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = lfp_band_file_name
         key["lfp_band_object_id"] = lfp_band_object_id
 
-        # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
-        # downsampled these data
+        # finally, we need to censor the valid times to account for the
+        # downsampling if this is the first time we've downsampled these data
+
         key["interval_list_name"] = (
             interval_list_name
             + " lfp band "
             + str(lfp_band_sampling_rate)
             + "Hz"
         )
-        interval_key = IntervalList().cautious_insert1(
-            key={
+
+        tmp_valid_times = (
+            IntervalList
+            & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
-                "valid_times": lfp_band_valid_times,
-                "pipeline": "lfp band",
-            },
-            approx_name="lfp band%Hz",
-        )
-        key.update(interval_key)
+            }
+        ).fetch("valid_times")
+        if len(tmp_valid_times) == 0:
+            lfp_band_valid_times = interval_list_censor(
+                lfp_band_valid_times, new_timestamps
+            )
+            interval_key = IntervalList().cautious_insert1(
+                key={
+                    "nwb_file_name": key["nwb_file_name"],
+                    "interval_list_name": key["interval_list_name"],
+                    "valid_times": lfp_band_valid_times,
+                    "pipeline": "lfp band",
+                },
+                approx_name="lfp band%Hz",
+            )
+            key.update(interval_key)
+        else:
+            lfp_band_valid_times = interval_list_censor(
+                lfp_band_valid_times, new_timestamps
+            )
+            # check that the valid times are the same
+            assert np.isclose(
+                tmp_valid_times[0], lfp_band_valid_times
+            ).all(), (
+                "previously saved lfp band times do not match current times"
+            )
+
+        # - --------------------------------------------------------------
 
         AnalysisNwbfile().log(key, table=self.full_table_name)
+
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):

@@ -131,7 +131,11 @@ class IntervalList(SpyglassMixin, dj.Manual):
         for candidate in candidates:
             if time() - start_time > time_limit:
                 return False, key
-            if (not len(candidate["valid_times"]) == len( key["valid_times"])) or (not np.equal(candidate["valid_times"], key["valid_times"]).all()):
+            if (
+                not len(candidate["valid_times"]) == len(key["valid_times"])
+            ) or (
+                not np.equal(candidate["valid_times"], key["valid_times"]).all()
+            ):
                 continue
             logger.info(
                 "Interval valid times exist: "
