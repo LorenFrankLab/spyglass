@@ -1,15 +1,14 @@
 # Change Log
 
-## \[Unreleased\]
+## [0.5.3] (Unreleased)
 
-### Release Nodes
+### Release Notes
 
-<!--
-Add `alter` snippets here, to be deleted before release.
--->
+<!-- Running draft to be removed immediately prior to release. -->
 
 ### Infrastructure
 
+- Create class `SpyglassGroupPart` to aid delete propagations #899
 - Add long-distance restrictions via `<<` and `>>` operators. #943
 
 ## [0.5.2] (April 22, 2024)
@@ -239,3 +238,4 @@ Add `alter` snippets here, to be deleted before release.
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
+[0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
