@@ -10,7 +10,7 @@ from datajoint.user_tables import UserTable
 
 from spyglass.utils.dj_chains import PERIPHERAL_TABLES
 from spyglass.utils.logging import logger
-from spyglass.utils.nwb_helper_fn import get_nwb_file
+from spyglass.utils.nwb_helper_fn import get_nwb_file, file_from_dandi
 
 
 def unique_dicts(list_of_dict):
@@ -205,6 +205,10 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     kwargs["as_dict"] = True  # force return as dictionary
 
     tbl, attr_name = nwb_master
+    if "analysis" in attr_name:
+        file_name_attr = "analysis_file_name"
+    else:
+        file_name_attr = "nwb_file_name"
 
     if not attrs:
         attrs = query_expression.heading.names
@@ -219,9 +223,18 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    rec_dicts = (
-        query_expression * tbl.proj(nwb2load_filepath=attr_name)
-    ).fetch(*attrs, "nwb2load_filepath", **kwargs)
+    query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    rec_dicts = (query_table).fetch(*attrs, **kwargs)
+    # get filepath for each. Use datajoint for checksum if local
+    for rec_dict in rec_dicts:
+        file_path = file_path_fn(rec_dict[file_name_attr])
+        if file_from_dandi(file_path):
+            # skip the filepath checksum if streamed from Dandi
+            rec_dict["nwb2load_filepath"] = file_path
+            continue
+        rec_dict["nwb2load_filepath"] = (query_table & rec_dict).fetch1(
+            "nwb2load_filepath"
+        )
 
     if not rec_dicts or not np.any(
         ["object_id" in key for key in rec_dicts[0]]
