@@ -13,6 +13,10 @@ import datajoint as dj
 from spyglass.common.common_usage import Export
 from spyglass.settings import export_dir
 
+from dandi.consts import known_instances
+
+dev_instance = known_instances["dandi-staging"]
+
 schema = dj.schema("common_dandi")
 
 
@@ -21,21 +25,23 @@ class DandiPath(dj.Manual):
     definition = """
     -> Export.File
     ---
-    dandiset_id: int
+    dandiset_id: str
     filename: varchar(255)
     dandi_path: varchar(255)
     """
 
     def fetch_file_from_dandi(self, key: dict):
         key = (self & key).fetch1("KEY")
-        dandiset_id = (self & key).fetch1("dandiset_id")
+        dandiset_id = str((self & key).fetch1("dandiset_id"))
         dandi_path = (self & key).fetch1("dandi_path")
 
         # get the s3 url from Dandi
         from dandi.dandiapi import DandiAPIClient
 
-        with DandiAPIClient() as client:
-            asset = client.get_dandiset(dandiset_id, "draft").get_asset_by_path(
+        with DandiAPIClient(
+            dandi_instance=dev_instance,
+        ) as client:  # TODO: this is the dev server of dandi
+            asset = client.get_dandiset(dandiset_id).get_asset_by_path(
                 dandi_path
             )
             s3_url = asset.get_content_url(follow_redirects=1, strip_query=True)
