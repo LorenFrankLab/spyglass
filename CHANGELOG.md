@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
+- Fix bug report template #XXX
 
 ## [0.5.2] (April 22, 2024)
 
