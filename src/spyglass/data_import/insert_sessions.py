@@ -12,7 +12,9 @@ from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
-def insert_sessions(nwb_file_names: Union[str, List[str]]):
+def insert_sessions(
+    nwb_file_names: Union[str, List[str]], permissive_insert=True
+):
     """
     Populate the dj database with new sessions.
 
@@ -23,6 +25,10 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         existing .nwb files. Each file represents a session. Also accepts
         strings with glob wildcards (e.g., *) so long as the wildcard specifies
         exactly one file.
+    permissive_insert : bool
+        If True, will insert an error into InsertError and continue if an error
+        is encountered during `populate_all_common`. If False, will raise the
+        error.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -54,7 +60,10 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
-        if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
+        if (
+            len(Nwbfile() & {"nwb_file_name": out_nwb_file_name})
+            and permissive_insert  # Nwbfile insert below has skip_duplicates
+        ):
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
@@ -66,7 +75,9 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         # the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-        populate_all_common(out_nwb_file_name)
+        populate_all_common(
+            out_nwb_file_name, permissive_insert=permissive_insert
+        )
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):

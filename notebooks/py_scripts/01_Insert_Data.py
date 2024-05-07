@@ -198,11 +198,17 @@ sgc.LabTeam.LabTeamMember()
 # - neural activity (extracellular recording of multiple brain areas)
 # - etc.
 #
-# _Note:_ this may take time as Spyglass creates the copy. You may see a prompt
-# about inserting device information.
+# _Notes:_
+#
+# - this may take time as Spyglass creates the copy. You may see a prompt
+#   about inserting device information.
+# - the `permissive_insert` feature means that, if Spyglass encounters an error,
+#   it will take note and keep moving to the next insert. With this set to false,
+#   if any error is encountered, all inserts will be canceled. This may be useful
+#   when playing around with settings for your nwb file.
 #
 
-sgi.insert_sessions(nwb_file_name)
+sgi.insert_sessions(nwb_file_name, permissive_insert=True)
 
 # ## Inspecting the data
 #

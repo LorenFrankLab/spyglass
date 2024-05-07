@@ -52,6 +52,12 @@ class Session(SpyglassMixin, dj.Imported):
         """
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
@@ -114,6 +120,7 @@ class Session(SpyglassMixin, dj.Imported):
                 "experiment_description": nwbf.experiment_description,
             },
             skip_duplicates=True,
+            allow_direct_insert=True,  # for populate_all_common
         )
 
         logger.info("Skipping Apparatus for now...")

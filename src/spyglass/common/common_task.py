@@ -97,6 +97,12 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      """
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -120,6 +126,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             logger.warn(f"No tasks processing module found in {nwbf}\n")
             return
 
+        task_inserts = []
         for task in tasks_mod.data_interfaces.values():
             if self.check_task_table(task):
                 # check if the task is in the Task table and if not, add it
@@ -169,7 +176,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                             break
                     # TODO case when interval is not found is not handled
                     key["interval_list_name"] = interval
-                    self.insert1(key)
+                    task_inserts.append(key.copy())
+        self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
     def update_entries(cls, restrict={}):
