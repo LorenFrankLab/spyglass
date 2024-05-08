@@ -57,7 +57,7 @@ def log_insert_error(
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
-    permissive_insert: bool = True,
+    raise_err: bool = False,
     error_constants: dict = None,
 ):
     """For each table, run the `_no_transaction_make` method.
@@ -70,11 +70,20 @@ def single_transaction_make(
     with Nwbfile.connection.transaction:
         for table in tables:
             logger.info(f"Populating {table.__name__}...")
-            pop_key = (table.key_source & file_restr).fetch1("KEY")
+
+            # If imported/computed table, get key from key_source
+            key_source = getattr(table, "key_source", None)
+            if key_source is None:  # Generate key from parents
+                parents = table.parents(as_objects=True)
+                key_source = parents[0].proj()
+                for parent in parents[1:]:
+                    key_source *= parent.proj()
+            pop_key = (key_source & file_restr).fetch1("KEY")
+
             try:
                 table()._no_transaction_make(pop_key)
             except Exception as err:
-                if not permissive_insert:
+                if raise_err:
                     raise err
                 log_insert_error(
                     table=table, err=err, error_constants=error_constants
@@ -82,7 +91,7 @@ def single_transaction_make(
 
 
 def populate_all_common(
-    nwb_file_name, permissive_insert=True
+    nwb_file_name, rollback_on_fail=False, raise_err=False
 ) -> Union[List, None]:
     """Insert all common tables for a given NWB file.
 
@@ -90,9 +99,12 @@ def populate_all_common(
     ----------
     nwb_file_name : str
         The name of the NWB file to populate.
-    permissive_insert : bool
-        If True, will insert an error into InsertError and continue if an error
-        is encountered. If False, will raise the error.
+    rollback_on_fail : bool, optional
+        If True, will delete the Session entry if any errors occur.
+        Defaults to False.
+    raise_err : bool, optional
+        If True, will raise any errors that occur during population.
+        Defaults to False. This will prevent any rollback from occurring.
 
     Returns
     -------
@@ -107,40 +119,50 @@ def populate_all_common(
         nwb_file_name=nwb_file_name,
     )
 
-    tables_1 = [
-        Session,
-        # NwbfileKachery, # Not used by default
-        ElectrodeGroup,
-        Electrode,
-        Raw,
-        SampleCount,
-        DIOEvents,
-        # SensorData, # Not used by default. Generates large files
-        TaskEpoch,
-        StateScriptFile,
-        VideoFile,
-        PositionSource,
+    table_lists = [
+        [  # Tables that can be inserted in a single transaction
+            Session,
+            ElectrodeGroup,  # Depends on Session
+            Electrode,  # Depends on ElectrodeGroup
+            Raw,  # Depends on Session
+            SampleCount,  # Depends on Session
+            DIOEvents,  # Depends on Session
+            TaskEpoch,  # Depends on Session
+            ImportedSpikeSorting,  # Depends on Session
+            # NwbfileKachery, # Not used by default
+            # SensorData, # Not used by default. Generates large files
+        ],
+        [  # Tables that depend on above transaction
+            PositionSource,  # Depends on Session
+            VideoFile,  # Depends on TaskEpoch
+            StateScriptFile,  # Depends on TaskEpoch
+        ],
+        [
+            RawPosition,  # Depends on PositionSource
+        ],
     ]
 
-    tables_2 = [  # Run separately so that transaction above concludes first
-        RawPosition,  # Depends on PositionSource
-        ImportedSpikeSorting,  # Depends on Session
-    ]
+    for tables in table_lists:
+        single_transaction_make(
+            tables=tables,
+            nwb_file_name=nwb_file_name,
+            raise_err=raise_err,
+            error_constants=error_constants,
+        )
 
-    # Two transactions. If fail in tables_2, tables_1 will still be inserted
-    single_transaction_make(
-        tables_1, nwb_file_name, permissive_insert, error_constants
-    )
-    single_transaction_make(
-        tables_2, nwb_file_name, permissive_insert, error_constants
-    )
+    err_query = InsertError & error_constants
+    nwbfile_query = Nwbfile & {"nwb_file_name": nwb_file_name}
 
-    query = InsertError & error_constants
-    if query:
-        err_tables = query.fetch("table")
+    if err_query and nwbfile_query and rollback_on_fail:
+        logger.error(f"Rolling back population for {nwb_file_name}...")
+        # Should this be safemode=False to prevent confirmation prompt?
+        nwbfile_query.super_delete(warn=False)
+
+    if err_query:
+        err_tables = err_query.fetch("table")
         logger.error(
             f"Errors occurred during population for {nwb_file_name}:\n\t"
             + f"Failed tables {err_tables}\n\t"
             + "See common_usage.InsertError for more details"
         )
-        return query.fetch("KEY")
+        return err_query.fetch("KEY")

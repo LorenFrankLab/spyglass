@@ -198,17 +198,25 @@ sgc.LabTeam.LabTeamMember()
 # - neural activity (extracellular recording of multiple brain areas)
 # - etc.
 #
-# _Notes:_
+# _Notes:_ this may take time as Spyglass creates the copy. You may see a prompt
+# about inserting device information.
 #
-# - this may take time as Spyglass creates the copy. You may see a prompt
-#   about inserting device information.
-# - the `permissive_insert` feature means that, if Spyglass encounters an error,
-#   it will take note and keep moving to the next insert. With this set to false,
-#   if any error is encountered, all inserts will be canceled. This may be useful
-#   when playing around with settings for your nwb file.
+# By default, the session insert process is error permissive. It will log an
+# error and continue attempts across various tables. You have two options you can
+# toggle to adjust this.
+#
+# - `rollback_on_fail`: Default False. If True, errors will still be logged for
+#   all tables and, if any are registered, the `Nwbfile` entry will be deleted.
+#   This is helpful for knowing why your file failed, and making it easy to retry.
+# - `raise_err`: Default False. If True, errors will not be logged and will
+#   instead be raised. This is useful for debugging and exploring the error stack.
+#   The end result may be that some tables may still have entries from this file
+#   that will need to be manually deleted after a failed attempt. 'transactions'
+#   are used where possible to rollback sibling tables, but child table errors
+#   will still leave entries from parent tables.
 #
 
-sgi.insert_sessions(nwb_file_name, permissive_insert=True)
+sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_error=False)
 
 # ## Inspecting the data
 #

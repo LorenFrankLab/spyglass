@@ -13,7 +13,9 @@ from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
 def insert_sessions(
-    nwb_file_names: Union[str, List[str]], permissive_insert=True
+    nwb_file_names: Union[str, List[str]],
+    rollback_on_fail: bool = False,
+    raise_err: bool = False,
 ):
     """
     Populate the dj database with new sessions.
@@ -25,10 +27,10 @@ def insert_sessions(
         existing .nwb files. Each file represents a session. Also accepts
         strings with glob wildcards (e.g., *) so long as the wildcard specifies
         exactly one file.
-    permissive_insert : bool
-        If True, will insert an error into InsertError and continue if an error
-        is encountered during `populate_all_common`. If False, will raise the
-        error.
+    rollback_on_fail : bool, optional
+        If True, undo all inserts if an error occurs. Default is False.
+    raise_err : bool, optional
+        If True, raise an error if an error occurs. Default is False.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -60,10 +62,7 @@ def insert_sessions(
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
-        if (
-            len(Nwbfile() & {"nwb_file_name": out_nwb_file_name})
-            and permissive_insert  # Nwbfile insert below has skip_duplicates
-        ):
+        if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
@@ -75,8 +74,10 @@ def insert_sessions(
         # the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-        populate_all_common(
-            out_nwb_file_name, permissive_insert=permissive_insert
+        return populate_all_common(
+            out_nwb_file_name,
+            rollback_on_fail=rollback_on_fail,
+            raise_err=raise_err,
         )
 
 
