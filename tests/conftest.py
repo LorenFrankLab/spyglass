@@ -3,7 +3,6 @@ import sys
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from subprocess import Popen
 from time import sleep as tsleep
 
 import datajoint as dj
@@ -12,6 +11,7 @@ import pytest
 from datajoint.logging import logger as dj_logger
 
 from .container import DockerMySQLManager
+from .data_downloader import DataDownloader
 
 # ---------------------- CONSTANTS ---------------------
 
@@ -66,7 +66,7 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
@@ -83,47 +83,13 @@ def pytest_configure(config):
         null_server=config.option.no_server,
         verbose=VERBOSE,
     )
-    DOWNLOAD = download_data(verbose=VERBOSE)
 
-
-def data_is_downloaded():
-    """Check if data is downloaded."""
-    return os.path.exists(RAW_DIR / TEST_FILE)
-
-
-def download_data(verbose=False):
-    """Download data from BOX using environment variable credentials.
-
-    Note: In gh-actions, this is handled by the test-conda workflow.
-    """
-    if data_is_downloaded():
-        return None
-    UCSF_BOX_USER = os.environ.get("UCSF_BOX_USER")
-    UCSF_BOX_TOKEN = os.environ.get("UCSF_BOX_TOKEN")
-    if not all([UCSF_BOX_USER, UCSF_BOX_TOKEN]):
-        raise ValueError(
-            "Missing data, no credentials: UCSF_BOX_USER or UCSF_BOX_TOKEN."
-        )
-    data_url = f"ftps://ftp.box.com/trodes_to_nwb_test_data/{TEST_FILE}"
-
-    cmd = [
-        "wget",
-        "--recursive",
-        "--no-host-directories",
-        "--no-directories",
-        "--user",
-        UCSF_BOX_USER,
-        "--password",
-        UCSF_BOX_TOKEN,
-        "-P",
-        RAW_DIR,
-        data_url,
-    ]
-    if not verbose:
-        cmd.insert(cmd.index("--recursive") + 1, "--no-verbose")
-    cmd_kwargs = dict(stdout=sys.stdout, stderr=sys.stderr) if verbose else {}
-
-    return Popen(cmd, **cmd_kwargs)
+    DOWNLOADS = DataDownloader(
+        nwb_file_name=TEST_FILE,
+        target_dir=BASE_DIR,
+        verbose=VERBOSE,
+        download_extras=True,  # toggle to False to disable video downloads
+    )
 
 
 def pytest_unconfigure(config):
@@ -198,8 +164,8 @@ def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
 
     # wait for wget download to finish
-    if DOWNLOAD is not None:
-        DOWNLOAD.wait()
+    if DOWNLOADS.download_nwb is not None:
+        DOWNLOADS.download_nwb.wait()
 
     # wait for gh-actions download to finish
     timeout, wait, found = 60, 5, False
@@ -213,6 +179,17 @@ def mini_path(raw_dir):
         raise ConnectionError("Download failed.")
 
     yield path
+
+
+@pytest.fixture(scope="session")
+def extra_files():  # waiting on errors. could be improved with async
+    yield True if not DOWNLOADS.extras_errors else False
+
+
+@pytest.fixture(scope="session")
+def skipif_noextras(extra_files):
+    if not extra_files:
+        return pytest.mark.skip(reason="Extra files not available.")
 
 
 @pytest.fixture(scope="session")
@@ -287,8 +264,7 @@ def mini_insert(mini_path, teardown, server, load_config):
     yield
 
     close_nwb_files()
-    # Note: no need to run deletes in teardown, since we are using teardown
-    # will remove the container
+    # Note: teardown will remove the container, deleting all data
 
 
 @pytest.fixture(scope="session")

@@ -79,22 +79,25 @@ def test_populate_state_script(common, pop_state_script):
     ), "StateScript populate unexpected effect"
 
 
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_no_transaction(common, mini_restr):
-    """Test no transaction"""
-    common.VideoFile()._no_transaction_make(mini_restr)
+@pytest.fixture(scope="session")
+def video_keys(common):
+    return common.VideoFile().fetch(as_dict=True)
 
 
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_update_entries(common):
+@pytest.mark.usefixtures("skipif_noextras")
+def test_videofile_update_entries(common, video_keys):
     """Test update entries"""
-    common.VideoFile().update_entries()
+    key = common.VideoFile().fetch(as_dict=True)[0]
+    common.VideoFile().update_entries(key)
 
 
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_getabspath(common, mini_restr):
+@pytest.mark.usefixtures("skipif_noextras")
+def test_videofile_getabspath(common, video_keys):
     """Test get absolute path"""
-    common.VideoFile().getabspath(mini_restr)
+    key = common.VideoFile().fetch(as_dict=True)[0]
+    path = common.VideoFile().get_abs_path(key)
+    file_part = key["nwb_file_name"].split("2")[0] + "_0" + str(key["epoch"])
+    assert file_part in path, "VideoFile get_abs_path failed"
 
 
 @pytest.mark.skipif(not TEARDOWN, reason="No teardown: expect no change.")
