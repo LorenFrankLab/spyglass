@@ -17,6 +17,31 @@ EXTRA_PATHS = [
         "target_name": "20230622_minirec_02_s2.1.h264",
         "url": BASE_URL + "20230622_sample_02_a1/20230622_sample_02_a1.1.h264",
     },
+    {
+        "relative_dir": "deeplabcut",
+        "target_name": "CollectedData_sc_eb.csv",
+        "url": BASE_URL + "minirec_dlc_items/CollectedData_sc_eb.csv",
+    },
+    {
+        "relative_dir": "deeplabcut",
+        "target_name": "CollectedData_sc_eb.h5",
+        "url": BASE_URL + "minirec_dlc_items/CollectedData_sc_eb.h5",
+    },
+    # {
+    #     "relative_dir": "deeplabcut",
+    #     "target_name": "config.yaml",
+    #     "url": BASE_URL + "minirec_dlc_items/config.yaml",
+    # },
+    # {
+    #     "relative_dir": "deeplabcut",
+    #     "target_name": "img000.png",
+    #     "url": BASE_URL + "minirec_dlc_items/img000.png",
+    # },
+    # {
+    #     "relative_dir": "deeplabcut",
+    #     "target_name": "img001.png",
+    #     "url": BASE_URL + "minirec_dlc_items/img001.png",
+    # },
 ]
 
 
