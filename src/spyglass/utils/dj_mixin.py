@@ -877,7 +877,7 @@ class SpyglassMixin:
             child=child,
             direction=direction,
             search_restr=restriction,
-            banned_tables=self._banned_search_tables,
+            banned_tables=list(self._banned_search_tables),
             allow_merge=True,
             cascade=True,
             verbose=verbose,
