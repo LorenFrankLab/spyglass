@@ -814,7 +814,7 @@ class Merge(dj.Manual):
         """
         if warn:
             logger.warning("!! Bypassing cautious_delete !!")
-            self._log_use(start=time(), super_delete=True)
+            self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
 

@@ -265,3 +265,31 @@ def graph_tables(dj_conn, graph_schema):
     yield graph_schema
 
     schema.drop(force=True)
+
+
+@pytest.fixture(scope="module")
+def graph_tables_many_to_one(graph_tables):
+    ParentNode = graph_tables["ParentNode"]
+    IntermediateNode = graph_tables["IntermediateNode"]
+    PkSkNode = graph_tables["PkSkNode"]
+
+    pk_sk_keys = PkSkNode().fetch(as_dict=True)[-2:]
+    new_inserts = [
+        {
+            "pk_sk_id": k["pk_sk_id"] + 3,
+            "intermediate_id": k["intermediate_id"] + 3,
+            "intermediate_attr": k["intermediate_id"] + 16,
+            "parent_id": k["intermediate_id"] - 1,
+            "parent_attr": k["intermediate_id"] + 11,
+            "other_id": k["other_id"],  # No change
+            "pk_sk_attr": k["pk_sk_attr"] + 10,
+        }
+        for k in pk_sk_keys
+    ]
+
+    insert_kwargs = {"ignore_extra_fields": True, "skip_duplicates": True}
+    ParentNode.insert(new_inserts, **insert_kwargs)
+    IntermediateNode.insert(new_inserts, **insert_kwargs)
+    PkSkNode.insert(new_inserts, **insert_kwargs)
+
+    yield graph_tables

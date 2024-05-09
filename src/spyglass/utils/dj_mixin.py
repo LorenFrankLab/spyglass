@@ -850,17 +850,16 @@ class SpyglassMixin:
             Restricted version of present table or FindKeyGraph object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import (
-            TableChain,
-            TableChains,
-        )  # noqa: F401
+        from spyglass.utils.dj_graph import TableChain  # noqa: F401
 
         if restriction is True:
             return self
+
         try:
             ret = self.restrict(restriction)  # Save time trying first
-            logger.warning("Restriction valid for this table. Using as is.")
-            return ret
+            if len(ret) < len(self):
+                logger.warning("Restriction valid for this table. Using as is.")
+                return ret
         except DataJointError:
             pass  # Could avoid try/except if assert_join_compatible return bool
             logger.debug("Restriction not valid. Attempting to cascade.")

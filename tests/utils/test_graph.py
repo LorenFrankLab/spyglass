@@ -99,6 +99,7 @@ def test_rg_root(restr_graph_root):
         ("pk_alias_attr > 18", 3, "pk pk alias"),
         ("sk_alias_attr > 19", 2, "sk sk alias"),
         ("merge_child_attr > 21", 2, "merge child down"),
+        ({"merge_child_attr": 21}, 1, "dict restr"),
     ],
 )
 def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
@@ -114,8 +115,29 @@ def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
         ("PkAliasNode", "parent_attr > 17", 2, "pk pk alias"),
         ("SkAliasNode", "parent_attr > 18", 2, "sk sk alias"),
         ("MergeChild", "parent_attr > 18", 2, "merge child"),
+        ("MergeChild", {"parent_attr": 18}, 1, "dict restr"),
     ],
 )
 def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
     msg = "Error in `<<` for " + msg
     assert len(graph_tables[table]() << restr) == expect_n, msg
+
+
+def test_restr_many_to_one(graph_tables_many_to_one):
+    PK = graph_tables_many_to_one["PkSkNode"]()
+    OP = graph_tables_many_to_one["OtherParentNode"]()
+
+    msg_template = "Error in `%s` for many to one."
+
+    assert len(PK << "other_attr > 14") == 4, msg_template % "<<"
+    assert len(PK << {"other_attr": 15}) == 2, msg_template % "<<"
+    assert len(OP >> "pk_sk_attr > 19") == 2, msg_template % ">>"
+    assert (
+        len(OP >> [{"pk_sk_attr": 19}, {"pk_sk_attr": 20}]) == 2
+    ), "Error accepting list of dicts for `>>` for many to one."
+
+
+def test_restr_invalid(graph_tables):
+    PkNode = graph_tables["PkNode"]()
+    with pytest.raises(ValueError):
+        len(PkNode << set(["parent_attr > 15", "parent_attr < 20"]))

@@ -925,14 +925,24 @@ class TableChain(RestrGraph):
     def _set_find_restr(self, table_name, restriction):
         """Set restr to look for from leaf node."""
         if isinstance(restriction, dict):
-            logger.warning("Using `>>` or `<<`: DICT unreliable, use STR.")
+            restriction = [restriction]
 
-        restr_attrs = set()  # modified by make_condition
-        table_ft = self._get_ft(table_name)
-        restr_string = make_condition(table_ft, restriction, restr_attrs)
+        if isinstance(restriction, list) and all(
+            [isinstance(r, dict) for r in restriction]
+        ):
+            restr_attrs = set(key for restr in restriction for key in restr)
+            find_restr = restriction
+        elif isinstance(restriction, str):
+            restr_attrs = set()  # modified by make_condition
+            table_ft = self._get_ft(table_name)
+            find_restr = make_condition(table_ft, restriction, restr_attrs)
+        else:
+            raise ValueError(
+                f"Invalid restriction type, use STR: {restriction}"
+            )
 
-        self._set_node(table_name, "find_restr", restr_string)
         self._set_node(table_name, "restr_attrs", restr_attrs)
+        self._set_node(table_name, "find_restr", find_restr)
 
     def _get_find_restr(self, table) -> Tuple[str, Set[str]]:
         """Get restr and restr_attrs from leaf node."""
