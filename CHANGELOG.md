@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
+- Fix bug report template #955
 - Add long-distance restrictions via `<<` and `>>` operators. #943
 
 ## [0.5.2] (April 22, 2024)
