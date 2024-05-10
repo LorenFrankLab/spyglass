@@ -10,6 +10,7 @@
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
 - Fix bug report template #955
+- Pin `mkdocstring-python` to `0.9.0`, fix existing docstrings. #967
 
 ## [0.5.2] (April 22, 2024)
 
