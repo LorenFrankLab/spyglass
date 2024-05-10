@@ -107,7 +107,6 @@ plugins:
             group_by_category: false
             line_length: 80
             docstring_style: numpy
-            show_inheritance_diagram: true
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:
