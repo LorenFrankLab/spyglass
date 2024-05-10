@@ -91,7 +91,7 @@ docs = [
     "mkdocs-jupyter",        # Docs render notebooks
     "mkdocs-literate-nav",   # Dynamic page list for API docs
     "mkdocs-material",       # Docs theme
-    "mkdocstrings[python]<=1.9.0",  # Docs API docstrings
+    "mkdocstrings[python]",  # Docs API docstrings
 ]
 
 [tool.hatch.version]

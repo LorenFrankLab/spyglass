@@ -10,8 +10,8 @@
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
 - Fix bug report template #955
-- Pin `mkdocstring-python` to `1.9.0`, fix existing docstrings. #967
 - Add long-distance restrictions via `<<` and `>>` operators. #943
+- Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 
 ## [0.5.2] (April 22, 2024)
 
