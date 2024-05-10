@@ -4790,35 +4790,37 @@ applied. Spyglass introduces <code>&lt;&lt;</code> as a shorthand for <code>rest
 key and <code>&gt;&gt;</code> as a shorthand for <code>restrict_by</code> a downstream key.</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span> <span class="nn">spyglass.example</span> <span class="kn">import</span> <span class="n">AnyTable</span>
 </span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">AnyTable</span> <span class="o">&gt;&gt;</span> <span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">AnyTable</span> <span class="o">&lt;&lt;</span> <span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">AnyTable</span><span class="p">()</span> <span class="o">&lt;&lt;</span> <span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">AnyTable</span><span class="p">()</span> <span class="o">&gt;&gt;</span> <span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span>
 </span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
 </span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Equivalent to</span>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">AnyTable</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;up&quot;</span><span class="p">)</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">AnyTable</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;down&quot;</span><span class="p">)</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">AnyTable</span><span class="p">()</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;down&quot;</span><span class="p">)</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">AnyTable</span><span class="p">()</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;up&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Some caveats to this function:</p>
 <ol>
 <li>'Peripheral' tables, like <code>IntervalList</code> and <code>AnalysisNwbfile</code> make it hard
     to determine the correct parent/child relationship and have been removed
-    from this search.</li>
+    from this search by default.</li>
 <li>This function will raise an error if it attempts to check a table that has
     not been imported into the current namespace. It is best used for exploring
     and debugging, not for production code.</li>
 <li>It's hard to determine the attributes in a mixed dictionary/string
     restriction. If you are having trouble, try using a pure string
     restriction.</li>
-<li>The most direct path to your restriction may not be the path took, especially
-    when using Merge Tables. When the result is empty see the warning about the
-    path used. Then, ban tables from the search to force a different path.</li>
+<li>The most direct path to your restriction may not be the path your data took,
+    especially when using Merge Tables. When the result is empty see the
+    warning about the path used. Then, ban tables from the search to force a
+    different path.</li>
 </ol>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">my_table</span> <span class="o">=</span> <span class="n">MyTable</span><span class="p">()</span>  <span class="c1"># must be instantced</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">my_table</span> <span class="o">=</span> <span class="n">MyTable</span><span class="p">()</span>  <span class="c1"># must be instanced</span>
 </span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">my_table</span><span class="o">.</span><span class="n">ban_search_table</span><span class="p">(</span><span class="n">UnwantedTable1</span><span class="p">)</span>
 </span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">my_table</span><span class="o">.</span><span class="n">ban_search_table</span><span class="p">([</span><span class="n">UnwantedTable2</span><span class="p">,</span> <span class="n">UnwantedTable3</span><span class="p">])</span>
 </span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">my_table</span><span class="o">.</span><span class="n">unban_search_table</span><span class="p">(</span><span class="n">UnwantedTable3</span><span class="p">)</span>
 </span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">my_table</span><span class="o">.</span><span class="n">see_banned_tables</span><span class="p">()</span>
 </span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
 </span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">my_table</span> <span class="o">&lt;&lt;</span> <span class="n">my_restriction</span>
+</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">my_table</span> <span class="o">&lt;&lt;</span> <span class="n">upstream_restriction</span> <span class="o">&gt;&gt;</span> <span class="n">downstream_restriction</span>
 </span></code></pre></div>
 <p>When providing a restriction of the parent, use 'up' direction. When providing a
 restriction of the child, use 'down' direction.</p>

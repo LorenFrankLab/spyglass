@@ -8720,114 +8720,7 @@ Default True.</p>
   <div class="doc doc-contents ">
   
       <p>Given a table/restriction, id or delete relevant downstream merge entries</p>
-
-
-
-  <p><span class="doc-section-title">Parameters:</span></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Type</th>
-        <th>Description</th>
-        <th>Default</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr class="doc-section-item">
-          <td><code>table</code></td>
-          <td>
-                <code><span title="datajoint.Table">Table</span></code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>DataJoint table or restriction thereof</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr class="doc-section-item">
-          <td><code>restriction</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Optional restriction to apply before deletion from merge/part
-tables. If not provided, delete all downstream entries.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr class="doc-section-item">
-          <td><code>dry_run</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Default True. If true, return list of tuples, merge/part tables
-downstream of table input. Otherwise, delete merge/part table entries.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr class="doc-section-item">
-          <td><code>disable_warning</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Default False. If True, don't warn about restrictions on table object.</p>
-            </div>
-          </td>
-          <td>
-              <em>required</em>
-          </td>
-        </tr>
-        <tr class="doc-section-item">
-          <td><code>kwargs</code></td>
-          <td>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Additional keyword arguments for DataJoint delete.</p>
-            </div>
-          </td>
-          <td>
-                <code>{}</code>
-          </td>
-        </tr>
-    </tbody>
-  </table>
-
-
-
-  <p><span class="doc-section-title">Returns:</span></p>
-  <table>
-    <thead>
-      <tr>
-        <th>Type</th>
-        <th>Description</th>
-      </tr>
-    </thead>
-    <tbody>
-        <tr class="doc-section-item">
-          <td>
-                <code>List[Tuple[<span title="datajoint.Table">Table</span>, <span title="datajoint.Table">Table</span>]]</code>
-          </td>
-          <td>
-            <div class="doc-md-description">
-              <p>Entries in merge/part tables downstream of table input.</p>
-            </div>
-          </td>
-        </tr>
-    </tbody>
-  </table>
+<p>Passthrough to SpyglassMixin.delete_downstream_merge</p>
 
           <details class="quote">
             <summary>Source code in <code>src/spyglass/utils/dj_merge_tables.py</code></summary>
@@ -8850,62 +8743,26 @@ downstream of table input. Otherwise, delete merge/part table entries.</p>
 <span class="normal"><a href="#__codelineno-0-843">843</a></span>
 <span class="normal"><a href="#__codelineno-0-844">844</a></span>
 <span class="normal"><a href="#__codelineno-0-845">845</a></span>
-<span class="normal"><a href="#__codelineno-0-846">846</a></span>
-<span class="normal"><a href="#__codelineno-0-847">847</a></span>
-<span class="normal"><a href="#__codelineno-0-848">848</a></span>
-<span class="normal"><a href="#__codelineno-0-849">849</a></span>
-<span class="normal"><a href="#__codelineno-0-850">850</a></span>
-<span class="normal"><a href="#__codelineno-0-851">851</a></span>
-<span class="normal"><a href="#__codelineno-0-852">852</a></span>
-<span class="normal"><a href="#__codelineno-0-853">853</a></span>
-<span class="normal"><a href="#__codelineno-0-854">854</a></span>
-<span class="normal"><a href="#__codelineno-0-855">855</a></span>
-<span class="normal"><a href="#__codelineno-0-856">856</a></span>
-<span class="normal"><a href="#__codelineno-0-857">857</a></span>
-<span class="normal"><a href="#__codelineno-0-858">858</a></span>
-<span class="normal"><a href="#__codelineno-0-859">859</a></span>
-<span class="normal"><a href="#__codelineno-0-860">860</a></span>
-<span class="normal"><a href="#__codelineno-0-861">861</a></span>
-<span class="normal"><a href="#__codelineno-0-862">862</a></span>
-<span class="normal"><a href="#__codelineno-0-863">863</a></span>
-<span class="normal"><a href="#__codelineno-0-864">864</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-827"><a id="__codelineno-0-827" name="__codelineno-0-827"></a><span class="k">def</span> <span class="nf">delete_downstream_merge</span><span class="p">(</span>
+<span class="normal"><a href="#__codelineno-0-846">846</a></span></pre></div></td><td class="code"><div><pre><span></span><code><span id="__span-0-827"><a id="__codelineno-0-827" name="__codelineno-0-827"></a><span class="k">def</span> <span class="nf">delete_downstream_merge</span><span class="p">(</span>
 </span><span id="__span-0-828"><a id="__codelineno-0-828" name="__codelineno-0-828"></a>    <span class="n">table</span><span class="p">:</span> <span class="n">dj</span><span class="o">.</span><span class="n">Table</span><span class="p">,</span>
 </span><span id="__span-0-829"><a id="__codelineno-0-829" name="__codelineno-0-829"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
 </span><span id="__span-0-830"><a id="__codelineno-0-830" name="__codelineno-0-830"></a><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">:</span>
 </span><span id="__span-0-831"><a id="__codelineno-0-831" name="__codelineno-0-831"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Given a table/restriction, id or delete relevant downstream merge entries</span>
 </span><span id="__span-0-832"><a id="__codelineno-0-832" name="__codelineno-0-832"></a>
-</span><span id="__span-0-833"><a id="__codelineno-0-833" name="__codelineno-0-833"></a><span class="sd">    Parameters</span>
-</span><span id="__span-0-834"><a id="__codelineno-0-834" name="__codelineno-0-834"></a><span class="sd">    ----------</span>
-</span><span id="__span-0-835"><a id="__codelineno-0-835" name="__codelineno-0-835"></a><span class="sd">    table: dj.Table</span>
-</span><span id="__span-0-836"><a id="__codelineno-0-836" name="__codelineno-0-836"></a><span class="sd">        DataJoint table or restriction thereof</span>
-</span><span id="__span-0-837"><a id="__codelineno-0-837" name="__codelineno-0-837"></a><span class="sd">    restriction: str</span>
-</span><span id="__span-0-838"><a id="__codelineno-0-838" name="__codelineno-0-838"></a><span class="sd">        Optional restriction to apply before deletion from merge/part</span>
-</span><span id="__span-0-839"><a id="__codelineno-0-839" name="__codelineno-0-839"></a><span class="sd">        tables. If not provided, delete all downstream entries.</span>
-</span><span id="__span-0-840"><a id="__codelineno-0-840" name="__codelineno-0-840"></a><span class="sd">    dry_run: bool</span>
-</span><span id="__span-0-841"><a id="__codelineno-0-841" name="__codelineno-0-841"></a><span class="sd">        Default True. If true, return list of tuples, merge/part tables</span>
-</span><span id="__span-0-842"><a id="__codelineno-0-842" name="__codelineno-0-842"></a><span class="sd">        downstream of table input. Otherwise, delete merge/part table entries.</span>
-</span><span id="__span-0-843"><a id="__codelineno-0-843" name="__codelineno-0-843"></a><span class="sd">    disable_warning: bool</span>
-</span><span id="__span-0-844"><a id="__codelineno-0-844" name="__codelineno-0-844"></a><span class="sd">        Default False. If True, don&#39;t warn about restrictions on table object.</span>
-</span><span id="__span-0-845"><a id="__codelineno-0-845" name="__codelineno-0-845"></a><span class="sd">    kwargs: dict</span>
-</span><span id="__span-0-846"><a id="__codelineno-0-846" name="__codelineno-0-846"></a><span class="sd">        Additional keyword arguments for DataJoint delete.</span>
-</span><span id="__span-0-847"><a id="__codelineno-0-847" name="__codelineno-0-847"></a>
-</span><span id="__span-0-848"><a id="__codelineno-0-848" name="__codelineno-0-848"></a><span class="sd">    Returns</span>
-</span><span id="__span-0-849"><a id="__codelineno-0-849" name="__codelineno-0-849"></a><span class="sd">    -------</span>
-</span><span id="__span-0-850"><a id="__codelineno-0-850" name="__codelineno-0-850"></a><span class="sd">    List[Tuple[dj.Table, dj.Table]]</span>
-</span><span id="__span-0-851"><a id="__codelineno-0-851" name="__codelineno-0-851"></a><span class="sd">        Entries in merge/part tables downstream of table input.</span>
-</span><span id="__span-0-852"><a id="__codelineno-0-852" name="__codelineno-0-852"></a><span class="sd">    &quot;&quot;&quot;</span>
-</span><span id="__span-0-853"><a id="__codelineno-0-853" name="__codelineno-0-853"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
-</span><span id="__span-0-854"><a id="__codelineno-0-854" name="__codelineno-0-854"></a>        <span class="s2">&quot;DEPRECATED: This function will be removed in `0.6`. &quot;</span>
-</span><span id="__span-0-855"><a id="__codelineno-0-855" name="__codelineno-0-855"></a>        <span class="o">+</span> <span class="s2">&quot;Use AnyTable().delete_downstream_merge() instead.&quot;</span>
-</span><span id="__span-0-856"><a id="__codelineno-0-856" name="__codelineno-0-856"></a>    <span class="p">)</span>
-</span><span id="__span-0-857"><a id="__codelineno-0-857" name="__codelineno-0-857"></a>
-</span><span id="__span-0-858"><a id="__codelineno-0-858" name="__codelineno-0-858"></a>    <span class="kn">from</span> <span class="nn">spyglass.utils.dj_mixin</span> <span class="kn">import</span> <span class="n">SpyglassMixin</span>
-</span><span id="__span-0-859"><a id="__codelineno-0-859" name="__codelineno-0-859"></a>
-</span><span id="__span-0-860"><a id="__codelineno-0-860" name="__codelineno-0-860"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">SpyglassMixin</span><span class="p">):</span>
-</span><span id="__span-0-861"><a id="__codelineno-0-861" name="__codelineno-0-861"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Input must be a Spyglass Table.&quot;</span><span class="p">)</span>
-</span><span id="__span-0-862"><a id="__codelineno-0-862" name="__codelineno-0-862"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">table</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">dj</span><span class="o">.</span><span class="n">Table</span><span class="p">)</span> <span class="k">else</span> <span class="n">table</span><span class="p">()</span>
-</span><span id="__span-0-863"><a id="__codelineno-0-863" name="__codelineno-0-863"></a>
-</span><span id="__span-0-864"><a id="__codelineno-0-864" name="__codelineno-0-864"></a>    <span class="k">return</span> <span class="n">table</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+</span><span id="__span-0-833"><a id="__codelineno-0-833" name="__codelineno-0-833"></a><span class="sd">    Passthrough to SpyglassMixin.delete_downstream_merge</span>
+</span><span id="__span-0-834"><a id="__codelineno-0-834" name="__codelineno-0-834"></a><span class="sd">    &quot;&quot;&quot;</span>
+</span><span id="__span-0-835"><a id="__codelineno-0-835" name="__codelineno-0-835"></a>    <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+</span><span id="__span-0-836"><a id="__codelineno-0-836" name="__codelineno-0-836"></a>        <span class="s2">&quot;DEPRECATED: This function will be removed in `0.6`. &quot;</span>
+</span><span id="__span-0-837"><a id="__codelineno-0-837" name="__codelineno-0-837"></a>        <span class="o">+</span> <span class="s2">&quot;Use AnyTable().delete_downstream_merge() instead.&quot;</span>
+</span><span id="__span-0-838"><a id="__codelineno-0-838" name="__codelineno-0-838"></a>    <span class="p">)</span>
+</span><span id="__span-0-839"><a id="__codelineno-0-839" name="__codelineno-0-839"></a>
+</span><span id="__span-0-840"><a id="__codelineno-0-840" name="__codelineno-0-840"></a>    <span class="kn">from</span> <span class="nn">spyglass.utils.dj_mixin</span> <span class="kn">import</span> <span class="n">SpyglassMixin</span>
+</span><span id="__span-0-841"><a id="__codelineno-0-841" name="__codelineno-0-841"></a>
+</span><span id="__span-0-842"><a id="__codelineno-0-842" name="__codelineno-0-842"></a>    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">SpyglassMixin</span><span class="p">):</span>
+</span><span id="__span-0-843"><a id="__codelineno-0-843" name="__codelineno-0-843"></a>        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Input must be a Spyglass Table.&quot;</span><span class="p">)</span>
+</span><span id="__span-0-844"><a id="__codelineno-0-844" name="__codelineno-0-844"></a>    <span class="n">table</span> <span class="o">=</span> <span class="n">table</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">table</span><span class="p">,</span> <span class="n">dj</span><span class="o">.</span><span class="n">Table</span><span class="p">)</span> <span class="k">else</span> <span class="n">table</span><span class="p">()</span>
+</span><span id="__span-0-845"><a id="__codelineno-0-845" name="__codelineno-0-845"></a>
+</span><span id="__span-0-846"><a id="__codelineno-0-846" name="__codelineno-0-846"></a>    <span class="k">return</span> <span class="n">table</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
 </span></code></pre></div></td></tr></table></div>
           </details>
   </div>
