@@ -15,8 +15,6 @@ def Mixin():
 
     yield Mixin
 
-    Mixin().drop_quick()
-
 
 @pytest.mark.skipif(
     not VERBOSE or not TEARDOWN,

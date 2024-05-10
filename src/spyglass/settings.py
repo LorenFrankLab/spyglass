@@ -20,7 +20,7 @@ class SpyglassConfig:
     facilitate testing.
     """
 
-    def __init__(self, base_dir: str = None, **kwargs):
+    def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
         Initializes a new instance of the class.
 
@@ -103,7 +103,7 @@ class SpyglassConfig:
         force_reload=False,
         on_startup: bool = False,
         **kwargs,
-    ):
+    ) -> None:
         """
         Loads the configuration settings for the object.
 
@@ -223,25 +223,25 @@ class SpyglassConfig:
 
         return self._config
 
-    def _load_env_vars(self):
+    def _load_env_vars(self) -> dict:
         loaded_dict = {}
         for var, val in self.env_defaults.items():
             loaded_dict[var] = os.getenv(var, val)
         return loaded_dict
 
-    def _set_env_with_dict(self, env_dict):
+    def _set_env_with_dict(self, env_dict) -> None:
         # NOTE: Kept for backwards compatibility. Should be removed in future
         # for custom paths. Keep self.env_defaults.
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 
-    def _mkdirs_from_dict_vals(self, dir_dict):
+    def _mkdirs_from_dict_vals(self, dir_dict) -> None:
         if self._debug_mode:
             return
         for dir_str in dir_dict.values():
             Path(dir_str).mkdir(exist_ok=True)
 
-    def _set_dj_config_stores(self, check_match=True, set_stores=True):
+    def _set_dj_config_stores(self, check_match=True, set_stores=True) -> None:
         """
         Checks dj.config['stores'] match resolved dirs. Ensures stores set.
 
@@ -287,7 +287,7 @@ class SpyglassConfig:
 
         return
 
-    def dir_to_var(self, dir: str, dir_type: str = "spyglass"):
+    def dir_to_var(self, dir: str, dir_type: str = "spyglass") -> str:
         """Converts a dir string to an env variable name."""
         return f"{dir_type.upper()}_{dir.upper()}_DIR"
 
@@ -300,7 +300,7 @@ class SpyglassConfig:
         database_port: int = 3306,
         database_use_tls: bool = True,
         **kwargs,
-    ):
+    ) -> dict:
         """Generate a datajoint configuration file.
 
         Parameters
@@ -345,7 +345,7 @@ class SpyglassConfig:
         base_dir=None,
         set_password=True,
         **kwargs,
-    ):
+    ) -> None:
         """Set the dj.config parameters, set password, and save config to file.
 
         Parameters
