@@ -1,3 +1,10 @@
+"""Configuration for pytest, including fixtures and command line options.
+
+Fixtures in this script are mad available to all tests in the test suite.
+conftest.py files in subdirectories have fixtures that are only available to
+tests in that subdirectory.
+"""
+
 import os
 import sys
 import warnings
@@ -7,17 +14,19 @@ from subprocess import Popen
 from time import sleep as tsleep
 
 import datajoint as dj
+import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
 
 from .container import DockerMySQLManager
 
-# ---------------------- CONSTANTS ---------------------
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+
+# ------------------------------- TESTS CONFIG -------------------------------
 
 # globals in pytest_configure:
 #       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 
 
 def pytest_addoption(parser):
@@ -131,7 +140,7 @@ def pytest_unconfigure(config):
         SERVER.stop()
 
 
-# ------------------- FIXTURES -------------------
+# ---------------------------- FIXTURES, TEST ENV ----------------------------
 
 
 @pytest.fixture(scope="session")
@@ -143,6 +152,27 @@ def verbose():
 @pytest.fixture(scope="session", autouse=True)
 def verbose_context(verbose):
     """Verbosity context for suppressing Spyglass logging."""
+
+    class QuietStdOut:
+        """Used to quiet all prints and logging as context manager."""
+
+        def __init__(self):
+            from spyglass.utils import logger as spyglass_logger
+
+            self.spy_logger = spyglass_logger
+            self.previous_level = None
+
+        def __enter__(self):
+            self.previous_level = self.spy_logger.getEffectiveLevel()
+            self.spy_logger.setLevel("CRITICAL")
+            self._original_stdout = sys.stdout
+            sys.stdout = open(os.devnull, "w")
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            self.spy_logger.setLevel(self.previous_level)
+            sys.stdout.close()
+            sys.stdout = self._original_stdout
+
     yield nullcontext() if verbose else QuietStdOut()
 
 
@@ -191,6 +221,9 @@ def base_dir():
 def raw_dir(base_dir):
     # could do settings.raw_dir, but this is faster while server booting
     yield base_dir / "raw"
+
+
+# ------------------------------- FIXTURES, DATA -------------------------------
 
 
 @pytest.fixture(scope="session")
@@ -251,18 +284,22 @@ def load_config(dj_conn, base_dir):
     from spyglass.settings import SpyglassConfig
 
     yield SpyglassConfig().load_config(
-        base_dir=base_dir, test_mode=True, force_reload=True
+        base_dir=base_dir, debug_mode=False, test_mode=True, force_reload=True
     )
 
 
 @pytest.fixture(autouse=True, scope="session")
-def mini_insert(mini_path, teardown, server, load_config):
+def mini_insert(
+    dj_conn, mini_path, mini_content, teardown, server, load_config
+):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
         SpikeSortingOutput,
     )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
+
+    _ = SpikeSortingOutput()
 
     LabMember().insert1(
         ["Root User", "Root", "User"], skip_duplicates=not teardown
@@ -287,8 +324,7 @@ def mini_insert(mini_path, teardown, server, load_config):
     yield
 
     close_nwb_files()
-    # Note: no need to run deletes in teardown, since we are using teardown
-    # will remove the container
+    # Note: no need to run deletes in teardown, bc removing the container
 
 
 @pytest.fixture(scope="session")
@@ -299,6 +335,9 @@ def mini_restr(mini_path):
 @pytest.fixture(scope="session")
 def mini_dict(mini_copy_name):
     yield {"nwb_file_name": mini_copy_name}
+
+
+# --------------------------- FIXTURES, SUBMODULES ---------------------------
 
 
 @pytest.fixture(scope="session")
@@ -323,17 +362,48 @@ def settings(dj_conn):
 
 
 @pytest.fixture(scope="session")
+def sgp(common):
+    from spyglass import position
+
+    yield position
+
+
+@pytest.fixture(scope="session")
+def lfp(common):
+    from spyglass import lfp
+
+    return lfp
+
+
+@pytest.fixture(scope="session")
+def lfp_band(lfp):
+    from spyglass.lfp.analysis.v1 import lfp_band
+
+    return lfp_band
+
+
+@pytest.fixture(scope="session")
+def sgl(common):
+    from spyglass import linearization
+
+    yield linearization
+
+
+@pytest.fixture(scope="session")
+def sgpl(sgl):
+    from spyglass.linearization import v1
+
+    yield v1
+
+
+@pytest.fixture(scope="session")
 def populate_exception():
     from spyglass.common.errors import PopulateException
 
     yield PopulateException
 
 
-@pytest.fixture(scope="session")
-def sgp(common):
-    from spyglass import position
-
-    yield position
+# ------------------------- FIXTURES, POSITION TABLES -------------------------
 
 
 @pytest.fixture(scope="session")
@@ -418,12 +488,16 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 def pos_merge_tables(dj_conn):
     """Return the merge tables as activated."""
     from spyglass.common.common_position import TrackGraph
+    from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
     from spyglass.position.position_merge import PositionOutput
 
     # must import common_position before LinOutput to avoid circular import
-
     _ = TrackGraph()
+
+    # import LFPOutput to use when testing mixin cascade
+    _ = LFPOutput()
+
     return [PositionOutput(), LinearizedPositionOutput()]
 
 
@@ -442,25 +516,258 @@ def pos_merge_key(pos_merge, trodes_pos_v1, trodes_sel_keys):
     yield pos_merge.merge_get_part(trodes_sel_keys[-1]).fetch1("KEY")
 
 
-# ------------------ GENERAL FUNCTION ------------------
+# ---------------------- FIXTURES, LINEARIZATION TABLES ----------------------
+# ---------------------- Note: Used to test RestrGraph -----------------------
 
 
-class QuietStdOut:
-    """If quiet_spy, used to quiet prints, teardowns and table.delete prints"""
+@pytest.fixture(scope="session")
+def pos_lin_key(trodes_sel_keys):
+    yield trodes_sel_keys[-1]
 
-    def __init__(self):
-        from spyglass.utils import logger as spyglass_logger
 
-        self.spy_logger = spyglass_logger
-        self.previous_level = None
+@pytest.fixture(scope="session")
+def position_info(pos_merge, pos_merge_key):
+    yield (pos_merge & {"merge_id": pos_merge_key}).fetch1_dataframe()
 
-    def __enter__(self):
-        self.previous_level = self.spy_logger.getEffectiveLevel()
-        self.spy_logger.setLevel("CRITICAL")
-        self._original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, "w")
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.spy_logger.setLevel(self.previous_level)
-        sys.stdout.close()
-        sys.stdout = self._original_stdout
+@pytest.fixture(scope="session")
+def track_graph_key():
+    yield {"track_graph_name": "6 arm"}
+
+
+@pytest.fixture(scope="session")
+def track_graph(teardown, sgpl, track_graph_key):
+    node_positions = np.array(
+        [
+            (79.910, 216.720),  # top left well 0
+            (132.031, 187.806),  # top middle intersection 1
+            (183.718, 217.713),  # top right well 2
+            (132.544, 132.158),  # middle intersection 3
+            (87.202, 101.397),  # bottom left intersection 4
+            (31.340, 126.110),  # middle left well 5
+            (180.337, 104.799),  # middle right intersection 6
+            (92.693, 42.345),  # bottom left well 7
+            (183.784, 45.375),  # bottom right well 8
+            (231.338, 136.281),  # middle right well 9
+        ]
+    )
+
+    edges = np.array(
+        [
+            (0, 1),
+            (1, 2),
+            (1, 3),
+            (3, 4),
+            (4, 5),
+            (3, 6),
+            (6, 9),
+            (4, 7),
+            (6, 8),
+        ]
+    )
+
+    linear_edge_order = [
+        (3, 6),
+        (6, 8),
+        (6, 9),
+        (3, 1),
+        (1, 2),
+        (1, 0),
+        (3, 4),
+        (4, 5),
+        (4, 7),
+    ]
+    linear_edge_spacing = 15
+
+    sgpl.TrackGraph.insert1(
+        {
+            **track_graph_key,
+            "environment": track_graph_key["track_graph_name"],
+            "node_positions": node_positions,
+            "edges": edges,
+            "linear_edge_order": linear_edge_order,
+            "linear_edge_spacing": linear_edge_spacing,
+        },
+        skip_duplicates=True,
+    )
+
+    yield sgpl.TrackGraph & {"track_graph_name": "6 arm"}
+    if teardown:
+        sgpl.TrackGraph().delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def lin_param_key():
+    yield {"linearization_param_name": "default"}
+
+
+@pytest.fixture(scope="session")
+def lin_params(
+    teardown,
+    sgpl,
+    lin_param_key,
+):
+    param_table = sgpl.LinearizationParameters()
+    param_table.insert1(lin_param_key, skip_duplicates=True)
+    yield param_table
+
+
+@pytest.fixture(scope="session")
+def lin_sel_key(
+    pos_merge_key, track_graph_key, lin_param_key, lin_params, track_graph
+):
+    yield {
+        "pos_merge_id": pos_merge_key["merge_id"],
+        **track_graph_key,
+        **lin_param_key,
+    }
+
+
+@pytest.fixture(scope="session")
+def lin_sel(teardown, sgpl, lin_sel_key):
+    sel_table = sgpl.LinearizationSelection()
+    sel_table.insert1(lin_sel_key, skip_duplicates=True)
+    yield sel_table
+    if teardown:
+        sel_table.delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def lin_v1(teardown, sgpl, lin_sel):
+    v1 = sgpl.LinearizedPositionV1()
+    v1.populate()
+    yield v1
+    if teardown:
+        v1.delete(safemode=False)
+
+
+@pytest.fixture(scope="session")
+def lin_merge_key(lin_merge, lin_v1, lin_sel_key):
+    yield lin_merge.merge_get_part(lin_sel_key).fetch1("KEY")
+
+
+# --------------------------- FIXTURES, LFP TABLES ---------------------------
+# ---------------- Note: LFPOuput is used to test RestrGraph -----------------
+
+
+@pytest.fixture(scope="module")
+def lfp_band_v1(lfp_band):
+    yield lfp_band.LFPBandV1()
+
+
+@pytest.fixture(scope="session")
+def firfilters_table(common):
+    return common.FirFilterParameters()
+
+
+@pytest.fixture(scope="session")
+def electrodegroup_table(lfp):
+    return lfp.v1.LFPElectrodeGroup()
+
+
+@pytest.fixture(scope="session")
+def lfp_constants(common, mini_copy_name, mini_dict):
+    n_delay = 9
+    lfp_electrode_group_name = "test"
+    orig_list_name = "01_s1"
+    orig_valid_times = (
+        common.IntervalList
+        & mini_dict
+        & f"interval_list_name = '{orig_list_name}'"
+    ).fetch1("valid_times")
+    new_list_name = orig_list_name + f"_first{n_delay}"
+    new_list_key = {
+        "nwb_file_name": mini_copy_name,
+        "interval_list_name": new_list_name,
+        "valid_times": np.asarray(
+            [[orig_valid_times[0, 0], orig_valid_times[0, 0] + n_delay]]
+        ),
+    }
+
+    yield dict(
+        lfp_electrode_ids=[0],
+        lfp_electrode_group_name=lfp_electrode_group_name,
+        lfp_eg_key={
+            "nwb_file_name": mini_copy_name,
+            "lfp_electrode_group_name": lfp_electrode_group_name,
+        },
+        n_delay=n_delay,
+        orig_interval_list_name=orig_list_name,
+        orig_valid_times=orig_valid_times,
+        interval_list_name=new_list_name,
+        interval_key=new_list_key,
+        filter1_name="LFP 0-400 Hz",
+        filter_sampling_rate=30_000,
+        filter2_name="Theta 5-11 Hz",
+        lfp_band_electrode_ids=[0],  # assumes we've filtered these electrodes
+        lfp_band_sampling_rate=100,  # desired sampling rate
+    )
+
+
+@pytest.fixture(scope="session")
+def add_electrode_group(
+    firfilters_table,
+    electrodegroup_table,
+    mini_copy_name,
+    lfp_constants,
+):
+    firfilters_table.create_standard_filters()
+    group_name = lfp_constants.get("lfp_electrode_group_name")
+    electrodegroup_table.create_lfp_electrode_group(
+        nwb_file_name=mini_copy_name,
+        group_name=group_name,
+        electrode_list=np.array(lfp_constants.get("lfp_electrode_ids")),
+    )
+    assert len(
+        electrodegroup_table & {"lfp_electrode_group_name": group_name}
+    ), "Failed to add LFPElectrodeGroup."
+    yield
+
+
+@pytest.fixture(scope="session")
+def add_interval(common, lfp_constants):
+    common.IntervalList.insert1(
+        lfp_constants.get("interval_key"), skip_duplicates=True
+    )
+    yield lfp_constants.get("interval_list_name")
+
+
+@pytest.fixture(scope="session")
+def add_selection(
+    lfp, common, add_electrode_group, add_interval, lfp_constants
+):
+    lfp_s_key = {
+        **lfp_constants.get("lfp_eg_key"),
+        "target_interval_list_name": add_interval,
+        "filter_name": lfp_constants.get("filter1_name"),
+        "filter_sampling_rate": lfp_constants.get("filter_sampling_rate"),
+    }
+    lfp.v1.LFPSelection.insert1(lfp_s_key, skip_duplicates=True)
+    yield lfp_s_key
+
+
+@pytest.fixture(scope="session")
+def lfp_s_key(lfp_constants, mini_copy_name):
+    yield {
+        "nwb_file_name": mini_copy_name,
+        "lfp_electrode_group_name": lfp_constants.get(
+            "lfp_electrode_group_name"
+        ),
+        "target_interval_list_name": lfp_constants.get("interval_list_name"),
+    }
+
+
+@pytest.fixture(scope="session")
+def populate_lfp(lfp, add_selection, lfp_s_key):
+    lfp.v1.LFPV1().populate(add_selection)
+    yield {"merge_id": (lfp.LFPOutput.LFPV1() & lfp_s_key).fetch1("merge_id")}
+
+
+@pytest.fixture(scope="session")
+def lfp_merge_key(populate_lfp):
+    yield populate_lfp
+
+
+@pytest.fixture(scope="session")
+def lfp_v1_key(lfp, lfp_s_key):
+    yield (lfp.v1.LFPV1 & lfp_s_key).fetch1("KEY")
