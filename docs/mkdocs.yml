@@ -101,12 +101,12 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [src]
           options:
             members_order: source
             group_by_category: false
             line_length: 80
             docstring_style: numpy
+          paths: [../src]
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:

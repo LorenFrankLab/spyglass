@@ -92,7 +92,6 @@ docs = [
     "mkdocs-literate-nav",   # Dynamic page list for API docs
     "mkdocs-material",       # Docs theme
     "mkdocstrings[python]",  # Docs API docstrings
-    "mkdocstrings-python<=1.9.0" # Pinned #976
 ]
 
 [tool.hatch.version]
