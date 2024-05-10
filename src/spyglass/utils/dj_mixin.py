@@ -13,12 +13,11 @@ from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
-from datajoint.utils import get_master, user_choice
+from datajoint.utils import get_master, to_camel_case, user_choice
 from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_chains import TableChain, TableChains
 from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
@@ -71,6 +70,8 @@ class SpyglassMixin:
     _session_pk = None  # Session primary key. Mixin is ambivalent to Session pk
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
+    _banned_search_tables = set()  # Tables to avoid in restrict_by
+
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
 
@@ -92,6 +93,33 @@ class SpyglassMixin:
                 "Table definition matches Merge but does not inherit class: "
                 + self.full_table_name
             )
+
+    # -------------------------- Misc helper methods --------------------------
+
+    @property
+    def camel_name(self):
+        """Return table name in camel case."""
+        return to_camel_case(self.table_name)
+
+    def _auto_increment(self, key, pk, *args, **kwargs):
+        """Auto-increment primary key."""
+        if not key.get(pk):
+            key[pk] = (dj.U().aggr(self, n=f"max({pk})").fetch1("n") or 0) + 1
+        return key
+
+    def file_like(self, name=None, **kwargs):
+        """Convenience method for wildcard search on file name fields."""
+        if not name:
+            return self & True
+        attr = None
+        for field in self.heading.names:
+            if "file" in field:
+                attr = field
+                break
+        if not attr:
+            logger.error(f"No file-like field found in {self.full_table_name}")
+            return
+        return self & f"{attr} LIKE '%{name}%'"
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -203,6 +231,26 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_merge ------------------------
 
+    def _import_merge_tables(self):
+        """Import all merge tables downstream of self."""
+        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
+        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
+        from spyglass.linearization.merge import (
+            LinearizedPositionOutput,
+        )  # noqa F401
+        from spyglass.position.position_merge import PositionOutput  # noqa F401
+        from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
+            SpikeSortingOutput,
+        )
+
+        _ = (
+            DecodingOutput(),
+            LFPOutput(),
+            LinearizedPositionOutput(),
+            PositionOutput(),
+            SpikeSortingOutput(),
+        )
+
     @cached_property
     def _merge_tables(self) -> Dict[str, dj.FreeTable]:
         """Dict of merge tables downstream of self: {full_table_name: FreeTable}.
@@ -215,10 +263,6 @@ class SpyglassMixin:
         visited = set()
 
         def search_descendants(parent):
-            # TODO: Add check that parents are in the graph. If not, raise error
-            #       asking user to import the table.
-            # TODO: Make a `is_merge_table` helper, and check for false
-            #       positives in the mixin init.
             for desc in parent.descendants(as_objects=True):
                 if (
                     MERGE_PK not in desc.heading.names
@@ -235,12 +279,16 @@ class SpyglassMixin:
 
         try:
             _ = search_descendants(self)
-        except NetworkXError as e:
-            table_name = "".join(e.args[0].split("`")[1:4])
-            raise ValueError(f"Please import {table_name} and try again.")
+        except NetworkXError:
+            try:  # Attempt to import missing table
+                self._import_merge_tables()
+                _ = search_descendants(self)
+            except NetworkXError as e:
+                table_name = "".join(e.args[0].split("`")[1:4])
+                raise ValueError(f"Please import {table_name} and try again.")
 
         logger.info(
-            f"Building merge cache for {self.table_name}.\n\t"
+            f"Building merge cache for {self.camel_name}.\n\t"
             + f"Found {len(merge_tables)} downstream merge tables"
         )
 
@@ -258,9 +306,11 @@ class SpyglassMixin:
         with a new restriction. To recompute, add `reload_cache=True` to
         delete_downstream_merge call.
         """
+        from spyglass.utils.dj_graph import TableChains  # noqa F401
+
         merge_chains = {}
         for name, merge_table in self._merge_tables.items():
-            chains = TableChains(self, merge_table, connection=self.connection)
+            chains = TableChains(self, merge_table)
             if len(chains):
                 merge_chains[name] = chains
 
@@ -268,13 +318,14 @@ class SpyglassMixin:
         # that the merge table with the longest chain is the most downstream.
         # A more sophisticated approach would order by length from self to
         # each merge part independently, but this is a good first approximation.
+
         return OrderedDict(
             sorted(
                 merge_chains.items(), key=lambda x: x[1].max_len, reverse=True
             )
         )
 
-    def _get_chain(self, substring) -> TableChains:
+    def _get_chain(self, substring):
         """Return chain from self to merge table with substring in name."""
         for name, chain in self._merge_chains.items():
             if substring.lower() in name:
@@ -330,20 +381,19 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         if reload_cache:
-            del self._merge_tables
-            del self._merge_chains
+            for attr in ["_merge_tables", "_merge_chains"]:
+                _ = self.__dict__.pop(attr, None)
 
         restriction = restriction or self.restriction or True
 
         merge_join_dict = {}
         for name, chain in self._merge_chains.items():
-            join = chain.join(restriction)
-            if join:
+            if join := chain.cascade(restriction, direction="down"):
                 merge_join_dict[name] = join
 
         if not merge_join_dict and not disable_warning:
             logger.warning(
-                f"No merge deletes found w/ {self.table_name} & "
+                f"No merge deletes found w/ {self.camel_name} & "
                 + f"{restriction}.\n\tIf this is unexpected, try importing "
                 + " Merge table(s) and running with `reload_cache`."
             )
@@ -424,8 +474,10 @@ class SpyglassMixin:
         return exp_missing + exp_present
 
     @cached_property
-    def _session_connection(self) -> Union[TableChain, bool]:
+    def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
+        from spyglass.utils.dj_graph import TableChain  # noqa F401
+
         connection = TableChain(parent=self._delete_deps[-1], child=self)
         return connection if connection.has_link else False
 
@@ -716,27 +768,132 @@ class SpyglassMixin:
             self._log_fetch(*args, **kwargs)
         return ret
 
-    # ------------------------- Other helper methods -------------------------
+    # ------------------------------ Restrict by ------------------------------
 
-    def _auto_increment(self, key, pk, *args, **kwargs):
-        """Auto-increment primary key."""
-        if not key.get(pk):
-            key[pk] = (dj.U().aggr(self, n=f"max({pk})").fetch1("n") or 0) + 1
-        return key
+    def __lshift__(self, restriction) -> QueryExpression:
+        """Restriction by upstream operator e.g. ``q1 << q2``.
 
-    def file_like(self, name=None, **kwargs):
-        """Convenience method for wildcard search on file name fields."""
-        if not name:
-            return self & True
-        attr = None
-        for field in self.heading.names:
-            if "file" in field:
-                attr = field
-                break
-        if not attr:
-            logger.error(f"No file-like field found in {self.full_table_name}")
-            return
-        return self & f"{attr} LIKE '%{name}%'"
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_by(restriction, direction="up")
+
+    def __rshift__(self, restriction) -> QueryExpression:
+        """Restriction by downstream operator e.g. ``q1 >> q2``.
+
+        Returns
+        -------
+        QueryExpression
+            A restricted copy of the query expression using the nearest upstream
+            table for which the restriction is valid.
+        """
+        return self.restrict_by(restriction, direction="down")
+
+    def _ensure_names(self, tables) -> List[str]:
+        """Ensure table is a string in a list."""
+        if not isinstance(tables, (list, tuple, set)):
+            tables = [tables]
+        for table in tables:
+            return [getattr(table, "full_table_name", table) for t in tables]
+
+    def ban_search_table(self, table):
+        """Ban table from search in restrict_by."""
+        self._banned_search_tables.update(self._ensure_names(table))
+
+    def unban_search_table(self, table):
+        """Unban table from search in restrict_by."""
+        self._banned_search_tables.difference_update(self._ensure_names(table))
+
+    def see_banned_tables(self):
+        """Print banned tables."""
+        logger.info(f"Banned tables: {self._banned_search_tables}")
+
+    def restrict_by(
+        self,
+        restriction: str = True,
+        direction: str = "up",
+        return_graph: bool = False,
+        verbose: bool = False,
+        **kwargs,
+    ) -> QueryExpression:
+        """Restrict self based on up/downstream table.
+
+        If fails to restrict table, the shortest path may not have been correct.
+        If there's a different path that should be taken, ban unwanted tables.
+
+        >>> my_table = MyTable() # must be instantced
+        >>> my_table.ban_search_table(UnwantedTable1)
+        >>> my_table.ban_search_table([UnwantedTable2, UnwantedTable3])
+        >>> my_table.unban_search_table(UnwantedTable3)
+        >>> my_table.see_banned_tables()
+        >>>
+        >>> my_table << my_restriction
+
+        Parameters
+        ----------
+        restriction : str
+            Restriction to apply to the some table up/downstream of self.
+        direction : str, optional
+            Direction to search for valid restriction. Default 'up'.
+        return_graph : bool, optional
+            If True, return FindKeyGraph object. Default False, returns
+            restricted version of present table.
+        verbose : bool, optional
+            If True, print verbose output. Default False.
+
+        Returns
+        -------
+        Union[QueryExpression, FindKeyGraph]
+            Restricted version of present table or FindKeyGraph object. If
+            return_graph, use all_ft attribute to see all tables in cascade.
+        """
+        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+
+        if restriction is True:
+            return self
+
+        try:
+            ret = self.restrict(restriction)  # Save time trying first
+            if len(ret) < len(self):
+                logger.warning("Restriction valid for this table. Using as is.")
+                return ret
+        except DataJointError:
+            pass  # Could avoid try/except if assert_join_compatible return bool
+            logger.debug("Restriction not valid. Attempting to cascade.")
+
+        if direction == "up":
+            parent, child = None, self
+        elif direction == "down":
+            parent, child = self, None
+        else:
+            raise ValueError("Direction must be 'up' or 'down'.")
+
+        graph = TableChain(
+            parent=parent,
+            child=child,
+            direction=direction,
+            search_restr=restriction,
+            banned_tables=list(self._banned_search_tables),
+            allow_merge=True,
+            cascade=True,
+            verbose=verbose,
+            **kwargs,
+        )
+
+        if return_graph:
+            return graph
+
+        ret = graph.leaf_ft[0]
+        if len(ret) == len(self) or len(ret) == 0:
+            logger.warning(
+                f"Failed to restrict with path: {graph.path_str}\n\t"
+                + "See `help(YourTable.restrict_by)`"
+            )
+
+        return ret
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
