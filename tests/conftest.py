@@ -18,6 +18,8 @@ from .data_downloader import DataDownloader
 # globals in pytest_configure:
 #       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
 warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+warnings.filterwarnings("ignore", module="tensorflow")
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 
 
 def pytest_addoption(parser):

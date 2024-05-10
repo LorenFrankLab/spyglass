@@ -98,6 +98,10 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
 
         video_path, video_filename, _, _ = get_video_path(key)
         output_dir = infer_output_dir(key)
+
+        if not video_path:
+            raise FileNotFoundError(f"Video file not found for {key}")
+
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
             path=f"{output_dir.as_posix()}/log.log",

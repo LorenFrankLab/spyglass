@@ -20,8 +20,8 @@ import pandas as pd
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.utils import logger
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.utils import logger
 
 
 def validate_option(
@@ -108,7 +108,6 @@ def validate_smooth_params(params):
     if not params.get("smooth"):
         return
     smoothing_params = params.get("smoothing_params")
-    validate_option(smoother=smoothing_params, name="smoothing_params")
     validate_option(
         option=smoothing_params.get("smooth_method"),
         name="smooth_method",

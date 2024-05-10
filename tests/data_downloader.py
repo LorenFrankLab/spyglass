@@ -32,16 +32,16 @@ EXTRA_PATHS = [
     #     "target_name": "config.yaml",
     #     "url": BASE_URL + "minirec_dlc_items/config.yaml",
     # },
-    # {
-    #     "relative_dir": "deeplabcut",
-    #     "target_name": "img000.png",
-    #     "url": BASE_URL + "minirec_dlc_items/img000.png",
-    # },
-    # {
-    #     "relative_dir": "deeplabcut",
-    #     "target_name": "img001.png",
-    #     "url": BASE_URL + "minirec_dlc_items/img001.png",
-    # },
+    {
+        "relative_dir": "deeplabcut",
+        "target_name": "img000.png",
+        "url": BASE_URL + "minirec_dlc_items/img000.png",
+    },
+    {
+        "relative_dir": "deeplabcut",
+        "target_name": "img001.png",
+        "url": BASE_URL + "minirec_dlc_items/img001.png",
+    },
 ]
 
 

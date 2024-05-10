@@ -1,4 +1,5 @@
 from pathlib import Path
+from shutil import rmtree as shutil_rmtree
 
 import pytest
 from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
@@ -21,24 +22,29 @@ def dlc_project_tbl(sgp):
 
 
 @pytest.fixture(scope="session")
-def insert_project(dlc_project_tbl, common, bodyparts, mini_copy_name):
-    team_name = common.LabTeam.fetch("team_name")[0].replace(" ", "_")
-    project_key = dlc_project_tbl.insert_new_project(
-        project_name="pytest_proj",
-        bodyparts=bodyparts,
-        lab_team=team_name,
-        frames_per_video=100,
-        video_list=[
-            {"nwb_file_name": mini_copy_name, "epoch": 0},
-            {"nwb_file_name": mini_copy_name, "epoch": 1},
-        ],
-        skip_duplicates=True,
-    )
+def insert_project(
+    verbose_context, dlc_project_tbl, common, bodyparts, mini_copy_name
+):
+    team_name = "sc_eb"
+    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    with verbose_context:
+        project_key = dlc_project_tbl.insert_new_project(
+            project_name="pytest_proj",
+            bodyparts=bodyparts,
+            lab_team=team_name,
+            frames_per_video=100,
+            video_list=[
+                {"nwb_file_name": mini_copy_name, "epoch": 0},
+                {"nwb_file_name": mini_copy_name, "epoch": 1},
+            ],
+            skip_duplicates=True,
+        )
     config_path = (dlc_project_tbl & project_key).fetch1("config_path")
     cfg = read_config(config_path)
     cfg.update(
         {
             "numframes2pick": 2,
+            "maxiters": 2,
             "scorer": team_name,
             "skeleton": [
                 ["whiteLED"],
@@ -54,6 +60,9 @@ def insert_project(dlc_project_tbl, common, bodyparts, mini_copy_name):
     write_config(config_path, cfg)
 
     yield project_key, cfg, config_path
+
+    (dlc_project_tbl & project_key).delete(safemode=False)
+    shutil_rmtree(str(Path(config_path).parent))
 
 
 @pytest.fixture(scope="session")
@@ -77,51 +86,64 @@ def project_dir(config_path):
 
 
 @pytest.fixture(scope="session")
-def extract_frames(dlc_project_tbl, project_key, dlc_config, project_dir):
-    dlc_project_tbl.run_extract_frames(project_key, userfeedback=False)
+def extract_frames(
+    verbose_context, dlc_project_tbl, project_key, dlc_config, project_dir
+):
+    with verbose_context:
+        dlc_project_tbl.run_extract_frames(project_key, userfeedback=False)
     vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
-    label_dir = project_dir / "labeled-data" / vid_name
+    label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
     yield label_dir
 
 
 @pytest.fixture(scope="session")
-def label_dir(extract_frames):
+def labeled_vid_dir(extract_frames):
     yield extract_frames
 
 
 @pytest.fixture(scope="session")
-def fix_frames(label_dir, project_dir):
-    # Rename to img000.png, img001.png, etc.
-    for i, img in enumerate(label_dir.glob("*.png")):
-        img.rename(label_dir / f"img{i:03d}.png")
-
-    # Move labels to labeled-data
-    for file in project_dir.glob("Collect*"):
-        file.rename(label_dir / file.name)
+def fix_downloaded(labeled_vid_dir, project_dir):
+    """Grabs CollectedData and img files from project_dir, moves to labeled"""
+    for file in project_dir.parent.parent.glob("*"):
+        if file.is_dir():
+            continue
+        dest = labeled_vid_dir / file.name
+        if dest.exists():
+            dest.unlink()
+        dest.write_bytes(file.read_bytes())
+        # TODO: revert to rename before merge
+        # file.rename(labeled_vid_dir / file.name)
 
     yield
 
 
 @pytest.fixture(scope="session")
-def training_params_key(sgp, project_key):
+def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
+    dlc_project_tbl.add_training_files(project_key, skip_duplicates=True)
+    yield
+
+
+@pytest.fixture(scope="session")
+def training_params_key(verbose_context, sgp, project_key):
     training_params_name = "tutorial"
-    sgp.v1.DLCModelTrainingParams.insert_new_params(
-        paramset_name=training_params_name,
-        params={
-            "trainingsetindex": 0,
-            "shuffle": 1,
-            "gputouse": 1,
-            "net_type": "resnet_50",
-            "augmenter_type": "imgaug",
-        },
-        skip_duplicates=True,
-    )
+    with verbose_context:
+        sgp.v1.DLCModelTrainingParams.insert_new_params(
+            paramset_name=training_params_name,
+            params={
+                "trainingsetindex": 0,
+                "shuffle": 1,
+                "gputouse": 1,
+                "net_type": "resnet_50",
+                "augmenter_type": "imgaug",
+            },
+            skip_duplicates=True,
+        )
     yield {"dlc_training_params_name": training_params_name}
 
 
 @pytest.fixture(scope="session")
 def model_train_key(sgp, project_key, training_params_key):
-    _ = project_key.pop("config_path")
+    _ = project_key.pop("config_path", None)
     model_train_key = {
         **project_key,
         **training_params_key,
@@ -138,10 +160,11 @@ def model_train_key(sgp, project_key, training_params_key):
 
 
 @pytest.fixture(scope="session")
-def populate_training(sgp, fix_frames, model_train_key):
-    raise NotImplementedError("Can't find dj config for DLCModelTraining")
+def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
+    _ = add_training_files
+    _ = fix_downloaded
     sgp.v1.DLCModelTraining.populate(model_train_key)
-    yield
+    yield model_train_key
 
 
 @pytest.fixture(scope="session")
@@ -152,8 +175,9 @@ def model_source_key(sgp, model_train_key, populate_training):
 @pytest.fixture(scope="session")
 def model_key(sgp, model_source_key):
     model_key = {**model_source_key, "dlc_model_params_name": "default"}
-    sgp.v1.DLCModelParams.get_default()
+    _ = sgp.v1.DLCModelParams.get_default()
     sgp.v1.DLCModelSelection().insert1(model_key, skip_duplicates=True)
+    yield model_key
 
 
 @pytest.fixture(scope="session")
@@ -163,16 +187,16 @@ def populate_model(sgp, model_key):
 
 
 @pytest.fixture(scope="session")
-def pose_estimation_key(sgp, mini_copy_name, model_source_key):
+def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
     yield sgp.v1.DLCPoseEstimationSelection.insert_estimation_task(
         {
             "nwb_file_name": mini_copy_name,
-            "epoch": 0,
+            "epoch": 1,
             "video_file_num": 0,
-            **model_source_key,
+            **model_key,
         },
         task_mode="trigger",  # trigger or load
-        params={"gputouse": 1, "videotype": "mp4"},
+        params={"gputouse": None, "videotype": "mp4"},
     )
 
 
