@@ -15,8 +15,6 @@ def Mixin():
 
     yield Mixin
 
-    Mixin().drop_quick()
-
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_bad_prefix(caplog, dj_conn, Mixin):

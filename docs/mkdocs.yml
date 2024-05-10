@@ -74,6 +74,7 @@ nav:
       - FigURL: misc/figurl_views.md
       - Session Groups: misc/session_groups.md
       - Insert Data: misc/insert_data.md
+      - Mixin: misc/mixin.md
       - Merge Tables: misc/merge_tables.md
       - Database Management: misc/database_management.md
       - Export: misc/export.md
@@ -100,6 +101,7 @@ plugins:
       default_handler: python
       handlers:
         python:
+          paths: [src]
           options:
             members_order: source
             group_by_category: false

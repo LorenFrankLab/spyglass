@@ -7,7 +7,7 @@
 cp ./CHANGELOG.md ./docs/src/
 cp ./LICENSE ./docs/src/LICENSE.md
 mkdir -p ./docs/src/notebooks
-rm -r ./docs/src/notebooks/*
+rm -fr ./docs/src/notebooks/*
 cp ./notebooks/*ipynb ./docs/src/notebooks/
 cp ./notebooks/*md ./docs/src/notebooks/
 mv ./docs/src/notebooks/README.md ./docs/src/notebooks/index.md
