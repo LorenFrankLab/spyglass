@@ -27,6 +27,12 @@ class DIOEvents(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -45,10 +51,17 @@ class DIOEvents(SpyglassMixin, dj.Imported):
         key["interval_list_name"] = (
             Raw() & {"nwb_file_name": nwb_file_name}
         ).fetch1("interval_list_name")
+
+        dio_inserts = []
         for event_series in behav_events.time_series.values():
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
-            self.insert1(key, skip_duplicates=True)
+            dio_inserts.append(key.copy())
+        self.insert(
+            dio_inserts,
+            skip_duplicates=True,
+            allow_direct_insert=True,
+        )
 
     def plot_all_dio_events(self, return_fig=False):
         """Plot all DIO events in the session.

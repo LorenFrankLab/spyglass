@@ -43,12 +43,8 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
-    def populate(self, keys=None):
-        """Insert position source data from NWB file.
-
-        WARNING: populate method on Manual table is not protected by transaction
-                protections like other DataJoint tables.
-        """
+    def _no_transaction_make(self, keys=None):
+        """Insert position source data from NWB file."""
         if not isinstance(keys, list):
             keys = [keys]
         if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
@@ -227,6 +223,12 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return column_names
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         interval_list_name = key["interval_list_name"]
 
@@ -238,7 +240,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
             PositionSource.get_epoch_num(interval_list_name)
         ]
 
-        self.insert1(key)
+        self.insert1(key, allow_direct_insert=True)
         self.PosObject.insert(
             [
                 dict(
@@ -294,6 +296,12 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        self._no_transaction_make(key)
+
+    def _no_transaction_make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         """Add a new row to the StateScriptFile table."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -309,6 +317,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             )
             return  # See #849
 
+        script_inserts = []
         for associated_file_obj in associated_files.data_interfaces.values():
             if not isinstance(
                 associated_file_obj, ndx_franklab_novela.AssociatedFiles
@@ -337,9 +346,12 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
                 # find the file associated with this epoch
                 if str(key["epoch"]) in epoch_list:
                     key["file_object_id"] = associated_file_obj.object_id
-                    self.insert1(key)
+                    script_inserts.append(key.copy())
             else:
                 logger.info("not a statescript file")
+
+        if script_inserts:
+            self.insert(script_inserts, allow_direct_insert=True)
 
 
 @schema
