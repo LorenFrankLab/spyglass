@@ -90,16 +90,23 @@ class PositionSource(SpyglassMixin, dj.Manual):
         for epoch, epoch_list in all_pos.items():
             ind_key = dict(interval_list_name=cls.get_pos_interval_name(epoch))
 
-            sources.append(dict(**src_key, **ind_key))
-            intervals.append(
-                dict(
+            interval_exists, new_interval = IntervalList().key_exists(
+                key=dict(
                     **sess_key,
                     **ind_key,
                     valid_times=epoch_list[0]["valid_times"],
                     pipeline="position",
-                )
+                ),
+                approx_name="pos%valid times",
             )
+            if not interval_exists:
+                intervals.append(new_interval)
+            else:
+                ind_key.update(
+                    {"interval_list_name": new_interval["interval_list_name"]}
+                )
 
+            sources.append(dict(**src_key, **ind_key))
             for index, pdict in enumerate(epoch_list):
                 spat_series.append(
                     dict(

@@ -148,7 +148,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
         # INSERT
         # - into IntervalList
-        IntervalList.insert1(
+        actual_interval = IntervalList().cautious_insert1(
             dict(
                 nwb_file_name=(
                     SpikeSortingRecordingSelection * ArtifactDetectionSelection
@@ -158,8 +158,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 valid_times=artifact_removed_valid_times,
                 pipeline="spikesorting_artifact_v1",
             ),
+            approx_name="artifact_removed_valid_times",
             skip_duplicates=True,
         )
+        key.update(actual_interval)
+
         # - into ArtifactRemovedInterval
         self.insert1(key)
 

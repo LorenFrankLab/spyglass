@@ -271,9 +271,10 @@ class Raw(SpyglassMixin, dj.Imported):
             )
         key["sampling_rate"] = sampling_rate
 
-        interval_dict = dict()
-        interval_dict["nwb_file_name"] = key["nwb_file_name"]
-        interval_dict["interval_list_name"] = raw_interval_name
+        interval_dict = {
+            "nwb_file_name": key["nwb_file_name"],
+            "interval_list_name": raw_interval_name,
+        }
         if rawdata.rate is not None:
             interval_dict["valid_times"] = np.array(
                 [[0, len(rawdata.data) / rawdata.rate]]
@@ -290,18 +291,21 @@ class Raw(SpyglassMixin, dj.Imported):
 
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id
+        logger.info(
+            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n'
+            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
+        )
 
-        key["raw_object_id"] = rawdata.object_id
-        key["sampling_rate"] = sampling_rate
-        logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz'
+        key.update(
+            {
+                "raw_object_id": rawdata.object_id,
+                "sampling_rate": sampling_rate,
+                "interval_list_name": raw_interval_name,
+                "comments": rawdata.comments,
+                "description": rawdata.description,
+            }
         )
-        logger.info(
-            f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
-        )
-        key["interval_list_name"] = raw_interval_name
-        key["comments"] = rawdata.comments
-        key["description"] = rawdata.description
+
         self.insert1(key, skip_duplicates=True)
 
     def nwb_object(self, key):
@@ -484,23 +488,30 @@ class LFP(SpyglassMixin, dj.Imported):
 
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
 
-        key["analysis_file_name"] = lfp_file_name
-        key["lfp_object_id"] = lfp_object_id
-        key["lfp_sampling_rate"] = sampling_rate // decimation
+        key.update(
+            {
+                "analysis_file_name": lfp_file_name,
+                "lfp_object_id": lfp_object_id,
+                "lfp_sampling_rate": sampling_rate // decimation,
+                "interval_list_name": "lfp valid times",
+            }
+        )
 
         # finally, we need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
+
         # add an interval list for the LFP valid times, skipping duplicates
-        key["interval_list_name"] = "lfp valid times"
-        IntervalList.insert1(
-            {
+        interval_key = IntervalList().cautious_insert1(
+            key={
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
                 "valid_times": lfp_valid_times,
                 "pipeline": "lfp_v0",
             },
-            replace=True,
-        )
+            approx_name=None,  # search all from this animal
+        )  # removed repleace=True 2024-04-22
+        key.update(interval_key)
+
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
@@ -670,7 +681,8 @@ class LFPBand(SpyglassMixin, dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
-        # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
+        # get the NWB object with the lfp data; FIX: change to fetch with
+        # additional infrastructure
         lfp_object = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch_nwb()[0]["lfp"]
@@ -690,9 +702,11 @@ class LFPBand(SpyglassMixin, dj.Computed):
         lfp_sampling_rate = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch1("lfp_sampling_rate")
+
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key
         ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
+
         valid_times = (
             IntervalList()
             & {
@@ -700,8 +714,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
-        # the valid_times for this interval may be slightly beyond the valid times for the lfp itself,
-        # so we have to intersect the two
+
+        # the valid_times for this interval may be slightly beyond the valid
+        # times for the lfp itself, so we have to intersect the two
+
         lfp_interval_list = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch1("interval_list_name")
@@ -727,7 +743,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
-        # get the indices of the first timestamp and the last timestamp that are within the valid times
+
+        # get the indices of the first timestamp and the last timestamp that
+        # are within the valid times
+
         included_indices = interval_list_contains_ind(
             lfp_band_valid_times, timestamps
         )
@@ -791,12 +810,17 @@ class LFPBand(SpyglassMixin, dj.Computed):
             decimation,
         )
 
-        # now that the LFP is filtered, we create an electrical series for it and add it to the file
+        # now that the LFP is filtered, we create an electrical series for it
+        # and add it to the file
+
         with pynwb.NWBHDF5IO(
             path=lfp_band_file_abspath, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            # get the indices of the electrodes in the electrode table of the file to get the right values
+
+            # get the indices of the electrodes in the electrode table of the
+            # file to get the right values
+
             elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
@@ -813,14 +837,15 @@ class LFPBand(SpyglassMixin, dj.Computed):
             nwbf.add_scratch(es)
             io.write(nwbf)
             filtered_data_object_id = es.object_id
-        #
+
         # add the file to the AnalysisNwbfile table
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_band_file_name)
         key["analysis_file_name"] = lfp_band_file_name
         key["filtered_data_object_id"] = filtered_data_object_id
 
-        # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
-        # downsampled these data
+        # finally, we need to censor the valid times to account for the
+        # downsampling if this is the first time we've downsampled these data
+
         key["interval_list_name"] = (
             interval_list_name
             + " lfp band "
@@ -834,19 +859,23 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch("valid_times")
+
         if len(tmp_valid_times) == 0:
             lfp_band_valid_times = interval_list_censor(
                 lfp_band_valid_times, new_timestamps
             )
             # add an interval list for the LFP valid times
-            IntervalList.insert1(
-                {
+            actual_interval = IntervalList.cautious_insert1(
+                key={
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
                     "valid_times": lfp_band_valid_times,
                     "pipeline": "lfp_band",
-                }
+                },
+                approx_name="lfp_band%Hz",
             )
+            key.update(actual_interval)
+
         else:
             # check that the valid times are the same
             assert np.isclose(

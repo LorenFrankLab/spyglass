@@ -1,5 +1,9 @@
 import itertools
 from functools import reduce
+from random import shuffle as random_shuffle
+from re import sub as re_sub
+from time import time
+from typing import List, Tuple, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -7,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
 
 from .common_session import Session  # noqa: F401
 
@@ -23,7 +28,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
     interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
-    pipeline = "": varchar(64)  # type of interval list (e.g. 'position', 'spikesorting_recording_v1')
+    pipeline = "": varchar(64)  # schema name of inserting table
     """
 
     # See #630, #664. Excessive key length.
@@ -53,20 +58,212 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         epochs = nwbf.epochs.to_dataframe()
 
+        inserts = []
         for _, epoch_data in epochs.iterrows():
-            epoch_dict = {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": (
-                    epoch_data.tags[0]
-                    if epoch_data.tags
-                    else f"interval_{epoch_data[0]}"
-                ),
-                "valid_times": np.asarray(
-                    [[epoch_data.start_time, epoch_data.stop_time]]
-                ),
-            }
+            inserts.append(
+                {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": (
+                        epoch_data.tags[0]
+                        if epoch_data.tags
+                        else f"interval_{epoch_data[0]}"
+                    ),
+                    "valid_times": np.asarray(
+                        [[epoch_data.start_time, epoch_data.stop_time]]
+                    ),
+                }
+            )
 
-            cls.insert1(epoch_dict, skip_duplicates=True)
+        cls.insert(inserts, skip_duplicates=True)
+
+    def _generalize_name(self, name):
+        """Generalize interval list name by replacing numbers with '%'."""
+        name = re_sub(r"\d+", "%", name)  # replace numbers with %
+        name = re_sub(r"^%|%$", "", name)  # remove leading/trailing %
+        parts = name.split(".nwb")  # remove file name
+        return parts[-1]
+
+    def _pk_from_key(self, key):
+        return {k: v for k, v in key.items() if k in self.primary_key}
+
+    def _times_match(self, times1, times2) -> bool:
+        """Check match of valid_times between two interval lists."""
+        len_match = len(times1) == len(times2)
+        content_match = np.equal(times1, times2).all()
+        return len_match and content_match
+
+    def key_exists(
+        self,
+        key: dict,
+        approx_name: str = None,
+        time_limit: float = 5.0,
+        *args,
+        **kwargs,
+    ) -> Tuple[bool, dict]:
+        """Check if the interval list already exists.
+
+        Parameters
+        ----------
+        key : dict
+            The key for the IntervalList table.
+        approx_name : str, optional
+            A string that should be in the interval list name. If None, just
+            search by nwb_file_name. Defaults to None. If `True`, will attempt
+            to generalize the name by replacing numbers with '%'.
+        time_limit : float, optional
+            The maximum time to search for an existing interval list before
+            inserting a new one. Defaults to 5.0.
+
+        Returns
+        -------
+        tuple
+            The first element is a boolean indicating if the interval list
+            already exists. The second element is the key of the existing
+            interval list if it exists, or the original key if it does not.
+        """
+
+        start_time = time()
+
+        # Exact search
+        query = self & key
+        if len(query) == 1:
+            if self._times_match(
+                query.fetch1("valid_times"), key["valid_times"]
+            ):
+                return True, key
+            elif downstream := self.cleanup(query.restriction, dry_run=False):
+                raise ValueError(
+                    "List with key exists and is used elsewhere:\n\t"
+                    + f"Key: {key}\n\tDownstream: {downstream}"
+                )
+                # Alternatively, adjust the name and insert?
+
+        # Approx name search
+        query = self & {"nwb_file_name": key.get("nwb_file_name")}
+        if approx_name is True:
+            approx_name = self._generalize_name(key["interval_list_name"])
+        if approx_name:
+            query &= f"interval_list_name LIKE '%{approx_name}%'"
+
+        if not query:
+            return False, key
+
+        candidates = query.fetch(as_dict=True)
+        random_shuffle(candidates)
+        for candidate in candidates:
+            if time() - start_time > time_limit:
+                return False, key
+            if not self._times_match(
+                candidate["valid_times"], key["valid_times"]
+            ):
+                continue
+            logger.info(
+                "Interval valid times exist: "
+                + f"{key['interval_list_name']} -> "
+                + f"{candidate['interval_list_name']}"
+            )
+            return True, candidate
+
+    def cautious_insert1(
+        self,
+        key: dict,
+        approx_name: str = None,
+        time_limit: float = 5.0,
+        *args,
+        **kwargs,
+    ) -> dict:
+        """Check if the interval list already exists before inserting it.
+
+        If the interval list already exists, return the existing interval list.
+        Will insert if search time exceeds `time_limit`.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key for the IntervalList table.
+        approx_name : str, optional
+            A string that should be in the interval list name. If None, just
+            search by nwb_file_name. Defaults to None. If `True`, will attempt
+            to generalize the name by replacing numbers with '%'.
+        time_limit : float, optional
+            The maximum time to search for an existing interval list before
+            inserting a new one. Defaults to 5.0.
+        """
+
+        exists, new_key = self._check_existing(
+            key, approx_name, time_limit, *args, **kwargs
+        )
+
+        if not exists:
+            self.insert1(key, *args, **kwargs)
+
+        return self._pk_from_key(new_key)
+
+    def cautious_insert(
+        self,
+        keys: List[dict],
+        approx_names: Union[str, List[str]] = None,
+        time_limit: float = 5.0,
+        *args,
+        **kwargs,
+    ):
+        if not isinstance(keys, list):
+            keys = [keys]
+        if not isinstance(approx_names, list):
+            approx_names = [approx_names] * len(keys)
+
+        inserts = []
+        for key, approx_name in zip(keys, approx_names):
+            exists, new_key = self._check_existing(
+                key, approx_name, time_limit, *args, **kwargs
+            )
+            if not exists:
+                inserts.append(new_key)
+        self.insert(inserts, *args, **kwargs)
+        return [self._pk_from_key(key) for key in inserts]
+
+    def cleanup(
+        self, restriction: str, dry_run: bool = True
+    ) -> Union[None, List[dj.FreeTable]]:
+        """Find all entries associated with a given restriction.
+
+        If dry_run, return list of FreeTables with associated entries."""
+        from spyglass.utils.dj_graph import RestrGraph
+
+        raise NotImplementedError("This method requires #949.")
+
+        restr_self = self & restriction  # raises exception if invalid
+
+        restr_graph = RestrGraph(
+            seed_table=self,
+            table_name=self.full_table_name,
+            restriction=restriction,
+            direction="down",
+            cascade=True,
+        )
+        all_ft = restr_graph.all_ft
+
+        if dry_run:
+            return all_ft if len(all_ft) > 1 else None
+
+        if len(all_ft) == 1 and all_ft[0] == self.full_table_name:
+            logger.info(f"Deleting orphaned entries\n\t{all_ft[0]}")
+            restr_self.super_delete(warn=False)
+        else:
+            logger.info(f"Found associated entries: \n\t{all_ft}")
+
+    def nightly_cleanup(self, dry_run: bool = True):
+        """Delete orphaned entries in the IntervalList table.
+
+        NOTE: Does not catch all orphans in testing.
+        """
+        child_tables = get_child_tables(self)
+        orphans = self - child_tables
+
+        if dry_run:
+            return orphans
+
+        orphans.delete_quick()
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)

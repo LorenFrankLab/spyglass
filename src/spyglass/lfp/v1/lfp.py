@@ -162,28 +162,16 @@ class LFPV1(SpyglassMixin, dj.Computed):
                 "valid times",
             )
         )
-
-        tmp_valid_times = (
-            IntervalList
-            & {
+        interval_key = IntervalList().cautious_insert1(
+            key={
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
-            }
-        ).fetch("valid_times")
-        if len(tmp_valid_times) == 0:
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_valid_times,
-                    "pipeline": "lfp_v1",
-                },
-                replace=True,
-            )
-        elif not np.allclose(tmp_valid_times[0], lfp_valid_times):
-            raise ValueError(
-                "previously saved lfp times do not match current times"
-            )
+                "valid_times": lfp_valid_times,
+                "pipeline": "lfp_v1",
+            },
+            approx_name="lfp_" + key["lfp_electrode_group_name"],
+        )
+        key.update(interval_key)
         self.insert1(key)
 
         # finally, we insert this into the LFP output table.

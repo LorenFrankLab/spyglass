@@ -418,6 +418,7 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 def pos_merge_tables(dj_conn):
     """Return the merge tables as activated."""
     from spyglass.common.common_position import TrackGraph
+    from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
     from spyglass.position.position_merge import PositionOutput
 

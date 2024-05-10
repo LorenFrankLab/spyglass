@@ -71,72 +71,59 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        if not (ArtifactDetectionSelection & key).fetch1(
+        if (ArtifactDetectionSelection & key).fetch1(
             "custom_artifact_detection"
         ):
-            # get the dict of artifact params associated with this artifact_params_name
-            artifact_params = (ArtifactDetectionParameters & key).fetch1(
-                "artifact_params"
-            )
+            return
 
-            recording_path = (SpikeSortingRecording & key).fetch1(
-                "recording_path"
-            )
-            recording_name = SpikeSortingRecording._get_recording_name(key)
-            recording = si.load_extractor(recording_path)
+        # get the dict of artifact params associated with this params_name
+        artifact_params = (ArtifactDetectionParameters & key).fetch1(
+            "artifact_params"
+        )
 
-            job_kwargs = {
-                "chunk_duration": "10s",
-                "n_jobs": 4,
-                "progress_bar": "True",
+        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
+        recording_name = SpikeSortingRecording._get_recording_name(key)
+        recording = si.load_extractor(recording_path)
+
+        job_kwargs = {
+            "chunk_duration": "10s",
+            "n_jobs": 4,
+            "progress_bar": "True",
+        }
+
+        artifact_removed_valid_times, artifact_times = _get_artifact_times(
+            recording, **artifact_params, **job_kwargs
+        )
+        interval_list_name = (
+            recording_name
+            + "_"
+            + key["artifact_params_name"]
+            + "_artifact_removed_valid_times"
+        )
+
+        key.update(
+            {
+                "artifact_times": artifact_times,
+                "artifact_removed_valid_times": artifact_removed_valid_times,
+                "artifact_removed_interval_list_name": interval_list_name,
             }
+        )
 
-            artifact_removed_valid_times, artifact_times = _get_artifact_times(
-                recording, **artifact_params, **job_kwargs
-            )
+        interval_key = IntervalList().cautious_insert1(
+            key={
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": interval_list_name,
+                "valid_times": key["artifact_removed_valid_times"],
+                "pipeline": "spikesorting_artifact_v0",
+            },
+            approx_name="artifact_removed_valid_times",
+        )  # removed replace=True 2024-04-23
+        key.update(interval_key)
 
-            # NOTE: decided not to do this but to just create a single long segment; keep for now
-            # get artifact times by segment
-            # if AppendSegmentRecording, get artifact times for each segment
-            # if isinstance(recording, AppendSegmentRecording):
-            #     artifact_removed_valid_times = []
-            #     artifact_times = []
-            #     for rec in recording.recording_list:
-            #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
-            #         for valid_times in rec_valid_times:
-            #             artifact_removed_valid_times.append(valid_times)
-            #         for artifact_times in rec_artifact_times:
-            #             artifact_times.append(artifact_times)
-            #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
-            #     artifact_times = np.asarray(artifact_times)
-            # else:
-            #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
+        ArtifactRemovedIntervalList.insert1(key, replace=True)
 
-            key["artifact_times"] = artifact_times
-            key["artifact_removed_valid_times"] = artifact_removed_valid_times
-
-            # set up a name for no-artifact times using recording id
-            key["artifact_removed_interval_list_name"] = (
-                recording_name
-                + "_"
-                + key["artifact_params_name"]
-                + "_artifact_removed_valid_times"
-            )
-
-            ArtifactRemovedIntervalList.insert1(key, replace=True)
-
-            # also insert into IntervalList
-            tmp_key = {}
-            tmp_key["nwb_file_name"] = key["nwb_file_name"]
-            tmp_key["interval_list_name"] = key[
-                "artifact_removed_interval_list_name"
-            ]
-            tmp_key["valid_times"] = key["artifact_removed_valid_times"]
-            tmp_key["pipeline"] = "spikesorting_artifact_v0"
-            IntervalList.insert1(tmp_key, replace=True)
-
-            # insert into computed table
-            self.insert1(key)
+        # insert into computed table
+        self.insert1(key)
 
 
 @schema
@@ -290,8 +277,11 @@ def _get_artifact_times(
 
     # compute set difference between intervals (of indices)
     try:
-        # if artifact_intervals_new is a list of lists then len(artifact_intervals_new[0]) is the number of intervals
-        # otherwise artifact_intervals_new is a list of ints and len(artifact_intervals_new[0]) is not defined
+
+        # if artifact_intervals_new is a list of lists then
+        # len(artifact_intervals_new[0]) is the number of intervals otherwise
+        # artifact_intervals_new is a list of ints and
+        # len(artifact_intervals_new[0]) is not defined
         len(artifact_intervals_new[0])
     except TypeError:
         # convert to list of lists

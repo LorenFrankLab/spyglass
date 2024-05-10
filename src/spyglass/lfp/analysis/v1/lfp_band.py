@@ -325,14 +325,16 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = lfp_band_file_name
         key["lfp_band_object_id"] = lfp_band_object_id
 
-        # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
-        # downsampled these data
+        # finally, we need to censor the valid times to account for the
+        # downsampling if this is the first time we've downsampled these data
+
         key["interval_list_name"] = (
             interval_list_name
             + " lfp band "
             + str(lfp_band_sampling_rate)
             + "Hz"
         )
+
         tmp_valid_times = (
             IntervalList
             & {
@@ -344,15 +346,16 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             lfp_band_valid_times = interval_list_censor(
                 lfp_band_valid_times, new_timestamps
             )
-            # add an interval list for the LFP valid times
-            IntervalList.insert1(
-                {
+            interval_key = IntervalList().cautious_insert1(
+                key={
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
                     "valid_times": lfp_band_valid_times,
                     "pipeline": "lfp band",
-                }
+                },
+                approx_name="lfp band%Hz",
             )
+            key.update(interval_key)
         else:
             lfp_band_valid_times = interval_list_censor(
                 lfp_band_valid_times, new_timestamps
