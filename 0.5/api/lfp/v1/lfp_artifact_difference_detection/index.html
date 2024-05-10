@@ -82,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-skip">
+        <a href="#spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-skip">
           Skip to content
         </a>
       
@@ -2640,7 +2640,7 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-nav__link">
+  <a href="#spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-nav__link">
     <span class="md-ellipsis">
       lfp_artifact_difference_detection
     </span>
@@ -2649,7 +2649,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="md-nav__link">
+  <a href="#spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="md-nav__link">
     <span class="md-ellipsis">
       difference_artifact_detector
     </span>
@@ -4421,27 +4421,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../../utils/dj_chains/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    dj_chains.py
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../../utils/dj_graph/" class="md-nav__link">
         
   
@@ -4661,7 +4640,7 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-nav__link">
+  <a href="#spyglass.lfp.v1.lfp_artifact_difference_detection" class="md-nav__link">
     <span class="md-ellipsis">
       lfp_artifact_difference_detection
     </span>
@@ -4670,7 +4649,7 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="md-nav__link">
+  <a href="#spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="md-nav__link">
     <span class="md-ellipsis">
       difference_artifact_detector
     </span>
@@ -4699,7 +4678,7 @@
 
 
 
-<a id="src.spyglass.lfp.v1.lfp_artifact_difference_detection"></a>
+<a id="spyglass.lfp.v1.lfp_artifact_difference_detection"></a>
   <div class="doc doc-contents first">
 
   
@@ -4713,14 +4692,26 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
 <div class="doc doc-object doc-function">
 
 
 
-<h2 id="src.spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="doc doc-heading">
+<h2 id="spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="doc doc-heading">
           <code class="highlight language-python"><span class="n">difference_artifact_detector</span><span class="p">(</span><span class="n">recording</span><span class="p">,</span> <span class="n">timestamps</span><span class="p">,</span> <span class="n">amplitude_thresh_1st</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">amplitude_thresh_2nd</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">proportion_above_thresh_1st</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">proportion_above_thresh_2nd</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">removal_window_ms</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">local_window_ms</span><span class="o">=</span><span class="mf">1.0</span><span class="p">,</span> <span class="n">sampling_frequency</span><span class="o">=</span><span class="mf">1000.0</span><span class="p">,</span> <span class="n">referencing</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span></code>
 
-<a href="#src.spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="headerlink" title="Permanent link">&para;</a></h2>
+<a href="#spyglass.lfp.v1.lfp_artifact_difference_detection.difference_artifact_detector" class="headerlink" title="Permanent link">&para;</a></h2>
 
 
   <div class="doc doc-contents ">
@@ -4733,7 +4724,7 @@ amplitude change threshold values of None are ignored.</p>
 
 
 
-  <p><strong>Parameters:</strong></p>
+  <p><span class="doc-section-title">Parameters:</span></p>
   <table>
     <thead>
       <tr>
@@ -4744,7 +4735,7 @@ amplitude change threshold values of None are ignored.</p>
       </tr>
     </thead>
     <tbody>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>recording</code></td>
           <td>
                 <code>lfp eseries zscore_thresh : float</code>
@@ -4758,7 +4749,7 @@ amplitude change threshold values of None are ignored.</p>
               <em>required</em>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>amplitude_thresh_1st</code></td>
           <td>
                 <code>float</code>
@@ -4773,7 +4764,7 @@ None</p>
                 <code>None</code>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>amplitude_thresh_2nd</code></td>
           <td>
                 <code>float</code>
@@ -4788,7 +4779,7 @@ None</p>
                 <code>None</code>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>proportion_above_thresh_1st</code></td>
           <td>
                 <code>float, optional, should be&gt;0 and &lt;=1</code>
@@ -4803,7 +4794,7 @@ to 1</p>
                 <code>1.0</code>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>proportion_above_thresh_2nd</code></td>
           <td>
                 <code>float, optional, should be&gt;0 and &lt;=1</code>
@@ -4818,7 +4809,7 @@ to 1</p>
                 <code>1.0</code>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>removal_window_ms</code></td>
           <td>
                 <code>float</code>
@@ -4833,7 +4824,7 @@ removed on each side of threshold crossing), defaults to 1 ms</p>
                 <code>1.0</code>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
           <td><code>referencing</code></td>
           <td>
                 <code>bool</code>
@@ -4852,7 +4843,7 @@ removed on each side of threshold crossing), defaults to 1 ms</p>
 
 
 
-  <p><strong>Returns:</strong></p>
+  <p><span class="doc-section-title">Returns:</span></p>
   <table>
     <thead>
       <tr>
@@ -4861,7 +4852,7 @@ removed on each side of threshold crossing), defaults to 1 ms</p>
       </tr>
     </thead>
     <tbody>
-        <tr>
+        <tr class="doc-section-item">
 <td><code>artifact_removed_valid_times</code></td>          <td>
                 <code><span title="numpy.ndarray">ndarray</span></code>
           </td>
@@ -4872,7 +4863,7 @@ seconds</p>
             </div>
           </td>
         </tr>
-        <tr>
+        <tr class="doc-section-item">
 <td><code>artifact_intervals</code></td>          <td>
                 <code><span title="numpy.ndarray">ndarray</span></code>
           </td>

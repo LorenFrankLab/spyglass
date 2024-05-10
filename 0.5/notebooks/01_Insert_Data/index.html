@@ -4477,27 +4477,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/utils/dj_chains/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    dj_chains.py
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/utils/dj_graph/" class="md-nav__link">
         
   
@@ -5990,8 +5969,22 @@ the NWB file is properly composed, this includes...</p>
 <li>neural activity (extracellular recording of multiple brain areas)</li>
 <li>etc.</li>
 </ul>
-<p><em>Note:</em> this may take time as Spyglass creates the copy. You may see a prompt
+<p><em>Notes:</em> this may take time as Spyglass creates the copy. You may see a prompt
 about inserting device information.</p>
+<p>By default, the session insert process is error permissive. It will log an
+error and continue attempts across various tables. You have two options you can
+toggle to adjust this.</p>
+<ul>
+<li><code>rollback_on_fail</code>: Default False. If True, errors will still be logged for
+all tables and, if any are registered, the <code>Nwbfile</code> entry will be deleted.
+This is helpful for knowing why your file failed, and making it easy to retry.</li>
+<li><code>raise_err</code>: Default False. If True, errors will not be logged and will
+instead be raised. This is useful for debugging and exploring the error stack.
+The end result may be that some tables may still have entries from this file
+that will need to be manually deleted after a failed attempt. 'transactions'
+are used where possible to rollback sibling tables, but child table errors
+will still leave entries from parent tables.</li>
+</ul>
 </div>
 </div>
 </div>
@@ -6014,9 +6007,9 @@ about inserting device information.</p>
 </div>
 </clipboard-copy>
 </div>
-<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgi</span><span class="o">.</span><span class="n">insert_sessions</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">)</span>
+<div class="highlight-ipynb hl-python"><pre><span></span><span class="n">sgi</span><span class="o">.</span><span class="n">insert_sessions</span><span class="p">(</span><span class="n">nwb_file_name</span><span class="p">,</span> <span class="n">rollback_on_fail</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">raise_error</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </pre></div>
-<div class="clipboard-copy-txt" id="cell-9">sgi.insert_sessions(nwb_file_name)</div>
+<div class="clipboard-copy-txt" id="cell-9">sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_error=False)</div>
 </div>
 </div>
 </div>

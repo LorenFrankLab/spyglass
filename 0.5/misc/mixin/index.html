@@ -1163,6 +1163,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#long-distance-restrictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Long-Distance Restrictions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delete-functionality" class="md-nav__link">
     <span class="md-ellipsis">
       Delete Functionality
@@ -4445,27 +4454,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../api/utils/dj_chains/" class="md-nav__link">
-        
-  
-  <span class="md-ellipsis">
-    dj_chains.py
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../api/utils/dj_graph/" class="md-nav__link">
         
   
@@ -4696,6 +4684,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#long-distance-restrictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Long-Distance Restrictions
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#delete-functionality" class="md-nav__link">
     <span class="md-ellipsis">
       Delete Functionality
@@ -4751,22 +4748,21 @@
 functionalities that have been added to DataJoint tables. This includes...</p>
 <ul>
 <li>Fetching NWB files</li>
+<li>Long-distance restrictions.</li>
 <li>Delete functionality, including permission checks and part/master pairs</li>
 <li>Export logging. See <a href="../export/">export doc</a> for more information.</li>
 </ul>
 <p>To add this functionality to your own tables, simply inherit from the mixin:</p>
 <div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">import</span> <span class="nn">datajoint</span> <span class="k">as</span> <span class="nn">dj</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">from</span> <span class="nn">spyglass.utils</span> <span class="kn">import</span> <span class="n">SpyglassMixin</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">schema</span> <span class="o">=</span> <span class="n">dj</span><span class="o">.</span><span class="n">schema</span><span class="p">(</span><span class="s1">&#39;my_schema&#39;</span><span class="p">)</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="nd">@schema</span>
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="k">class</span> <span class="nc">MyOldTable</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    <span class="k">pass</span>
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="nd">@schema</span>
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="k">class</span> <span class="nc">MyNewTable</span><span class="p">(</span><span class="n">SpyglassMixin</span><span class="p">,</span> <span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):)</span>
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>    <span class="k">pass</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">from</span> <span class="nn">spyglass.utils</span> <span class="kn">import</span> <span class="n">SpyglassMixin</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="n">schema</span> <span class="o">=</span> <span class="n">dj</span><span class="o">.</span><span class="n">schema</span><span class="p">(</span><span class="s2">&quot;my_schema&quot;</span><span class="p">)</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="nd">@schema</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="k">class</span> <span class="nc">MyOldTable</span><span class="p">(</span><span class="n">dj</span><span class="o">.</span><span class="n">Manual</span><span class="p">):</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>    <span class="k">pass</span>
 </span></code></pre></div>
 <p><strong>NOTE</strong>: The mixin must be the first class inherited from in order to override
 default DataJoint functions.</p>
@@ -4782,6 +4778,50 @@ single function to access these files from any table.</p>
 should be fetched from <code>Nwbfile</code> or an analysis file should be fetched from
 <code>AnalysisNwbfile</code>. If neither is foreign-key-referenced, the function will refer
 to a <code>_nwb_table</code> attribute.</p>
+<h2 id="long-distance-restrictions">Long-Distance Restrictions<a class="headerlink" href="#long-distance-restrictions" title="Permanent link">&para;</a></h2>
+<p>In complicated pipelines like Spyglass, there are often tables that 'bury' their
+foreign keys as secondary keys. This is done to avoid having to pass a long list
+of foreign keys through the pipeline, potentially hitting SQL limits (see also
+<a href="../merge_tables/">Merge Tables</a>). This burrying makes it difficult to restrict
+a given table by familiar attributes.</p>
+<p>Spyglass provides a function, <code>restrict_by</code>, to handle this. The function takes
+your restriction and checks parents/children until the restriction can be
+applied. Spyglass introduces <code>&lt;&lt;</code> as a shorthand for <code>restrict_by</code> an upstream
+key and <code>&gt;&gt;</code> as a shorthand for <code>restrict_by</code> a downstream key.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span> <span class="nn">spyglass.example</span> <span class="kn">import</span> <span class="n">AnyTable</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">AnyTable</span> <span class="o">&gt;&gt;</span> <span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">AnyTable</span> <span class="o">&lt;&lt;</span> <span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="c1"># Equivalent to</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="n">AnyTable</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;upstream_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;up&quot;</span><span class="p">)</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">AnyTable</span><span class="o">.</span><span class="n">restrict_by</span><span class="p">(</span><span class="s1">&#39;downsteam_attribute=&quot;value&quot;&#39;</span><span class="p">,</span> <span class="n">direction</span><span class="o">=</span><span class="s2">&quot;down&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<p>Some caveats to this function:</p>
+<ol>
+<li>'Peripheral' tables, like <code>IntervalList</code> and <code>AnalysisNwbfile</code> make it hard
+    to determine the correct parent/child relationship and have been removed
+    from this search.</li>
+<li>This function will raise an error if it attempts to check a table that has
+    not been imported into the current namespace. It is best used for exploring
+    and debugging, not for production code.</li>
+<li>It's hard to determine the attributes in a mixed dictionary/string
+    restriction. If you are having trouble, try using a pure string
+    restriction.</li>
+<li>The most direct path to your restriction may not be the path took, especially
+    when using Merge Tables. When the result is empty see the warning about the
+    path used. Then, ban tables from the search to force a different path.</li>
+</ol>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">my_table</span> <span class="o">=</span> <span class="n">MyTable</span><span class="p">()</span>  <span class="c1"># must be instantced</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">my_table</span><span class="o">.</span><span class="n">ban_search_table</span><span class="p">(</span><span class="n">UnwantedTable1</span><span class="p">)</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="n">my_table</span><span class="o">.</span><span class="n">ban_search_table</span><span class="p">([</span><span class="n">UnwantedTable2</span><span class="p">,</span> <span class="n">UnwantedTable3</span><span class="p">])</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">my_table</span><span class="o">.</span><span class="n">unban_search_table</span><span class="p">(</span><span class="n">UnwantedTable3</span><span class="p">)</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="n">my_table</span><span class="o">.</span><span class="n">see_banned_tables</span><span class="p">()</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">my_table</span> <span class="o">&lt;&lt;</span> <span class="n">my_restriction</span>
+</span></code></pre></div>
+<p>When providing a restriction of the parent, use 'up' direction. When providing a
+restriction of the child, use 'down' direction.</p>
 <h2 id="delete-functionality">Delete Functionality<a class="headerlink" href="#delete-functionality" title="Permanent link">&para;</a></h2>
 <p>The mixin overrides the default <code>delete</code> function to provide two additional
 features.</p>
@@ -4818,31 +4858,31 @@ entries that would be deleted, otherwise it will delete them.</p>
 have not been imported into the current namespace. If you are having trouble
 with part deletion errors, import the offending table and rerun the function
 with <code>reload_cache=True</code>.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">restricted_nwbfile</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span>
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">restricted_nwbfile</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># DataJointError(&quot;Attempt to delete part table MyMerge.Part before ...</span>
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="kn">from</span> <span class="nn">spyglass.example</span> <span class="kn">import</span> <span class="n">MyMerge</span>
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="n">restricted_nwbfile</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="n">reload_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">restricted_nwbfile</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">restricted_nwbfile</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># DataJointError(&quot;Attempt to delete part table MyMerge.Part before ...</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="kn">from</span> <span class="nn">spyglass.example</span> <span class="kn">import</span> <span class="n">MyMerge</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="n">restricted_nwbfile</span><span class="o">.</span><span class="n">delete_downstream_merge</span><span class="p">(</span><span class="n">reload_cache</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </span></code></pre></div>
 <p>Because each table keeps a cache of downsteam merge tables, it is important to
 reload the cache if the table has been imported after the cache was created.
 Speed gains can also be achieved by avoiding re-instancing the table each time.</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Slow</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
-</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="p">(</span><span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">(</span><span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Other%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
-</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Faster</span>
-</span><span id="__span-3-8"><a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
-</span><span id="__span-3-9"><a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>
-</span><span id="__span-3-10"><a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="n">nwbfile</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="p">()</span>
-</span><span id="__span-3-11"><a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="p">(</span><span class="n">nwbfile</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
-</span><span id="__span-3-12"><a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">(</span><span class="n">nwbfile</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Other%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Slow</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="p">(</span><span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="p">(</span><span class="n">Nwbfile</span><span class="p">()</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Other%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Faster</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="kn">from</span> <span class="nn">spyglass.common</span> <span class="kn">import</span> <span class="n">Nwbfile</span>
+</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
+</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="n">nwbfile</span> <span class="o">=</span> <span class="n">Nwbfile</span><span class="p">()</span>
+</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="p">(</span><span class="n">nwbfile</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Name%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="p">(</span><span class="n">nwbfile</span> <span class="o">&amp;</span> <span class="s2">&quot;nwb_file_name LIKE &#39;Other%&#39;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">ddm</span><span class="p">(</span><span class="n">dry_run</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
 </span></code></pre></div>
 
 
