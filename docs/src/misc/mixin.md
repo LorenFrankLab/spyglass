@@ -78,7 +78,7 @@ Some caveats to this function:
 3. It's hard to determine the attributes in a mixed dictionary/string
     restriction. If you are having trouble, try using a pure string
     restriction.
-4. The most direct path to your restriction may not be the your data took,
+4. The most direct path to your restriction may not be the path your data took,
     especially when using Merge Tables. When the result is empty see the
     warning about the path used. Then, ban tables from the search to force a
     different path.
