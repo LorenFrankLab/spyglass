@@ -830,25 +830,7 @@ def delete_downstream_merge(
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
-    Parameters
-    ----------
-    table: dj.Table
-        DataJoint table or restriction thereof
-    restriction: str
-        Optional restriction to apply before deletion from merge/part
-        tables. If not provided, delete all downstream entries.
-    dry_run: bool
-        Default True. If true, return list of tuples, merge/part tables
-        downstream of table input. Otherwise, delete merge/part table entries.
-    disable_warning: bool
-        Default False. If True, don't warn about restrictions on table object.
-    kwargs: dict
-        Additional keyword arguments for DataJoint delete.
-
-    Returns
-    -------
-    List[Tuple[dj.Table, dj.Table]]
-        Entries in merge/part tables downstream of table input.
+    Passthrough to SpyglassMixin.delete_downstream_merge
     """
     logger.warning(
         "DEPRECATED: This function will be removed in `0.6`. "

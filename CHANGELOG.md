@@ -11,7 +11,7 @@
 - Create class `SpyglassGroupPart` to aid delete propagations #899
 - Fix bug report template #955
 - Add rollback option to `populate_all_common` #957
-- Add long-distance restrictions via `<<` and `>>` operators. #943
+- Add long-distance restrictions via `<<` and `>>` operators. #943, #969
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 
 ## [0.5.2] (April 22, 2024)
