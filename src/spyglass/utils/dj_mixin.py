@@ -886,7 +886,7 @@ class SpyglassMixin:
         if return_graph:
             return graph
 
-        ret = graph.leaf_ft[0]
+        ret = self & graph._get_restr(self.full_table_name)
         if len(ret) == len(self) or len(ret) == 0:
             logger.warning(
                 f"Failed to restrict with path: {graph.path_str}\n\t"
