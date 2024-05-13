@@ -232,38 +232,25 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 dlc_result.creation_time
             ).strftime("%Y-%m-%d %H:%M:%S")
 
-            # get video information
-            _, _, meters_per_pixel, video_time = get_video_path(key)
-            # check if a position interval exists for this epoch
-            try:
-                interval_list_name = (
-                    convert_epoch_interval_name_to_position_interval_name(
-                        {
-                            "nwb_file_name": key["nwb_file_name"],
-                            "epoch": key["epoch"],
-                        },
-                        populate_missing=False,
-                    )
+            logger.logger.info("getting raw position")
+            interval_list_name = (
+                convert_epoch_interval_name_to_position_interval_name(
+                    {
+                        "nwb_file_name": key["nwb_file_name"],
+                        "epoch": key["epoch"],
+                    },
+                    populate_missing=False,
                 )
-                raw_position = True
-            except KeyError:
-                raw_position = False
-
-            if raw_position:
-                logger.logger.info("Getting raw position")
-                spatial_series = (
-                    RawPosition()
-                    & {**key, "interval_list_name": interval_list_name}
-                ).fetch_nwb()[0]["raw_position"]
-                pos_time = spatial_series.timestamps
-                reference_frame = spatial_series.reference_frame
-                comments = spatial_series.comments
-            else:
-                pos_time = video_time
-                reference_frame = ""
-                comments = "no comments"
-
-            key["meters_per_pixel"] = meters_per_pixel
+            )
+            spatial_series = (
+                RawPosition()
+                & {**key, "interval_list_name": interval_list_name}
+            ).fetch_nwb()[0]["raw_position"]
+            _, _, _, video_time = get_video_path(key)
+            pos_time = spatial_series.timestamps
+            # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
+            # which also has timestamps
+            key["meters_per_pixel"] = spatial_series.conversion
 
             # Insert entry into DLCPoseEstimation
             logger.logger.info(
@@ -305,8 +292,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     timestamps=part_df.time.to_numpy(),
                     conversion=METERS_PER_CM,
                     data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                    reference_frame=reference_frame,
-                    comments=comments,
+                    reference_frame=spatial_series.reference_frame,
+                    comments=spatial_series.comments,
                     description="x_position, y_position",
                 )
                 likelihood.create_timeseries(

@@ -14,11 +14,6 @@
 - Add long-distance restrictions via `<<` and `>>` operators. #943, #969
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 
-### Pipelines
-
-- DLC
-   - Allow dlc without pre-existing tracking data #950
-
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
