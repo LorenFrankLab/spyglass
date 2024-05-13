@@ -250,7 +250,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 raw_position = False
 
             if raw_position:
-                logger.logger.info("getting raw position")
+                logger.logger.info("Getting raw position")
                 spatial_series = (
                     RawPosition()
                     & {**key, "interval_list_name": interval_list_name}
