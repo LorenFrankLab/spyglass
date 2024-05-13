@@ -1,3 +1,5 @@
+from time import time
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -85,9 +87,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         # Get labels to smooth from Parameters table
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
         pos_df = pd.concat(
             {
@@ -132,6 +132,9 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             orientation = np.angle(np.exp(1j * orientation))
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
+        )
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
         )
         if (
             RawPosition & key
