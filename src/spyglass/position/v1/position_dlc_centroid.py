@@ -268,17 +268,10 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             position = pynwb.behavior.Position()
             velocity = pynwb.behavior.BehavioralTimeSeries()
-            if (
-                RawPosition & key
-            ):  # if spatial series exists, get metadata from there
-                spatial_series = (RawPosition() & key).fetch_nwb()[0][
-                    "raw_position"
-                ]
-                reference_frame = spatial_series.reference_frame
-                comments = spatial_series.comments
+            if query := (RawPosition & key):
+                spatial_series = query.fetch_nwb()[0]["raw_position"]
             else:
-                reference_frame = ""
-                comments = "no comments"
+                spatial_series = None
 
             METERS_PER_CM = 0.01
             position.create_spatial_series(
@@ -286,8 +279,8 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 timestamps=final_df.index.to_numpy(),
                 conversion=METERS_PER_CM,
                 data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=reference_frame,
-                comments=comments,
+                reference_frame=getattr(spatial_series, "reference_frame", ""),
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_position, y_position",
             )
             velocity.create_timeseries(
