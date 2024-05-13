@@ -291,7 +291,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 data=velocity_df.loc[
                     :, idx[("velocity_x", "velocity_y", "speed")]
                 ].to_numpy(),
-                comments=spatial_series.comments,
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_velocity, y_velocity, speed",
             )
             velocity.create_timeseries(
