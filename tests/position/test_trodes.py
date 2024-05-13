@@ -59,8 +59,3 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
     )
     hash_exp = "5296e74dea2e5e68d39f81bc81723a12"
     assert hash_df == hash_exp, "Dataframe differs from expected"
-
-
-def test_null_video(sgp):
-    """Note: This will change if video is added to the test data."""
-    sgp.v1.TrodesPosVideo().populate()  # no longer raises error

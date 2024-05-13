@@ -45,9 +45,6 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -101,9 +98,6 @@ class Electrode(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -276,9 +270,6 @@ class Raw(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -376,9 +367,6 @@ class SampleCount(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""

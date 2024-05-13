@@ -24,13 +24,13 @@ def test_valid_epoch_num(common):
 
 def test_possource_make(common):
     """Test custom populate"""
-    common.PositionSource()._no_transaction_make(common.Session())
+    common.PositionSource().make(common.Session())
 
 
 def test_possource_make_invalid(common):
     """Test invalid populate"""
     with pytest.raises(ValueError):
-        common.PositionSource()._no_transaction_make(dict())
+        common.PositionSource().make(dict())
 
 
 def test_raw_position_fetchnwb(common, mini_pos, mini_pos_interval_dict):

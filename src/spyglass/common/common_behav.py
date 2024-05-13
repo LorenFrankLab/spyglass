@@ -43,7 +43,14 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
-    def _no_transaction_make(self, keys: Union[List[Dict], dj.Table]):
+    def populate(self, *args, **kwargs):
+        logger.warning(
+            "PositionSource is a manual table with a custom `make`."
+            + " Use `make` instead."
+        )
+        self.make(*args, **kwargs)
+
+    def make(self, keys: Union[List[Dict], dj.Table]):
         """Insert position source data from NWB file."""
         if not isinstance(keys, list):
             keys = [keys]
@@ -52,9 +59,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         for key in keys:
             nwb_file_name = key.get("nwb_file_name")
             if not nwb_file_name:
-                raise ValueError(
-                    "PositionSource._no_transaction_make requires nwb_file_name"
-                )
+                raise ValueError("PositionSource.make requires nwb_file_name")
             self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
 
     @classmethod
@@ -222,9 +227,6 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return column_names
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -295,9 +297,6 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""

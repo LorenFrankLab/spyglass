@@ -60,7 +60,7 @@ def single_transaction_make(
     raise_err: bool = False,
     error_constants: dict = None,
 ):
-    """For each table, run the `_no_transaction_make` method.
+    """For each table, run the `make` method directly instead of `populate`.
 
     Requires `allow_direct_insert` set to True within each method. Uses
     nwb_file_name search table key_source for relevant key. Currently assumes
@@ -81,7 +81,7 @@ def single_transaction_make(
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
-                    table()._no_transaction_make(pop_key)
+                    table().make(pop_key)
                 except Exception as err:
                     if raise_err:
                         raise err
