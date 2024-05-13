@@ -316,7 +316,7 @@ def mini_insert(
     if len(Nwbfile()) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
     else:
-        insert_sessions(mini_path.name)
+        insert_sessions(mini_path.name, raise_err=True)
 
     if len(Session()) == 0:
         raise ValueError("No sessions inserted.")

@@ -60,7 +60,7 @@ def single_transaction_make(
     raise_err: bool = False,
     error_constants: dict = None,
 ):
-    """For each table, run the `_no_transaction_make` method.
+    """For each table, run the `make` method directly instead of `populate`.
 
     Requires `allow_direct_insert` set to True within each method. Uses
     nwb_file_name search table key_source for relevant key. Currently assumes
@@ -78,16 +78,16 @@ def single_transaction_make(
                 key_source = parents[0].proj()
                 for parent in parents[1:]:
                     key_source *= parent.proj()
-            pop_key = (key_source & file_restr).fetch1("KEY")
 
-            try:
-                table()._no_transaction_make(pop_key)
-            except Exception as err:
-                if raise_err:
-                    raise err
-                log_insert_error(
-                    table=table, err=err, error_constants=error_constants
-                )
+            for pop_key in (key_source & file_restr).fetch("KEY"):
+                try:
+                    table().make(pop_key)
+                except Exception as err:
+                    if raise_err:
+                        raise err
+                    log_insert_error(
+                        table=table, err=err, error_constants=error_constants
+                    )
 
 
 def populate_all_common(
@@ -123,7 +123,6 @@ def populate_all_common(
         [  # Tables that can be inserted in a single transaction
             Session,
             ElectrodeGroup,  # Depends on Session
-            Electrode,  # Depends on ElectrodeGroup
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session
             DIOEvents,  # Depends on Session
@@ -133,6 +132,7 @@ def populate_all_common(
             # SensorData, # Not used by default. Generates large files
         ],
         [  # Tables that depend on above transaction
+            Electrode,  # Depends on ElectrodeGroup
             PositionSource,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch

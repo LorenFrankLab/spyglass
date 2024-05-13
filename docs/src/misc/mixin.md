@@ -59,37 +59,39 @@ key and `>>` as a shorthand for `restrict_by` a downstream key.
 ```python
 from spyglass.example import AnyTable
 
-AnyTable >> 'downsteam_attribute="value"'
-AnyTable << 'upstream_attribute="value"'
+AnyTable() << 'upstream_attribute="value"'
+AnyTable() >> 'downsteam_attribute="value"'
 
 # Equivalent to
-AnyTable.restrict_by('upstream_attribute="value"', direction="up")
-AnyTable.restrict_by('downsteam_attribute="value"', direction="down")
+AnyTable().restrict_by('downsteam_attribute="value"', direction="down")
+AnyTable().restrict_by('upstream_attribute="value"', direction="up")
 ```
 
 Some caveats to this function:
 
 1. 'Peripheral' tables, like `IntervalList` and `AnalysisNwbfile` make it hard
     to determine the correct parent/child relationship and have been removed
-    from this search.
+    from this search by default.
 2. This function will raise an error if it attempts to check a table that has
     not been imported into the current namespace. It is best used for exploring
     and debugging, not for production code.
 3. It's hard to determine the attributes in a mixed dictionary/string
     restriction. If you are having trouble, try using a pure string
     restriction.
-4. The most direct path to your restriction may not be the path took, especially
-    when using Merge Tables. When the result is empty see the warning about the
-    path used. Then, ban tables from the search to force a different path.
+4. The most direct path to your restriction may not be the path your data took,
+    especially when using Merge Tables. When the result is empty see the
+    warning about the path used. Then, ban tables from the search to force a
+    different path.
 
 ```python
-my_table = MyTable()  # must be instantced
+my_table = MyTable()  # must be instanced
 my_table.ban_search_table(UnwantedTable1)
 my_table.ban_search_table([UnwantedTable2, UnwantedTable3])
 my_table.unban_search_table(UnwantedTable3)
 my_table.see_banned_tables()
 
 my_table << my_restriction
+my_table << upstream_restriction >> downstream_restriction
 ```
 
 When providing a restriction of the parent, use 'up' direction. When providing a
