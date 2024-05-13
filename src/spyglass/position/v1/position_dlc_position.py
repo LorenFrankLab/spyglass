@@ -1,3 +1,5 @@
+from time import time
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -167,9 +169,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             path=f"{output_dir.as_posix()}/log.log",
             print_console=False,
         ) as logger:
-            key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-                key["nwb_file_name"]
-            )
+            AnalysisNwbfile()._creation_times["pre_create_time"] = time()
             logger.logger.info("-----------------------")
             idx = pd.IndexSlice
             # Get labels to smooth from Parameters table
@@ -226,6 +226,9 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
                 (DLCPoseEstimation.BodyPart() & key)
                 .fetch_nwb()[0]["dlc_pose_estimation_position"]
                 .get_spatial_series()
+            )
+            key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+                key["nwb_file_name"]
             )
             # Add dataframe to AnalysisNwbfile
             nwb_analysis_file = AnalysisNwbfile()

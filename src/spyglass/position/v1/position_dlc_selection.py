@@ -1,5 +1,6 @@
 import copy
 from pathlib import Path
+from time import time
 
 import datajoint as dj
 import numpy as np
@@ -58,9 +59,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
     def make(self, key):
         orig_key = copy.deepcopy(key)
         # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
@@ -114,6 +113,9 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             comments=vid_frame_obj.comments,
         )
 
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         nwb_analysis_file = AnalysisNwbfile()
         key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
             key["analysis_file_name"], orientation
