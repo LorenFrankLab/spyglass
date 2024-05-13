@@ -136,25 +136,19 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
-        if (
-            RawPosition & key
-        ):  # if spatial series exists, get metadata from there
-            spatial_series = (RawPosition() & key).fetch_nwb()[0][
-                "raw_position"
-            ]
-            reference_frame = spatial_series.reference_frame
-            comments = spatial_series.comments
+        # if spatial series exists, get metadata from there
+        if query := (RawPosition & key):
+            spatial_series = query.fetch_nwb()[0]["raw_position"]
         else:
-            reference_frame = ""
-            comments = "no comments"
+            spatial_series = None
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
             name="orientation",
             timestamps=final_df.index.to_numpy(),
             conversion=1.0,
             data=final_df["orientation"].to_numpy(),
-            reference_frame=reference_frame,
-            comments=comments,
+            reference_frame=getattr(spatial_series, "reference_frame", ""),
+            comments=getattr(spatial_series, "comments", "no comments"),
             description="orientation",
         )
         nwb_analysis_file = AnalysisNwbfile()
