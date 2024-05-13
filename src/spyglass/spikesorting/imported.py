@@ -37,7 +37,6 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
-        raise RuntimeError("TEMP: This is a test error. Please ignore.")
         orig_key = copy.deepcopy(key)
 
         nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])

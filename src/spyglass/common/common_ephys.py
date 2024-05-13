@@ -190,8 +190,8 @@ class Electrode(SpyglassMixin, dj.Imported):
                     key.update(electrode_config_dicts[elect_id])
             electrode_inserts.append(key.copy())
 
-        self.insert1(
-            key,
+        self.insert(
+            electrode_inserts,
             skip_duplicates=True,
             allow_direct_insert=True,  # for no_transaction, pop_all_common
         )

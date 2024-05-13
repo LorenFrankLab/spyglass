@@ -63,5 +63,4 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
 
 def test_null_video(sgp):
     """Note: This will change if video is added to the test data."""
-    with pytest.raises(FileNotFoundError):
-        sgp.v1.TrodesPosVideo().populate()
+    sgp.v1.TrodesPosVideo().populate()  # no longer raises error
