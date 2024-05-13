@@ -613,11 +613,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     if len(pos_query) == 0:
         if populate_missing:
             PositionIntervalMap()._no_transaction_make(key)
-        else:
-            raise KeyError(
-                f"{key} must be populated in the PositionIntervalMap table "
-                + "prior to your current populate call"
-            )
+            pos_query = PositionIntervalMap & key
 
     if len(pos_query) == 0:
         logger.info(f"No position intervals found for {key}")
