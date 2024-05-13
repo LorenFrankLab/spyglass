@@ -1,3 +1,5 @@
+from time import time
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -85,9 +87,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         # Get labels to smooth from Parameters table
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
         pos_df = pd.concat(
             {
@@ -133,15 +133,22 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
+        # if spatial series exists, get metadata from there
+        if query := (RawPosition & key):
+            spatial_series = query.fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
             name="orientation",
             timestamps=final_df.index.to_numpy(),
             conversion=1.0,
             data=final_df["orientation"].to_numpy(),
-            reference_frame=spatial_series.reference_frame,
-            comments=spatial_series.comments,
+            reference_frame=getattr(spatial_series, "reference_frame", ""),
+            comments=getattr(spatial_series, "comments", "no comments"),
             description="orientation",
         )
         nwb_analysis_file = AnalysisNwbfile()
