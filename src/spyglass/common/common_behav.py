@@ -1,7 +1,7 @@
 import pathlib
 import re
 from functools import reduce
-from typing import Dict
+from typing import Dict, List, Union
 
 import datajoint as dj
 import ndx_franklab_novela
@@ -43,7 +43,14 @@ class PositionSource(SpyglassMixin, dj.Manual):
         name=null: varchar(32)       # name of spatial series
         """
 
-    def _no_transaction_make(self, keys=None):
+    def populate(self, *args, **kwargs):
+        logger.warning(
+            "PositionSource is a manual table with a custom `make`."
+            + " Use `make` instead."
+        )
+        self.make(*args, **kwargs)
+
+    def make(self, keys: Union[List[Dict], dj.Table]):
         """Insert position source data from NWB file."""
         if not isinstance(keys, list):
             keys = [keys]
@@ -52,10 +59,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         for key in keys:
             nwb_file_name = key.get("nwb_file_name")
             if not nwb_file_name:
-                raise ValueError(
-                    "PositionSource.populate is an alias for a non-computed table "
-                    + "and must be passed a key with nwb_file_name"
-                )
+                raise ValueError("PositionSource.make requires nwb_file_name")
             self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
 
     @classmethod
@@ -106,7 +110,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                     )
                 )
 
-        with cls.connection.transaction:
+        with cls._safe_context():
             IntervalList.insert(intervals, skip_duplicates=skip_duplicates)
             cls.insert(sources, skip_duplicates=skip_duplicates)
             cls.SpatialSeries.insert(
@@ -223,9 +227,6 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return column_names
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -296,9 +297,6 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
@@ -433,7 +431,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
                             + "in CameraDevice table."
                         )
                     key["video_file_object_id"] = video_obj.object_id
-                    self.insert1(key)
+                    self.insert1(
+                        key, skip_duplicates=True, allow_direct_insert=True
+                    )
                     is_found = True
 
         if not is_found and verbose:
@@ -567,7 +567,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Insert into table
         key["position_interval_name"] = matching_pos_intervals[0]
-        self.insert1(key, allow_direct_insert=True)
+        self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
         logger.info(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
@@ -660,9 +660,10 @@ def populate_position_interval_map_session(nwb_file_name: str):
     for interval_name in (TaskEpoch & {"nwb_file_name": nwb_file_name}).fetch(
         "interval_list_name"
     ):
-        PositionIntervalMap.populate(
-            {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": interval_name,
-            }
-        )
+        with PositionIntervalMap._safe_context():
+            PositionIntervalMap().make(
+                {
+                    "nwb_file_name": nwb_file_name,
+                    "interval_list_name": interval_name,
+                }
+            )

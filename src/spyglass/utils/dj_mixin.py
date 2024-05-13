@@ -1,6 +1,7 @@
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
 from collections import OrderedDict
+from contextlib import nullcontext
 from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
@@ -120,6 +121,15 @@ class SpyglassMixin:
             logger.error(f"No file-like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+    @classmethod
+    def _safe_context(cls):
+        """Return transaction if not already in one."""
+        return (
+            cls.connection.transaction
+            if not cls.connection.in_transaction
+            else nullcontext()
+        )
 
     # ------------------------------- fetch_nwb -------------------------------
 

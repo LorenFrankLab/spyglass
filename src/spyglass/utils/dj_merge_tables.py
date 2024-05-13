@@ -1,4 +1,3 @@
-from contextlib import nullcontext
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
@@ -368,15 +367,6 @@ class Merge(dj.Manual):
             super().insert(cls(), master_entries, **kwargs)
             for part, part_entries in parts_entries.items():
                 part.insert(part_entries, **kwargs)
-
-    @classmethod
-    def _safe_context(cls):
-        """Return transaction if not already in one."""
-        return (
-            cls.connection.transaction
-            if not cls.connection.in_transaction
-            else nullcontext()
-        )
 
     @classmethod
     def _ensure_dependencies_loaded(cls) -> None:
