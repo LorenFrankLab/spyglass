@@ -22,6 +22,7 @@ dependencies:
   - libgcc   # dlc-only
   - matplotlib
   - non_local_detector
+  # - numpy<1.24 # non-dlc
   - pip>=20.2.*
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
@@ -45,6 +46,6 @@ dependencies:
       - pubnub<=6.4.0
       - pynwb>=2.2.0,<3
       - sortingview>=0.11
-      - spikeinterface>=0.98.2,<0.99
+      - spikeinterface>=0.99.1,<0.100
       - tensorflow<=2.12  # dlc-only
       - .[dlc]
