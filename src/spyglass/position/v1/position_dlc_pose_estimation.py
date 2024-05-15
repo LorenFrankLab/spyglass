@@ -296,7 +296,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     timestamps=part_df.time.to_numpy(),
                     conversion=METERS_PER_CM,
                     data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                    reference_frame=get_video_path(
+                    reference_frame=getattr(
                         spatial_series, "reference_frame", ""
                     ),
                     comments=getattr(spatial_series, "comments", "no commwnts"),
