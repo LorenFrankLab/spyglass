@@ -423,7 +423,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             likelihoods=likelihoods,
             position_time=position_time,
             video_time=None,
-            processor=params.get("processor", "matplotlib"),
+            processor=params.get("processor", "opencv"),
             frames=frames_arr,
             percent_frames=percent_frames,
             output_video_filename=output_video_filename,
