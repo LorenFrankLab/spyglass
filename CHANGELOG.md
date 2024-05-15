@@ -17,7 +17,7 @@
 ### Pipelines
 
 - DLC
-   - Allow dlc without pre-existing tracking data #973
+   - Allow dlc without pre-existing tracking data #973, #975
 
 ## [0.5.2] (April 22, 2024)
 
