@@ -1,5 +1,6 @@
 import copy
 from pathlib import Path
+from time import time
 
 import datajoint as dj
 import numpy as np
@@ -58,9 +59,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
     def make(self, key):
         orig_key = copy.deepcopy(key)
         # Add to Analysis NWB file
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
@@ -114,6 +113,9 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             comments=vid_frame_obj.comments,
         )
 
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
         nwb_analysis_file = AnalysisNwbfile()
         key["orientation_object_id"] = nwb_analysis_file.add_nwb_object(
             key["analysis_file_name"], orientation
@@ -309,24 +311,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         if "video_params" not in params:
             params["video_params"] = {}
         M_TO_CM = 100
-        interval_list_name = (
-            convert_epoch_interval_name_to_position_interval_name(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "epoch": key["epoch"],
-                },
-                populate_missing=False,
-            )
-        )
-        key["interval_list_name"] = interval_list_name
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
-        )
+        epoch = key["epoch"]
         pose_estimation_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
@@ -438,7 +423,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             likelihoods=likelihoods,
             position_time=position_time,
             video_time=None,
-            processor=params.get("processor", "matplotlib"),
+            processor=params.get("processor", "opencv"),
             frames=frames_arr,
             percent_frames=percent_frames,
             output_video_filename=output_video_filename,

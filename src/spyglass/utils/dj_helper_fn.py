@@ -2,15 +2,39 @@
 
 import inspect
 import os
-from typing import Type
+from typing import List, Type, Union
 
 import datajoint as dj
 import numpy as np
 from datajoint.user_tables import UserTable
 
-from spyglass.utils.dj_chains import PERIPHERAL_TABLES
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
+
+# Tables that should be excluded from the undirected graph when finding paths
+# for TableChain objects and searching for an upstream key.
+PERIPHERAL_TABLES = [
+    "`common_interval`.`interval_list`",
+    "`common_nwbfile`.`__analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`__nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery_selection`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile`",
+    "`common_nwbfile`.`kachery_channel`",
+    "`common_nwbfile`.`nwbfile_kachery_selection`",
+    "`common_nwbfile`.`nwbfile_kachery`",
+    "`common_nwbfile`.`nwbfile`",
+]
+
+
+def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
+    """Given lists of items/names, return item at index or by substring."""
+    if isinstance(index, int):
+        return sources[index]
+    for i, part in enumerate(names):
+        if index in part:
+            return sources[i]
+    return None
 
 
 def unique_dicts(list_of_dict):

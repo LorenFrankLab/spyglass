@@ -22,15 +22,15 @@ def test_valid_epoch_num(common):
     assert epoch_num == 1, "PositionSource get_epoch_num failed"
 
 
-def test_invalid_populate(common):
+def test_possource_make(common):
+    """Test custom populate"""
+    common.PositionSource().make(common.Session())
+
+
+def test_possource_make_invalid(common):
     """Test invalid populate"""
     with pytest.raises(ValueError):
-        common.PositionSource.populate(dict())
-
-
-def test_custom_populate(common):
-    """Test custom populate"""
-    common.PositionSource.populate(common.Session())
+        common.PositionSource().make(dict())
 
 
 def test_raw_position_fetchnwb(common, mini_pos, mini_pos_interval_dict):
