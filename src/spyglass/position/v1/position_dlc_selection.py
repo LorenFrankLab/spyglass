@@ -274,7 +274,7 @@ class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     def get_default(cls):
         query = cls & {"dlc_pos_video_params_name": "default"}
         if not len(query) > 0:
-            cls().insert_default(skip_duplicates=True)
+            cls().insert_default()
             default = (cls & {"dlc_pos_video_params_name": "default"}).fetch1()
         else:
             default = query.fetch1()

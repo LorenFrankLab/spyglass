@@ -13,6 +13,7 @@ channels:
   # - pytorch # dlc-only
   - franklab
   - edeno
+  # - anaconda # dlc-only, for cudatoolkit
 dependencies:
   - bottleneck
   # - cudatoolkit=11.3 # dlc-only

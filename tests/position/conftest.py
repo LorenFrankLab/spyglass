@@ -23,7 +23,12 @@ def dlc_project_tbl(sgp):
 
 @pytest.fixture(scope="session")
 def insert_project(
-    verbose_context, dlc_project_tbl, common, bodyparts, mini_copy_name
+    verbose_context,
+    teardown,
+    dlc_project_tbl,
+    common,
+    bodyparts,
+    mini_copy_name,
 ):
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
@@ -61,8 +66,9 @@ def insert_project(
 
     yield project_key, cfg, config_path
 
-    (dlc_project_tbl & project_key).delete(safemode=False)
-    shutil_rmtree(str(Path(config_path).parent))
+    if teardown:
+        (dlc_project_tbl & project_key).delete(safemode=False)
+        shutil_rmtree(str(Path(config_path).parent))
 
 
 @pytest.fixture(scope="session")
@@ -90,7 +96,9 @@ def extract_frames(
     verbose_context, dlc_project_tbl, project_key, dlc_config, project_dir
 ):
     with verbose_context:
-        dlc_project_tbl.run_extract_frames(project_key, userfeedback=False)
+        dlc_project_tbl.run_extract_frames(
+            project_key, userfeedback=False, mode="automatic"
+        )
     vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
     label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
     yield label_dir
@@ -125,14 +133,15 @@ def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
 
 @pytest.fixture(scope="session")
 def training_params_key(verbose_context, sgp, project_key):
-    training_params_name = "tutorial"
+    training_params_name = "pytest"
     with verbose_context:
         sgp.v1.DLCModelTrainingParams.insert_new_params(
             paramset_name=training_params_name,
             params={
                 "trainingsetindex": 0,
                 "shuffle": 1,
-                "gputouse": 1,
+                "gputouse": None,
+                "TFGPUinference": False,
                 "net_type": "resnet_50",
                 "augmenter_type": "imgaug",
             },
@@ -161,9 +170,11 @@ def model_train_key(sgp, project_key, training_params_key):
 
 @pytest.fixture(scope="session")
 def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
-    _ = add_training_files
-    _ = fix_downloaded
-    sgp.v1.DLCModelTraining.populate(model_train_key)
+    train_tbl = sgp.v1.DLCModelTraining
+    if len(train_tbl & model_train_key) == 0:
+        _ = add_training_files
+        _ = fix_downloaded
+        sgp.v1.DLCModelTraining.populate(model_train_key)
     yield model_train_key
 
 
@@ -182,8 +193,12 @@ def model_key(sgp, model_source_key):
 
 @pytest.fixture(scope="session")
 def populate_model(sgp, model_key):
-    sgp.v1.DLCModel.populate(model_key)
-    yield
+    model_tbl = sgp.v1.DLCModel
+    if model_tbl & model_key:
+        yield
+    else:
+        sgp.v1.DLCModel.populate(model_key)
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -196,21 +211,38 @@ def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
             **model_key,
         },
         task_mode="trigger",  # trigger or load
-        params={"gputouse": None, "videotype": "mp4"},
+        params={"gputouse": None, "videotype": "mp4", "TFGPUinference": False},
     )
 
 
 @pytest.fixture(scope="session")
 def populate_pose_estimation(sgp, pose_estimation_key):
-    sgp.v1.DLCPoseEstimation.populate(pose_estimation_key)
-    yield
+    pose_est_tbl = sgp.v1.DLCPoseEstimation
+    if pose_est_tbl & pose_estimation_key:
+        yield
+    else:
+        pose_est_tbl.populate(pose_estimation_key)
+        yield
 
 
 @pytest.fixture(scope="session")
 def si_params_name(sgp, populate_pose_estimation):
-    _ = sgp.v1.DLCSmoothInterpParams.get_default()
-    nan_params = sgp.v1.DLCSmoothInterpParams.get_nan_params()
-    yield nan_params["dlc_si_params_name"]
+    params_name = "low_bar"
+    params_tbl = sgp.v1.DLCSmoothInterpParams
+    # if len(params_tbl & {"dlc_si_params_name": params_name}) == 0:
+    if True:  # TODO: remove before merge
+        nan_params = params_tbl.get_nan_params()
+        nan_params["dlc_si_params_name"] = params_name
+        nan_params["params"].update(
+            {
+                "likelihood_thresh": 0.4,
+                "max_cm_between_pts": 100,
+                "num_inds_to_span": 50,
+            }
+        )
+        params_tbl.insert1(nan_params, skip_duplicates=True)
+
+    yield params_name
 
 
 @pytest.fixture(scope="session")
@@ -235,8 +267,8 @@ def si_key(sgp, bodyparts, si_params_name, pose_estimation_key):
 
 
 @pytest.fixture(scope="session")
-def populate_si(sgp, si_key):
-    sgp.v1.DLCSmoothInterp.populate(si_key)
+def populate_si(sgp, si_key, populate_pose_estimation):
+    sgp.v1.DLCSmoothInterp.populate()
     yield
 
 
@@ -246,10 +278,9 @@ def cohort_selection(sgp, si_key, si_params_name):
         k: v
         for k, v in {
             **si_key,
-            "dlc_si_cohort_selection_name": "green_red_led",
+            "dlc_si_cohort_selection_name": "whiteLED",
             "bodyparts_params_dict": {
-                "greenLED": si_params_name,
-                "redLED_C": si_params_name,
+                "whiteLED": si_params_name,
             },
         }.items()
         if k not in ["bodypart", "dlc_si_params_name"]
@@ -266,19 +297,45 @@ def cohort_key(sgp, cohort_selection):
 
 
 @pytest.fixture(scope="session")
-def populate_cohort(sgp, cohort_selection):
+def populate_cohort(sgp, cohort_selection, populate_si):
     sgp.v1.DLCSmoothInterpCohort.populate(cohort_selection)
 
 
 @pytest.fixture(scope="session")
-def centroid_selection(sgp, cohort_key):
+def centroid_params(sgp):
+    params_tbl = sgp.v1.DLCCentroidParams
+    params_key = {"dlc_centroid_params_name": "one_test"}
+    if len(params_tbl & params_key) == 0:
+        params_tbl.insert1(
+            {
+                **params_key,
+                "params": {
+                    "centroid_method": "one_pt_centroid",
+                    "points": {"point1": "whiteLED"},
+                    "interpolate": True,
+                    "interp_params": {"max_cm_to_interp": 100},
+                    "smooth": True,
+                    "smoothing_params": {
+                        "smoothing_duration": 0.05,
+                        "smooth_method": "moving_avg",
+                    },
+                    "max_LED_separation": 50,
+                    "speed_smoothing_std_dev": 0.100,
+                },
+            }
+        )
+    yield params_key
+
+
+@pytest.fixture(scope="session")
+def centroid_selection(sgp, cohort_key, populate_cohort, centroid_params):
     centroid_key = cohort_key.copy()
     centroid_key = {
         key: val
         for key, val in cohort_key.items()
         if key in sgp.v1.DLCCentroidSelection.primary_key
     }
-    centroid_key["dlc_centroid_params_name"] = "default"
+    centroid_key.update(centroid_params)
     sgp.v1.DLCCentroidSelection.insert1(centroid_key, skip_duplicates=True)
     yield centroid_key
 
@@ -294,13 +351,22 @@ def populate_centroid(sgp, centroid_selection):
 
 
 @pytest.fixture(scope="session")
-def orient_selection(sgp, cohort_key):
+def orient_params(sgp):
+    params_tbl = sgp.v1.DLCOrientationParams
+    params_key = {"dlc_orientation_params_name": "none"}
+    if len(params_tbl & params_key) == 0:
+        params_tbl.insert1({**params_key, "params": {}})
+    return params_key
+
+
+@pytest.fixture(scope="session")
+def orient_selection(sgp, cohort_key, orient_params):
     orient_key = {
         key: val
         for key, val in cohort_key.items()
         if key in sgp.v1.DLCOrientationSelection.primary_key
     }
-    orient_key["dlc_orientation_params_name"] = "default"
+    orient_key.update(orient_params)
     sgp.v1.DLCOrientationSelection().insert1(orient_key, skip_duplicates=True)
     yield orient_key
 
@@ -317,7 +383,7 @@ def populate_orient(sgp, orient_selection):
 
 
 @pytest.fixture(scope="session")
-def dlc_selection(sgp, centroid_key, orient_key):
+def dlc_selection(sgp, centroid_key, orient_key, populate_orient):
     dlc_key = {
         key: val
         for key, val in centroid_key.items()
@@ -327,12 +393,6 @@ def dlc_selection(sgp, centroid_key, orient_key):
         {
             "dlc_si_cohort_centroid": centroid_key[
                 "dlc_si_cohort_selection_name"
-            ],
-            "dlc_si_cohort_orientation": orient_key[
-                "dlc_si_cohort_selection_name"
-            ],
-            "dlc_orientation_params_name": orient_key[
-                "dlc_orientation_params_name"
             ],
         }
     )

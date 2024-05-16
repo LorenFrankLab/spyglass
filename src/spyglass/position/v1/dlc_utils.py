@@ -11,7 +11,7 @@ from collections import abc
 from contextlib import redirect_stdout
 from itertools import groupby
 from operator import itemgetter
-from typing import Union
+from typing import Iterable, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -20,7 +20,7 @@ import pandas as pd
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
 from spyglass.utils import logger
 
 
@@ -62,7 +62,10 @@ def validate_option(
             f"Unknown {name}: {option} " f"Available options: {options}"
         )
 
-    if types and not isinstance(option, tuple(types)):
+    if types is not None and not isinstance(types, Iterable):
+        types = (types,)
+
+    if types is not None and not isinstance(option, types):
         raise TypeError(f"{name} is {type(option)}. Available types {types}")
 
     if val_range and not (val_range[0] <= option <= val_range[1]):
@@ -193,7 +196,7 @@ class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     def __init__(self, name, path, level="INFO", **kwargs):
         self.logger = self.setup_logger(name, path, **kwargs)
         self.name = self.logger.name
-        self.level = getattr(logging, level)
+        self.level = 30 if test_mode else getattr(logging, level)
 
     def setup_logger(
         self, name_logfile, path_logfile, print_console=False

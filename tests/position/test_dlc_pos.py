@@ -1,4 +1,6 @@
 import pandas as pd
+import pytest
+from numpy import isclose as np_isclose
 
 
 def test_si_params_default(sgp):
@@ -29,9 +31,23 @@ def test_si_params_default(sgp):
     }
 
 
-def test_si_fetch1_dataframe(sgp, si_key, populate_si, bodyparts):
-    fetched_df = (
+@pytest.fixture(scope="session")
+def si_df(sgp, si_key, populate_si, bodyparts):
+    yield (
         sgp.v1.DLCSmoothInterp() & {**si_key, "bodypart": bodyparts[0]}
     ).fetch1_dataframe()
-    assert isinstance(fetched_df, pd.DataFrame)
-    raise NotImplementedError
+
+
+@pytest.mark.parametrize(
+    "column, exp_sum",
+    [
+        ("video_frame_ind", 36312),
+        ("x", 17987),
+        ("y", 2983),
+    ],
+)
+def test_centroid_fetch1_dataframe(si_df, column, exp_sum):
+    tolerance = abs(si_df[column].iloc[0] * 0.1)
+    assert np_isclose(
+        si_df[column].sum(), exp_sum, atol=tolerance
+    ), f"Sum of {column} in SmoothInterp dataframe is not as expected"

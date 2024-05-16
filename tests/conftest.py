@@ -9,6 +9,8 @@ import datajoint as dj
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
+from numba import NumbaWarning
+from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
@@ -20,6 +22,8 @@ from .data_downloader import DataDownloader
 warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 warnings.filterwarnings("ignore", module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
+warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
 
 def pytest_addoption(parser):
