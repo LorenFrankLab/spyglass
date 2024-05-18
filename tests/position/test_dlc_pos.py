@@ -1,4 +1,3 @@
-import pandas as pd
 import pytest
 from numpy import isclose as np_isclose
 

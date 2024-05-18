@@ -180,7 +180,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
             bp_key = key.copy()
             if test_mode:  # during testing, analysis_file not in BodyPart table
-                bp_key.pop("analysis_file_name")
+                bp_key.pop("analysis_file_name", None)
 
             dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
