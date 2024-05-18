@@ -290,7 +290,14 @@ def decompose_name(full_name: str) -> tuple:
 
     parts = full_trimmed.split(delim)
 
-    if delim is None or len(parts) != 2:  # catch unsupported format
+    # the name is separated by a comma ({last, first})
+    if delim == ", ":
+        last, first = parts
+    # the name is separated by a space ({first last}) with no space within either first or last
+    elif delim == " ":
+        first, last = parts
+    # the name is not separated by a comma or a space OR the name is separated by a space but has additional spaces within either first or last
+    elif delim is None or len(parts) != 2:
         raise ValueError(
             f"Name has unsupported format for {full_name}. \n\t"
             + "Must use exactly one comma+space (i.e., ', ') or space.\n\t"
@@ -299,7 +306,6 @@ def decompose_name(full_name: str) -> tuple:
             + "if name(s) includes spaces."
         )
 
-    first, last = parts if delim == " " else parts[::-1]
     full = f"{first} {last}"
 
     return full, first, last
