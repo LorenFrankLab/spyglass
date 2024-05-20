@@ -164,7 +164,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def download_file(
-        analysis_file_name: str, permissible_fail: bool = False
+        analysis_file_name: str, permit_fail: bool = False
     ) -> bool:
         """Download the specified analysis file and associated linked files
         from kachery-cloud if possible
@@ -213,7 +213,7 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
                         raise Exception(
                             f"Linked file {linked_file_path} cannot be downloaded"
                         )
-        if not downloaded and not permissible_fail:
+        if not downloaded and not permit_fail:
             raise Exception(f"{analysis_file_name} cannot be downloaded")
 
         return downloaded

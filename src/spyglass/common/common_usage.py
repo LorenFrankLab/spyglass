@@ -10,14 +10,13 @@ import os
 from pathlib import Path
 from typing import List, Union
 
-import datajoint as dj
-from datajoint import FreeTable
-from datajoint import config as dj_config
-
 import dandi.download
 import dandi.organize
 import dandi.upload
+import datajoint as dj
 from dandi.organize import OrganizeInvalid
+from datajoint import FreeTable
+from datajoint import config as dj_config
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import export_dir
@@ -435,7 +434,9 @@ class Export(SpyglassMixin, dj.Computed):
 
         # make a temp dir with symbolic links to the export files
         source_files = (self.File() & key).fetch("file_path")
-        destination_dir = f"{export_dir}/dandiset_{paper_id}"
+        paper_dir = f"{export_dir}/{paper_id}"
+        os.makedirs(paper_dir, exist_ok=True)
+        destination_dir = f"{paper_dir}/dandiset_{paper_id}"
         os.makedirs(destination_dir, exist_ok=True)
         for file in source_files:
             if not os.path.exists(
@@ -448,10 +449,10 @@ class Export(SpyglassMixin, dj.Computed):
 
         # given dandiset_id, download the dandiset to the export_dir
         url = f"https://gui-staging.dandiarchive.org/dandiset/{dandiset_id}/draft"  # TODO: this is the dev server of dandi
-        dandi.download.download(url, output_dir=f"{export_dir}")
+        dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory
-        dandiset_dir = f"{export_dir}/{dandiset_id}"
+        dandiset_dir = f"{paper_dir}/{dandiset_id}"
         dandi.organize.organize(
             destination_dir, dandiset_dir, invalid=OrganizeInvalid.WARN
         )

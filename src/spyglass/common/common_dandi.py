@@ -1,19 +1,20 @@
 import os
+from uuid import uuid4
+
 import dandi.organize
 import dandi.validate
-from dandi.validate_types import Severity
-import fsspec
-import pynwb
-import h5py
-from uuid import uuid4
-from fsspec.implementations.cached import CachingFileSystem
-
 import datajoint as dj
+import fsspec
+import h5py
+import pynwb
+from dandi.consts import known_instances
+from dandi.dandiapi import DandiAPIClient
+from dandi.validate_types import Severity
+from fsspec.implementations.cached import CachingFileSystem
 
 from spyglass.common.common_usage import Export
 from spyglass.settings import export_dir
-
-from dandi.consts import known_instances
+from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 
 dev_instance = known_instances["dandi-staging"]
 
@@ -21,7 +22,7 @@ schema = dj.schema("common_dandi")
 
 
 @schema
-class DandiPath(dj.Manual):
+class DandiPath(SpyglassMixin, dj.Manual):
     definition = """
     -> Export.File
     ---
@@ -36,8 +37,6 @@ class DandiPath(dj.Manual):
         dandi_path = (self & key).fetch1("dandi_path")
 
         # get the s3 url from Dandi
-        from dandi.dandiapi import DandiAPIClient
-
         with DandiAPIClient(
             dandi_instance=dev_instance,
         ) as client:  # TODO: this is the dev server of dandi

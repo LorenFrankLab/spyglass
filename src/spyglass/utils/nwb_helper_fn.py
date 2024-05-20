@@ -59,11 +59,11 @@ def get_nwb_file(nwb_file_path):
             # the download functions assume just the filename, so we need to
             # get that from the path
             if not AnalysisNwbfileKachery.download_file(
-                os.path.basename(nwb_file_path), permissible_fail=True
+                os.path.basename(nwb_file_path), permit_fail=True
             ):
                 logger.info(
-                "NWB file not found in kachery; checking Dandi for "
-                + f"{nwb_file_path}"
+                    "NWB file not found in kachery; checking Dandi for "
+                    + f"{nwb_file_path}"
                 )
                 # Dandi fallback SB 2024-04-03
                 from ..common.common_dandi import DandiPath
@@ -89,6 +89,7 @@ def get_nwb_file(nwb_file_path):
 
     return nwbfile
 
+
 def file_from_dandi(filepath):
     """helper to determine if open file is streamed from Dandi"""
     if filepath not in __open_nwb_files:
@@ -98,6 +99,7 @@ def file_from_dandi(filepath):
         if "HTTPFileSystem" in k:
             return True
     return False
+
 
 def get_config(nwb_file_path):
     """Return a dictionary of config settings for the given NWB file.
