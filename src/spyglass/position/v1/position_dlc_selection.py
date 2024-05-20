@@ -304,6 +304,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     ---
     """
 
+    # TODO: Shoultn't this keep track of the video file it creates?
+
     def make(self, key):
         from tqdm import tqdm as tqdm
 
@@ -432,3 +434,4 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             crop=crop,
             **params["video_params"],
         )
+        self.insert1(key)

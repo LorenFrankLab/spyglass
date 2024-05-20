@@ -1,5 +1,19 @@
 # PyTests
 
+## Environment
+
+To facilitate headless testing of various Qt-based tools as well as Tensorflow,
+`pyproject.toml` includes some environment variables associated with the
+display. These are...
+
+- `QT_QPA_PLATFORM`: Set to `offscreen` to prevent the need for a display.
+- `TF_ENABLE_ONEDNN_OPTS`: Set to `1` to enable Tensorflow optimizations.
+- `TF_CPP_MIN_LOG_LEVEL`: Set to `2` to suppress Tensorflow warnings.
+
+<!-- - `DISPLAY`: Set to `:0` to prevent the need for a display. -->
+
+## Options
+
 This directory is contains files for testing the code. Simply by running
 `pytest` from the root directory, all tests will be run with default parameters
 specified in `pyproject.toml`. Notable optional parameters include...
@@ -7,7 +21,7 @@ specified in `pyproject.toml`. Notable optional parameters include...
 - Coverage items. The coverage report indicates what percentage of the code was
     included in tests.
 
-    - `--cov=spyglatss`: Which package should be described in the coverage report
+    - `--cov=spyglass`: Which package should be described in the coverage report
     - `--cov-report term-missing`: Include lines of items missing in coverage
 
 - Verbosity.

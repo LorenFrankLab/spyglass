@@ -388,6 +388,14 @@ def populate_exception():
     yield PopulateException
 
 
+# -------------------------- FIXTURES, COMMON TABLES --------------------------
+
+
+@pytest.fixture(scope="session")
+def video_keys(common):
+    return common.VideoFile().fetch(as_dict=True)
+
+
 # ------------------------- FIXTURES, POSITION TABLES -------------------------
 
 
@@ -428,7 +436,7 @@ def trodes_params(trodes_params_table, teardown):
             },
         },
     }
-    trodes_params_table.get_default()
+    _ = trodes_params_table.get_default()
     trodes_params_table.insert(
         [v for k, v in paramsets.items()], skip_duplicates=True
     )
@@ -779,9 +787,15 @@ def dlc_project_tbl(sgp):
 
 
 @pytest.fixture(scope="session")
+def dlc_project_name():
+    yield "pytest_proj"
+
+
+@pytest.fixture(scope="session")
 def insert_project(
     verbose_context,
     teardown,
+    dlc_project_name,
     dlc_project_tbl,
     common,
     bodyparts,
@@ -791,7 +805,7 @@ def insert_project(
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     with verbose_context:
         project_key = dlc_project_tbl.insert_new_project(
-            project_name="pytest_proj",
+            project_name=dlc_project_name,
             bodyparts=bodyparts,
             lab_team=team_name,
             frames_per_video=100,
@@ -858,7 +872,13 @@ def extract_frames(
         )
     vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
     label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
+
     yield label_dir
+
+    for file in label_dir.glob("*png"):
+        if file.stem in ["img000", "img001"]:
+            continue
+        file.unlink()
 
 
 @pytest.fixture(scope="session")
@@ -889,11 +909,18 @@ def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
 
 
 @pytest.fixture(scope="session")
-def training_params_key(verbose_context, sgp, project_key):
-    training_params_name = "pytest"
+def dlc_training_params(sgp):
+    params_tbl = sgp.v1.DLCModelTrainingParams()
+    params_name = "pytest"
+    yield params_tbl, params_name
+
+
+@pytest.fixture(scope="session")
+def training_params_key(verbose_context, sgp, project_key, dlc_training_params):
+    params_tbl, params_name = dlc_training_params
     with verbose_context:
-        sgp.v1.DLCModelTrainingParams.insert_new_params(
-            paramset_name=training_params_name,
+        params_tbl.insert_new_params(
+            paramset_name=params_name,
             params={
                 "trainingsetindex": 0,
                 "shuffle": 1,
@@ -901,10 +928,11 @@ def training_params_key(verbose_context, sgp, project_key):
                 "TFGPUinference": False,
                 "net_type": "resnet_50",
                 "augmenter_type": "imgaug",
+                "video_sets": "test skipping param",
             },
             skip_duplicates=True,
         )
-    yield {"dlc_training_params_name": training_params_name}
+    yield {"dlc_training_params_name": params_name}
 
 
 @pytest.fixture(scope="session")
@@ -913,7 +941,6 @@ def model_train_key(sgp, project_key, training_params_key):
     model_train_key = {
         **project_key,
         **training_params_key,
-        "training_id": 0,
     }
     sgp.v1.DLCModelTrainingSelection().insert1(
         {
@@ -974,19 +1001,17 @@ def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
 
 @pytest.fixture(scope="session")
 def populate_pose_estimation(sgp, pose_estimation_key):
-    pose_est_tbl = sgp.v1.DLCPoseEstimation
-    if pose_est_tbl & pose_estimation_key:
-        yield
-    else:
+    pose_est_tbl = sgp.v1.DLCPoseEstimation()
+    if len(pose_est_tbl & pose_estimation_key) < 1:
         pose_est_tbl.populate(pose_estimation_key)
-        yield
+    yield pose_est_tbl
 
 
 @pytest.fixture(scope="session")
 def si_params_name(sgp, populate_pose_estimation):
     params_name = "low_bar"
     params_tbl = sgp.v1.DLCSmoothInterpParams
-    # if len(params_tbl & {"dlc_si_params_name": params_name}) == 0:
+    # if len(params_tbl & {"dlc_si_params_name": params_name}) < 1:
     if True:  # TODO: remove before merge
         nan_params = params_tbl.get_nan_params()
         nan_params["dlc_si_params_name"] = params_name
@@ -995,6 +1020,9 @@ def si_params_name(sgp, populate_pose_estimation):
                 "likelihood_thresh": 0.4,
                 "max_cm_between_pts": 100,
                 "num_inds_to_span": 50,
+                # Smoothing and Interpolation added later - must check
+                "smoothing_params": {"smoothing_duration": 0.05},
+                "interp_params": {"max_cm_to_interp": 100},
             }
         )
         params_tbl.insert1(nan_params, skip_duplicates=True)

@@ -11,15 +11,6 @@ dlc_utils.py     :
     58, 61, 69, 72, 97-100, 104, 149-161, 232-235, 239-241, 246, 259, 280,
     293-305, 310-316, 328-341, 356-373, 395, 404, 480, 487-488, 530, 548-561,
     594-601, 611-612, 641-657, 682-736, 762-772, 787, 809-1286
-
-TODO: tests for
-pose_estimat   51-71, 102, 115, 256, 345-366
-position.py    53, 99, 114, 119, 197-198, 205-219, 349, 353-355, 360, 382, 385, 407, 443-466
-project.py     45-54, 128-205, 250-255, 259, 278-303, 316, 347, 361-413, 425, 457, 476-479, 486-489, 514-555, 582, 596
-selection.py   213, 282, 308-417
-training.py    55, 67-73, 85-87, 113, 143-144, 161, 207-210
-es_position.py 67, 282-283, 361-362, 496, 502-503
-
 """
 
 from itertools import product as iter_prodect
@@ -33,7 +24,7 @@ import pytest
 def dlc_video_params(sgp):
     sgp.v1.DLCPosVideoParams.insert_default()
     params_key = {"dlc_pos_video_params_name": "five_percent"}
-    sgp.v1.DLCPosVideoSelection.insert1(
+    sgp.v1.DLCPosVideoParams.insert1(
         {
             **params_key,
             "params": {
@@ -47,7 +38,7 @@ def dlc_video_params(sgp):
 
 
 @pytest.fixture(scope="session")
-def dlc_video_selection(sgp, dlc_key, dlc_video_params):
+def dlc_video_selection(sgp, dlc_key, dlc_video_params, populate_dlc):
     s_key = {**dlc_key, **dlc_video_params}
     sgp.v1.DLCPosVideoSelection.insert1(s_key, skip_duplicates=True)
     yield dlc_key
@@ -56,7 +47,7 @@ def dlc_video_selection(sgp, dlc_key, dlc_video_params):
 @pytest.fixture(scope="session")
 def populate_dlc_video(sgp, dlc_video_selection):
     sgp.v1.DLCPosVideo.populate(dlc_video_selection)
-    yield
+    yield sgp.v1.DLCPosVideo()
 
 
 @pytest.fixture(scope="session")
@@ -95,4 +86,4 @@ def generate_led_df(leds, inc_vals=False):
         count[0] += 1
         return count[0]
 
-    return df.map(lambda x: increment_count() if x == 1 else x)
+    return df.applymap(lambda x: increment_count() if x == 1 else x)

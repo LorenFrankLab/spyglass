@@ -385,7 +385,17 @@ def infer_output_dir(key, makedir=True):
     """
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
-    nwb_file_name = key["nwb_file_name"].split("_.")[0]
+
+    file_name = key.get("nwb_file_name")
+    dlc_model_name = key.get("dlc_model_name")
+    epoch = key.get("epoch")
+
+    if not all([file_name, dlc_model_name, epoch]):
+        raise ValueError(
+            "Key must contain 'nwb_file_name', 'dlc_model_name', and 'epoch'"
+        )
+
+    nwb_file_name = file_name.split("_.")[0]
     output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
@@ -1021,7 +1031,10 @@ def make_video(
         video.release()
         out.release()
         print("destroying cv2 windows")
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
         print("finished making video with opencv")
         return
 

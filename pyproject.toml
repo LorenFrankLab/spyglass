@@ -79,6 +79,7 @@ test = [
     "pre-commit",     # linting
     "pytest",         # unit testing
     "pytest-cov",     # code coverage
+    "pytest-xvfb",    # for headless testing of Qt
 ]
 docs = [
     "hatch",                 # Get version from env
@@ -120,12 +121,12 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    "-sv",
-    "--sw", # stepwise: resume with next test after failure
-    "--pdb", # drop into debugger on failure
+    # "-sv", # verbose output
+    # "--sw", # stepwise: resume with next test after failure
+    # "--pdb", # drop into debugger on failure
     "-p no:warnings",
-    "--no-teardown", # don't teardown the database after tests
-    "--quiet-spy",                  # don't show logging from spyglass
+    # "--no-teardown", # don't teardown the database after tests
+    # "--quiet-spy",                  # don't show logging from spyglass
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
     "--cov=spyglass",
@@ -134,6 +135,12 @@ addopts = [
 ]
 testpaths = ["tests"]
 log_level = "INFO"
+env = [
+    "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
+    # "DISPLAY = :0", # QT fails headless without this
+    "TF_ENABLE_ONEDNN_OPTS = 0", # TF disable approx calcs
+    "TF_CPP_MIN_LOG_LEVEL = 2", # Disable TF warnings
+]
 
 [tool.coverage.run]
 source = ["*/src/spyglass/*"]

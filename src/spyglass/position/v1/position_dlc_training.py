@@ -108,7 +108,7 @@ class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
     """
 
     def insert1(self, key, **kwargs):
-        training_id = key["training_id"]
+        training_id = key.get("training_id")
         if training_id is None:
             training_id = (
                 dj.U().aggr(self & key, n="max(training_id)").fetch1("n") or 0

@@ -79,11 +79,6 @@ def test_populate_state_script(common, pop_state_script):
     ), "StateScript populate unexpected effect"
 
 
-@pytest.fixture(scope="session")
-def video_keys(common):
-    return common.VideoFile().fetch(as_dict=True)
-
-
 @pytest.mark.usefixtures("skipif_noextras")
 def test_videofile_update_entries(common, video_keys):
     """Test update entries"""
