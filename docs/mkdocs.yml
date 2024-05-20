@@ -51,10 +51,10 @@ nav:
           - Data Sync: notebooks/02_Data_Sync.ipynb
           - Merge Tables: notebooks/03_Merge_Tables.ipynb
           - Config Populate: notebooks/04_PopulateConfigFile.ipynb
+          - Export: notebooks/05_Export.ipynb
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
-          - Curation: notebooks/11_CurationV0.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
@@ -74,8 +74,10 @@ nav:
       - FigURL: misc/figurl_views.md
       - Session Groups: misc/session_groups.md
       - Insert Data: misc/insert_data.md
+      - Mixin: misc/mixin.md
       - Merge Tables: misc/merge_tables.md
       - Database Management: misc/database_management.md
+      - Export: misc/export.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md
@@ -104,6 +106,7 @@ plugins:
             group_by_category: false
             line_length: 80
             docstring_style: numpy
+          paths: [../src]
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:

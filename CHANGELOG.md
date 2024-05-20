@@ -1,6 +1,57 @@
 # Change Log
 
-## Unreleased
+## [0.5.3] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+### Infrastructure
+
+- Create class `SpyglassGroupPart` to aid delete propagations #899
+- Fix bug report template #955
+- Add rollback option to `populate_all_common` #957, #971
+- Add long-distance restrictions via `<<` and `>>` operators. #943, #969
+- Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
+- Clean up old `TableChain.join` call in mixin delete. #982
+
+### Pipelines
+
+- DLC
+    - Allow dlc without pre-existing tracking data #973, #975
+
+## [0.5.2] (April 22, 2024)
+
+### Infrastructure
+
+- Refactor `TableChain` to include `_searched` attribute. #867
+- Fix errors in config import #882
+- Save current spyglass version in analysis nwb files to aid diagnosis #897
+- Add functionality to export vertical slice of database. #875
+- Add pynapple support #898
+- Update PR template checklist to include db changes. #903
+- Avoid permission check on personnel tables. #903
+- Add documentation for `SpyglassMixin`. #903
+- Add helper to identify merge table by definition. #903
+- Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile
+    #918
+- Fix potential duplicate entries in Merge part tables #922
+- Add logging of AnalysisNwbfile creation time and size #937
+- Fix error on empty delete call in merge table. #940
+- Add log of AnalysisNwbfile creation time, size, and access count #937, #941
+
+### Pipelines
+
+- Spikesorting
+    - Update calls in v0 pipeline for spikeinterface>=0.99 #893
+    - Fix method type of `get_spike_times` #904
+    - Add helper functions for restricting spikesorting results and linking to
+        probe info #910
+- Decoding
+    - Handle dimensions of clusterless `get_ahead_behind_distance` #904
+    - Fix improper handling of nwb file names with .strip #929
+
+## [0.5.1] (March 7, 2024)
 
 ### Infrastructure
 
@@ -16,9 +67,12 @@
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
-
 - Spikesorting:
+    - Increase`spikeinterface` version to >=0.99.1, \<0.100 #852
     - Bug fix in single artifact interval edge case #859
+    - Bug fix in FigURL #871
+- LFP
+    - In LFPArtifactDetection, only apply referencing if explicitly selected #863
 
 ## [0.5.0] (February 9, 2024)
 
@@ -191,3 +245,6 @@
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
+[0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
+[0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
+[0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3

@@ -161,10 +161,15 @@ def read_yaml(fullpath, filename="*"):
 
     Parameters
     ----------
-    fullpath: String or pathlib path. Directory with yaml files
-    filename: String. Filename, no extension. Permits wildcards.
+    fullpath: Union[str, pathlib.Path]
+        Directory with yaml files
+    filename: str
+        Filename, no extension. Permits wildcards.
 
-    Returns filepath and contents as dict
+    Returns
+    -------
+    tuple
+        filepath and contents as dict
     """
     from deeplabcut.utils.auxiliaryfunctions import read_config
 

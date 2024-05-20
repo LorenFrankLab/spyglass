@@ -144,6 +144,24 @@ class RippleParameters(SpyglassMixin, dj.Lookup):
             {"ripple_param_name": "default", "ripple_param_dict": default_dict},
             skip_duplicates=True,
         )
+        default_dict_trodes = {
+            "speed_name": "speed",
+            "ripple_detection_algorithm": "Kay_ripple_detector",
+            "ripple_detection_params": dict(
+                speed_threshold=4.0,  # cm/s
+                minimum_duration=0.015,  # sec
+                zscore_threshold=2.0,  # std
+                smoothing_sigma=0.004,  # sec
+                close_ripple_threshold=0.0,  # sec
+            ),
+        }
+        self.insert1(
+            {
+                "ripple_param_name": "default_trodes",
+                "ripple_param_dict": default_dict_trodes,
+            },
+            skip_duplicates=True,
+        )
 
 
 @schema
@@ -373,7 +391,6 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         lfp_offset=1,
         lfp_channel_ind=None,
     ):
-
         ripple_times = self.fetch1_dataframe()
 
         def _add_ripple_times(

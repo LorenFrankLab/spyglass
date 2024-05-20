@@ -6,6 +6,7 @@ on:
       - master
       - maint/*
       - '!test_branch'
+      - '!documentation'
     tags:
       - "*"
   pull_request:

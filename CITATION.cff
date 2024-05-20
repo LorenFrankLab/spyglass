@@ -79,6 +79,26 @@ authors:
     email: xulu.sun@ucsf.edu
     affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0000-0003-3076-0994'
+  - given-names: Broyles
+    family-names: Emrey
+    email: emrey.broyles@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0001-5559-2910'
+  - given-names: Shin
+    family-names: Donghoon
+    email: donghoon.shin@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0009-0000-8916-7314'
+  - given-names: Chiang
+    family-names: Sharon
+    email: sharon.chiang@ucsf.edu
+    affiliation: 'University of California, San Francisco'
+    orcid: 'https://orcid.org/0000-0002-4548-4550'
+  - given-names: Holobetz
+    family-names: Cristofer
+    email: cristofer.holobetz.23@ucl.ac.uk
+    affiliation: 'University College London'
+    orcid: 'https://orcid.org/0009-0009-8567-3290'
   - given-names: Andrew
     family-names: Tritt
     email: ajtritt@lbl.gov
@@ -146,5 +166,5 @@ keywords:
   - spike sorting
   - kachery
 license: MIT
-version: 0.5.0
-date-released: '2024-02-09'
+version: 0.5.2
+date-released: '2024-04-22'

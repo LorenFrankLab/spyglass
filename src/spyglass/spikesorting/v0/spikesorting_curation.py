@@ -10,9 +10,17 @@ from typing import List
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+from packaging import version
+
+if version.parse(si.__version__) < version.parse("0.99.1"):
+    raise ImportError(
+        "SpikeInterface version must updated. "
+        + "Please run `pip install spikeinterface==0.99.1` to update."
+    )
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
+from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveforms_dir
@@ -25,6 +33,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
 )
 from spyglass.utils import SpyglassMixin, logger
 
+from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema("spikesorting_curation")
@@ -219,6 +228,7 @@ class Curation(SpyglassMixin, dj.Manual):
         units_object_id : str
 
         """
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         sort_interval_valid_times = (
             IntervalList & {"interval_list_name": sort_interval_list_name}
@@ -239,7 +249,6 @@ class Curation(SpyglassMixin, dj.Manual):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         object_ids = AnalysisNwbfile().add_units(
             analysis_file_name,
             units,
@@ -317,6 +326,9 @@ class Waveforms(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         recording = Curation.get_recording(key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
@@ -342,15 +354,13 @@ class Waveforms(SpyglassMixin, dj.Computed):
             **waveform_params,
         )
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
         object_id = AnalysisNwbfile().add_units_waveforms(
             key["analysis_file_name"], waveform_extractor=waveforms
         )
         key["waveforms_object_id"] = object_id
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def load_waveforms(self, key: dict):
@@ -503,7 +513,13 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        analysis_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         waveform_extractor = Waveforms().load_waveforms(key)
+        key["analysis_file_name"] = (
+            analysis_file_name  # add to key here to prevent fetch errors
+        )
         qm = {}
         params = (MetricParameters & key).fetch1("metric_params")
         for metric_name, metric_params in params.items():
@@ -519,13 +535,11 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         logger.info(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
         key["object_id"] = AnalysisNwbfile().add_units_metrics(
             key["analysis_file_name"], metrics=qm
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 
@@ -617,12 +631,10 @@ def _get_peak_offset(
     """Computes the shift of the waveform peak from center of window."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_offset_inds = (
-        si.postprocessing.get_template_extremum_channel_peak_shift(
-            waveform_extractor=waveform_extractor,
-            peak_sign=peak_sign,
-            **metric_params,
-        )
+    peak_offset_inds = si.core.get_template_extremum_channel_peak_shift(
+        waveform_extractor=waveform_extractor,
+        peak_sign=peak_sign,
+        **metric_params,
     )
     peak_offset = {key: int(abs(val)) for key, val in peak_offset_inds.items()}
     return peak_offset
@@ -634,7 +646,7 @@ def _get_peak_channel(
     """Computes the electrode_id of the channel with the extremum peak for each unit."""
     if "peak_sign" in metric_params:
         del metric_params["peak_sign"]
-    peak_channel_dict = si.postprocessing.get_template_extremum_channel(
+    peak_channel_dict = si.core.get_template_extremum_channel(
         waveform_extractor=waveform_extractor,
         peak_sign=peak_sign,
         **metric_params,
@@ -921,17 +933,21 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
         unit_labels_to_remove = ["reject"]
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1("quality_metrics")
         if metrics == {}:
-            Warning(
-                f"Metrics for Curation {key} should normally be calculated before insertion here"
+            logger.warning(
+                f"Metrics for Curation {key} should normally be calculated "
+                + "before insertion here"
             )
 
         sorting = Curation.get_curated_sorting(key)
         unit_ids = sorting.get_unit_ids()
-        # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
+
+        # Get the labels for the units, add only those units that do not have
+        # 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1("curation_labels")
         accepted_units = []
         for unit_id in unit_ids:
@@ -987,6 +1003,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             unit_ids=accepted_units,
             labels=labels,
         )
+
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
         # now add the units
@@ -1028,6 +1046,37 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         # expand the key
         sorting_key = (cls & key).fetch1("KEY")
         return Curation.get_curated_sorting(sorting_key)
+
+    @classmethod
+    def get_sort_group_info(cls, key):
+        """Returns the sort group information for the curation
+        (e.g. brain region, electrode placement, etc.)
+
+        Parameters
+        ----------
+        key : dict
+            restriction on CuratedSpikeSorting table
+
+        Returns
+        -------
+        sort_group_info : Table
+            Table with information about the sort groups
+        """
+        electrode_restrict_list = []
+        for entry in cls & key:
+            # Just take one electrode entry per sort group
+            electrode_restrict_list.extend(
+                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
+                    limit=1
+                )
+            )
+        # Run joins with the tables with info and return
+        sort_group_info = (
+            (Electrode & electrode_restrict_list)
+            * (cls & key)
+            * SortGroup.SortGroupElectrode()
+        ) * BrainRegion()
+        return sort_group_info
 
 
 @schema

@@ -1,3 +1,4 @@
+from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -7,9 +8,14 @@ import spikeinterface as si
 import spikeinterface.curation as sc
 import spikeinterface.extractors as se
 
+from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_ephys import Raw
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import (
+    SortGroup,
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -74,6 +80,8 @@ class CurationV1(SpyglassMixin, dj.Manual):
         -------
         curation_key : dict
         """
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
         if parent_curation_id == -1:
@@ -120,6 +128,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
             key,
             skip_duplicates=True,
         )
+        AnalysisNwbfile().log(analysis_file_name, table=cls.full_table_name)
 
         return key
 
@@ -213,7 +222,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
             }
         ]
 
-        sorting = si.NumpySorting.from_dict(
+        sorting = si.NumpySorting.from_unit_dict(
             units_dict_list, sampling_frequency=sampling_frequency
         )
 
@@ -260,6 +269,42 @@ class CurationV1(SpyglassMixin, dj.Manual):
         else:
             return si_sorting
 
+    @classmethod
+    def get_sort_group_info(cls, key: dict) -> dj.Table:
+        """Returns the sort group information for the curation
+        (e.g. brain region, electrode placement, etc.)
+
+        Parameters
+        ----------
+        key : dict
+            restriction on CuratedSpikeSorting table
+
+        Returns
+        -------
+        sort_group_info : Table
+            Table with information about the sort groups
+        """
+        table = (
+            (cls & key) * SpikeSortingSelection()
+        ) * SpikeSortingRecordingSelection().proj(
+            "recording_id", "sort_group_id"
+        )
+        electrode_restrict_list = []
+        for entry in table:
+            # pull just one electrode from each sort group for info
+            electrode_restrict_list.extend(
+                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
+                    limit=1
+                )
+            )
+
+        sort_group_info = (
+            (Electrode & electrode_restrict_list)
+            * table
+            * SortGroup.SortGroupElectrode()
+        ) * BrainRegion()
+        return (cls & key).proj() * sort_group_info
+
 
 def _write_sorting_to_nwb_with_curation(
     sorting_id: str,
@@ -296,6 +341,7 @@ def _write_sorting_to_nwb_with_curation(
     nwb_file_name = (SpikeSortingSelection & {"sorting_id": sorting_id}).fetch1(
         "nwb_file_name"
     )
+    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
 
     # get sorting
     sorting_analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -324,7 +370,6 @@ def _write_sorting_to_nwb_with_curation(
     unit_ids = list(units_dict.keys())
 
     # create new analysis nwb file
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,

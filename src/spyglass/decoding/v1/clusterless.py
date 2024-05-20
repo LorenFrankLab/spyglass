@@ -32,7 +32,7 @@ from spyglass.decoding.v1.waveform_features import (
 )  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -44,7 +44,7 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
     waveform_features_group_name: varchar(80)
     """
 
-    class UnitFeatures(SpyglassMixin, dj.Part):
+    class UnitFeatures(SpyglassMixinPart):
         definition = """
         -> UnitWaveformFeaturesGroup
         -> UnitWaveformFeatures
@@ -247,7 +247,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Insert results
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
 
-        nwb_file_name = key["nwb_file_name"].strip("_.nwb")
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
         # Generate a unique path for the results file
         path_exists = True
@@ -466,7 +466,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: Handle decode intervals, store in table
 
         classifier = self.fetch_model()
-        results = self.fetch_results()
+        results = self.fetch_results().squeeze()
         posterior = results.acausal_posterior.unstack("state_bins").sum("state")
 
         if getattr(classifier.environments[0], "track_graph") is not None:

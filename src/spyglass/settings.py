@@ -20,7 +20,7 @@ class SpyglassConfig:
     facilitate testing.
     """
 
-    def __init__(self, base_dir: str = None, **kwargs):
+    def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
         Initializes a new instance of the class.
 
@@ -60,6 +60,7 @@ class SpyglassConfig:
 
         self.relative_dirs = {
             # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
+            # NOTE: Adding new dir requires edit to HHMI hub
             "spyglass": {
                 "raw": "raw",
                 "analysis": "analysis",
@@ -68,9 +69,10 @@ class SpyglassConfig:
                 "waveforms": "waveforms",
                 "temp": "tmp",
                 "video": "video",
+                "export": "export",
             },
             "kachery": {
-                "cloud": "kachery_storage",
+                "cloud": ".kachery-cloud",
                 "storage": "kachery_storage",
                 "temp": "tmp",
             },
@@ -101,7 +103,7 @@ class SpyglassConfig:
         force_reload=False,
         on_startup: bool = False,
         **kwargs,
-    ):
+    ) -> None:
         """
         Loads the configuration settings for the object.
 
@@ -181,10 +183,13 @@ class SpyglassConfig:
                     else None
                 )
 
+                source_config = (
+                    dj_dlc
+                    if prefix == "dlc"
+                    else dj_kachery if prefix == "kachery" else dj_spyglass
+                )
                 dir_location = (
-                    dj_spyglass.get(dir)
-                    or dj_kachery.get(dir)
-                    or dj_dlc.get(dir)
+                    source_config.get(dir)
                     or env_loc
                     or str(Path(this_base) / dir_str)
                 ).replace('"', "")
@@ -218,25 +223,25 @@ class SpyglassConfig:
 
         return self._config
 
-    def _load_env_vars(self):
+    def _load_env_vars(self) -> dict:
         loaded_dict = {}
         for var, val in self.env_defaults.items():
             loaded_dict[var] = os.getenv(var, val)
         return loaded_dict
 
-    def _set_env_with_dict(self, env_dict):
+    def _set_env_with_dict(self, env_dict) -> None:
         # NOTE: Kept for backwards compatibility. Should be removed in future
         # for custom paths. Keep self.env_defaults.
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 
-    def _mkdirs_from_dict_vals(self, dir_dict):
+    def _mkdirs_from_dict_vals(self, dir_dict) -> None:
         if self._debug_mode:
             return
         for dir_str in dir_dict.values():
             Path(dir_str).mkdir(exist_ok=True)
 
-    def _set_dj_config_stores(self, check_match=True, set_stores=True):
+    def _set_dj_config_stores(self, check_match=True, set_stores=True) -> None:
         """
         Checks dj.config['stores'] match resolved dirs. Ensures stores set.
 
@@ -282,7 +287,7 @@ class SpyglassConfig:
 
         return
 
-    def dir_to_var(self, dir: str, dir_type: str = "spyglass"):
+    def dir_to_var(self, dir: str, dir_type: str = "spyglass") -> str:
         """Converts a dir string to an env variable name."""
         return f"{dir_type.upper()}_{dir.upper()}_DIR"
 
@@ -295,7 +300,7 @@ class SpyglassConfig:
         database_port: int = 3306,
         database_use_tls: bool = True,
         **kwargs,
-    ):
+    ) -> dict:
         """Generate a datajoint configuration file.
 
         Parameters
@@ -340,7 +345,7 @@ class SpyglassConfig:
         base_dir=None,
         set_password=True,
         **kwargs,
-    ):
+    ) -> None:
         """Set the dj.config parameters, set password, and save config to file.
 
         Parameters
@@ -456,6 +461,7 @@ class SpyglassConfig:
                     "waveforms": self.waveforms_dir,
                     "temp": self.temp_dir,
                     "video": self.video_dir,
+                    "export": self.export_dir,
                 },
                 "kachery_dirs": {
                     "cloud": self.config.get(
@@ -514,6 +520,10 @@ class SpyglassConfig:
         return self.config.get(self.dir_to_var("video"))
 
     @property
+    def export_dir(self) -> str:
+        return self.config.get(self.dir_to_var("export"))
+
+    @property
     def debug_mode(self) -> bool:
         """Returns True if debug_mode is set.
 
@@ -557,6 +567,7 @@ if sg_config.load_failed:  # Failed to load
     sorting_dir = None
     waveforms_dir = None
     video_dir = None
+    export_dir = None
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
@@ -570,6 +581,7 @@ else:
     sorting_dir = sg_config.sorting_dir
     waveforms_dir = sg_config.waveforms_dir
     video_dir = sg_config.video_dir
+    export_dir = sg_config.export_dir
     debug_mode = sg_config.debug_mode
     test_mode = sg_config.test_mode
     prepopulate = config.get("prepopulate", False)

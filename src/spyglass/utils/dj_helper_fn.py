@@ -2,13 +2,44 @@
 
 import inspect
 import os
-from typing import Type
+from typing import List, Type, Union
 
 import datajoint as dj
 import numpy as np
+from datajoint.user_tables import UserTable
 
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
+
+# Tables that should be excluded from the undirected graph when finding paths
+# for TableChain objects and searching for an upstream key.
+PERIPHERAL_TABLES = [
+    "`common_interval`.`interval_list`",
+    "`common_nwbfile`.`__analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`__nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery_selection`",
+    "`common_nwbfile`.`analysis_nwbfile_kachery`",
+    "`common_nwbfile`.`analysis_nwbfile`",
+    "`common_nwbfile`.`kachery_channel`",
+    "`common_nwbfile`.`nwbfile_kachery_selection`",
+    "`common_nwbfile`.`nwbfile_kachery`",
+    "`common_nwbfile`.`nwbfile`",
+]
+
+
+def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
+    """Given lists of items/names, return item at index or by substring."""
+    if isinstance(index, int):
+        return sources[index]
+    for i, part in enumerate(names):
+        if index in part:
+            return sources[i]
+    return None
+
+
+def unique_dicts(list_of_dict):
+    """Remove duplicate dictionaries from a list."""
+    return [dict(t) for t in {tuple(d.items()) for d in list_of_dict}]
 
 
 def deprecated_factory(classes: list, old_module: str = "") -> list:
@@ -105,6 +136,74 @@ def dj_replace(original_table, new_values, key_column, replace_column):
     return original_table
 
 
+def get_fetching_table_from_stack(stack):
+    """Get all classes from a stack of tables."""
+    classes = set()
+    for frame_info in stack:
+        locals_dict = frame_info.frame.f_locals
+        for obj in locals_dict.values():
+            if not isinstance(obj, UserTable):
+                continue  # skip non-tables
+            if (name := obj.full_table_name) in PERIPHERAL_TABLES:
+                continue  # skip common_nwbfile tables
+            classes.add(name)
+    if len(classes) > 1:
+        logger.warn(
+            f"Multiple classes found in stack: {classes}. "
+            "Please submit a bug report with the snippet used."
+        )
+        classes = None  # predict only one but not sure, so return None
+    return next(iter(classes)) if classes else None
+
+
+def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
+    """Get the NWB file name and path from the given DataJoint query.
+
+    Parameters
+    ----------
+    query_expression : query
+        A DataJoint query expression (e.g., join, restrict) or a table to call fetch on.
+    tbl : table
+        DataJoint table to fetch from.
+    attr_name : str
+        Attribute name to fetch from the table.
+    *attrs : list
+        Attributes from normal DataJoint fetch call.
+    **kwargs : dict
+        Keyword arguments from normal DataJoint fetch call.
+
+    Returns
+    -------
+    nwb_files : list
+        List of NWB file names.
+    file_path_fn : function
+        Function to get the absolute path to the NWB file.
+    """
+    from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+
+    kwargs["as_dict"] = True  # force return as dictionary
+    attrs = attrs or query_expression.heading.names  # if none, all
+
+    which = "analysis" if "analysis" in attr_name else "nwb"
+    tbl_map = {  # map to file_name_str and file_path_fn
+        "analysis": ["analysis_file_name", AnalysisNwbfile.get_abs_path],
+        "nwb": ["nwb_file_name", Nwbfile.get_abs_path],
+    }
+    file_name_str, file_path_fn = tbl_map[which]
+
+    # TODO: check that the query_expression restricts tbl - CBroz
+    nwb_files = (
+        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    ).fetch(file_name_str)
+
+    if which == "analysis":  # log access of analysis files to log table
+        AnalysisNwbfile().increment_access(
+            nwb_files, table=get_fetching_table_from_stack(inspect.stack())
+        )
+
+    return nwb_files, file_path_fn
+
+
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
 
@@ -128,32 +227,20 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         List of dicts containing fetch results and NWB objects.
     """
     kwargs["as_dict"] = True  # force return as dictionary
+
     tbl, attr_name = nwb_master
 
     if not attrs:
         attrs = query_expression.heading.names
 
-    # get the list of analysis or nwb files
-    file_name_str = (
-        "analysis_file_name" if "analysis" in nwb_master[1] else "nwb_file_name"
-    )
-    # TODO: avoid this import?
-    from ..common.common_nwbfile import AnalysisNwbfile, Nwbfile
-
-    file_path_fn = (
-        AnalysisNwbfile.get_abs_path
-        if "analysis" in nwb_master[1]
-        else Nwbfile.get_abs_path
+    nwb_files, file_path_fn = get_nwb_table(
+        query_expression, tbl, attr_name, *attrs, **kwargs
     )
 
-    # TODO: check that the query_expression restricts tbl - CBroz
-    nwb_files = (
-        query_expression * tbl.proj(nwb2load_filepath=attr_name)
-    ).fetch(file_name_str)
     for file_name in nwb_files:
         file_path = file_path_fn(file_name)
-        if not os.path.exists(file_path):
-            # retrieve the file from kachery. This also opens the file and stores the file object
+        if not os.path.exists(file_path):  # retrieve the file from kachery.
+            # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
     rec_dicts = (

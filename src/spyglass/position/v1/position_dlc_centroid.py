@@ -141,6 +141,10 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             path=f"{output_dir.as_posix()}/log.log",
             print_console=False,
         ) as logger:
+            # Add to Analysis NWB file
+            analysis_file_name = AnalysisNwbfile().create(  # logged
+                key["nwb_file_name"]
+            )
             logger.logger.info("-----------------------")
             logger.logger.info("Centroid Calculation")
 
@@ -264,17 +268,19 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             position = pynwb.behavior.Position()
             velocity = pynwb.behavior.BehavioralTimeSeries()
-            spatial_series = (RawPosition() & key).fetch_nwb()[0][
-                "raw_position"
-            ]
+            if query := (RawPosition & key):
+                spatial_series = query.fetch_nwb()[0]["raw_position"]
+            else:
+                spatial_series = None
+
             METERS_PER_CM = 0.01
             position.create_spatial_series(
                 name="position",
                 timestamps=final_df.index.to_numpy(),
                 conversion=METERS_PER_CM,
                 data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
+                reference_frame=getattr(spatial_series, "reference_frame", ""),
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_position, y_position",
             )
             velocity.create_timeseries(
@@ -285,7 +291,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 data=velocity_df.loc[
                     :, idx[("velocity_x", "velocity_y", "speed")]
                 ].to_numpy(),
-                comments=spatial_series.comments,
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_velocity, y_velocity, speed",
             )
             velocity.create_timeseries(
@@ -298,8 +304,6 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 description="video_frame_ind",
                 comments="no comments",
             )
-            # Add to Analysis NWB file
-            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
             nwb_analysis_file = AnalysisNwbfile()
             key.update(
                 {
@@ -319,6 +323,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCCentroid")
+            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
