@@ -13,11 +13,12 @@
 - Add rollback option to `populate_all_common` #957, #971
 - Add long-distance restrictions via `<<` and `>>` operators. #943, #969
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
+- Clean up old `TableChain.join` call in mixin delete. #982
 
 ### Pipelines
 
 - DLC
-   - Allow dlc without pre-existing tracking data #973, #975
+    - Allow dlc without pre-existing tracking data #973, #975
 
 ## [0.5.2] (April 22, 2024)
 
