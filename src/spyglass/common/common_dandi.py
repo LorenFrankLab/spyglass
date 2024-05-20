@@ -12,9 +12,11 @@ from dandi.dandiapi import DandiAPIClient
 from dandi.validate_types import Severity
 from fsspec.implementations.cached import CachingFileSystem
 
+from spyglass.common.common_lab import LabMember
 from spyglass.common.common_usage import Export
 from spyglass.settings import export_dir
-from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.dj_helper_fn import _resolve_external_table
+from spyglass.utils.dj_mixin import SpyglassMixin
 
 dev_instance = known_instances["dandi-staging"]
 
@@ -161,7 +163,13 @@ def make_file_obj_id_unique(nwb_path: str):
     str
         the new object_id
     """
+    dj_user = dj.config["database.user"]
+    if dj_user not in LabMember().admin:
+        raise PermissionError(
+            "Admin permissions required to edit existing analysis files"
+        )
     new_id = str(uuid4())
     with h5py.File(nwb_path, "a") as f:
         f.attrs["object_id"] = new_id
+    _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
     return new_id

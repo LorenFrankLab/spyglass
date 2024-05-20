@@ -2,14 +2,18 @@
 
 import inspect
 import os
+from pathlib import Path
 from typing import List, Type, Union
 
 import datajoint as dj
+import h5py
 import numpy as np
 from datajoint.user_tables import UserTable
 
 from spyglass.utils.logging import logger
-from spyglass.utils.nwb_helper_fn import get_nwb_file, file_from_dandi
+from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
+
+STR_DTYPE = h5py.special_dtype(vlen=str)
 
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.
@@ -302,3 +306,133 @@ def get_child_tables(table):
         )
         for s in table.children()
     ]
+
+
+def update_analysis_for_dandi_standard(
+    file_name: str,
+    age: str = "P4M/P8M",
+):
+    """Function to resolve common nwb file format errors within the database
+
+    Parameters
+    ----------
+    file_name : str
+        The analysis file name to edit
+    age : str, optional
+        age to assign animal if missing, by default "P4M/P8M"
+    """
+    from spyglass.common import LabMember
+    from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+    dj_user = dj.config["database.user"]
+    if dj_user not in LabMember().admin:
+        raise PermissionError(
+            "Admin permissions required to edit existing analysis files"
+        )
+    filepath = AnalysisNwbfile().get_abs_path(file_name)
+    # edit the file
+    with h5py.File(filepath, "a") as f:
+        sex_value = f["/general/subject/sex"][()].decode("utf-8")
+        assert sex_value in ["Female", "Male", "F", "M"]
+        if sex_value == "Male":
+            new_sex_value = "M"
+            print(
+                f"Adjusting subject sex from '{sex_value}' to '{new_sex_value}'."
+            )
+            f["/general/subject/sex"][()] = new_sex_value
+        elif sex_value == "Female":
+            new_sex_value = "F"
+            print(
+                f"Adjusting subject sex from '{sex_value}' to '{new_sex_value}'."
+            )
+            f["/general/subject/sex"][()] = new_sex_value
+
+        # replace subject species value "Rat" with "Rattus norvegicus"
+        species_value = f["/general/subject/species"][()].decode("utf-8")
+        assert species_value in ("Rat", "Rattus norvegicus")
+        if species_value == "Rat":
+            new_species_value = "Rattus norvegicus"
+            print(
+                f"Adjusting subject species from '{species_value}' to '{new_species_value}'."
+            )
+            f["/general/subject/species"][()] = new_species_value
+
+        # add subject age dataset "P4M/P8M"
+        if "age" not in f["/general/subject"]:
+            new_age_value = age
+            print(f"Adding missing subject age, set to '{new_age_value}'.")
+            f["/general/subject"].create_dataset(
+                name="age", data=new_age_value, dtype=STR_DTYPE
+            )
+
+        # format name to "Last, First"
+        experimenter_value = f["/general/experimenter"][:].astype(str)
+        new_experimenter_value = dandi_format_names(experimenter_value)
+        if experimenter_value != new_experimenter_value:
+            new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
+            print(
+                f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
+            )
+            f["/general/experimenter"][:] = new_experimenter_value
+
+    # update the datajoint external store table to reflect the changes
+    _resolve_external_table(filepath, file_name)
+
+
+def dandi_format_names(experimenter: List) -> List:
+    """Make names compliant with dandi standard of "Last, First"
+
+    Parameters
+    ----------
+    experimenter : List
+        List of experimenter names
+
+    Returns
+    -------
+    List
+        reformatted list of experimenter names
+    """
+    for i, name in enumerate(experimenter):
+        parts = name.split(" ")
+        new_name = " ".join(
+            parts[:-1],
+        )
+        new_name = f"{parts[-1]}, {new_name}"
+        experimenter[i] = new_name
+    return experimenter
+
+
+def _resolve_external_table(
+    filepath: str, file_name: str, location: str = "analysis"
+):
+    """Function to resolve discrepencies between the database external checks and
+    current file properties.
+    WARNING: This should only be used when editing file metadata and violate data
+    integrity if impproperly used.
+
+    Parameters
+    ----------
+    filepath : _type_
+        _description_
+    file_name : _type_
+        _description_
+    location : str, optional
+        _description_, by default "analysis"
+    """
+    from spyglass.common import LabMember
+    from spyglass.common.common_nwbfile import schema as common_schema
+
+    dj_user = dj.config["database.user"]
+    if dj_user not in LabMember().admin:
+        raise PermissionError(
+            "Please contact database admin to edit database checksums"
+        )
+    external_table = (
+        common_schema.external[location] & f"filepath LIKE '%{file_name}'"
+    )
+    external_key = external_table.fetch1()
+    manual_hash = dj.hash.uuid_from_file(filepath)
+    manual_size = Path(filepath).stat().st_size
+    external_key["size"] = manual_size
+    external_key["contents_hash"] = manual_hash
+    common_schema.external[location].update1(external_key)
