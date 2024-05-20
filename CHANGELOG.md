@@ -15,11 +15,12 @@
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 - Add method to export a set of files to Dandi. #956
 - Add `fetch_nwb` fallback to stream files from Dandi. #956
+- Clean up old `TableChain.join` call in mixin delete. #982
 
 ### Pipelines
 
 - DLC
-   - Allow dlc without pre-existing tracking data #973
+    - Allow dlc without pre-existing tracking data #973, #975
 
 ## [0.5.2] (April 22, 2024)
 

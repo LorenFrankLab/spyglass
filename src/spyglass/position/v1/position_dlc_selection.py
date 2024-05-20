@@ -311,24 +311,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         if "video_params" not in params:
             params["video_params"] = {}
         M_TO_CM = 100
-        interval_list_name = (
-            convert_epoch_interval_name_to_position_interval_name(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "epoch": key["epoch"],
-                },
-                populate_missing=False,
-            )
-        )
-        key["interval_list_name"] = interval_list_name
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
-        )
+        epoch = key["epoch"]
         pose_estimation_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
@@ -440,7 +423,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             likelihoods=likelihoods,
             position_time=position_time,
             video_time=None,
-            processor=params.get("processor", "matplotlib"),
+            processor=params.get("processor", "opencv"),
             frames=frames_arr,
             percent_frames=percent_frames,
             output_video_filename=output_video_filename,
