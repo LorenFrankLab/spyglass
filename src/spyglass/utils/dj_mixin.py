@@ -476,7 +476,7 @@ class SpyglassMixin:
         format = dj.U(self._session_pk, self._member_pk)
 
         restr = self.restriction or True
-        sess_link = self._session_connection.join(restr, reverse_order=True)
+        sess_link = self._session_connection.cascade(restr, direction="up")
 
         exp_missing = format & (sess_link - SesExp).proj(**empty_pk)
         exp_present = format & (sess_link * SesExp - exp_missing).proj()
