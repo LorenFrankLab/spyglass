@@ -13,6 +13,8 @@
 - Add rollback option to `populate_all_common` #957, #971
 - Add long-distance restrictions via `<<` and `>>` operators. #943, #969
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
+- Add method to export a set of files to Dandi. #956
+- Add `fetch_nwb` fallback to stream files from Dandi. #956
 
 ### Pipelines
 
