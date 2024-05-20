@@ -309,31 +309,30 @@ def get_child_tables(table):
 
 
 def update_analysis_for_dandi_standard(
-    file_name: str,
+    filepath: str,
     age: str = "P4M/P8M",
 ):
     """Function to resolve common nwb file format errors within the database
 
     Parameters
     ----------
-    file_name : str
-        The analysis file name to edit
+    filepath : str
+        abs path to the file to edit
     age : str, optional
         age to assign animal if missing, by default "P4M/P8M"
     """
     from spyglass.common import LabMember
-    from spyglass.common.common_nwbfile import AnalysisNwbfile
 
     dj_user = dj.config["database.user"]
     if dj_user not in LabMember().admin:
         raise PermissionError(
             "Admin permissions required to edit existing analysis files"
         )
-    filepath = AnalysisNwbfile().get_abs_path(file_name)
+    file_name = filepath.split("/")[-1]
     # edit the file
     with h5py.File(filepath, "a") as f:
         sex_value = f["/general/subject/sex"][()].decode("utf-8")
-        assert sex_value in ["Female", "Male", "F", "M"]
+        assert sex_value in ["Female", "Male", "F", "M", "O", "U"]
         if sex_value == "Male":
             new_sex_value = "M"
             print(
