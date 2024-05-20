@@ -404,7 +404,7 @@ def dandi_format_names(experimenter: List) -> List:
 def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
-    """Function to resolve discrepencies between the database external checks and
+    """Function to resolve discrepancies between the database external checks and
     current file properties.
     WARNING: This should only be used when editing file metadata and violate data
     integrity if impproperly used.

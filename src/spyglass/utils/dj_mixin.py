@@ -139,7 +139,10 @@ class SpyglassMixin:
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa F401
+        from spyglass.common.common_nwbfile import (
+            AnalysisNwbfile,
+            Nwbfile,
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -242,7 +245,9 @@ class SpyglassMixin:
         """Import all merge tables downstream of self."""
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
         from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import LinearizedPositionOutput  # noqa F401
+        from spyglass.linearization.merge import (
+            LinearizedPositionOutput,
+        )  # noqa F401
         from spyglass.position.position_merge import PositionOutput  # noqa F401
         from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
             SpikeSortingOutput,
