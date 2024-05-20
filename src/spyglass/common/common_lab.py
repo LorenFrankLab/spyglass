@@ -192,7 +192,7 @@ class LabTeam(SpyglassMixin, dj.Manual):
 
         member_list = []
         for team_member in team_members:
-            LabMember.insert_from_name(team_member)
+            # LabMember.insert_from_name(team_member)
             query = (
                 LabMember.LabMemberInfo() & {"lab_member_name": team_member}
             ).fetch("google_user_name")
