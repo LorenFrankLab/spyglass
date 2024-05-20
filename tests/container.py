@@ -193,7 +193,7 @@ class DockerMySQLManager:
             "database.user": self.user,
             "database.port": int(self.port),
             "safemode": "false",
-            "custom": {"test_mode": True},
+            "custom": {"test_mode": True, "debug_mode": False},
         }
 
     @property

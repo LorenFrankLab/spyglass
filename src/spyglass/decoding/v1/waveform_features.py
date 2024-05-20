@@ -82,7 +82,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class UnitWaveformFeaturesSelection(dj.Manual):
+class UnitWaveformFeaturesSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> SpikeSortingOutput.proj(spikesorting_merge_id="merge_id")
     -> WaveformFeaturesParams

@@ -18,7 +18,7 @@ Steps to reproduce the behavior:
 3. Scroll down to '....'
 4. See error
 
-</details><summary>Error Stack</summary>
+<details><summary>Error Stack</summary>
 
 ```python
 # Paste the error stack trace here

@@ -1,5 +1,24 @@
 # Change Log
 
+## [0.5.3] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+### Infrastructure
+
+- Create class `SpyglassGroupPart` to aid delete propagations #899
+- Fix bug report template #955
+- Add rollback option to `populate_all_common` #957, #971
+- Add long-distance restrictions via `<<` and `>>` operators. #943, #969
+- Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
+
+### Pipelines
+
+- DLC
+   - Allow dlc without pre-existing tracking data #973
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
@@ -227,3 +246,4 @@
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
+[0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3

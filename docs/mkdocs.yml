@@ -74,6 +74,7 @@ nav:
       - FigURL: misc/figurl_views.md
       - Session Groups: misc/session_groups.md
       - Insert Data: misc/insert_data.md
+      - Mixin: misc/mixin.md
       - Merge Tables: misc/merge_tables.md
       - Database Management: misc/database_management.md
       - Export: misc/export.md
@@ -105,6 +106,7 @@ plugins:
             group_by_category: false
             line_length: 80
             docstring_style: numpy
+          paths: [../src]
   - literate-nav:
       nav_file: navigation.md
   - exclude-search:

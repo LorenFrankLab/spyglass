@@ -540,7 +540,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
-    logger.warning("This function is deprecated and will be removed soon.")
+    logger.warning("DEPRECATED: This function will be removed in `0.6`.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids
