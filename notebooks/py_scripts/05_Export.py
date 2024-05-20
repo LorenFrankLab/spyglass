@@ -202,7 +202,7 @@ Export().populate_paper(**paper_key)
 # <details>
 #    <summary style="font-size:1.5em"> Dandi data compliance (admins)</summary>
 #
-#    >__WARNING__: The following describes spyglass utilities that require database admin privledges to run. It involves altering database values to correct for metadata format errors generated prior to spyglass insert. As such it has the potential to violate data integrity and should be used with caution.
+#    >__WARNING__: The following describes spyglass utilities that require database admin privileges to run. It involves altering database values to correct for metadata format errors generated prior to spyglass insert. As such it has the potential to violate data integrity and should be used with caution.
 #    >
 #    >The Dandi database has specific formatting standards for metadata and nwb files. If there were violations of this standard in the
 #    raw nwbfile, spyglass will propagate them into all generated analysis files. In this case, running the code below will result in a list of error printouts and an error raised within the `validate_dandiset` function.
