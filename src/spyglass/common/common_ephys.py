@@ -88,7 +88,7 @@ class Electrode(SpyglassMixin, dj.Imported):
     x = NULL: float                         # the x coordinate of the electrode position in the brain
     y = NULL: float                         # the y coordinate of the electrode position in the brain
     z = NULL: float                         # the z coordinate of the electrode position in the brain
-    filtering: varchar(2000)                # description of the signal filtering
+    filtering: = "unfiltered": varchar(2000)      # description of the signal filtering
     impedance = NULL: float                 # electrode impedance
     bad_channel = "False": enum("True", "False")  # if electrode is "good" or "bad" as observed during recording
     x_warped = NULL: float                  # x coordinate of electrode position warped to common template brain
