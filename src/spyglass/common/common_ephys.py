@@ -102,7 +102,6 @@ class Electrode(SpyglassMixin, dj.Imported):
 
         Allows populate_all_common to work within a single transaction."""
 
-
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -117,7 +116,7 @@ class Electrode(SpyglassMixin, dj.Imported):
             electrode_config_dicts = dict()
 
         # properties that are optional when creating NWB file but not part of trodes_to_nwb
-        optional_fields = ['x', 'y', 'z', 'filtering', 'impedance']
+        optional_fields = ["x", "y", "z", "filtering", "impedance"]
 
         electrode_constants = {
             "x_warped": 0,
