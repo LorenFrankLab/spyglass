@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - master
-      - main
       - maint/*
       - '!test_branch'
       - '!documentation'
@@ -13,7 +12,6 @@ on:
   pull_request:
     branches:
       - master
-      - main
       - maint/*
 defaults:
   run:
@@ -76,13 +74,9 @@ jobs:
       - name: Install sdist
         if: matrix.package == 'sdist'
         run: pip install dist/*.tar.gz
-      - name: Install archive
-        if: matrix.package == 'archive'
+      - name: Install archive # requires tag
+        if: matrix.package == 'archive' && startsWith(github.ref, 'refs/tags/')
         run: pip install archive/archive.tgz
-      # - name: Install test extras
-      #   run: pip install spyglass[test]
-      # - name: Run tests
-      #   run: pytest --doctest-modules -v --pyargs spyglass
   publish:
     name: Upload release to PyPI
     runs-on: ubuntu-latest

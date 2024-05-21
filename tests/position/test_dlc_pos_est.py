@@ -11,9 +11,10 @@ def test_rename_non_default_columns(sgp, common, pos_est_sel, video_keys):
 
     input = "0, 10, 0, 1000"
     output = pos_est_sel.get_video_crop(vid_path + vid_name, input)
+    expected = [0, 10, 0, 1000]
 
     assert (
-        input == output
+        output == expected
     ), f"{pos_est_sel.table_name}.get_video_crop did not return expected output"
 
 

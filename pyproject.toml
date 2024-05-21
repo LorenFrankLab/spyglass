@@ -129,6 +129,7 @@ addopts = [
     # "--quiet-spy",                  # don't show logging from spyglass
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+    "--doctest-modules", # run doctests in all modules
     "--cov=spyglass",
     "--cov-report=term-missing",
     "--no-cov-on-fail",
