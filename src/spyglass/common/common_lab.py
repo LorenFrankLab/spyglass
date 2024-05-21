@@ -64,9 +64,9 @@ class LabMember(SpyglassMixin, dj.Manual):
             # each person is by default the member of their own LabTeam
             # (same as their name)
 
-            full_name, _, _ = decompose_name(experimenter)
+            full_name, first, last = decompose_name(experimenter)
             LabTeam.create_new_team(
-                team_name=full_name, team_members=[full_name]
+                team_name=full_name, team_members=[f"{last}, {first}"]
             )
 
     @classmethod
@@ -192,9 +192,10 @@ class LabTeam(SpyglassMixin, dj.Manual):
 
         member_list = []
         for team_member in team_members:
-            # LabMember.insert_from_name(team_member)
+            LabMember.insert_from_name(team_member)
+            full_name, _, _ = decompose_name(team_member)
             query = (
-                LabMember.LabMemberInfo() & {"lab_member_name": team_member}
+                LabMember.LabMemberInfo() & {"lab_member_name": full_name}
             ).fetch("google_user_name")
             if not query:
                 logger.info(
