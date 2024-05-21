@@ -40,11 +40,9 @@ jobs:
         environment-file: environment_dlc.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
-    - name: Install spyglass
+    - name: pip/apt install
       run: |
         pip install --quiet -e .[test,dlc]
-    - name: Apt install
-      run: |
         sudo apt-get install -y xvfb # Manage DLC Qt headless
     - name: Download data
       env:
@@ -55,15 +53,12 @@ jobs:
         VIDEO_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
         DLC_DIR: /home/runner/work/spyglass/spyglass/tests/_data/deeplabcut/ 
       run: |
-        echo "Make dirs"
         mkdir -p $RAW_DIR $VIDEO_DIR $DLC_DIR
-        echo "Run wget"
         wget --recursive --no-verbose --no-host-directories --no-directories \
           --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
           -P $RAW_DIR $WEBSITE
-        echo "Move vids"
-        mv ${RAW_DIR}/*.h264 $VIDEO_DIR
-        mv ${RAW_DIR}/minirec_dlc_items/* $DLC_DIR
+        mv ${RAW_DIR}*.h264 $VIDEO_DIR
+        mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
         pytest -rP  # env vars are set within certain tests

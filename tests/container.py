@@ -209,10 +209,10 @@ class DockerMySQLManager:
         if not self.container_status or self.container_status == "exited":
             return
 
-        name = self.container_name
+        container_name = self.container_name
         self.container.stop()
-        self.logger.info(f"Container {name} stopped.")
+        self.logger.info(f"Container {container_name} stopped.")
 
         if remove:
             self.container.remove()
-            self.logger.info(f"Container {name} removed.")
+            self.logger.info(f"Container {container_name} removed.")
