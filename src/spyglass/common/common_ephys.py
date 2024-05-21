@@ -101,6 +101,8 @@ class Electrode(SpyglassMixin, dj.Imported):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
+
+
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -113,6 +115,9 @@ class Electrode(SpyglassMixin, dj.Imported):
             }
         else:
             electrode_config_dicts = dict()
+
+        # properties that are optional when creating NWB file but not part of trodes_to_nwb
+        optional_fields = ['x', 'y', 'z', 'filtering', 'impedance']
 
         electrode_constants = {
             "x_warped": 0,
@@ -132,14 +137,13 @@ class Electrode(SpyglassMixin, dj.Imported):
                     "region_id": BrainRegion.fetch_add(
                         region_name=elect_data.group.location
                     ),
-                    "x": elect_data.x,
-                    "y": elect_data.y,
-                    "z": elect_data.z,
-                    "filtering": elect_data.filtering,
-                    "impedance": elect_data.get("imp"),
                     **electrode_constants,
                 }
             )
+
+            for f in optional_fields:
+                if f in elect_data:
+                    key.update({f: elect_data.get(f)})
 
             # rough check of whether the electrodes table was created by
             # rec_to_nwb and has the appropriate custom columns used by
