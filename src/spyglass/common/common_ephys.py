@@ -88,7 +88,7 @@ class Electrode(SpyglassMixin, dj.Imported):
     x = NULL: float                         # the x coordinate of the electrode position in the brain
     y = NULL: float                         # the y coordinate of the electrode position in the brain
     z = NULL: float                         # the z coordinate of the electrode position in the brain
-    filtering: = "unfiltered": varchar(2000)      # description of the signal filtering
+    filtering: varchar(2000)                # description of the signal filtering
     impedance = NULL: float                 # electrode impedance
     bad_channel = "False": enum("True", "False")  # if electrode is "good" or "bad" as observed during recording
     x_warped = NULL: float                  # x coordinate of electrode position warped to common template brain
@@ -115,9 +115,6 @@ class Electrode(SpyglassMixin, dj.Imported):
         else:
             electrode_config_dicts = dict()
 
-        # properties that are optional when creating NWB file but not part of trodes_to_nwb
-        optional_fields = ["x", "y", "z", "filtering", "impedance"]
-
         electrode_constants = {
             "x_warped": 0,
             "y_warped": 0,
@@ -136,13 +133,14 @@ class Electrode(SpyglassMixin, dj.Imported):
                     "region_id": BrainRegion.fetch_add(
                         region_name=elect_data.group.location
                     ),
+                    "x": elect_data.get("x"),
+                    "y": elect_data.get("y"),
+                    "z": elect_data.get("z"),
+                    "filtering": elect_data.get("filtering", "unfiltered"),
+                    "impedance": elect_data.get("imp"),
                     **electrode_constants,
                 }
             )
-
-            for f in optional_fields:
-                if f in elect_data:
-                    key.update({f: elect_data.get(f)})
 
             # rough check of whether the electrodes table was created by
             # rec_to_nwb and has the appropriate custom columns used by
