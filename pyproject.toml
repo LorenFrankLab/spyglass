@@ -148,19 +148,19 @@ omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
     "*/cli/*",
-    "*/common/*", # UNDO
+    # "*/common/*",
     "*/data_import/*",
     "*/decoding/*",
     "*/figurl_views/*",
-    "*/lfp/*", # UNDO
-    "*/linearization/*", # UNDO
+    # "*/lfp/*",
+    # "*/linearization/*",
     "*/lock/*",
     "*/mua/*",
-    # "*/position/*", # UNDO
+    # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
     "*/spikesorting/*",
-    "*/utils/*", # UNDO
+    # "*/utils/*",
     "settings.py",
 ]
 

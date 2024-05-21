@@ -42,7 +42,7 @@ jobs:
         miniforge-version: latest
     - name: Install spyglass
       run: |
-        pip install -e .[test]
+        pip install -e .[test,dlc]
     - name: Download data
       env:
         UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
@@ -51,9 +51,6 @@ jobs:
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
         VIDEO_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
         DLC_DIR: /home/runner/work/spyglass/spyglass/tests/_data/deeplabcut/ 
-        QT_QPA_PLATFORM: offscreen # QT fails on CBroz's machine otherwise
-        TF_ENABLE_ONEDNN_OPTS: 0 # TF disable approx calcs
-        TF_CPP_MIN_LOG_LEVEL: 2 # Disable TF warnings
       run: |
         mkdir -p $RAW_DIR $VIDEO_DIR $DLC_DIR
         wget --recursive --no-verbose --no-host-directories --no-directories \
