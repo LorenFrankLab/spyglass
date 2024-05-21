@@ -193,10 +193,10 @@ class LabTeam(SpyglassMixin, dj.Manual):
         member_list = []
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
-            full_name, _, _ = decompose_name(team_member)
-            query = (
-                LabMember.LabMemberInfo() & {"lab_member_name": full_name}
-            ).fetch("google_user_name")
+            member_dict = {"lab_member_name": decompose_name(team_member)[0]}
+            query = (LabMember.LabMemberInfo() & member_dict).fetch(
+                "google_user_name"
+            )
             if not query:
                 logger.info(
                     f"Please add the Google user ID for {team_member} in "
@@ -204,7 +204,7 @@ class LabTeam(SpyglassMixin, dj.Manual):
                 )
             labteammember_dict = {
                 "team_name": team_name,
-                "lab_member_name": team_member,
+                **member_dict,
             }
             member_list.append(labteammember_dict)
             # clear cache for this member
