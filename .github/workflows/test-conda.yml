@@ -48,7 +48,7 @@ jobs:
       env:
         UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
         UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
-        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/
+        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
         VIDEO_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
         DLC_DIR: /home/runner/work/spyglass/spyglass/tests/_data/deeplabcut/ 
@@ -57,8 +57,8 @@ jobs:
         wget --recursive --no-verbose --no-host-directories --no-directories \
           --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
           -P $RAW_DIR $WEBSITE
-        mv ${RAW_DIR}*.h264 $VIDEO_DIR
-        mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
+        # mv ${RAW_DIR}*.h264 $VIDEO_DIR
+        # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
         pytest -rP  # env vars are set within certain tests
