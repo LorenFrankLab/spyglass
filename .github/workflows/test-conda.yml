@@ -73,4 +73,4 @@ jobs:
         # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
-        pytest --no-server
+        pytest --no-docker
