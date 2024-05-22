@@ -101,6 +101,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
+
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -132,10 +133,10 @@ class Electrode(SpyglassMixin, dj.Imported):
                     "region_id": BrainRegion.fetch_add(
                         region_name=elect_data.group.location
                     ),
-                    "x": elect_data.x,
-                    "y": elect_data.y,
-                    "z": elect_data.z,
-                    "filtering": elect_data.filtering,
+                    "x": elect_data.get("x"),
+                    "y": elect_data.get("y"),
+                    "z": elect_data.get("z"),
+                    "filtering": elect_data.get("filtering", "unfiltered"),
                     "impedance": elect_data.get("imp"),
                     **electrode_constants,
                 }
