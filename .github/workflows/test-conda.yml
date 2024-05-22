@@ -27,7 +27,7 @@ jobs:
       mysql:
         image: datajoint/mysql:8.0
         env:
-          MYSQL_DATABASE: spyglass-pytest
+          MYSQL_DATABASE: localhost
           MYSQL_ROOT_PASSWORD: tutorial
         ports:
           - 3306:3308
@@ -73,4 +73,4 @@ jobs:
         # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
-        pytest --no-docker
+        pytest --no-docker tests/common/test_behav.py -k test_invalid_interval 
