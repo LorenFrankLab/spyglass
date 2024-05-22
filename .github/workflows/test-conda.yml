@@ -11,15 +11,12 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     defaults:
      run:
        shell: bash -l {0}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]  #, macos-latest, windows-latest]
     env:
-      OS: ${{ matrix.os }}
+      OS: ubuntu-latest
       PYTHON: '3.9'
     steps:
     - name: Cancel Workflow Action
@@ -42,8 +39,15 @@ jobs:
         miniforge-version: latest
     - name: pip/apt install
       run: |
-        pip install --quiet -e .[test,dlc]
+        sudo apt-get update
         sudo apt-get install -y xvfb # Manage DLC Qt headless
+        sudo apt-get install -y ffmpeg
+        pip install --quiet -e .[test,dlc]
+        pip list
+    - name: docker container
+      run: |
+        docker run --name spyglass-pytest -p 3309:3308 \
+        -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0 || true
     - name: Download data
       env:
         UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
@@ -61,4 +65,4 @@ jobs:
         # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
-        pytest -rP  # env vars are set within certain tests
+        pytest --no-docker

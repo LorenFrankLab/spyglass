@@ -48,7 +48,7 @@ def pytest_addoption(parser):
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
     --no-teardown (bool): Default False. Delete pipeline on close.
-    --no-server (bool): Default False. Run datajoint server in Docker.
+    --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --datadir (str): Default './tests/test_data/'. Dir for local input file.
         WARNING: not yet implemented.
     """
@@ -60,9 +60,9 @@ def pytest_addoption(parser):
         help="Quiet logging from Spyglass.",
     )
     parser.addoption(
-        "--no-server",
+        "--no-docker",
         action="store_true",
-        dest="no_server",
+        dest="no_docker",
         default=False,
         help="Do not launch datajoint server in Docker.",
     )
@@ -97,7 +97,7 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_server,
+        null_server=config.option.no_docker,
         verbose=VERBOSE,
     )
 
@@ -432,7 +432,7 @@ def trodes_params(trodes_params_table, teardown):
             "params": {
                 **params,
                 "is_upsampled": 1,
-                "upsampling_sampling_rate": 500,
+                "upsampling_sampling_rate": 500,  # TODO - lower this to speed up
             },
         },
     }

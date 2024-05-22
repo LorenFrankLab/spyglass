@@ -32,9 +32,10 @@ specified in `pyproject.toml`. Notable optional parameters include...
 
 - Data and database.
 
-    - `--no-server`: Default False, launch Docker container from python. When
+    - `--no-docker`: Default False, launch Docker container from python. When
         True, no server is started and tests attempt to connect to existing
-        container.
+        container. For github actions, `--no-docker` is set to configure the
+        container class as null.
     - `--no-teardown`: Default False. When True, docker database tables are
         preserved on exit. Set to false to inspect output items after testing.
     - `--my-datadir ./rel-path/`: Default `./tests/test_data/`. Where to store
