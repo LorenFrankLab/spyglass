@@ -21,6 +21,8 @@ jobs:
     env:
       OS: ${{ matrix.os }}
       PYTHON: '3.9'
+      UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
+      UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -58,8 +60,6 @@ jobs:
         pip list
     - name: Download data
       env:
-        UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
-        UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
         WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
         VIDEO_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
