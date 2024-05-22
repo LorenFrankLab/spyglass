@@ -11,13 +11,25 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     defaults:
      run:
        shell: bash -l {0}
+    strategy:
+      matrix:
+        os: [ubuntu-latest]  #, macos-latest, windows-latest]
     env:
-      OS: ubuntu-latest
+      OS: ${{ matrix.os }}
       PYTHON: '3.9'
+    services:
+      mysql:
+        image: datajoint:8.0
+        env:
+          MYSQL_DATABASE: spyglass-pytest
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3306:3308
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
     steps:
     - name: Cancel Workflow Action
       uses: styfle/cancel-workflow-action@0.11.0
@@ -44,10 +56,6 @@ jobs:
         sudo apt-get install -y ffmpeg
         pip install --quiet -e .[test,dlc]
         pip list
-    - name: docker container
-      run: |
-        docker run --name spyglass-pytest -p 3309:3308 \
-        -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0 || true
     - name: Download data
       env:
         UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
@@ -65,4 +73,4 @@ jobs:
         # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
-        pytest --no-docker
+        pytest --no-server
