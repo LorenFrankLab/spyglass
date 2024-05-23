@@ -1,4 +1,4 @@
-name: Test conda env and run tests
+name: Tests
 
 on:
   push:
@@ -11,18 +11,18 @@ on:
 
 jobs:
   run-tests:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     defaults:
      run:
        shell: bash -l {0}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]  #, macos-latest, windows-latest]
     env:
-      OS: ${{ matrix.os }}
+      OS: ubuntu-latest
       PYTHON: '3.9'
       UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
       UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
+      QT_QPA_PLATFORM: 'offscreen' # QT headless
+      TF_ENABLE_ONEDNN_OPTS: 0 # TF disable approx calcs
+      TF_CPP_MIN_LOG_LEVEL: 2 # Disable TF warnings
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -30,16 +30,27 @@ jobs:
           MYSQL_DATABASE: localhost
           MYSQL_ROOT_PASSWORD: tutorial
         ports:
-          - 3306:3308
+          - 3308:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
     steps:
     - name: Cancel Workflow Action
       uses: styfle/cancel-workflow-action@0.11.0
+      if: ${{ !env.ACT }}
       with:
         access_token: ${{ github.token }}
         all_but_latest: true
     - name: Checkout
       uses: actions/checkout@v3
+    - name: cuda 
+      uses: Jimver/cuda-toolkit@v0.2.15
+      id: cuda-toolkit
+      with:
+        cuda: '12.4.1'
+    - name: cuda printout
+      run: |
+        echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
+        echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
+        nvcc -V
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -49,15 +60,15 @@ jobs:
       with:
         activate-environment: spyglass-dlc
         environment-file: environment_dlc.yml
+        # activate-environment: spyglass
+        # environment-file: environment.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
     - name: pip/apt install
       run: |
         sudo apt-get update
         sudo apt-get install -y xvfb # Manage DLC Qt headless
-        sudo apt-get install -y ffmpeg
-        pip install --quiet -e .[test,dlc]
-        pip list
+        pip install --quiet .[test,dlc]
     - name: Download data
       env:
         WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
@@ -69,8 +80,6 @@ jobs:
         wget --recursive --no-verbose --no-host-directories --no-directories \
           --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
           -P $RAW_DIR $WEBSITE
-        # mv ${RAW_DIR}*.h264 $VIDEO_DIR
-        # mv ${RAW_DIR}minirec_dlc_items/* $DLC_DIR
     - name: Run tests
       run: |
         pytest --no-docker tests/common/test_behav.py -k test_invalid_interval 

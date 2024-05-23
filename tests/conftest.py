@@ -18,7 +18,6 @@ import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
-from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
@@ -801,6 +800,8 @@ def insert_project(
     bodyparts,
     mini_copy_name,
 ):
+    from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
+
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     with verbose_context:

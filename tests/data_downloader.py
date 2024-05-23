@@ -27,11 +27,6 @@ EXTRA_PATHS = [
         "target_name": "CollectedData_sc_eb.h5",
         "url": BASE_URL + "minirec_dlc_items/CollectedData_sc_eb.h5",
     },
-    # {
-    #     "relative_dir": "deeplabcut",
-    #     "target_name": "config.yaml",
-    #     "url": BASE_URL + "minirec_dlc_items/config.yaml",
-    # },
     {
         "relative_dir": "deeplabcut",
         "target_name": "img000.png",
