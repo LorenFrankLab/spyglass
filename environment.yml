@@ -10,43 +10,25 @@ name: spyglass
 channels:
   - conda-forge
   - defaults
-  # - pytorch # dlc-only
   - franklab
   - edeno
+  # - pytorch # dlc-only
   # - anaconda # dlc-only, for cudatoolkit
 dependencies:
   - bottleneck
   # - cudatoolkit=11.3 # dlc-only
   # - ffmpeg # dlc-only
-  - ipympl
   - jupyterlab>=3.*
   # - libgcc # dlc-only
-  - matplotlib
-  - non_local_detector
-  - numpy<1.24
-  - pip
-  - position_tools
+  - pip>=20.2.*
   - pybind11  # req by mountainsort4 -> isosplit5
-  - pydotplus
+  - pydotplus>=2.0.*
   - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
   - python>=3.9,<3.10
   - pytorch<1.12.0
-  - ripple_detection
-  - seaborn
   # - torchaudio # dlc-only
   # - torchvision # dlc-only
-  - track_linearization>=2.3
-  - pip:
-      - "black[jupyter]"
-      - datajoint>=0.13.6
-      # - deeplabcut<2.3.0 # dlc-only
+  - pip: # Items also in pyproject removed
       - ghostipy # for common_filter
-      - ndx-franklab-novela>=0.1.0
-      - mountainsort4
-      - panel<=1.3.5 # See panel #6325
-      - pubnub<=6.4.0
-      - pynwb>=2.2.0,<3
-      - sortingview>=0.11
-      - spikeinterface>=0.99.1,<0.100
       # - tensorflow<=2.12 # dlc-only
       - .
