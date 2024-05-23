@@ -20,6 +20,7 @@ jobs:
       PYTHON: '3.9'
       UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
       UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
+      # DISPLAY: ':99.0' # cuda exit code 134
       QT_QPA_PLATFORM: 'offscreen' # QT headless
       TF_ENABLE_ONEDNN_OPTS: 0 # TF disable approx calcs
       TF_CPP_MIN_LOG_LEVEL: 2 # Disable TF warnings
@@ -35,7 +36,7 @@ jobs:
     steps:
     - name: Cancel Workflow Action
       uses: styfle/cancel-workflow-action@0.11.0
-      if: ${{ !env.ACT }}
+      if: ${{ !env.ACT }} # skip for local runner
       with:
         access_token: ${{ github.token }}
         all_but_latest: true
@@ -46,6 +47,8 @@ jobs:
       id: cuda-toolkit
       with:
         cuda: '12.4.1'
+        method: network
+        sub-packages: '["toolkit"]'
     - name: cuda printout
       run: |
         echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
