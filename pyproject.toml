@@ -62,18 +62,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dlc = ["ffmpeg", "numba>=0.54", "deeplabcut[tf]<2.3.0"]
+dlc = ["ffmpeg", "numba>=0.54", "deeplabcut[tf]"]
 test = [
-    "click",          # for CLI subpackage only
-    "docker",         # for tests in a container
+    "click",                 # for CLI subpackage only
+    "docker",                # for tests in a container
     "ghostipy",
-    "kachery",        # database access
+    "kachery",               # database access
     "kachery-client",
     "kachery-cloud>=0.4.0",
-    "pre-commit",     # linting
-    "pytest",         # unit testing
-    "pytest-cov",     # code coverage
-    "pytest-xvfb",    # for headless testing of Qt
+    "pre-commit",            # linting
+    "pytest",                # unit testing
+    "pytest-cov",            # code coverage
+    "pytest-xvfb",           # for headless testing of Qt
 ]
 docs = [
     "hatch",                 # Get version from env
