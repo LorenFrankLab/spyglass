@@ -32,24 +32,24 @@ specified in `pyproject.toml`. Notable optional parameters include...
 
 - Data and database.
 
+    - `--base_dir`: Default `./tests/test_data/`. Where to store downloaded and
+        created files.
+    - `--no-teardown`: Default False. When True, docker database tables are
+        preserved on exit. Set to false to inspect output items after testing.
     - `--no-docker`: Default False, launch Docker container from python. When
         True, no server is started and tests attempt to connect to existing
         container. For github actions, `--no-docker` is set to configure the
         container class as null.
-    - `--no-teardown`: Default False. When True, docker database tables are
-        preserved on exit. Set to false to inspect output items after testing.
-    - `--my-datadir ./rel-path/`: Default `./tests/test_data/`. Where to store
-        created files.
+    - `--no-dlc`: Default False. When True, skip data downloads for and tests of
+        features that require DeepLabCut.
 
 - Incremental running.
 
-    - `-m`: Run tests with the
-        [given marker](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests)
-        (e.g., `pytest -m current`).
-    - `--sw`: Stepwise. Continue from previously failed test when starting again.
     - `-s`: No capture. By including `from IPython import embed; embed()` in a
         test, and using this flag, you can open an IPython environment from within
         a test
+    - `-v`: Verbose. List individual tests, report pass/fail.
+    - `--sw`: Stepwise. Continue from previously failed test when starting again.
     - `--pdb`: Enter debug mode if a test fails.
     - `tests/test_file.py -k test_name`: To run just a set of tests, specify the
         file name at the end of the command. To run a single test, further specify

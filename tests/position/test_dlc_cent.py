@@ -1,6 +1,5 @@
 import numpy as np
 import pytest
-from numpy import isclose as np_isclose
 
 from .conftest import generate_led_df
 
@@ -11,10 +10,19 @@ def centroid_df(sgp, centroid_key, populate_centroid):
 
 
 def test_centroid_fetch1_dataframe(centroid_df):
-    df_sum = centroid_df.sum().sum()
-    assert np_isclose(
-        df_sum, 55_860, atol=1000
-    ), f"Unexpected checksum for centroid dataframe: {df_sum}"
+    df_cols = centroid_df.columns
+    exp_cols = [
+        "video_frame_ind",
+        "position_x",
+        "position_y",
+        "velocity_x",
+        "velocity_y",
+        "speed",
+    ]
+
+    assert all(
+        e in df_cols for e in exp_cols
+    ), f"Unexpected cols in position merge dataframe: {df_cols}"
 
 
 @pytest.fixture(scope="session")

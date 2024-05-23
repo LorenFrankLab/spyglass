@@ -46,10 +46,10 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
+    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
-    --datadir (str): Default './tests/test_data/'. Dir for local input file.
-        WARNING: not yet implemented.
+    --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
     """
     parser.addoption(
         "--quiet-spy",
@@ -59,11 +59,11 @@ def pytest_addoption(parser):
         help="Quiet logging from Spyglass.",
     )
     parser.addoption(
-        "--no-docker",
-        action="store_true",
-        dest="no_docker",
-        default=False,
-        help="Do not launch datajoint server in Docker.",
+        "--base-dir",
+        action="store",
+        default="./tests/_data/",
+        dest="base_dir",
+        help="Directory for local input file.",
     )
     parser.addoption(
         "--no-teardown",
@@ -73,20 +73,28 @@ def pytest_addoption(parser):
         help="Tear down tables after tests.",
     )
     parser.addoption(
-        "--base-dir",
-        action="store",
-        default="./tests/_data/",
-        dest="base_dir",
-        help="Directory for local input file.",
+        "--no-docker",
+        action="store_true",
+        dest="no_docker",
+        default=False,
+        help="Do not launch datajoint server in Docker.",
+    )
+    parser.addoption(
+        "--no-dlc",
+        action="store_true",
+        dest="no_dlc",
+        default=False,
+        help="Skip downloads for and tests of DLC-dependent features.",
     )
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
+    NO_DLC = config.option.no_dlc
 
     BASE_DIR = Path(config.option.base_dir).absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -104,7 +112,7 @@ def pytest_configure(config):
         nwb_file_name=TEST_FILE,
         target_dir=BASE_DIR,
         verbose=VERBOSE,
-        download_extras=True,  # toggle to False to disable video downloads
+        download_dlc=not NO_DLC,
     )
 
 
@@ -222,14 +230,15 @@ def mini_path(raw_dir):
 
 
 @pytest.fixture(scope="session")
-def extra_files():  # waiting on errors. could be improved with async
-    yield True if not DOWNLOADS.extras_errors else False
+def nodlc(request):
+    yield NO_DLC
 
 
 @pytest.fixture(scope="session")
-def skipif_noextras(extra_files):
-    if not extra_files:
-        return pytest.mark.skip(reason="Extra files not available.")
+def skipif_nodlc(request):
+    if NO_DLC:
+        # return pytest.mark.skip(reason="Skipping DLC-dependent tests.")
+        yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
 
 
 @pytest.fixture(scope="session")
@@ -800,6 +809,9 @@ def insert_project(
     bodyparts,
     mini_copy_name,
 ):
+    if NO_DLC:
+        pytest.skip("Skipping DLC-dependent tests.")
+
     from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 
     team_name = "sc_eb"

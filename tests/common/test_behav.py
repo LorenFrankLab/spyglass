@@ -79,14 +79,12 @@ def test_populate_state_script(common, pop_state_script):
     ), "StateScript populate unexpected effect"
 
 
-@pytest.mark.usefixtures("skipif_noextras")
 def test_videofile_update_entries(common, video_keys):
     """Test update entries"""
     key = common.VideoFile().fetch(as_dict=True)[0]
     common.VideoFile().update_entries(key)
 
 
-@pytest.mark.usefixtures("skipif_noextras")
 def test_videofile_getabspath(common, video_keys):
     """Test get absolute path"""
     key = common.VideoFile().fetch(as_dict=True)[0]

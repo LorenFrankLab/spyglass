@@ -122,12 +122,13 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    # "-sv", # verbose output
+    # "-sv", # no capture, verbose output
     # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
-    # "--quiet-spy",                  # don't show logging from spyglass
+    # "--quiet-spy",   # don't show logging from spyglass
+    # "--no-dlc",      # don't run DLC tests
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
     "--doctest-modules", # run doctests in all modules
@@ -139,7 +140,7 @@ testpaths = ["tests"]
 log_level = "INFO"
 env = [
     "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
-    # "DISPLAY = :0", # QT fails headless without this
+    "DISPLAY = :0", # QT fails headless without this
     "TF_ENABLE_ONEDNN_OPTS = 0", # TF disable approx calcs
     "TF_CPP_MIN_LOG_LEVEL = 2", # Disable TF warnings
 ]

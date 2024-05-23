@@ -6,6 +6,8 @@ from sys import stderr, stdout
 UCSF_BOX_USER = os_environ.get("UCSF_BOX_USER")
 UCSF_BOX_TOKEN = os_environ.get("UCSF_BOX_TOKEN")
 BASE_URL = "ftps://ftp.box.com/trodes_to_nwb_test_data/"
+
+NON_DLC = 2  # First N items below are not for DeepLabCut
 EXTRA_PATHS = [
     {
         "relative_dir": "video",
@@ -46,7 +48,7 @@ class DataDownloader:
         nwb_file_name,
         extra_paths=EXTRA_PATHS,
         target_dir=".",
-        download_extras=True,
+        download_dlc=True,
         verbose=True,
     ):
         if not all([UCSF_BOX_USER, UCSF_BOX_TOKEN]):
@@ -74,14 +76,15 @@ class DataDownloader:
 
         self.file_name = nwb_file_name
         self.base_dir = Path(target_dir).resolve()
-        self.extra_paths = extra_paths
+        self.extra_paths = (
+            extra_paths if download_dlc else extra_paths[:NON_DLC]
+        )
         self.verbose = verbose
         self.base_dir.mkdir(exist_ok=True)
 
         # Start downloads
         _ = self.download_nwb
-        if download_extras:
-            _ = self.download_extras
+        _ = self.download_extras
 
     def _single_wget(self, url):
         return Popen(self.cmd + [url], **self.cmd_kwargs)

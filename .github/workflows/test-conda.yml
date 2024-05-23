@@ -20,10 +20,6 @@ jobs:
       PYTHON: '3.9'
       UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
       UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
-      # DISPLAY: ':99.0' # cuda exit code 134
-      QT_QPA_PLATFORM: 'offscreen' # QT headless
-      TF_ENABLE_ONEDNN_OPTS: 0 # TF disable approx calcs
-      TF_CPP_MIN_LOG_LEVEL: 2 # Disable TF warnings
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -40,38 +36,20 @@ jobs:
       with:
         access_token: ${{ github.token }}
         all_but_latest: true
-    - name: Checkout
-      uses: actions/checkout@v3
-    - name: cuda 
-      uses: Jimver/cuda-toolkit@v0.2.15
-      id: cuda-toolkit
-      with:
-        cuda: '12.4.1'
-        method: network
-        sub-packages: '["toolkit"]'
-    - name: cuda printout
-      run: |
-        echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
-        echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
-        nvcc -V
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: ${{ env.PYTHON }}
-    - name: Set up conda environment
+    - name: Set up conda
       uses: conda-incubator/setup-miniconda@v2
       with:
-        activate-environment: spyglass-dlc
-        environment-file: environment_dlc.yml
-        # activate-environment: spyglass
-        # environment-file: environment.yml
+        activate-environment: spyglass
+        environment-file: environment.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
     - name: pip/apt install
       run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb # Manage DLC Qt headless
-        pip install --quiet .[test,dlc]
+        pip install --quiet .[test]
     - name: Download data
       env:
         WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
@@ -85,4 +63,4 @@ jobs:
           -P $RAW_DIR $WEBSITE
     - name: Run tests
       run: |
-        pytest --no-docker tests/common/test_behav.py -k test_invalid_interval 
+        pytest --no-docker --no-dlc

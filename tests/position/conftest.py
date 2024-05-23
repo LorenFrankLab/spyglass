@@ -13,7 +13,7 @@ dlc_utils.py     :
     594-601, 611-612, 641-657, 682-736, 762-772, 787, 809-1286
 """
 
-from itertools import product as iter_prodect
+from itertools import product as iter_product
 
 import numpy as np
 import pandas as pd
@@ -60,7 +60,7 @@ def generate_led_df(leds, inc_vals=False):
     """Returns df with all combinations of 1 and np.nan for each led.
 
     If inc_vals is True, the values will be incremented by 1 for each non-nan"""
-    all_vals = list(zip(*iter_prodect([1, np.nan], repeat=len(leds))))
+    all_vals = list(zip(*iter_product([1, np.nan], repeat=len(leds))))
     n_rows = len(all_vals[0])
     indices = np.random.uniform(1.6223e09, 1.6224e09, n_rows)
 
@@ -86,4 +86,7 @@ def generate_led_df(leds, inc_vals=False):
         count[0] += 1
         return count[0]
 
-    return df.applymap(lambda x: increment_count() if x == 1 else x)
+    def process_value(x):
+        return increment_count() if x == 1 else x
+
+    return df.applymap(process_value)

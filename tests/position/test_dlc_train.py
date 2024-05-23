@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_existing_params(
     verbose_context, dlc_training_params, training_params_key
 ):
@@ -22,7 +25,11 @@ def test_existing_params(
     assert len(params_query) == 1, "Existing params duplicated"
 
 
-def test_get_params(verbose_context, dlc_training_params):
+@pytest.mark.usefixtures("skipif_nodlc")
+def test_get_params(nodlc, verbose_context, dlc_training_params):
+    if nodlc:  # Decorator wasn't working here, so duplicate skipif
+        pytest.skip(reason="Skipping DLC-dependent tests.")
+
     params_tbl, _ = dlc_training_params
     with verbose_context:
         accepted_params = params_tbl.get_accepted_params()
