@@ -7,10 +7,12 @@ from tests.conftest import SERVER as docker_server
 def db_settings(user_name):
     from spyglass.utils.database_settings import DatabaseSettings
 
+    id = getattr(docker_server.container, "id", None)
+
     return DatabaseSettings(
         user_name=user_name,
         host_name=docker_server.creds["database.host"],
-        target_database=docker_server.container.id,
+        target_database=id,  # If 'None', we're --no-docker
         exec_user=docker_server.creds["database.user"],
         exec_pass=docker_server.creds["database.password"],
     )
