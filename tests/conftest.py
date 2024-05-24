@@ -223,6 +223,9 @@ def mini_path(raw_dir):
             break
         tsleep(wait)
 
+    for file in raw_dir.glob("*"):
+        print(file)
+
     if not found:
         raise ConnectionError("Download failed.")
 

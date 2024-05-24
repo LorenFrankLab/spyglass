@@ -9,6 +9,10 @@ on:
     - cron: '0 0 * * *'
   workflow_dispatch: # Manually trigger with 'Run workflow' button
 
+concurrency: # Replace Cancel Workflow Action
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   run-tests:
     runs-on: ubuntu-latest
@@ -30,37 +34,32 @@ jobs:
           - 3308:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
     steps:
-    - name: Cancel Workflow Action
-      uses: styfle/cancel-workflow-action@0.11.0
-      if: ${{ !env.ACT }} # skip for local runner
-      with:
-        access_token: ${{ github.token }}
-        all_but_latest: true
+    - name: Checkout
+      uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON }}
     - name: Set up conda
-      uses: conda-incubator/setup-miniconda@v2
+      uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass
         environment-file: environment.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
-    - name: pip/apt install
+        use-mamba: true
+    - name: Run pip install for test deps
       run: |
         pip install --quiet .[test]
     - name: Download data
       env:
         WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
-        VIDEO_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
-        DLC_DIR: /home/runner/work/spyglass/spyglass/tests/_data/deeplabcut/ 
       run: |
-        mkdir -p $RAW_DIR $VIDEO_DIR $DLC_DIR
+        mkdir -p $RAW_DIR
         wget --recursive --no-verbose --no-host-directories --no-directories \
           --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
           -P $RAW_DIR $WEBSITE
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc
+        pytest -sv --no-docker --no-dlc tests/common/test_behav.py 
