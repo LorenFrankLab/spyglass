@@ -399,10 +399,11 @@ def populate_exception():
 
 
 @pytest.fixture(scope="session")
-def video_keys(common):
+def video_keys(common, base_dir):
     for file, download in DOWNLOADS.file_downloads.items():
-        if file.endswith(".h264"):  # Wait for all video downloads to finish
-            download.wait()
+        if file.endswith(".h264") and download is not None:
+            download.wait()  # wait for videos to finish downloading
+    DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
 

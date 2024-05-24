@@ -72,4 +72,4 @@ jobs:
         wget_opts $VID_DIR $VID_TWO
     - name: Run tests
       run: |
-        pytest -sv --no-docker --no-dlc tests/common/test_behav.py 
+        pytest --no-docker --no-dlc

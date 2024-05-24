@@ -93,20 +93,33 @@ class DataDownloader:
         # Start downloads
         _ = self.file_downloads
 
+    def rename_files(self):
+        """Redund, but allows rerun later in startup process of conftest."""
+        for path in self.file_paths:
+            target, url = path["target_name"], path["url"]
+            target_dir = self.base_dir / path["relative_dir"]
+            orig = target_dir / url.split("/")[-1]
+            dest = target_dir / target
+
+            if orig.exists():
+                orig.rename(dest)
+
     @cached_property  # Only make list of processes once
     def file_downloads(self) -> Dict[str, Union[Popen, None]]:
         """{File: POpen/None} for each file. If exists/finished, None."""
         ret = dict()
+        self.rename_files()
         for path in self.file_paths:
-            target = path["target_name"]
-            dest = self.base_dir / path["relative_dir"] / target
-            if dest.exists():  # Have the file
+            target, url = path["target_name"], path["url"]
+            target_dir = self.base_dir / path["relative_dir"]
+            dest = target_dir / target
+
+            if dest.exists():
                 ret[target] = None
                 continue
-            dest.parent.mkdir(exist_ok=True, parents=True)
-            ret[target] = Popen(
-                self.cmd + [dest, path["url"]], **self.cmd_kwargs
-            )
+
+            target_dir.mkdir(exist_ok=True, parents=True)
+            ret[target] = Popen(self.cmd + [target_dir, url], **self.cmd_kwargs)
         return ret
 
     def check_download(self, download, info):
