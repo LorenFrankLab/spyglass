@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 # ------------------------------- TESTS CONFIG -------------------------------
 
 # globals in pytest_configure:
-#       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
 
 def pytest_addoption(parser):
@@ -110,7 +110,7 @@ def pytest_configure(config):
 
     DOWNLOADS = DataDownloader(
         nwb_file_name=TEST_FILE,
-        target_dir=BASE_DIR,
+        base_dir=BASE_DIR,
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
     )
@@ -212,8 +212,8 @@ def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
 
     # wait for wget download to finish
-    if DOWNLOADS.download_nwb is not None:
-        DOWNLOADS.download_nwb.wait()
+    if (nwb_download := DOWNLOADS.file_downloads.get(TEST_FILE)) is not None:
+        nwb_download.wait()
 
     # wait for download to finish
     timeout, wait, found = 60, 5, False
@@ -222,9 +222,6 @@ def mini_path(raw_dir):
             found = True
             break
         tsleep(wait)
-
-    for file in raw_dir.glob("*"):
-        print(file)
 
     if not found:
         raise ConnectionError("Download failed.")
@@ -240,7 +237,6 @@ def nodlc(request):
 @pytest.fixture(scope="session")
 def skipif_nodlc(request):
     if NO_DLC:
-        # return pytest.mark.skip(reason="Skipping DLC-dependent tests.")
         yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
 
 
@@ -404,6 +400,10 @@ def populate_exception():
 
 @pytest.fixture(scope="session")
 def video_keys(common):
+    for file, download in DOWNLOADS.file_downloads.items():
+        if file.endswith(".h264"):  # Wait for all video downloads to finish
+            download.wait()
+
     return common.VideoFile().fetch(as_dict=True)
 
 
