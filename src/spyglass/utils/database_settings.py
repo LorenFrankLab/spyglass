@@ -221,15 +221,16 @@ class DatabaseSettings:
         if self.debug:
             return
 
+        if self.test_mode:
+            prefix = "sudo mysql --password=tutorial"
+        else:
+            prefix = "mysql -p"
+
         cmd = (
-            f"mysql -p -h {self.host} < {file.name}"
+            f"{prefix} -h {self.host} < {file.name}"
             if self.target_database == "mysql"
             else f"docker exec -i {self.target_database} mysql -u "
             + f"{self.exec_user} --password={self.exec_pass} < {file.name}"
         )
-
-        if self.test_mode:
-            logger.info(f"DatabaseSettings: {cmd}")
-            cmd = "sudo " + cmd
 
         os.system(cmd)
