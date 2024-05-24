@@ -624,7 +624,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
                 f"lfp_band_sampling rate {lfp_band_sampling_rate} is not an integer divisor of lfp "
-                f"samping rate {lfp_sampling_rate}"
+                f"sampling rate {lfp_sampling_rate}"
             )
         # filter
         query = FirFilterParameters() & {
