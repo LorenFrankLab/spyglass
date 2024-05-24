@@ -8,13 +8,15 @@ def db_settings(user_name):
     from spyglass.utils.database_settings import DatabaseSettings
 
     id = getattr(docker_server.container, "id", None)
+    no_docker = id is None  # If 'None', we're --no-docker in gh actions
 
     return DatabaseSettings(
         user_name=user_name,
         host_name=docker_server.creds["database.host"],
-        target_database=id,  # If 'None', we're --no-docker
+        target_database=id,
         exec_user=docker_server.creds["database.user"],
         exec_pass=docker_server.creds["database.password"],
+        test_mode=no_docker,
     )
 
 
