@@ -53,13 +53,23 @@ jobs:
         pip install --quiet .[test]
     - name: Download data
       env:
-        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
+        BASEURL: ftps://ftp.box.com/trodes_to_nwb_test_data/
+        NWBFILE: minirec20230622.nwb # Relative to Base URL
+        VID_ONE: 20230622_sample_01_a1/20230622_sample_01_a1.1.h264
+        VID_TWO: 20230622_sample_02_a1/20230622_sample_02_a1.1.h264
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
       run: |
-        mkdir -p $RAW_DIR
-        wget --recursive --no-verbose --no-host-directories --no-directories \
-          --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
-          -P $RAW_DIR $WEBSITE
+        mkdir -p $RAW_DIR $VID_DIR
+        wget_opts() { # Declare func with download options
+          wget \
+            --recursive --no-verbose --no-host-directories --no-directories \
+            --user "$UCSF_BOX_USER" --password "$UCSF_BOX_TOKEN" \
+            -P "$1" "$BASEURL""$2"
+        }
+        wget $RAW_DIR $NWBFILE
+        wget $VID_DIR $VID_ONE
+        wget $VID_DIR $VID_TWO
     - name: Run tests
       run: |
         pytest -sv --no-docker --no-dlc tests/common/test_behav.py 

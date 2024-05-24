@@ -215,7 +215,7 @@ def mini_path(raw_dir):
     if DOWNLOADS.download_nwb is not None:
         DOWNLOADS.download_nwb.wait()
 
-    # wait for gh-actions download to finish
+    # wait for download to finish
     timeout, wait, found = 60, 5, False
     for _ in range(timeout // wait):
         if path.exists():
