@@ -67,9 +67,9 @@ jobs:
             --user "$UCSF_BOX_USER" --password "$UCSF_BOX_TOKEN" \
             -P "$1" "$BASEURL""$2"
         }
-        wget $RAW_DIR $NWBFILE
-        wget $VID_DIR $VID_ONE
-        wget $VID_DIR $VID_TWO
+        wget_opts $RAW_DIR $NWBFILE
+        wget_opts $VID_DIR $VID_ONE
+        wget_opts $VID_DIR $VID_TWO
     - name: Run tests
       run: |
         pytest -sv --no-docker --no-dlc tests/common/test_behav.py 
