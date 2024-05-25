@@ -222,12 +222,12 @@ class DatabaseSettings:
             return
 
         if self.test_mode:
-            prefix = "sudo mysql --password=tutorial"
+            prefix = "sudo mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial"
         else:
-            prefix = "mysql -p"
+            prefix = f"mysql -h {self.host} -u {self.exec_user} -p"
 
         cmd = (
-            f"{prefix} -h {self.host} < {file.name}"
+            f"{prefix} < {file.name}"
             if self.target_database == "mysql"
             else f"docker exec -i {self.target_database} mysql -u "
             + f"{self.exec_user} --password={self.exec_pass} < {file.name}"

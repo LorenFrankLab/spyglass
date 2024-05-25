@@ -27,7 +27,7 @@ jobs:
     services:
       mysql:
         image: datajoint/mysql:8.0
-        env:
+        env: # args: mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial -e "CMD;"
           MYSQL_DATABASE: localhost
           MYSQL_ROOT_PASSWORD: tutorial
         ports:
@@ -48,13 +48,13 @@ jobs:
         miniforge-variant: Mambaforge
         miniforge-version: latest
         use-mamba: true
-    # - name: Install MySQL dependencies
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get install libcurl4-openssl-dev libmysqlclient-dev libgirepository1.0-dev
+    - name: Install apt dependencies
+      run: |
+        sudo apt-get update # First mysql options
+        sudo apt-get install mysql-client libmysqlclient-dev libgirepository1.0-dev -y
+        sudo apt-get install ffmpeg libsm6 libxext6 -y # non-dlc position deps
     - name: Run pip install for test deps
-      run: | # Apt install for non-dlc position pipeline 
-        sudo apt-get update && sudo apt-get install ffmpeg libsm6 libxext6  -y
+      run: | 
         pip install --quiet .[test]
     - name: Download data
       env:
@@ -77,4 +77,4 @@ jobs:
         wget_opts $VID_DIR $VID_TWO
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc
+        pytest ---no-docker --no-dlc 
