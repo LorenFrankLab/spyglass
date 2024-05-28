@@ -15,7 +15,7 @@
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 - Clean up old `TableChain.join` call in mixin delete. #982
 - Add pytests for position pipeline, various `test_mode` exceptions #966
-- Migrate dependencies from `environment.yml`s to `pyproject.toml` #966
+- Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 
 ### Pipelines
 

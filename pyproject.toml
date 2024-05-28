@@ -62,7 +62,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dlc = ["ffmpeg", "numba>=0.54", "deeplabcut[tf]"]
+dlc = [
+  "ffmpeg",
+  "numba>=0.54",
+  "deeplabcut[tf]",          # removing dlc pin removes need to pin tf
+]
 test = [
     "click",                 # for CLI subpackage only
     "docker",                # for tests in a container
