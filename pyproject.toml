@@ -64,8 +64,7 @@ dependencies = [
 [project.optional-dependencies]
 dlc = [
   "ffmpeg",
-  "numba>=0.54",
-  "deeplabcut[tf]",          # removing dlc pin removes need to pin tf
+  "deeplabcut[tf]",          # removing dlc pin removes need to pin tf/numba
 ]
 test = [
     "click",                 # for CLI subpackage only
