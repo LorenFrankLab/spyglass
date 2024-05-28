@@ -38,4 +38,5 @@ dependencies:
   - track_linearization>=2.3
   - pip:
       - ghostipy # for common_filter
+      - mountainsort4
       - .

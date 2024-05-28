@@ -44,7 +44,6 @@ dependencies = [
     "hdmf>=3.4.6",
     "ipympl",
     "matplotlib",
-    "mountainsort4",
     "ndx_franklab_novela>=0.1.0",
     "non_local_detector",
     "numpy<1.24",
