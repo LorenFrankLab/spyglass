@@ -134,7 +134,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         validate_dandiset(destination_dir, ignore_external_files=True)
 
         # given dandiset_id, download the dandiset to the export_dir
-        url = f"{known_instances[dandi_instance].gui}/{dandiset_id}/draft"
+        url = f"{known_instances[dandi_instance].gui}/dandiset/{dandiset_id}/draft"
         dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory
@@ -161,6 +161,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
                 ).fetch1(),
                 **t,
                 "dandiset_id": dandiset_id,
+                "dandi_instance": dandi_instance,
             }
             for t in translations
         ]
@@ -202,7 +203,7 @@ def translate_name_to_dandi(folder):
         metadata, required_fields=None
     )
     return [
-        {"filename": Path(file["path"]).stem, file["dandi_path"]: "dandi_path"}
+        {"filename": Path(file["path"]).name, "dandi_path": file["dandi_path"]}
         for file in metadata
     ]
 
