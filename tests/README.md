@@ -1,5 +1,25 @@
 # PyTests
 
+## Environment
+
+To allow pytest helpers to automatically dowlnoad requisite data, you'll need to
+set credentials for Box. Consider adding these to a private `.env` file.
+
+- `UCSF_BOX_USER`: UCSF email address
+- `UCSF_BOX_TOKEN`: Token generated from UCSF Box account
+
+To facilitate headless testing of various Qt-based tools as well as Tensorflow,
+`pyproject.toml` includes some environment variables associated with the
+display. These are...
+
+- `QT_QPA_PLATFORM`: Set to `offscreen` to prevent the need for a display.
+- `TF_ENABLE_ONEDNN_OPTS`: Set to `1` to enable Tensorflow optimizations.
+- `TF_CPP_MIN_LOG_LEVEL`: Set to `2` to suppress Tensorflow warnings.
+
+<!-- - `DISPLAY`: Set to `:0` to prevent the need for a display. -->
+
+## Options
+
 This directory is contains files for testing the code. Simply by running
 `pytest` from the root directory, all tests will be run with default parameters
 specified in `pyproject.toml`. Notable optional parameters include...
@@ -7,7 +27,7 @@ specified in `pyproject.toml`. Notable optional parameters include...
 - Coverage items. The coverage report indicates what percentage of the code was
     included in tests.
 
-    - `--cov=spyglatss`: Which package should be described in the coverage report
+    - `--cov=spyglass`: Which package should be described in the coverage report
     - `--cov-report term-missing`: Include lines of items missing in coverage
 
 - Verbosity.
@@ -18,23 +38,24 @@ specified in `pyproject.toml`. Notable optional parameters include...
 
 - Data and database.
 
-    - `--no-server`: Default False, launch Docker container from python. When
-        True, no server is started and tests attempt to connect to existing
-        container.
+    - `--base_dir`: Default `./tests/test_data/`. Where to store downloaded and
+        created files.
     - `--no-teardown`: Default False. When True, docker database tables are
         preserved on exit. Set to false to inspect output items after testing.
-    - `--my-datadir ./rel-path/`: Default `./tests/test_data/`. Where to store
-        created files.
+    - `--no-docker`: Default False, launch Docker container from python. When
+        True, no server is started and tests attempt to connect to existing
+        container. For github actions, `--no-docker` is set to configure the
+        container class as null.
+    - `--no-dlc`: Default False. When True, skip data downloads for and tests of
+        features that require DeepLabCut.
 
 - Incremental running.
 
-    - `-m`: Run tests with the
-        [given marker](https://docs.pytest.org/en/6.2.x/usage.html#specifying-tests-selecting-tests)
-        (e.g., `pytest -m current`).
-    - `--sw`: Stepwise. Continue from previously failed test when starting again.
     - `-s`: No capture. By including `from IPython import embed; embed()` in a
         test, and using this flag, you can open an IPython environment from within
         a test
+    - `-v`: Verbose. List individual tests, report pass/fail.
+    - `--sw`: Stepwise. Continue from previously failed test when starting again.
     - `--pdb`: Enter debug mode if a test fails.
     - `tests/test_file.py -k test_name`: To run just a set of tests, specify the
         file name at the end of the command. To run a single test, further specify
