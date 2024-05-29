@@ -19,6 +19,8 @@
 
 - DLC
     - Allow dlc without pre-existing tracking data #973, #975
+- Common
+    - Don't insert lab member when creating lab team #983
 
 ## [0.5.2] (April 22, 2024)
 
