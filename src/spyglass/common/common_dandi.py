@@ -1,26 +1,28 @@
 import os
 
-import dandi.download
-import dandi.organize
-import dandi.upload
-import dandi.validate
 import datajoint as dj
 import fsspec
 import h5py
 import pynwb
-from dandi.consts import known_instances
-from dandi.dandiapi import DandiAPIClient
-from dandi.organize import OrganizeInvalid
-from dandi.validate_types import Severity
 from fsspec.implementations.cached import CachingFileSystem
+
+try:
+    import dandi.download
+    import dandi.organize
+    import dandi.upload
+    import dandi.validate
+    from dandi.consts import known_instances
+    from dandi.dandiapi import DandiAPIClient
+    from dandi.organize import OrganizeInvalid
+    from dandi.validate_types import Severity
+
+except ImportError as e:
+    logger.warning(e)
+
 
 from spyglass.common.common_usage import Export
 from spyglass.settings import export_dir
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import (
-    _resolve_external_table,
-    update_analysis_for_dandi_standard,
-)
 
 dev_instance = known_instances["dandi-staging"]
 
