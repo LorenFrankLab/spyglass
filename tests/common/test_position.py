@@ -1,29 +1,31 @@
+import numpy as np
+import pandas as pd
 import pytest
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def common_position(common):
     yield common.common_position
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def interval_position_info(common_position):
     yield common_position.IntervalPositionInfo
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def default_param_key():
     yield {"position_info_param_name": "default"}
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def interval_key(common):
     yield (common.IntervalList & "interval_list_name LIKE 'pos 0%'").fetch1(
         "KEY"
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def param_table(common_position, default_param_key, teardown):
     param_table = common_position.PositionInfoParameters()
     param_table.insert1(default_param_key, skip_duplicates=True)
@@ -32,7 +34,7 @@ def param_table(common_position, default_param_key, teardown):
         param_table.delete(safemode=False)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def upsample_position(
     common,
     common_position,
@@ -63,7 +65,7 @@ def upsample_position(
         (param_table & upsample_param_key).delete(safemode=False)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def interval_pos_key(upsample_position):
     yield upsample_position
 
@@ -72,7 +74,7 @@ def test_interval_position_info_insert(common_position, interval_pos_key):
     assert common_position.IntervalPositionInfo & interval_pos_key
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def upsample_position_error(
     upsample_position,
     default_param_key,
@@ -147,6 +149,76 @@ def test_interval_position_info_kwarg_alias(interval_position_info):
     ), "IntervalPositionInfo._fix_kwargs() should alias old arg names."
 
 
-@pytest.mark.skip(reason="Not testing with video data yet.")
-def test_position_video(common_position):
-    pass
+@pytest.fixture(scope="session")
+def position_video(common_position):
+    yield common_position.PositionVideo()
+
+
+def test_position_video(position_video, upsample_position):
+    _ = position_video.populate()
+    assert len(position_video) == 1, "Failed to populate PositionVideo table."
+
+
+def test_convert_to_pixels(position_video):
+
+    data = np.array([[2, 4], [6, 8]])
+    expect = np.array([[1, 2], [3, 4]])
+    output = position_video.convert_to_pixels(data, "junk", 2)
+
+    assert np.array_equal(output, expect), "Failed to convert to pixels."
+
+
+@pytest.fixture(scope="session")
+def rename_default_cols(common_position):
+    yield common_position._fix_col_names, ["xloc", "yloc", "xloc2", "yloc2"]
+
+
+@pytest.mark.parametrize(
+    "col_type, cols",
+    [
+        ("DEFAULT_COLS", ["xloc", "yloc", "xloc2", "yloc2"]),
+        ("ONE_IDX_COLS", ["xloc1", "yloc1", "xloc2", "yloc2"]),
+        ("ZERO_IDX_COLS", ["xloc0", "yloc0", "xloc1", "yloc1"]),
+    ],
+)
+def test_rename_columns(rename_default_cols, col_type, cols):
+
+    _fix_col_names, defaults = rename_default_cols
+    df = pd.DataFrame([range(len(cols) + 1)], columns=["junk"] + cols)
+    result = _fix_col_names(df).columns.tolist()
+
+    assert result == defaults, f"_fix_col_names failed to rename {col_type}."
+
+
+def test_rename_three_d(rename_default_cols):
+    _fix_col_names, _ = rename_default_cols
+    three_d = ["junk", "x", "y", "z"]
+    df = pd.DataFrame([range(4)], columns=three_d)
+    result = _fix_col_names(df).columns.tolist()
+
+    assert (
+        result == three_d[1:]
+    ), "_fix_col_names failed to rename THREE_D_COLS."
+
+
+def test_rename_non_default_columns(monkeypatch, rename_default_cols):
+    _fix_col_names, defaults = rename_default_cols
+    df = pd.DataFrame([range(4)], columns=["a", "b", "c", "d"])
+
+    # Monkeypatch the input function
+    monkeypatch.setattr("builtins.input", lambda _: "yes")
+    result = _fix_col_names(df).columns.tolist()
+
+    assert (
+        result == defaults
+    ), "_fix_col_names failed to rename non-default cols."
+
+
+def test_rename_non_default_columns_err(monkeypatch, rename_default_cols):
+    _fix_col_names, defaults = rename_default_cols
+    df = pd.DataFrame([range(4)], columns=["a", "b", "c", "d"])
+
+    monkeypatch.setattr("builtins.input", lambda _: "no")
+
+    with pytest.raises(ValueError):
+        _fix_col_names(df)

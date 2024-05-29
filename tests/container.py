@@ -46,7 +46,7 @@ class DockerMySQLManager:
         self.mysql_version = mysql_version
         self.container_name = container_name
         self.port = port or "330" + self.mysql_version[0]
-        self.client = docker.from_env()
+        self.client = None if null_server else docker.from_env()
         self.null_server = null_server
         self.password = "tutorial"
         self.user = "root"
@@ -64,10 +64,14 @@ class DockerMySQLManager:
 
     @property
     def container(self) -> docker.models.containers.Container:
+        if self.null_server:
+            return self.container_name
         return self.client.containers.get(self.container_name)
 
     @property
     def container_status(self) -> str:
+        if self.null_server:
+            return None
         try:
             self.container.reload()
             return self.container.status
@@ -76,6 +80,8 @@ class DockerMySQLManager:
 
     @property
     def container_health(self) -> str:
+        if self.null_server:
+            return None
         try:
             self.container.reload()
             return self.container.health
@@ -125,7 +131,6 @@ class DockerMySQLManager:
         wait : int
             Time to wait between checks in seconds. Default 5.
         """
-
         if self.null_server:
             return None
         if not self.container_status or self.container_status == "exited":
@@ -209,9 +214,10 @@ class DockerMySQLManager:
         if not self.container_status or self.container_status == "exited":
             return
 
+        container_name = self.container_name
         self.container.stop()
-        self.logger.info(f"Container {self.container_name} stopped.")
+        self.logger.info(f"Container {container_name} stopped.")
 
         if remove:
             self.container.remove()
-            self.logger.info(f"Container {self.container_name} removed.")
+            self.logger.info(f"Container {container_name} removed.")
