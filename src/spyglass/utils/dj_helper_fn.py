@@ -4,12 +4,14 @@ import inspect
 import os
 from pathlib import Path
 from typing import List, Type, Union
+from uuid import uuid4
 
 import datajoint as dj
 import h5py
 import numpy as np
 from datajoint.user_tables import UserTable
 
+from spyglass.common.common_lab import LabMember
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -406,7 +408,7 @@ def _resolve_external_table(
 ):
     """Function to resolve discrepancies between the database external checks and
     current file properties.
-    WARNING: This should only be used when editing file metadata and violate data
+    WARNING: This should only be used when editing file metadata. Can violate data
     integrity if impproperly used.
 
     Parameters
@@ -435,3 +437,28 @@ def _resolve_external_table(
     external_key["size"] = manual_size
     external_key["contents_hash"] = manual_hash
     common_schema.external[location].update1(external_key)
+
+
+def make_file_obj_id_unique(nwb_path: str):
+    """Make the top-level object_id attribute of the file unique
+
+    Parameters
+    ----------
+    nwb_path : str
+        path to the NWB file
+
+    Returns
+    -------
+    str
+        the new object_id
+    """
+    dj_user = dj.config["database.user"]
+    if dj_user not in LabMember().admin:
+        raise PermissionError(
+            "Admin permissions required to edit existing analysis files"
+        )
+    new_id = str(uuid4())
+    with h5py.File(nwb_path, "a") as f:
+        f.attrs["object_id"] = new_id
+    _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
+    return new_id
