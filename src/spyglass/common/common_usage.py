@@ -473,7 +473,7 @@ class Export(SpyglassMixin, dj.Computed):
             [dandiset_dir],
             dandi_instance="dandi-staging",  # TODO: this is the dev server of dandi
         )
-        print("uploaded")
+        logger.info(f"Dandiset {dandiset_id} uploaded")
         # insert the translations into the dandi table
         translations = [
             {

@@ -28,16 +28,16 @@ class DandiPath(SpyglassMixin, dj.Manual):
     definition = """
     -> Export.File
     ---
-    dandiset_id: str
+    dandiset_id: varchar(16)
     filename: varchar(255)
     dandi_path: varchar(255)
     """
 
     def fetch_file_from_dandi(self, key: dict):
-        key = (self & key).fetch1("KEY")
-        dandiset_id = str((self & key).fetch1("dandiset_id"))
-        dandi_path = (self & key).fetch1("dandi_path")
-
+        dandiset_id, dandi_path = (self & key).fetch1(
+            "dandiset_id", "dandi_path"
+        )
+        dandiset_id = str(dandiset_id)
         # get the s3 url from Dandi
         with DandiAPIClient(
             dandi_instance=dev_instance,
@@ -52,15 +52,14 @@ class DandiPath(SpyglassMixin, dj.Manual):
         fs = fsspec.filesystem("http")
 
         # create a cache to save downloaded data to disk (optional)
-        fs = CachingFileSystem(
+        fsspec_file = CachingFileSystem(
             fs=fs,
             cache_storage=f"{export_dir}/nwb-cache",  # Local folder for the cache
         )
 
         # Open and return the file
-        f = fs.open(s3_url, "rb")
-        file = h5py.File(f)
-        io = pynwb.NWBHDF5IO(file=file)
+        fs_file = fsspec_file.open(s3_url, "rb")
+        io = pynwb.NWBHDF5IO(file=h5py.File(fs_file))
         nwbfile = io.read()
         return (io, nwbfile)
 
@@ -81,6 +80,7 @@ def _get_metadata(path):
 
 def translate_name_to_dandi(folder):
     """Uses dandi.organize to translate filenames to dandi paths
+
     *Note* The name for a given file is dependent on that of all files in the folder
 
     Parameters
@@ -115,6 +115,7 @@ def validate_dandiset(
     folder, min_severity="ERROR", ignore_external_files=False
 ):
     """Validate the dandiset directory
+
     Parameters
     ----------
     folder : str
@@ -143,11 +144,16 @@ def validate_dandiset(
             if not i.message.startswith("Path is not inside")
         ]
 
-    for result in filtered_results:
-        print(result.severity, result.message, result.path)
-
     if filtered_results:
-        raise ValueError("Validation failed")
+        raise ValueError(
+            "Validation failed\n\t"
+            + "\n\t".join(
+                [
+                    f"{result.severity}: {result.message} in {result.path}"
+                    for result in filtered_results
+                ]
+            )
+        )
 
 
 def make_file_obj_id_unique(nwb_path: str):
