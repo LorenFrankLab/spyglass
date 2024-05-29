@@ -26,6 +26,8 @@
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
+- Common
+    - Don't insert lab member when creating lab team #983
 
 ## [0.5.2] (April 22, 2024)
 
