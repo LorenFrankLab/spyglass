@@ -1,4 +1,6 @@
 import os
+import shutil
+from pathlib import Path
 
 import datajoint as dj
 import fsspec
@@ -13,6 +15,7 @@ try:
     import dandi.validate
     from dandi.consts import known_instances
     from dandi.dandiapi import DandiAPIClient
+    from dandi.metadata.nwb import get_metadata
     from dandi.organize import OrganizeInvalid
     from dandi.validate_types import Severity
 
@@ -89,13 +92,38 @@ class DandiPath(SpyglassMixin, dj.Manual):
         """
         key = (Export & key).fetch1("KEY")
         paper_id = (Export & key).fetch1("paper_id")
+        if self & key:
+            raise ValueError(
+                f"Adding new files to an existing dandiset is not permitted. Please delete existing entries for {key} and run again"
+            )
 
         # make a temp dir with symbolic links to the export files
         source_files = (Export.File() & key).fetch("file_path")
         paper_dir = f"{export_dir}/{paper_id}"
         os.makedirs(paper_dir, exist_ok=True)
         destination_dir = f"{paper_dir}/dandiset_{paper_id}"
-        os.makedirs(destination_dir, exist_ok=True)
+        dandiset_dir = f"{paper_dir}/{dandiset_id}"
+
+        # check if pre-existing directories for dandi export exist. Remove if so to continue
+        for dandi_dir in destination_dir, dandiset_dir:
+            if os.path.exists(dandi_dir):
+                from datajoint.utils import user_choice
+
+                if (
+                    user_choice(
+                        "Pre-existing dandi export dir exist."
+                        + f"Delete existing export folder: {dandi_dir}",
+                        default="no",
+                    )
+                    == "yes"
+                ):
+                    shutil.rmtree(dandi_dir)
+                    continue
+                raise RuntimeError(
+                    f"{dandi_dir} must be removed prior to dandi export to ensure dandi-compatability"
+                )
+
+        os.makedirs(destination_dir, exist_ok=False)
         for file in source_files:
             if not os.path.exists(
                 f"{destination_dir}/{os.path.basename(file)}"
@@ -110,7 +138,6 @@ class DandiPath(SpyglassMixin, dj.Manual):
         dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory
-        dandiset_dir = f"{paper_dir}/{dandiset_id}"
         dandi.organize.organize(
             destination_dir, dandiset_dir, invalid=OrganizeInvalid.WARN
         )
@@ -142,9 +169,6 @@ class DandiPath(SpyglassMixin, dj.Manual):
 
 def _get_metadata(path):
     # taken from definition within dandi.organize.organize
-    # Avoid heavy import by importing within function:
-    from dandi.metadata.nwb import get_metadata
-
     try:
         meta = get_metadata(path)
     except Exception as exc:
@@ -169,7 +193,7 @@ def translate_name_to_dandi(folder):
     dict
         dictionary of filename to dandi_path translations
     """
-    files = [f"{folder}/{f}" for f in os.listdir(folder)]
+    files = Path(folder).glob("*")
     metadata = list(map(_get_metadata, files))
     metadata, skip_invalid = dandi.organize.filter_invalid_metadata_rows(
         metadata
@@ -177,14 +201,10 @@ def translate_name_to_dandi(folder):
     metadata = dandi.organize.create_unique_filenames_from_metadata(
         metadata, required_fields=None
     )
-    translations = []
-    for file in metadata:
-        translation = {
-            "filename": file["path"].split("/")[-1],
-            "dandi_path": file["dandi_path"],
-        }
-        translations.append(translation)
-    return translations
+    return [
+        {"filename": Path(file["path"]).stem, file["dandi_path"]: "dandi_path"}
+        for file in metadata
+    ]
 
 
 def validate_dandiset(
