@@ -16,11 +16,20 @@
 - Add method to export a set of files to Dandi. #956
 - Add `fetch_nwb` fallback to stream files from Dandi. #956
 - Clean up old `TableChain.join` call in mixin delete. #982
+- Add pytests for position pipeline, various `test_mode` exceptions #966
+- Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 
 ### Pipelines
 
+- Common
+    - `PositionVideo` table now inserts into self after `make` #966
+- Decoding: Default values for classes on `ImportError` #966
 - DLC
     - Allow dlc without pre-existing tracking data #973, #975
+    - Raise `KeyError` for missing input parameters across helper funcs #966
+    - `DLCPosVideo` table now inserts into self after `make` #966
+- Common
+    - Don't insert lab member when creating lab team #983
 
 ## [0.5.2] (April 22, 2024)
 

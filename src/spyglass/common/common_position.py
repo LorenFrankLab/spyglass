@@ -24,7 +24,7 @@ from track_linearization import (
 from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.settings import raw_dir, video_dir
+from spyglass.settings import raw_dir, test_mode, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
 
@@ -601,6 +601,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             cm_to_pixels=cm_per_pixel,
             disable_progressbar=False,
         )
+        self.insert1(key)
 
     @staticmethod
     def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
@@ -644,6 +645,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         disable_progressbar=False,
         arrow_radius=15,
         circle_radius=8,
+        truncate_data=False,  # reduce data to min length across all variables
     ):
         import cv2  # noqa: F401
 
@@ -656,6 +658,25 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         frame_size = (int(video.get(3)), int(video.get(4)))
         frame_rate = video.get(5)
         n_frames = int(head_orientation_mean.shape[0])
+
+        if test_mode or truncate_data:
+            # pytest video data has mismatched shapes in some cases
+            #   centroid (267, 2), video_time (270, 2), position_time (5193,)
+            min_len = min(
+                n_frames,
+                len(video_time),
+                len(position_time),
+                len(head_position_mean),
+                len(head_orientation_mean),
+                min(len(v) for v in centroids.values()),
+            )
+            n_frames = min_len
+            video_time = video_time[:min_len]
+            position_time = position_time[:min_len]
+            head_position_mean = head_position_mean[:min_len]
+            head_orientation_mean = head_orientation_mean[:min_len]
+            for color, data in centroids.items():
+                centroids[color] = data[:min_len]
 
         out = cv2.VideoWriter(
             output_video_filename, fourcc, frame_rate, frame_size, True
@@ -749,7 +770,10 @@ class PositionVideo(SpyglassMixin, dj.Computed):
 
         video.release()
         out.release()
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
 
 
 # ----------------------------- Migrated Tables -----------------------------

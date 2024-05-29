@@ -41,15 +41,19 @@ def test_merge_detect(Nwbfile, pos_merge_tables):
     ), "Merges not detected by mixin."
 
 
-def test_merge_chain_join(Nwbfile, pos_merge_tables, lin_v1, lfp_merge_key):
-    """Test that the mixin can join merge chains."""
-    _ = lin_v1, lfp_merge_key  # merge tables populated
+def test_merge_chain_join(
+    Nwbfile, pos_merge_tables, lin_v1, lfp_merge_key, populate_dlc
+):
+    """Test that the mixin can join merge chains.
+
+    NOTE: This will change if more data is added to merge tables."""
+    _ = lin_v1, lfp_merge_key, populate_dlc  # merge tables populated
 
     all_chains = [
         chains.cascade(True, direction="down")
         for chains in Nwbfile._merge_chains.values()
     ]
-    end_len = [len(chain[0]) for chain in all_chains if chain]
+    end_len = [len(chain) for chain in all_chains]
 
     assert sum(end_len) == 4, "Merge chains not joined correctly."
 
