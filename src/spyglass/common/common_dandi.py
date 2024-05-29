@@ -24,8 +24,6 @@ from spyglass.common.common_usage import Export
 from spyglass.settings import export_dir
 from spyglass.utils import SpyglassMixin, logger
 
-dev_instance = known_instances["dandi-staging"]
-
 schema = dj.schema("common_dandi")
 
 
@@ -37,17 +35,18 @@ class DandiPath(SpyglassMixin, dj.Manual):
     dandiset_id: varchar(16)
     filename: varchar(255)
     dandi_path: varchar(255)
+    dandi_instance = "dandi": varchar(32)
     """
 
     def fetch_file_from_dandi(self, key: dict):
-        dandiset_id, dandi_path = (self & key).fetch1(
-            "dandiset_id", "dandi_path"
+        dandiset_id, dandi_path, dandi_instance = (self & key).fetch1(
+            "dandiset_id", "dandi_path", "dandi_instance"
         )
         dandiset_id = str(dandiset_id)
         # get the s3 url from Dandi
         with DandiAPIClient(
-            dandi_instance=dev_instance,
-        ) as client:  # TODO: this is the dev server of dandi
+            dandi_instance=known_instances[dandi_instance],
+        ) as client:
             asset = client.get_dandiset(dandiset_id).get_asset_by_path(
                 dandi_path
             )
@@ -70,7 +69,11 @@ class DandiPath(SpyglassMixin, dj.Manual):
         return (io, nwbfile)
 
     def compile_dandiset(
-        self, key: dict, dandiset_id: str, dandi_api_key: str = None
+        self,
+        key: dict,
+        dandiset_id: str,
+        dandi_api_key: str = None,
+        dandi_instance: str = "dandi",
     ):
         """Compile a Dandiset from the export.
         Parameters
@@ -82,6 +85,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         dandi_api_key : str, optional
             API key for the dandi server. Optional if the environment variable
             DANDI_API_KEY is set.
+        dandi_instance : What instance of Dandi the dandiset is on. Defaults to the dev server
         """
         key = (Export & key).fetch1("KEY")
         paper_id = (Export & key).fetch1("paper_id")
@@ -102,7 +106,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         validate_dandiset(destination_dir, ignore_external_files=True)
 
         # given dandiset_id, download the dandiset to the export_dir
-        url = f"https://gui-staging.dandiarchive.org/dandiset/{dandiset_id}/draft"  # TODO: this is the dev server of dandi
+        url = f"{known_instances[dandi_instance].gui}/{dandiset_id}/draft"
         dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory
@@ -119,7 +123,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
             os.environ["DANDI_API_KEY"] = dandi_api_key
         dandi.upload.upload(
             [dandiset_dir],
-            dandi_instance="dandi-staging",  # TODO: this is the dev server of dandi
+            dandi_instance=dandi_instance,
         )
         logger.info(f"Dandiset {dandiset_id} uploaded")
         # insert the translations into the dandi table
