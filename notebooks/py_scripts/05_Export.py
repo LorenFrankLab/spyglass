@@ -195,7 +195,10 @@ Export().populate_paper(**paper_key)
 
 # # Dandiset Upload
 
-# One benefit of the `Export` table is it provides a list of all raw data, intermediate analysis files, and final analysis files needed to generate a set of figures in a work. To aid in data-sharing standards, we have implemented tools to compile and upload this set of files as a Dandi dataset, which can then be used by spyglass to directly read the data from the Dandi database if not available locally.
+# One benefit of the `Export` table is it provides a list of all raw data, intermediate analysis files,
+# and final analysis files needed to generate a set of figures in a work. To aid in data-sharing standards,
+# we have implemented tools to compile and upload this set of files as a Dandi dataset, which can then be used
+# by spyglass to directly read the data from the Dandi database if not available locally.
 #
 # We will walk through the steps to do so here:
 
@@ -212,38 +215,43 @@ Export().populate_paper(**paper_key)
 #    Export()._prepare_files_for_export(paper_key)
 #    ```
 #    >which will attempt to resolve these issues for a set of paper files. The code is __not__ guaranteed to address all errors found within the file, but can be used as a template for your specific errors
-#
+# </details>
 #
 #
 #
 
-# The first step you will need to do is to [create a Dandi account](https://www.dandiarchive.org/handbook/16_account/). With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata. Dandi's instructions for these steps are available [here](https://www.dandiarchive.org/handbook/13_upload/).
+# The first step you will need to do is to [create a Dandi account](https://www.dandiarchive.org/handbook/16_account/).
+# With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata.
+# Dandi's instructions for these steps are available [here](https://www.dandiarchive.org/handbook/13_upload/).
 #
 # The key information you will need from your registration is the `dandiset ID` and your account `api_key`, both of which are available from your registered account.
 #
 # Spyglass can then use this information to compile and upload the dandiset for your paper:
 
 # +
-dandiset_id = 213890  # use the value for you registered dandiset
+from spyglass.common.common_dandi import DandiPath
+
+dandiset_id = 214304  # use the value for you registered dandiset
 dandi_api_key = (
     "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # key connected to your Dandi account
 )
 
-Export().compile_dandiset(
-    paper_key, dandiset_id=dandiset_id, dandi_api_key=dandi_api_key
-)
+DandiPath().compile_dandiset(
+    paper_key,
+    dandiset_id=dandiset_id,
+    dandi_api_key=dandi_api_key,
+    dandi_instance="dandi",
+)  # use dandi_instance="dandi-staging" to use dandi's dev server
 # -
 
 # As well as uploading your dandiset, this function will populate the table `DandiPath` which will record the information needed to access a given analysis file from the Dandi server
 #
 
-# +
-from spyglass.common.common_dandi import DandiPath
+DandiPath() & {"export_id": 14}
 
-DandiPath()
-# -
-
-# When fetching data with spyglass, if a file is not available locally, syglass will automatically use this information to stream the file from Dandi's server if available, providing an additional method for sharing data with collaborators post-publication.
+# When fetching data with spyglass, if a file is not available locally, syglass will automatically use
+# this information to stream the file from Dandi's server if available, providing an additional method
+#  for sharing data with collaborators post-publication.
 
 # ## Up Next
 #
