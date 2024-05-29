@@ -11,7 +11,6 @@ import h5py
 import numpy as np
 from datajoint.user_tables import UserTable
 
-from spyglass.common.common_lab import LabMember
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -452,6 +451,8 @@ def make_file_obj_id_unique(nwb_path: str):
     str
         the new object_id
     """
+    from spyglass.common.common_lab import LabMember  # noqa: F401
+
     dj_user = dj.config["database.user"]
     if dj_user not in LabMember().admin:
         raise PermissionError(
