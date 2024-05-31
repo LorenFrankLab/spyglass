@@ -91,11 +91,10 @@ class AbstractGraph(ABC):
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
-        # Undirected graph may not be needed, but adding FT to the graph
-        # prevents `to_undirected` from working. If using undirected, remove
-        # PERIPHERAL_TABLES from the graph.
         self.graph = seed_table.connection.dependencies
         self.graph.load()
+        # undirect not needed in all cases but need to do before adding ft nodes
+        self.undirect_graph = self.graph.to_undirected()
 
         self.verbose = verbose
         self.leaves = set()
@@ -242,6 +241,11 @@ class AbstractGraph(ABC):
         if parts := self._get_ft(table).parts():
             ret.extend(parts)
         return ret
+
+    def _ignore_peripheral(self):
+        """Ignore peripheral tables in graph traversal."""
+        self.no_visit.update(PERIPHERAL_TABLES)
+        self.undirect_graph.remove_nodes_from(PERIPHERAL_TABLES)
 
     # ---------------------------- Graph Traversal -----------------------------
 
@@ -438,6 +442,47 @@ class AbstractGraph(ABC):
         ]
         return [ft for ft in all_ft if len(ft) > 0]
 
+    def ft_from_list(
+        self,
+        tables: List[str],
+        with_restr: bool = True,
+        sort_from: str = None,
+    ) -> List[FreeTable]:
+        """Return non-empty FreeTable objects from list of table names.
+
+        Parameters
+        ----------
+        tables : List[str]
+            List of table names
+        with_restr : bool, optional
+            Restrict FreeTable to restriction. Default True.
+        sort_from : str, optional
+            Table name. Sort by distance from this table. Default None, no sort.
+        """
+
+        def graph_distance(self, table1: str = None, table2: str = None) -> int:
+            """Sort tables by distance from root. If no root, do nothing."""
+            if not table1 or not table2:
+                return 0
+            try:
+                return len(shortest_path(self.undirect_graph, table1, table2))
+            except (NodeNotFound, NetworkXNoPath):
+                return 99
+
+        self.cascade()
+        tables = [self._ensure_name(t) for t in tables]
+
+        if sort_from:
+            sort_from = self._ensure_name(sort_from)
+            tables = sorted(
+                tables,
+                key=lambda t: graph_distance(sort_from, t),
+            )
+
+        fts = [self._get_ft(table, with_restr=with_restr) for table in tables]
+
+        return [ft for ft in fts if len(ft) > 0]
+
     @property
     def as_dict(self) -> List[Dict[str, str]]:
         """Return as a list of dictionaries of table_name: restriction"""
@@ -459,6 +504,7 @@ class RestrGraph(AbstractGraph):
         direction: Direction = "up",
         cascade: bool = False,
         verbose: bool = False,
+        ignore_peripheral: bool = False,
         **kwargs,
     ):
         """Use graph to cascade restrictions up from leaves to all ancestors.
@@ -487,6 +533,9 @@ class RestrGraph(AbstractGraph):
             Default False
         verbose : bool, optional
             Whether to print verbose output. Default False
+        ignore_peripheral : bool, optional
+            Whether to ignore peripheral tables in graph traversal. Default
+            False
         """
         super().__init__(seed_table, verbose=verbose)
 
@@ -495,6 +544,8 @@ class RestrGraph(AbstractGraph):
         )
         self.add_leaves(leaves)
 
+        if ignore_peripheral:
+            self._ignore_peripheral()
         if cascade:
             self.cascade(direction=direction)
 
@@ -832,7 +883,7 @@ class TableChain(RestrGraph):
         seed_table = parent if isinstance(parent, Table) else child
         super().__init__(seed_table=seed_table, verbose=verbose)
 
-        self.no_visit.update(PERIPHERAL_TABLES)
+        self._ignore_peripheral()
         self.no_visit.update(self._ensure_name(banned_tables) or [])
         self.no_visit.difference_update([self.parent, self.child])
         self.searched_tables = set()
@@ -899,20 +950,6 @@ class TableChain(RestrGraph):
         if not self.searched_path:
             _ = self.path
         return self.link_type is not None
-
-    @cached_property
-    def all_ft(self) -> List[dj.FreeTable]:
-        """Return list of FreeTable objects for each table in chain.
-
-        Unused. Preserved for future debugging.
-        """
-        if not self.has_link:
-            return None
-        return [
-            self._get_ft(table, with_restr=False)
-            for table in self.path
-            if not table.isnumeric()
-        ]
 
     @property
     def path_str(self) -> str:
@@ -1058,8 +1095,8 @@ class TableChain(RestrGraph):
         search_graph = self.graph
 
         if not directed:
+            # FTs in self.graph prevent `to_undirected` from working.
             self.connection.dependencies.load()
-            self.undirect_graph = self.connection.dependencies.to_undirected()
             search_graph = self.undirect_graph
 
         search_graph.remove_nodes_from(self.no_visit)

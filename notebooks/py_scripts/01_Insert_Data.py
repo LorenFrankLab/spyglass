@@ -378,7 +378,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # ```python
 # nwbfile = sgc.Nwbfile()
 #
-# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_merge(
+# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_parts(
 #     dry_run=False, # True will show Merge Table entries that would be deleted
 # )
 # ```

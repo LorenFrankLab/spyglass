@@ -64,10 +64,10 @@ def test_get_chain(Nwbfile, pos_merge_tables):
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_ddm_warning(Nwbfile, caplog):
     """Test that the mixin warns on empty delete_downstream_merge."""
-    (Nwbfile.file_like("BadName")).delete_downstream_merge(
+    (Nwbfile.file_like("BadName")).delete_downstream_parts(
         reload_cache=True, disable_warnings=False
     )
-    assert "No merge deletes found" in caplog.text, "No warning issued."
+    assert "No part deletes found" in caplog.text, "No warning issued."
 
 
 def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables, lin_v1):

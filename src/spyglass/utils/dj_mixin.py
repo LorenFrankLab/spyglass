@@ -51,8 +51,8 @@ class SpyglassMixin:
         `restriction` can be set to a string to restrict the delete. `dry_run`
         can be set to False to commit the delete. `reload_cache` can be set to
         True to reload the merge cache.
-    ddm(*args, **kwargs)
-        Alias for delete_downstream_merge.
+    ddp(*args, **kwargs)
+        Alias for delete_downstream_parts
     cautious_delete(force_permission=False, *args, **kwargs)
         Check user permissions before deleting table rows. Permission is granted
         to users listed as admin in LabMember table or to users on a team with
@@ -239,10 +239,10 @@ class SpyglassMixin:
             for file_name in nwb_files
         ]
 
-    # ------------------------ delete_downstream_merge ------------------------
+    # ------------------------ delete_downstream_parts ------------------------
 
     def _import_merge_tables(self):
-        """Import all merge tables downstream of self."""
+        """Import all merge tables."""
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
         from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
         from spyglass.linearization.merge import (
@@ -262,27 +262,26 @@ class SpyglassMixin:
         )
 
     @cached_property
-    def _merge_tables(self) -> Dict[str, dj.FreeTable]:
-        """Dict of merge tables downstream of self: {full_table_name: FreeTable}.
+    def _part_masters(self) -> Dict[str, dj.FreeTable]:
+        """Dict of part tables downstream of self: {camel_name: FreeTable}.
 
-        Cache of items in parents of self.descendants(as_objects=True). Both
-        descendant and parent must have the reserved primary key 'merge_id'.
+        Cache of masters of self.descendants(as_objects=True).
+        Part must have other parent(s) besides master.
         """
         self.connection.dependencies.load()
-        merge_tables = {}
+        part_masters = {}
         visited = set()
 
         def search_descendants(parent):
             for desc in parent.descendants(as_objects=True):
-                if (
-                    MERGE_PK not in desc.heading.names
-                    or not (master_name := get_master(desc.full_table_name))
-                    or master_name in merge_tables
+                if (  # Check if has master, no other fk, or already in cache
+                    not (master_name := get_master(desc.full_table_name))
+                    or not set(desc.parents()) - set([master_name])
+                    or master_name in part_masters
                 ):
                     continue
                 master_ft = dj.FreeTable(self.connection, master_name)
-                if is_merge_table(master_ft):
-                    merge_tables[master_name] = master_ft
+                part_masters[to_camel_case(master_name)] = master_ft
                 if master_name not in visited:
                     visited.add(master_name)
                     search_descendants(master_ft)
@@ -298,36 +297,34 @@ class SpyglassMixin:
                 raise ValueError(f"Please import {table_name} and try again.")
 
         logger.info(
-            f"Building merge cache for {self.camel_name}.\n\t"
-            + f"Found {len(merge_tables)} downstream merge tables"
+            f"Building part-parent cache for {self.camel_name}.\n\t"
+            + f"Found {len(part_masters)} downstream merge tables"
         )
 
-        return merge_tables
+        return part_masters
 
     @cached_property
     def _merge_chains(self) -> OrderedDict[str, List[dj.FreeTable]]:
-        """Dict of chains to merges downstream of self
+        """Dict of chains to parts downstream of self
 
-        Format: {full_table_name: TableChains}.
+        Format: {camel_name: TableChains}.
 
-        For each merge table found in _merge_tables, find the path from self to
-        merge via merge parts. If the path is valid, add it to the dict. Cache
-        prevents need to recompute whenever delete_downstream_merge is called
+        For each table found in _part_masters, find the path from self to
+        master via merge parts. If the path is valid, add it to the dict. Cache
+        prevents need to recompute whenever delete_downstream_part is called
         with a new restriction. To recompute, add `reload_cache=True` to
-        delete_downstream_merge call.
+        delete_downstream_part call.
         """
         from spyglass.utils.dj_graph import TableChains  # noqa F401
 
         merge_chains = {}
-        for name, merge_table in self._merge_tables.items():
+        for name, merge_table in self._part_masters.items():
             chains = TableChains(self, merge_table)
             if len(chains):
                 merge_chains[name] = chains
 
-        # This is ordered by max_len of chain from self to merge, which assumes
-        # that the merge table with the longest chain is the most downstream.
-        # A more sophisticated approach would order by length from self to
-        # each merge part independently, but this is a good first approximation.
+        # self->master chains ordered by max_len as a proxy for downstream-ness.
+        # A better approach would sort each self->part independently.
 
         return OrderedDict(
             sorted(
@@ -342,7 +339,7 @@ class SpyglassMixin:
                 return chain
         raise ValueError(f"No chain found with '{substring}' in name.")
 
-    def _commit_merge_deletes(
+    def _commit_part_deletes(
         self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
     ) -> None:
         """Commit merge deletes.
@@ -353,13 +350,13 @@ class SpyglassMixin:
             Dictionary of merge tables and their joins. Uses 'merge_id' primary
             key to restrict delete.
 
-        Extracted for use in cautious_delete and delete_downstream_merge."""
+        Extracted for use in cautious_delete and delete_downstream_parts."""
         for table_name, part_restr in merge_join_dict.items():
-            table = self._merge_tables[table_name]
-            keys = [part.fetch(MERGE_PK, as_dict=True) for part in part_restr]
+            table = self._part_masters[table_name]
+            keys = [part.proj().fetch(as_dict=True) for part in part_restr]
             (table & keys).delete(**kwargs)
 
-    def delete_downstream_merge(
+    def delete_downstream_parts(
         self,
         restriction: str = None,
         dry_run: bool = True,
@@ -403,7 +400,7 @@ class SpyglassMixin:
 
         if not merge_join_dict and not disable_warning:
             logger.warning(
-                f"No merge deletes found w/ {self.camel_name} & "
+                f"No part deletes found w/ {self.camel_name} & "
                 + f"{restriction}.\n\tIf this is unexpected, try importing "
                 + " Merge table(s) and running with `reload_cache`."
             )
@@ -411,9 +408,9 @@ class SpyglassMixin:
         if dry_run:
             return merge_join_dict.values() if return_parts else merge_join_dict
 
-        self._commit_merge_deletes(merge_join_dict, **kwargs)
+        self._commit_part_deletes(merge_join_dict, **kwargs)
 
-    def ddm(
+    def ddp(
         self,
         restriction: str = None,
         dry_run: bool = True,
@@ -423,8 +420,8 @@ class SpyglassMixin:
         *args,
         **kwargs,
     ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
-        """Alias for delete_downstream_merge."""
-        return self.delete_downstream_merge(
+        """Alias for delete_downstream_parts."""
+        return self.delete_downstream_parts(
             restriction=restriction,
             dry_run=dry_run,
             reload_cache=reload_cache,
@@ -609,7 +606,7 @@ class SpyglassMixin:
         if not force_permission:
             self._check_delete_permission()
 
-        merge_deletes = self.delete_downstream_merge(
+        merge_deletes = self.delete_downstream_parts(
             dry_run=True,
             disable_warning=True,
             return_parts=False,
@@ -630,7 +627,7 @@ class SpyglassMixin:
                 or not safemode
                 or user_choice("Commit deletes?", default="no") == "yes"
             ):
-                self._commit_merge_deletes(merge_deletes, **kwargs)
+                self._commit_part_deletes(merge_deletes, **kwargs)
             else:
                 logger.info("Delete aborted.")
                 self._log_delete(start)
@@ -856,8 +853,8 @@ class SpyglassMixin:
 
         Returns
         -------
-        Union[QueryExpression, FindKeyGraph]
-            Restricted version of present table or FindKeyGraph object. If
+        Union[QueryExpression, TableChain]
+            Restricted version of present table or TableChain object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
         from spyglass.utils.dj_graph import TableChain  # noqa: F401
@@ -897,11 +894,14 @@ class SpyglassMixin:
             return graph
 
         ret = self & graph._get_restr(self.full_table_name)
-        if len(ret) == len(self) or len(ret) == 0:
-            logger.warning(
-                f"Failed to restrict with path: {graph.path_str}\n\t"
-                + "See `help(YourTable.restrict_by)`"
-            )
+        warn_text = (
+            f" after restrict with path: {graph.path_str}\n\t "
+            + "See `help(YourTable.restrict_by)`"
+        )
+        if len(ret) == len(self):
+            logger.warning("Same length" + warn_text)
+        elif len(ret) == 0:
+            logger.warning("No entries" + warn_text)
 
         return ret
 

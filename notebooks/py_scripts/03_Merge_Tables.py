@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -64,7 +64,7 @@ warnings.simplefilter("ignore", category=UserWarning)
 import spyglass.common as sgc
 import spyglass.lfp as lfp
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
-from spyglass.utils.dj_merge_tables import delete_downstream_merge, Merge
+from spyglass.utils.dj_merge_tables import delete_downstream_parts, Merge
 from spyglass.common.common_ephys import LFP as CommonLFP  # Upstream 1
 from spyglass.lfp.lfp_merge import LFPOutput  # Merge Table
 from spyglass.lfp.v1.lfp import LFPV1  # Upstream 2
@@ -192,8 +192,8 @@ result8
 # 2. use `merge_delete_parent` to delete from the parent sources, getting rid of
 #    the entries in the source table they came from.
 #
-# 3. use `delete_downstream_merge` to find Merge Tables downstream of any other
-#    table and get rid full entries, avoiding orphaned master table entries.
+# 3. use `delete_downstream_parts` to find downstream part tables, like Merge
+#    Tables, and get rid full entries, avoiding orphaned master table entries.
 #
 # The two latter cases can be destructive, so we include an extra layer of
 # protection with `dry_run`. When true (by default), these functions return
@@ -204,7 +204,7 @@ LFPOutput.merge_delete(nwb_file_dict)  # Delete from merge table
 
 LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
 
-# `delete_downstream_merge` is available from any other table in the pipeline,
+# `delete_downstream_parts` is available from any other table in the pipeline,
 # but it does take some time to find the links downstream. If you're using this,
 # you can save time by reassigning your table to a variable, which will preserve
 # a copy of the previous search.
@@ -216,7 +216,7 @@ LFPOutput.merge_delete_parent(restriction=nwb_file_dict, dry_run=True)
 # +
 nwbfile = sgc.Nwbfile()
 
-(nwbfile & nwb_file_dict).delete_downstream_merge(
+(nwbfile & nwb_file_dict).delete_downstream_parts(
     dry_run=True,
     reload_cache=False,  # if still encountering errors, try setting this to True
 )
