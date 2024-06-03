@@ -253,7 +253,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             get_nwb_file(file_path)
 
     query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
-    rec_dicts = (query_table).fetch(*attrs, **kwargs)
+    rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
         file_path = file_path_fn(rec_dict[file_name_attr])
@@ -334,18 +334,13 @@ def update_analysis_for_dandi_standard(
     with h5py.File(filepath, "a") as f:
         sex_value = f["/general/subject/sex"][()].decode("utf-8")
         assert sex_value in ["Female", "Male", "F", "M", "O", "U"]
-        if sex_value == "Male":
-            new_sex_value = "M"
-            print(
-                f"Adjusting subject sex from '{sex_value}' to '{new_sex_value}'."
+        if len(sex_value) > 1:
+            new_sex_value = sex_value[0].upper()
+            logger.info(
+                f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'"
             )
             f["/general/subject/sex"][()] = new_sex_value
-        elif sex_value == "Female":
-            new_sex_value = "F"
-            print(
-                f"Adjusting subject sex from '{sex_value}' to '{new_sex_value}'."
-            )
-            f["/general/subject/sex"][()] = new_sex_value
+
 
         # replace subject species value "Rat" with "Rattus norvegicus"
         species_value = f["/general/subject/species"][()].decode("utf-8")
@@ -405,8 +400,8 @@ def dandi_format_names(experimenter: List) -> List:
 def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
-    """Function to resolve discrepancies between the database external checks and
-    current file properties.
+    """Function to resolve database vs. file property discrepancies.
+    
     WARNING: This should only be used when editing file metadata. Can violate data
     integrity if impproperly used.
 
@@ -431,10 +426,10 @@ def _resolve_external_table(
         common_schema.external[location] & f"filepath LIKE '%{file_name}'"
     )
     external_key = external_table.fetch1()
-    manual_hash = dj.hash.uuid_from_file(filepath)
-    manual_size = Path(filepath).stat().st_size
-    external_key["size"] = manual_size
-    external_key["contents_hash"] = manual_hash
+    external_key.update({
+        'size': Path(filepath).stat().st_size,
+        'contents_hash': dj.hash.uuid_from_file(filepath)
+    })
     common_schema.external[location].update1(external_key)
 
 

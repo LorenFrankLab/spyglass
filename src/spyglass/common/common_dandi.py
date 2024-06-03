@@ -20,6 +20,17 @@ try:
     from dandi.validate_types import Severity
 
 except ImportError as e:
+    (
+        dandi.download,
+        dandi.organize,
+        dandi.upload,
+        dandi.validate,
+        known_instances,
+        DandiAPIClient,
+        get_metadata,
+        OrganizeInvalid,
+        Severity,
+    ) = [None] * 9
     logger.warning(e)
 
 
@@ -94,7 +105,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
         paper_id = (Export & key).fetch1("paper_id")
         if self & key:
             raise ValueError(
-                f"Adding new files to an existing dandiset is not permitted. Please delete existing entries for {key} and run again"
+                "Adding new files to an existing dandiset is not permitted. "
+                + f"Please rerun after deleting existing entries for {key}"
             )
 
         # make a temp dir with symbolic links to the export files
@@ -120,7 +132,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
                     shutil.rmtree(dandi_dir)
                     continue
                 raise RuntimeError(
-                    f"{dandi_dir} must be removed prior to dandi export to ensure dandi-compatability"
+                    f"Directory must be removed prior to dandi export to ensure dandi-compatability: {dandi_dir}"
                 )
 
         os.makedirs(destination_dir, exist_ok=False)
