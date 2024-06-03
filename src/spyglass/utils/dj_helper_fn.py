@@ -324,11 +324,9 @@ def update_analysis_for_dandi_standard(
     """
     from spyglass.common import LabMember
 
-    dj_user = dj.config["database.user"]
-    if dj_user not in LabMember().admin:
-        raise PermissionError(
-            "Admin permissions required to edit existing analysis files"
-        )
+    LabMember().check_admin_privilege(
+        error_message="Admin permissions required to edit existing analysis files"
+    )
     file_name = filepath.split("/")[-1]
     # edit the file
     with h5py.File(filepath, "a") as file:
@@ -428,11 +426,9 @@ def _resolve_external_table(
     from spyglass.common import LabMember
     from spyglass.common.common_nwbfile import schema as common_schema
 
-    dj_user = dj.config["database.user"]
-    if dj_user not in LabMember().admin:
-        raise PermissionError(
-            "Please contact database admin to edit database checksums"
-        )
+    LabMember().check_admin_privilege(
+        error_message="Please contact database admin to edit database checksums"
+    )
     external_table = (
         common_schema.external[location] & f"filepath LIKE '%{file_name}'"
     )
@@ -461,11 +457,9 @@ def make_file_obj_id_unique(nwb_path: str):
     """
     from spyglass.common.common_lab import LabMember  # noqa: F401
 
-    dj_user = dj.config["database.user"]
-    if dj_user not in LabMember().admin:
-        raise PermissionError(
-            "Admin permissions required to edit existing analysis files"
-        )
+    LabMember().check_admin_privilege(
+        error_message="Admin permissions required to edit existing analysis files"
+    )
     new_id = str(uuid4())
     with h5py.File(nwb_path, "a") as f:
         f.attrs["object_id"] = new_id

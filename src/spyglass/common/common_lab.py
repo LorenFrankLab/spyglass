@@ -129,6 +129,20 @@ class LabMember(SpyglassMixin, dj.Manual):
 
         return query[0]
 
+    def check_admin_privilege(
+        cls,
+        error_message: str = "User does not have database admin privileges",
+    ):
+        """Check if a user has admin privilege.
+
+        Parameters
+        ----------
+        error_message: str
+            The error message to display if the user is not an admin.
+        """
+        if dj.config["database.user"] not in cls.admin:
+            raise PermissionError(error_message)
+
 
 @schema
 class LabTeam(SpyglassMixin, dj.Manual):
