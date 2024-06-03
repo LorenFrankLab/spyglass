@@ -72,7 +72,7 @@ def get_nwb_file(nwb_file_path):
                 if not DandiPath & dandi_key:
                     # If not in Dandi, then we can't find the file
                     raise FileNotFoundError(
-                        "NWB file not found in kachery or Dandi."
+                        f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
                     )
                 io, nwbfile = DandiPath().fetch_file_from_dandi(
                     dandi_key

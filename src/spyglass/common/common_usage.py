@@ -6,7 +6,6 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
-import os
 from pathlib import Path
 from typing import List, Union
 
@@ -415,7 +414,7 @@ class Export(SpyglassMixin, dj.Computed):
 
         # TODO: export conda env
 
-    def _prepare_files_for_export(self, key, **kwargs):
+    def prepare_files_for_export(self, key, **kwargs):
         """Resolve common known errors to make a set of analysis
         files dandi compliant
 

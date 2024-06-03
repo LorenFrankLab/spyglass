@@ -212,7 +212,7 @@ Export().populate_paper(**paper_key)
 #    >
 #    >To aid in correcting common formatting errors identified with changes in dandi standards, we have included the method
 #    ```
-#    Export()._prepare_files_for_export(paper_key)
+#    Export().prepare_files_for_export(paper_key)
 #    ```
 #    >which will attempt to resolve these issues for a set of paper files. The code is __not__ guaranteed to address all errors found within the file, but can be used as a template for your specific errors
 # </details>

@@ -331,44 +331,55 @@ def update_analysis_for_dandi_standard(
         )
     file_name = filepath.split("/")[-1]
     # edit the file
-    with h5py.File(filepath, "a") as f:
-        sex_value = f["/general/subject/sex"][()].decode("utf-8")
-        assert sex_value in ["Female", "Male", "F", "M", "O", "U"]
+    with h5py.File(filepath, "a") as file:
+        sex_value = file["/general/subject/sex"][()].decode("utf-8")
+        if not sex_value in ["Female", "Male", "F", "M", "O", "U"]:
+            raise ValueError(f"Unexpected value for sex: {sex_value}")
+
         if len(sex_value) > 1:
             new_sex_value = sex_value[0].upper()
             logger.info(
                 f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'"
             )
-            f["/general/subject/sex"][()] = new_sex_value
-
+            file["/general/subject/sex"][()] = new_sex_value
 
         # replace subject species value "Rat" with "Rattus norvegicus"
-        species_value = f["/general/subject/species"][()].decode("utf-8")
-        assert species_value in ("Rat", "Rattus norvegicus")
+        species_value = file["/general/subject/species"][()].decode("utf-8")
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
             print(
                 f"Adjusting subject species from '{species_value}' to '{new_species_value}'."
             )
-            f["/general/subject/species"][()] = new_species_value
+            file["/general/subject/species"][()] = new_species_value
+
+        if not (
+            len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
+        ):
+            raise ValueError(
+                f"Dandi upload requires species either be in Latin binomial form (e.g., 'Mus musculus' and 'Homo sapiens')"
+                + "or be a NCBI taxonomy link (e.g., 'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
+                + f"\n Please update species value of: {species_value}"
+            )
 
         # add subject age dataset "P4M/P8M"
-        if "age" not in f["/general/subject"]:
+        if "age" not in file["/general/subject"]:
             new_age_value = age
-            print(f"Adding missing subject age, set to '{new_age_value}'.")
-            f["/general/subject"].create_dataset(
+            logger.info(
+                f"Adding missing subject age, set to '{new_age_value}'."
+            )
+            file["/general/subject"].create_dataset(
                 name="age", data=new_age_value, dtype=STR_DTYPE
             )
 
         # format name to "Last, First"
-        experimenter_value = f["/general/experimenter"][:].astype(str)
+        experimenter_value = file["/general/experimenter"][:].astype(str)
         new_experimenter_value = dandi_format_names(experimenter_value)
         if experimenter_value != new_experimenter_value:
             new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
-            print(
+            logger.info(
                 f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
             )
-            f["/general/experimenter"][:] = new_experimenter_value
+            file["/general/experimenter"][:] = new_experimenter_value
 
     # update the datajoint external store table to reflect the changes
     _resolve_external_table(filepath, file_name)
@@ -401,18 +412,18 @@ def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
     """Function to resolve database vs. file property discrepancies.
-    
+
     WARNING: This should only be used when editing file metadata. Can violate data
     integrity if impproperly used.
 
     Parameters
     ----------
-    filepath : _type_
-        _description_
-    file_name : _type_
-        _description_
+    filepath : str
+        abs path to the file to edit
+    file_name : str
+        name of the file to edit
     location : str, optional
-        _description_, by default "analysis"
+        which external table the file is in, current options are ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
     from spyglass.common.common_nwbfile import schema as common_schema
@@ -426,10 +437,12 @@ def _resolve_external_table(
         common_schema.external[location] & f"filepath LIKE '%{file_name}'"
     )
     external_key = external_table.fetch1()
-    external_key.update({
-        'size': Path(filepath).stat().st_size,
-        'contents_hash': dj.hash.uuid_from_file(filepath)
-    })
+    external_key.update(
+        {
+            "size": Path(filepath).stat().st_size,
+            "contents_hash": dj.hash.uuid_from_file(filepath),
+        }
+    )
     common_schema.external[location].update1(external_key)
 
 

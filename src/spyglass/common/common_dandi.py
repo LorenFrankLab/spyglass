@@ -230,13 +230,12 @@ def validate_dandiset(
     folder : str
         location of dandiset to be validated
     min_severity : str
-        minimum severity level for errors to be reported
+        minimum severity level for errors to be reported, threshold for failed Dandi upload is "ERROR"
     ignore_external_files : bool
         whether to ignore external file errors. Used if validating
         before the organize step
     """
     validator_result = dandi.validate.validate(folder)
-    min_severity = "ERROR"
     min_severity_value = Severity[min_severity].value
 
     filtered_results = [
