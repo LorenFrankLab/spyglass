@@ -32,6 +32,7 @@
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
+    - Update docstrings #996
 
 ## [0.5.2] (April 22, 2024)
 

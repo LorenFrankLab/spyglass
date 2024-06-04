@@ -238,7 +238,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         DecodingOutput.insert1(orig_key, skip_duplicates=True)
 
-    def fetch_results(self):
+    def fetch_results(self) -> xr.Dataset:
+        """Retrieve the decoding results
+
+        Returns
+        -------
+        xr.Dataset
+            The decoding results (posteriors, etc.)
+        """
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
@@ -246,6 +253,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_environments(key):
+        """Fetch the environments for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        List[TrackGraph]
+            list of track graphs in the trained model
+        """
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
@@ -273,6 +292,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
+        """Get the maximum range of model times in the encoding and decoding intervals
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        Tuple[float, float]
+            The minimum and maximum times for the model
+        """
         encoding_interval = (
             IntervalList
             & {
@@ -302,6 +333,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_position_info(key):
+        """Fetch the position information for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, List[str]]
+            The position information and the names of the position variables
+        """
         position_group_key = {
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
@@ -326,6 +369,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_linear_position_info(key):
+        """Fetch the position information and project it onto the track graph
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        pd.DataFrame
+            The linearized position information
+        """
         environment = SortedSpikesDecodingV1.fetch_environments(key)[0]
 
         position_df = SortedSpikesDecodingV1.fetch_position_info(key)[0]
@@ -352,6 +407,22 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True, time_slice=None):
+        """Fetch the spike times for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+        filter_by_interval : bool, optional
+            Whether to filter for spike times in the model interval, by default True
+        time_slice : Slice, optional
+            User provided slice of time to restrict spikes to, by default None
+
+        Returns
+        -------
+        list[np.ndarray]
+            List of spike times for each unit in the model's spike group
+        """
         spike_times = SortedSpikesGroup.fetch_spike_data(key)
         if not filter_by_interval:
             return spike_times
@@ -371,6 +442,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return new_spike_times
 
     def spike_times_sorted_by_place_field_peak(self, time_slice=None):
+        """Spike times of units sorted by place field peak location
+
+        Parameters
+        ----------
+        time_slice : Slice, optional
+            time range to limit returned spikes to, by default None
+        """
         if time_slice is None:
             time_slice = slice(-np.inf, np.inf)
 
@@ -395,8 +473,23 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 ]
                 for neuron_ind in neuron_sort_ind
             ]
+        return new_spike_times
 
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
+        """Get the ahead-behind distance of the decoded position from the animal's actual position
+
+        Parameters
+        ----------
+        track_graph : TrackGraph, optional
+            environment track graph to project position on, by default None
+        time_slice : Slice, optional
+            time intrerval to restrict to, by default None
+
+        Returns
+        -------
+        distance_metrics : np.ndarray
+            Information about the distance of the animal to the mental position.
+        """
         # TODO: store in table
 
         if time_slice is None:
