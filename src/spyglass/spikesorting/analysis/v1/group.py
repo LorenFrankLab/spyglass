@@ -85,6 +85,13 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     ) -> np.ndarray:
         """
         Filter units based on labels
+
+        labels: list of list of strings
+            list of labels for each unit
+        include_labels: list of strings
+            if provided, only units with any of these labels will be included
+        exclude_labels: list of strings
+            if provided, units with any of these labels will be excluded
         """
         include_labels = np.unique(include_labels)
         exclude_labels = np.unique(exclude_labels)
@@ -108,7 +115,23 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return include_mask
 
     @staticmethod
-    def fetch_spike_data(key, time_slice=None):
+    def fetch_spike_data(
+        key: dict, time_slice: list[float] = None
+    ) -> list[np.ndarray]:
+        """fetch spike times for units in the group
+
+        Parameters
+        ----------
+        key : dict
+            dictionary containing the group key
+        time_slice : list of float, optional
+            if provided, filter for spikes occurring in the interval [start, stop], by default None
+
+        Returns
+        -------
+        list of np.ndarray
+            list of spike times for each unit in the group
+        """
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
             (
@@ -170,6 +193,20 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_spike_indicator(cls, key: dict, time: np.ndarray) -> np.ndarray:
+        """get spike indicator matrix for the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the spike indicator matrix
+
+        Returns
+        -------
+        np.ndarray
+            spike indicator matrix with shape (len(time), n_units)
+        """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
         spike_times = cls.fetch_spike_data(key)
@@ -195,6 +232,24 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         multiunit: bool = False,
         smoothing_sigma: float = 0.015,
     ) -> np.ndarray:
+        """get time-dependent firing rate for units in the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the firing rate
+        multiunit : bool, optional
+            if True, return the multiunit firing rate for units in the group, by default False
+        smoothing_sigma : float, optional
+            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+
+        Returns
+        -------
+        np.ndarray
+            time-dependent firing rate with shape (len(time), n_units)
+        """
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
