@@ -33,6 +33,6 @@ Table.alter() # Comment regarding the change
 - [ ] If release, I have updated the `CITATION.cff`
 - [ ] This PR makes edits to table definitions: (yes/no)
 - [ ] If table edits, I have included an `alter` snippet for release notes.
-- [ ] If this PR makes changes to positon, I ran the relevant tests locally.
+- [ ] If this PR makes changes to position, I ran the relevant tests locally.
 - [ ] I have updated the `CHANGELOG.md` with PR number and description.
 - [ ] I have added/edited docs/notebooks to reflect the changes
