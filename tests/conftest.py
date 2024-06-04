@@ -10,7 +10,7 @@ import sys
 import warnings
 from contextlib import nullcontext
 from pathlib import Path
-from subprocess import Popen
+from shutil import rmtree as shutil_rmtree
 from time import sleep as tsleep
 
 import datajoint as dj
@@ -18,15 +18,22 @@ import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
+from numba import NumbaWarning
+from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
+from .data_downloader import DataDownloader
 
 warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+warnings.filterwarnings("ignore", module="tensorflow")
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
+warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
 # globals in pytest_configure:
-#       BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
 
 def pytest_addoption(parser):
@@ -39,10 +46,10 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
+    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
     --no-teardown (bool): Default False. Delete pipeline on close.
-    --no-server (bool): Default False. Run datajoint server in Docker.
-    --datadir (str): Default './tests/test_data/'. Dir for local input file.
-        WARNING: not yet implemented.
+    --no-docker (bool): Default False. Run datajoint mysql server in Docker.
+    --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
     """
     parser.addoption(
         "--quiet-spy",
@@ -52,11 +59,11 @@ def pytest_addoption(parser):
         help="Quiet logging from Spyglass.",
     )
     parser.addoption(
-        "--no-server",
-        action="store_true",
-        dest="no_server",
-        default=False,
-        help="Do not launch datajoint server in Docker.",
+        "--base-dir",
+        action="store",
+        default="./tests/_data/",
+        dest="base_dir",
+        help="Directory for local input file.",
     )
     parser.addoption(
         "--no-teardown",
@@ -66,20 +73,28 @@ def pytest_addoption(parser):
         help="Tear down tables after tests.",
     )
     parser.addoption(
-        "--base-dir",
-        action="store",
-        default="./tests/_data/",
-        dest="base_dir",
-        help="Directory for local input file.",
+        "--no-docker",
+        action="store_true",
+        dest="no_docker",
+        default=False,
+        help="Do not launch datajoint server in Docker.",
+    )
+    parser.addoption(
+        "--no-dlc",
+        action="store_true",
+        dest="no_dlc",
+        default=False,
+        help="Skip downloads for and tests of DLC-dependent features.",
     )
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
+    NO_DLC = config.option.no_dlc
 
     BASE_DIR = Path(config.option.base_dir).absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -89,50 +104,16 @@ def pytest_configure(config):
     SERVER = DockerMySQLManager(
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_server,
+        null_server=config.option.no_docker,
         verbose=VERBOSE,
     )
-    DOWNLOAD = download_data(verbose=VERBOSE)
 
-
-def data_is_downloaded():
-    """Check if data is downloaded."""
-    return os.path.exists(RAW_DIR / TEST_FILE)
-
-
-def download_data(verbose=False):
-    """Download data from BOX using environment variable credentials.
-
-    Note: In gh-actions, this is handled by the test-conda workflow.
-    """
-    if data_is_downloaded():
-        return None
-    UCSF_BOX_USER = os.environ.get("UCSF_BOX_USER")
-    UCSF_BOX_TOKEN = os.environ.get("UCSF_BOX_TOKEN")
-    if not all([UCSF_BOX_USER, UCSF_BOX_TOKEN]):
-        raise ValueError(
-            "Missing data, no credentials: UCSF_BOX_USER or UCSF_BOX_TOKEN."
-        )
-    data_url = f"ftps://ftp.box.com/trodes_to_nwb_test_data/{TEST_FILE}"
-
-    cmd = [
-        "wget",
-        "--recursive",
-        "--no-host-directories",
-        "--no-directories",
-        "--user",
-        UCSF_BOX_USER,
-        "--password",
-        UCSF_BOX_TOKEN,
-        "-P",
-        RAW_DIR,
-        data_url,
-    ]
-    if not verbose:
-        cmd.insert(cmd.index("--recursive") + 1, "--no-verbose")
-    cmd_kwargs = dict(stdout=sys.stdout, stderr=sys.stderr) if verbose else {}
-
-    return Popen(cmd, **cmd_kwargs)
+    DOWNLOADS = DataDownloader(
+        nwb_file_name=TEST_FILE,
+        base_dir=BASE_DIR,
+        verbose=VERBOSE,
+        download_dlc=not NO_DLC,
+    )
 
 
 def pytest_unconfigure(config):
@@ -231,10 +212,10 @@ def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
 
     # wait for wget download to finish
-    if DOWNLOAD is not None:
-        DOWNLOAD.wait()
+    if (nwb_download := DOWNLOADS.file_downloads.get(TEST_FILE)) is not None:
+        nwb_download.wait()
 
-    # wait for gh-actions download to finish
+    # wait for download to finish
     timeout, wait, found = 60, 5, False
     for _ in range(timeout // wait):
         if path.exists():
@@ -246,6 +227,17 @@ def mini_path(raw_dir):
         raise ConnectionError("Download failed.")
 
     yield path
+
+
+@pytest.fixture(scope="session")
+def nodlc(request):
+    yield NO_DLC
+
+
+@pytest.fixture(scope="session")
+def skipif_nodlc(request):
+    if NO_DLC:
+        yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
 
 
 @pytest.fixture(scope="session")
@@ -324,7 +316,7 @@ def mini_insert(
     yield
 
     close_nwb_files()
-    # Note: no need to run deletes in teardown, bc removing the container
+    # Note: teardown will remove the container, deleting all data
 
 
 @pytest.fixture(scope="session")
@@ -403,6 +395,19 @@ def populate_exception():
     yield PopulateException
 
 
+# -------------------------- FIXTURES, COMMON TABLES --------------------------
+
+
+@pytest.fixture(scope="session")
+def video_keys(common, base_dir):
+    for file, download in DOWNLOADS.file_downloads.items():
+        if file.endswith(".h264") and download is not None:
+            download.wait()  # wait for videos to finish downloading
+    DOWNLOADS.rename_files()
+
+    return common.VideoFile().fetch(as_dict=True)
+
+
 # ------------------------- FIXTURES, POSITION TABLES -------------------------
 
 
@@ -439,11 +444,11 @@ def trodes_params(trodes_params_table, teardown):
             "params": {
                 **params,
                 "is_upsampled": 1,
-                "upsampling_sampling_rate": 500,
+                "upsampling_sampling_rate": 500,  # TODO - lower this to speed up
             },
         },
     }
-    trodes_params_table.get_default()
+    _ = trodes_params_table.get_default()
     trodes_params_table.insert(
         [v for k, v in paramsets.items()], skip_duplicates=True
     )
@@ -771,3 +776,453 @@ def lfp_merge_key(populate_lfp):
 @pytest.fixture(scope="session")
 def lfp_v1_key(lfp, lfp_s_key):
     yield (lfp.v1.LFPV1 & lfp_s_key).fetch1("KEY")
+
+
+# --------------------------- FIXTURES, DLC TABLES ----------------------------
+# ---------------- Note: DLCOutput is used to test RestrGraph -----------------
+
+
+@pytest.fixture(scope="session")
+def bodyparts(sgp):
+    bps = ["whiteLED", "tailBase", "tailMid", "tailTip"]
+    sgp.v1.BodyPart.insert(
+        [{"bodypart": bp, "bodypart_description": "none"} for bp in bps],
+        skip_duplicates=True,
+    )
+
+    yield bps
+
+
+@pytest.fixture(scope="session")
+def dlc_project_tbl(sgp):
+    yield sgp.v1.DLCProject()
+
+
+@pytest.fixture(scope="session")
+def dlc_project_name():
+    yield "pytest_proj"
+
+
+@pytest.fixture(scope="session")
+def insert_project(
+    verbose_context,
+    teardown,
+    dlc_project_name,
+    dlc_project_tbl,
+    common,
+    bodyparts,
+    mini_copy_name,
+):
+    if NO_DLC:
+        pytest.skip("Skipping DLC-dependent tests.")
+
+    from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
+
+    team_name = "sc_eb"
+    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    with verbose_context:
+        project_key = dlc_project_tbl.insert_new_project(
+            project_name=dlc_project_name,
+            bodyparts=bodyparts,
+            lab_team=team_name,
+            frames_per_video=100,
+            video_list=[
+                {"nwb_file_name": mini_copy_name, "epoch": 0},
+                {"nwb_file_name": mini_copy_name, "epoch": 1},
+            ],
+            skip_duplicates=True,
+        )
+    config_path = (dlc_project_tbl & project_key).fetch1("config_path")
+    cfg = read_config(config_path)
+    cfg.update(
+        {
+            "numframes2pick": 2,
+            "maxiters": 2,
+            "scorer": team_name,
+            "skeleton": [
+                ["whiteLED"],
+                [
+                    ["tailMid", "tailMid"],
+                    ["tailBase", "tailBase"],
+                    ["tailTip", "tailTip"],
+                ],
+            ],  # eb's has video_sets: {1: {'crop': [0, 1260, 0, 728]}}
+        }
+    )
+
+    write_config(config_path, cfg)
+
+    yield project_key, cfg, config_path
+
+    if teardown:
+        (dlc_project_tbl & project_key).delete(safemode=False)
+        shutil_rmtree(str(Path(config_path).parent))
+
+
+@pytest.fixture(scope="session")
+def project_key(insert_project):
+    yield insert_project[0]
+
+
+@pytest.fixture(scope="session")
+def dlc_config(insert_project):
+    yield insert_project[1]
+
+
+@pytest.fixture(scope="session")
+def config_path(insert_project):
+    yield insert_project[2]
+
+
+@pytest.fixture(scope="session")
+def project_dir(config_path):
+    yield Path(config_path).parent
+
+
+@pytest.fixture(scope="session")
+def extract_frames(
+    verbose_context, dlc_project_tbl, project_key, dlc_config, project_dir
+):
+    with verbose_context:
+        dlc_project_tbl.run_extract_frames(
+            project_key, userfeedback=False, mode="automatic"
+        )
+    vid_name = list(dlc_config["video_sets"].keys())[0].split("/")[-1]
+    label_dir = project_dir / "labeled-data" / vid_name.split(".")[0]
+
+    yield label_dir
+
+    for file in label_dir.glob("*png"):
+        if file.stem in ["img000", "img001"]:
+            continue
+        file.unlink()
+
+
+@pytest.fixture(scope="session")
+def labeled_vid_dir(extract_frames):
+    yield extract_frames
+
+
+@pytest.fixture(scope="session")
+def fix_downloaded(labeled_vid_dir, project_dir):
+    """Grabs CollectedData and img files from project_dir, moves to labeled"""
+    for file in project_dir.parent.parent.glob("*"):
+        if file.is_dir():
+            continue
+        dest = labeled_vid_dir / file.name
+        if dest.exists():
+            dest.unlink()
+        dest.write_bytes(file.read_bytes())
+        # TODO: revert to rename before merge
+        # file.rename(labeled_vid_dir / file.name)
+
+    yield
+
+
+@pytest.fixture(scope="session")
+def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
+    dlc_project_tbl.add_training_files(project_key, skip_duplicates=True)
+    yield
+
+
+@pytest.fixture(scope="session")
+def dlc_training_params(sgp):
+    params_tbl = sgp.v1.DLCModelTrainingParams()
+    params_name = "pytest"
+    yield params_tbl, params_name
+
+
+@pytest.fixture(scope="session")
+def training_params_key(verbose_context, sgp, project_key, dlc_training_params):
+    params_tbl, params_name = dlc_training_params
+    with verbose_context:
+        params_tbl.insert_new_params(
+            paramset_name=params_name,
+            params={
+                "trainingsetindex": 0,
+                "shuffle": 1,
+                "gputouse": None,
+                "TFGPUinference": False,
+                "net_type": "resnet_50",
+                "augmenter_type": "imgaug",
+                "video_sets": "test skipping param",
+            },
+            skip_duplicates=True,
+        )
+    yield {"dlc_training_params_name": params_name}
+
+
+@pytest.fixture(scope="session")
+def model_train_key(sgp, project_key, training_params_key):
+    _ = project_key.pop("config_path", None)
+    model_train_key = {
+        **project_key,
+        **training_params_key,
+    }
+    sgp.v1.DLCModelTrainingSelection().insert1(
+        {
+            **model_train_key,
+            "model_prefix": "",
+        },
+        skip_duplicates=True,
+    )
+    yield model_train_key
+
+
+@pytest.fixture(scope="session")
+def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
+    train_tbl = sgp.v1.DLCModelTraining
+    if len(train_tbl & model_train_key) == 0:
+        _ = add_training_files
+        _ = fix_downloaded
+        sgp.v1.DLCModelTraining.populate(model_train_key)
+    yield model_train_key
+
+
+@pytest.fixture(scope="session")
+def model_source_key(sgp, model_train_key, populate_training):
+    yield (sgp.v1.DLCModelSource & model_train_key).fetch1("KEY")
+
+
+@pytest.fixture(scope="session")
+def model_key(sgp, model_source_key):
+    model_key = {**model_source_key, "dlc_model_params_name": "default"}
+    _ = sgp.v1.DLCModelParams.get_default()
+    sgp.v1.DLCModelSelection().insert1(model_key, skip_duplicates=True)
+    yield model_key
+
+
+@pytest.fixture(scope="session")
+def populate_model(sgp, model_key):
+    model_tbl = sgp.v1.DLCModel
+    if model_tbl & model_key:
+        yield
+    else:
+        sgp.v1.DLCModel.populate(model_key)
+        yield
+
+
+@pytest.fixture(scope="session")
+def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
+    yield sgp.v1.DLCPoseEstimationSelection.insert_estimation_task(
+        {
+            "nwb_file_name": mini_copy_name,
+            "epoch": 1,
+            "video_file_num": 0,
+            **model_key,
+        },
+        task_mode="trigger",  # trigger or load
+        params={"gputouse": None, "videotype": "mp4", "TFGPUinference": False},
+    )
+
+
+@pytest.fixture(scope="session")
+def populate_pose_estimation(sgp, pose_estimation_key):
+    pose_est_tbl = sgp.v1.DLCPoseEstimation()
+    if len(pose_est_tbl & pose_estimation_key) < 1:
+        pose_est_tbl.populate(pose_estimation_key)
+    yield pose_est_tbl
+
+
+@pytest.fixture(scope="session")
+def si_params_name(sgp, populate_pose_estimation):
+    params_name = "low_bar"
+    params_tbl = sgp.v1.DLCSmoothInterpParams
+    # if len(params_tbl & {"dlc_si_params_name": params_name}) < 1:
+    if True:  # TODO: remove before merge
+        nan_params = params_tbl.get_nan_params()
+        nan_params["dlc_si_params_name"] = params_name
+        nan_params["params"].update(
+            {
+                "likelihood_thresh": 0.4,
+                "max_cm_between_pts": 100,
+                "num_inds_to_span": 50,
+                # Smoothing and Interpolation added later - must check
+                "smoothing_params": {"smoothing_duration": 0.05},
+                "interp_params": {"max_cm_to_interp": 100},
+            }
+        )
+        params_tbl.insert1(nan_params, skip_duplicates=True)
+
+    yield params_name
+
+
+@pytest.fixture(scope="session")
+def si_key(sgp, bodyparts, si_params_name, pose_estimation_key):
+    key = {
+        key: val
+        for key, val in pose_estimation_key.items()
+        if key in sgp.v1.DLCSmoothInterpSelection.primary_key
+    }
+    sgp.v1.DLCSmoothInterpSelection.insert(
+        [
+            {
+                **key,
+                "bodypart": bodypart,
+                "dlc_si_params_name": si_params_name,
+            }
+            for bodypart in bodyparts[:1]
+        ],
+        skip_duplicates=True,
+    )
+    yield key
+
+
+@pytest.fixture(scope="session")
+def populate_si(sgp, si_key, populate_pose_estimation):
+    sgp.v1.DLCSmoothInterp.populate()
+    yield
+
+
+@pytest.fixture(scope="session")
+def cohort_selection(sgp, si_key, si_params_name):
+    cohort_key = {
+        k: v
+        for k, v in {
+            **si_key,
+            "dlc_si_cohort_selection_name": "whiteLED",
+            "bodyparts_params_dict": {
+                "whiteLED": si_params_name,
+            },
+        }.items()
+        if k not in ["bodypart", "dlc_si_params_name"]
+    }
+    sgp.v1.DLCSmoothInterpCohortSelection().insert1(
+        cohort_key, skip_duplicates=True
+    )
+    yield cohort_key
+
+
+@pytest.fixture(scope="session")
+def cohort_key(sgp, cohort_selection):
+    yield cohort_selection.copy()
+
+
+@pytest.fixture(scope="session")
+def populate_cohort(sgp, cohort_selection, populate_si):
+    sgp.v1.DLCSmoothInterpCohort.populate(cohort_selection)
+
+
+@pytest.fixture(scope="session")
+def centroid_params(sgp):
+    params_tbl = sgp.v1.DLCCentroidParams
+    params_key = {"dlc_centroid_params_name": "one_test"}
+    if len(params_tbl & params_key) == 0:
+        params_tbl.insert1(
+            {
+                **params_key,
+                "params": {
+                    "centroid_method": "one_pt_centroid",
+                    "points": {"point1": "whiteLED"},
+                    "interpolate": True,
+                    "interp_params": {"max_cm_to_interp": 100},
+                    "smooth": True,
+                    "smoothing_params": {
+                        "smoothing_duration": 0.05,
+                        "smooth_method": "moving_avg",
+                    },
+                    "max_LED_separation": 50,
+                    "speed_smoothing_std_dev": 0.100,
+                },
+            }
+        )
+    yield params_key
+
+
+@pytest.fixture(scope="session")
+def centroid_selection(sgp, cohort_key, populate_cohort, centroid_params):
+    centroid_key = cohort_key.copy()
+    centroid_key = {
+        key: val
+        for key, val in cohort_key.items()
+        if key in sgp.v1.DLCCentroidSelection.primary_key
+    }
+    centroid_key.update(centroid_params)
+    sgp.v1.DLCCentroidSelection.insert1(centroid_key, skip_duplicates=True)
+    yield centroid_key
+
+
+@pytest.fixture(scope="session")
+def centroid_key(sgp, centroid_selection):
+    yield centroid_selection.copy()
+
+
+@pytest.fixture(scope="session")
+def populate_centroid(sgp, centroid_selection):
+    sgp.v1.DLCCentroid.populate(centroid_selection)
+
+
+@pytest.fixture(scope="session")
+def orient_params(sgp):
+    params_tbl = sgp.v1.DLCOrientationParams
+    params_key = {"dlc_orientation_params_name": "none"}
+    if len(params_tbl & params_key) == 0:
+        params_tbl.insert1(
+            {
+                **params_key,
+                "params": {
+                    "orient_method": "none",
+                    "bodypart1": "whiteLED",
+                    "orientation_smoothing_std_dev": 0.001,
+                },
+            }
+        )
+    return params_key
+
+
+@pytest.fixture(scope="session")
+def orient_selection(sgp, cohort_key, orient_params):
+    orient_key = {
+        key: val
+        for key, val in cohort_key.items()
+        if key in sgp.v1.DLCOrientationSelection.primary_key
+    }
+    orient_key.update(orient_params)
+    sgp.v1.DLCOrientationSelection().insert1(orient_key, skip_duplicates=True)
+    yield orient_key
+
+
+@pytest.fixture(scope="session")
+def orient_key(sgp, orient_selection):
+    yield orient_selection.copy()
+
+
+@pytest.fixture(scope="session")
+def populate_orient(sgp, orient_selection):
+    sgp.v1.DLCOrientation().populate(orient_selection)
+    yield
+
+
+@pytest.fixture(scope="session")
+def dlc_selection(sgp, centroid_key, orient_key, populate_orient):
+    dlc_key = {
+        key: val
+        for key, val in centroid_key.items()
+        if key in sgp.v1.DLCPosV1.primary_key
+    }
+    dlc_key.update(
+        {
+            "dlc_si_cohort_centroid": centroid_key[
+                "dlc_si_cohort_selection_name"
+            ],
+            "dlc_si_cohort_orientation": orient_key[
+                "dlc_si_cohort_selection_name"
+            ],
+            "dlc_orientation_params_name": orient_key[
+                "dlc_orientation_params_name"
+            ],
+        }
+    )
+    sgp.v1.DLCPosSelection().insert1(dlc_key, skip_duplicates=True)
+    yield dlc_key
+
+
+@pytest.fixture(scope="session")
+def dlc_key(sgp, dlc_selection):
+    yield dlc_selection.copy()
+
+
+@pytest.fixture(scope="session")
+def populate_dlc(sgp, dlc_key):
+    sgp.v1.DLCPosV1().populate(dlc_key)
+    yield

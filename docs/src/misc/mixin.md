@@ -21,6 +21,11 @@ schema = dj.schema("my_schema")
 @schema
 class MyOldTable(dj.Manual):
     pass
+
+
+@schema
+class MyNewTable(SpyglassMixin, dj.Manual):
+    pass
 ```
 
 **NOTE**: The mixin must be the first class inherited from in order to override
@@ -60,10 +65,10 @@ key and `>>` as a shorthand for `restrict_by` a downstream key.
 from spyglass.example import AnyTable
 
 AnyTable() << 'upstream_attribute="value"'
-AnyTable() >> 'downsteam_attribute="value"'
+AnyTable() >> 'downstream_attribute="value"'
 
 # Equivalent to
-AnyTable().restrict_by('downsteam_attribute="value"', direction="down")
+AnyTable().restrict_by('downstream_attribute="value"', direction="down")
 AnyTable().restrict_by('upstream_attribute="value"', direction="up")
 ```
 
@@ -136,7 +141,7 @@ function, `delete_downstream_merge`, to handle this, which is run by default
 when calling `delete`.
 
 `delete_downstream_merge`, also aliased as `ddm`, identifies all Merge tables
-downsteam of where it is called. If `dry_run=True`, it will return a list of
+downstream of where it is called. If `dry_run=True`, it will return a list of
 entries that would be deleted, otherwise it will delete them.
 
 Importantly, `delete_downstream_merge` cannot properly interact with tables that
@@ -156,7 +161,7 @@ from spyglass.example import MyMerge
 restricted_nwbfile.delete_downstream_merge(reload_cache=True, dry_run=False)
 ```
 
-Because each table keeps a cache of downsteam merge tables, it is important to
+Because each table keeps a cache of downstream merge tables, it is important to
 reload the cache if the table has been imported after the cache was created.
 Speed gains can also be achieved by avoiding re-instancing the table each time.
 

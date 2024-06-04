@@ -34,6 +34,7 @@ keywords = [
     "kachery",
     "sortingview",
 ]
+dynamic = ["version"]
 dependencies = [
     "black[jupyter]",
     "bottleneck",
@@ -47,8 +48,8 @@ dependencies = [
     "non_local_detector",
     "numpy<1.24",
     "opencv-python",
-    "panel<=1.3.4", # See panel #6325
-    "position_tools",
+    "panel>=1.4.0", # panel #6325 resolved
+    "position_tools>=0.1.0",
     "pubnub<6.4.0",            # TODO: remove this when sortingview is updated
     "pydotplus",
     "pynwb>=2.2.0,<3",
@@ -58,31 +59,27 @@ dependencies = [
     "spikeinterface>=0.99.1,<0.100",
     "track_linearization>=2.3",
 ]
-dynamic = ["version"]
-
-[project.scripts]
-spyglass_cli = "spyglass.cli:cli"
-
-[project.urls]
-"Homepage" = "https://github.com/LorenFrankLab/spyglass"
-"Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
 [project.optional-dependencies]
-dlc = ["ffmpeg", "numba>=0.54", "deeplabcut<2.3.0"]
+dlc = [
+  "ffmpeg",
+  "deeplabcut[tf]",          # removing dlc pin removes need to pin tf/numba
+]
 test = [
-    "click",          # for CLI subpackage only
-    "docker",         # for tests in a container
+    "click",                 # for CLI subpackage only
+    "docker",                # for tests in a container
     "ghostipy",
-    "kachery",        # database access
+    "kachery",               # database access
     "kachery-client",
     "kachery-cloud>=0.4.0",
-    "pre-commit",     # linting
-    "pytest",         # unit testing
-    "pytest-cov",     # code coverage
+    "pre-commit",            # linting
+    "pytest",                # unit testing
+    "pytest-cov",            # code coverage
+    "pytest-xvfb",           # for headless testing of Qt
 ]
 docs = [
     "hatch",                 # Get version from env
-    "jupytext==1.16.0",      # Convert notebooks to .py
+    "jupytext",              # Convert notebooks to .py
     "mike",                  # Docs versioning
     "mkdocs",                # Docs core
     "mkdocs-exclude",        # Docs exclude files
@@ -93,6 +90,13 @@ docs = [
     "mkdocs-material",       # Docs theme
     "mkdocstrings[python]",  # Docs API docstrings
 ]
+
+[project.scripts]
+spyglass_cli = "spyglass.cli:cli"
+
+[project.urls]
+"Homepage" = "https://github.com/LorenFrankLab/spyglass"
+"Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
 
 [tool.hatch.version]
 source = "vcs"
@@ -120,20 +124,28 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    "-sv",
+    # "-sv", # no capture, verbose output
     # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
-    # "--quiet-spy",                  # don't show logging from spyglass
+    # "--quiet-spy",   # don't show logging from spyglass
+    # "--no-dlc",      # don't run DLC tests
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+    "--doctest-modules", # run doctests in all modules
     "--cov=spyglass",
     "--cov-report=term-missing",
     "--no-cov-on-fail",
 ]
 testpaths = ["tests"]
 log_level = "INFO"
+env = [
+    "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
+    "DISPLAY = :0", # QT fails headless without this
+    "TF_ENABLE_ONEDNN_OPTS = 0", # TF disable approx calcs
+    "TF_CPP_MIN_LOG_LEVEL = 2", # Disable TF warnings
+]
 
 [tool.coverage.run]
 source = ["*/src/spyglass/*"]

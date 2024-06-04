@@ -189,7 +189,11 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_firing_rate(
-        cls, key: dict, time: np.ndarray, multiunit: bool = False
+        cls,
+        key: dict,
+        time: np.ndarray,
+        multiunit: bool = False,
+        smoothing_sigma: float = 0.015,
     ) -> np.ndarray:
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
@@ -202,7 +206,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return np.stack(
             [
                 get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis], sampling_frequency
+                    indicator[:, np.newaxis],
+                    sampling_frequency,
+                    smoothing_sigma,
                 )
                 for indicator in spike_indicator.T
             ],

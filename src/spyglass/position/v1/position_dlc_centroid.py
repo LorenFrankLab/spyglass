@@ -170,7 +170,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             for point in required_points:
                 bodypart = points[point]
                 if bodypart not in bodyparts_avail:
-                    raise ValueError(
+                    raise ValueError(  # TODO: migrate to input validation
                         "Bodypart in points not in model."
                         f"\tBodypart {bodypart}"
                         f"\tIn Model {bodyparts_avail}"
@@ -222,6 +222,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                     "smoothing_duration"
                 )
                 if not smoothing_duration:
+                    # TODO: remove - validated with `validate_smooth_params`
                     raise KeyError(
                         "smoothing_duration needs to be passed within smoothing_params"
                     )
@@ -368,6 +369,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     """Determines the centroid of 4 LEDS on an implant LED ring.
     Assumed to be the Green LED, and 3 red LEDs called: redLED_C, redLED_L, redLED_R
     By default, uses (greenled + redLED_C) / 2 to calculate centroid
+
     If Green LED is NaN, but red center LED is not,
         then the red center LED is called the centroid
     If green and red center LEDs are NaN, but red left and red right LEDs are not,
@@ -397,6 +399,9 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
+
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
     # TODO: this feels messy, clean-up
@@ -722,6 +727,8 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
 
     idx = pd.IndexSlice
     centroid = np.zeros(shape=(len(pos_df), 2))
@@ -797,6 +804,8 @@ def one_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not params.get("points"):
+        raise KeyError("points need to be passed in params")
     idx = pd.IndexSlice
     PT1 = params["points"].pop("point1", None)
     centroid = pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy()

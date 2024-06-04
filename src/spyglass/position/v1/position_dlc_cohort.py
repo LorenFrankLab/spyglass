@@ -113,6 +113,12 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
                 bodyparts_params_dict
             ), "more entries found in DLCSmoothInterp than specified in bodyparts_params_dict"
             table_column_names = list(table_entries[0].dtype.fields.keys())
+
+            if len(table_entries) == 0:
+                raise ValueError(
+                    f"No entries found in DLCSmoothInterp for {temp_key}"
+                )
+
             for table_entry in table_entries:
                 entry_key = {
                     **{

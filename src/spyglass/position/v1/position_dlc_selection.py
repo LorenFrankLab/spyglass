@@ -276,7 +276,7 @@ class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     def get_default(cls):
         query = cls & {"dlc_pos_video_params_name": "default"}
         if not len(query) > 0:
-            cls().insert_default(skip_duplicates=True)
+            cls().insert_default()
             default = (cls & {"dlc_pos_video_params_name": "default"}).fetch1()
         else:
             default = query.fetch1()
@@ -303,6 +303,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     -> DLCPosVideoSelection
     ---
     """
+
+    # TODO: Shoultn't this keep track of the video file it creates?
 
     def make(self, key):
         from tqdm import tqdm as tqdm
@@ -432,3 +434,4 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             crop=crop,
             **params["video_params"],
         )
+        self.insert1(key)
