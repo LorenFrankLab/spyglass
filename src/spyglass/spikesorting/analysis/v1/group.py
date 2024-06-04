@@ -125,7 +125,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         key : dict
             dictionary containing the group key
         time_slice : list of float, optional
-            if provided, filter for spikes occuring in the interval [start, stop], by default None
+            if provided, filter for spikes occurring in the interval [start, stop], by default None
 
         Returns
         -------
