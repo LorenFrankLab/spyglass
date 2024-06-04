@@ -1,6 +1,5 @@
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
-from collections import OrderedDict
 from contextlib import nullcontext
 from functools import cached_property
 from inspect import stack as inspect_stack
@@ -262,29 +261,27 @@ class SpyglassMixin:
         )
 
     @cached_property
-    def _part_masters(self) -> Dict[str, dj.FreeTable]:
-        """Dict of part tables downstream of self: {camel_name: FreeTable}.
+    def _part_masters(self) -> set:
+        """Set of master tables downstream of self.
 
-        Cache of masters of self.descendants(as_objects=True).
-        Part must have other parent(s) besides master.
+        Cache of masters in self.descendants(as_objects=True) with another
+        foreign key reference in the part. Used for delete_downstream_parts.
         """
         self.connection.dependencies.load()
-        part_masters = {}
-        visited = set()
+        part_masters = set()
 
         def search_descendants(parent):
             for desc in parent.descendants(as_objects=True):
-                if (  # Check if has master, no other fk, or already in cache
-                    not (master_name := get_master(desc.full_table_name))
-                    or not set(desc.parents()) - set([master_name])
-                    or master_name in part_masters
+                if (  # Check if has master, is part
+                    not (master := get_master(desc.full_table_name))
+                    # has other non-master parent
+                    or not set(desc.parents()) - set([master])
+                    or master in part_masters  # already in cache
                 ):
                     continue
-                master_ft = dj.FreeTable(self.connection, master_name)
-                part_masters[to_camel_case(master_name)] = master_ft
-                if master_name not in visited:
-                    visited.add(master_name)
-                    search_descendants(master_ft)
+                if master not in part_masters:
+                    part_masters.add(master)
+                    search_descendants(dj.FreeTable(self.connection, master))
 
         try:
             _ = search_descendants(self)
@@ -298,63 +295,10 @@ class SpyglassMixin:
 
         logger.info(
             f"Building part-parent cache for {self.camel_name}.\n\t"
-            + f"Found {len(part_masters)} downstream merge tables"
+            + f"Found {len(part_masters)} downstream part tables"
         )
 
         return part_masters
-
-    @cached_property
-    def _merge_chains(self) -> OrderedDict[str, List[dj.FreeTable]]:
-        """Dict of chains to parts downstream of self
-
-        Format: {camel_name: TableChains}.
-
-        For each table found in _part_masters, find the path from self to
-        master via merge parts. If the path is valid, add it to the dict. Cache
-        prevents need to recompute whenever delete_downstream_part is called
-        with a new restriction. To recompute, add `reload_cache=True` to
-        delete_downstream_part call.
-        """
-        from spyglass.utils.dj_graph import TableChains  # noqa F401
-
-        merge_chains = {}
-        for name, merge_table in self._part_masters.items():
-            chains = TableChains(self, merge_table)
-            if len(chains):
-                merge_chains[name] = chains
-
-        # self->master chains ordered by max_len as a proxy for downstream-ness.
-        # A better approach would sort each self->part independently.
-
-        return OrderedDict(
-            sorted(
-                merge_chains.items(), key=lambda x: x[1].max_len, reverse=True
-            )
-        )
-
-    def _get_chain(self, substring):
-        """Return chain from self to merge table with substring in name."""
-        for name, chain in self._merge_chains.items():
-            if substring.lower() in name:
-                return chain
-        raise ValueError(f"No chain found with '{substring}' in name.")
-
-    def _commit_part_deletes(
-        self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
-    ) -> None:
-        """Commit merge deletes.
-
-        Parameters
-        ----------
-        merge_join_dict : Dict[str, List[QueryExpression]]
-            Dictionary of merge tables and their joins. Uses 'merge_id' primary
-            key to restrict delete.
-
-        Extracted for use in cautious_delete and delete_downstream_parts."""
-        for table_name, part_restr in merge_join_dict.items():
-            table = self._part_masters[table_name]
-            keys = [part.proj().fetch(as_dict=True) for part in part_restr]
-            (table & keys).delete(**kwargs)
 
     def delete_downstream_parts(
         self,
@@ -362,9 +306,9 @@ class SpyglassMixin:
         dry_run: bool = True,
         reload_cache: bool = False,
         disable_warning: bool = False,
-        return_parts: bool = True,
+        return_graph: bool = False,
         **kwargs,
-    ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
+    ) -> List[dj.FreeTable]:
         """Delete downstream merge table entries associated with restriction.
 
         Requires caching of merge tables and links, which is slow on first call.
@@ -381,24 +325,33 @@ class SpyglassMixin:
             If True, reload merge cache. Default False.
         disable_warning : bool, optional
             If True, do not warn if no merge tables found. Default False.
-        return_parts : bool, optional
-            If True, return list of merge part entries to be deleted. Default
+        return_graph: bool, optional
+            If True, return RestrGraph object used to identify downstream
+            tables. Default False, return list of part FreeTables.
             True. If False, return dictionary of merge tables and their joins.
         **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
+        from spyglass.utils.dj_graph import RestrGraph  # noqa F401
+
         if reload_cache:
-            for attr in ["_merge_tables", "_merge_chains"]:
-                _ = self.__dict__.pop(attr, None)
+            _ = self.__dict__.pop("_part_masters", None)
 
         restriction = restriction or self.restriction or True
 
-        merge_join_dict = {}
-        for name, chain in self._merge_chains.items():
-            if join := chain.cascade(restriction, direction="down"):
-                merge_join_dict[name] = join
+        restr_graph = RestrGraph(
+            seed_table=self,
+            leaves={self.full_table_name: restriction},
+            direction="down",
+            cascade=True,
+            verbose=False,
+        )
 
-        if not merge_join_dict and not disable_warning:
+        master_fts = restr_graph.ft_from_list(
+            self._part_masters, sort_from=self.full_table_name
+        )
+
+        if not master_fts and not disable_warning:
             logger.warning(
                 f"No part deletes found w/ {self.camel_name} & "
                 + f"{restriction}.\n\tIf this is unexpected, try importing "
@@ -406,30 +359,16 @@ class SpyglassMixin:
             )
 
         if dry_run:
-            return merge_join_dict.values() if return_parts else merge_join_dict
+            return restr_graph if return_graph else master_fts
 
-        self._commit_part_deletes(merge_join_dict, **kwargs)
+        for master_ft in master_fts:
+            master_ft.delete(**kwargs)
 
     def ddp(
-        self,
-        restriction: str = None,
-        dry_run: bool = True,
-        reload_cache: bool = False,
-        disable_warning: bool = False,
-        return_parts: bool = True,
-        *args,
-        **kwargs,
+        self, *args, **kwargs
     ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
         """Alias for delete_downstream_parts."""
-        return self.delete_downstream_parts(
-            restriction=restriction,
-            dry_run=dry_run,
-            reload_cache=reload_cache,
-            disable_warning=disable_warning,
-            return_parts=return_parts,
-            *args,
-            **kwargs,
-        )
+        return self.delete_downstream_parts(*args, **kwargs)
 
     # ---------------------------- cautious_delete ----------------------------
 
@@ -554,16 +493,14 @@ class SpyglassMixin:
         logger.info(f"Queueing delete for session(s):\n{sess_summary}")
 
     @cached_property
-    def _usage_table(self):
+    def _cautious_del_tbl(self):
         """Temporary inclusion for usage tracking."""
         from spyglass.common.common_usage import CautiousDelete
 
         return CautiousDelete()
 
-    def _log_delete(self, start, merge_deletes=None, super_delete=False):
+    def _log_delete(self, start, master_deletes=None, super_delete=False):
         """Log use of cautious_delete."""
-        if isinstance(merge_deletes, QueryExpression):
-            merge_deletes = merge_deletes.fetch(as_dict=True)
         safe_insert = dict(
             duration=time() - start,
             dj_user=dj.config["database.user"],
@@ -572,15 +509,15 @@ class SpyglassMixin:
         restr_str = "Super delete: " if super_delete else ""
         restr_str += "".join(self.restriction) if self.restriction else "None"
         try:
-            self._usage_table.insert1(
+            self._cautious_del_tbl.insert1(
                 dict(
                     **safe_insert,
                     restriction=restr_str[:255],
-                    merge_deletes=merge_deletes,
+                    merge_deletes=master_deletes,
                 )
             )
         except (DataJointError, DataError):
-            self._usage_table.insert1(
+            self._cautious_del_tbl.insert1(
                 dict(**safe_insert, restriction="Unknown")
             )
 
@@ -606,10 +543,9 @@ class SpyglassMixin:
         if not force_permission:
             self._check_delete_permission()
 
-        merge_deletes = self.delete_downstream_parts(
+        master_fts = self.delete_downstream_parts(
             dry_run=True,
             disable_warning=True,
-            return_parts=False,
         )
 
         safemode = (
@@ -617,17 +553,21 @@ class SpyglassMixin:
             if kwargs.get("safemode") is None
             else kwargs["safemode"]
         )
+        _ = kwargs.pop("safemode", None)
 
-        if merge_deletes:
-            for table, content in merge_deletes.items():
-                count = sum([len(part) for part in content])
-                dj_logger.info(f"Merge: Deleting {count} rows from {table}")
+        if master_fts:
+            for part in master_fts:
+                dj_logger.info(
+                    f"Spyglass: Deleting {len(part)} rows from "
+                    + f"{part.full_table_name}"
+                )
             if (
-                not self._test_mode
+                self._test_mode
                 or not safemode
                 or user_choice("Commit deletes?", default="no") == "yes"
             ):
-                self._commit_part_deletes(merge_deletes, **kwargs)
+                for master in master_fts:  # safemode off b/c already checked
+                    master.delete(safemode=False, **kwargs)
             else:
                 logger.info("Delete aborted.")
                 self._log_delete(start)
@@ -635,7 +575,7 @@ class SpyglassMixin:
 
         super().delete(*args, **kwargs)  # Additional confirm here
 
-        self._log_delete(start=start, merge_deletes=merge_deletes)
+        self._log_delete(start=start, master_deletes=master_fts)
 
     def cdel(self, force_permission=False, *args, **kwargs):
         """Alias for cautious_delete."""
