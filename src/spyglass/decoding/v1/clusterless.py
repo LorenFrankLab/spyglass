@@ -274,7 +274,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         DecodingOutput.insert1(orig_key, skip_duplicates=True)
 
-    def fetch_results(self):
+    def fetch_results(self) -> xr.Dataset:
+        """Retrieve the decoding results
+
+        Returns
+        -------
+        xr.Dataset
+            The decoding results (posteriors, etc.)
+        """
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
@@ -282,6 +289,18 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_environments(key):
+        """Fetch the environments for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        List[TrackGraph]
+            list of track graphs in the trained model
+        """
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
@@ -309,6 +328,18 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
+        """Get the maximum range of model times in the encoding and decoding intervals
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        Tuple[float, float]
+            The minimum and maximum times for the model
+        """
         encoding_interval = (
             IntervalList
             & {
@@ -338,6 +369,18 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_position_info(key):
+        """Fetch the position information for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        Tuple[pd.DataFrame, List[str]]
+            The position information and the names of the position variables
+        """
         position_group_key = {
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
@@ -363,6 +406,18 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_linear_position_info(key):
+        """Fetch the position information and project it onto the track graph
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+
+        Returns
+        -------
+        pd.DataFrame
+            The linearized position information
+        """
         environment = ClusterlessDecodingV1.fetch_environments(key)[0]
 
         position_df = ClusterlessDecodingV1.fetch_position_info(key)[0]
@@ -391,6 +446,22 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True):
+        """Fetch the spike times for the decoding model
+
+        Parameters
+        ----------
+        key : dict
+            The decoding selection key
+        filter_by_interval : bool, optional
+            Whether to filter for spike times in the model interval, by default True
+        time_slice : Slice, optional
+            User provided slice of time to restrict spikes to, by default None
+
+        Returns
+        -------
+        list[np.ndarray]
+            List of spike times for each unit in the model's spike group
+        """
         waveform_keys = (
             (
                 UnitWaveformFeaturesGroup.UnitFeatures
@@ -426,6 +497,20 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @classmethod
     def get_spike_indicator(cls, key, time):
+        """get spike indicator matrix for the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the spike indicator matrix
+
+        Returns
+        -------
+        np.ndarray
+            spike indicator matrix with shape (len(time), n_units)
+        """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
         spike_times = cls.fetch_spike_data(key)[0]
@@ -442,6 +527,24 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @classmethod
     def get_firing_rate(cls, key, time, multiunit=False):
+        """get time-dependent firing rate for units in the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the firing rate
+        multiunit : bool, optional
+            if True, return the multiunit firing rate for units in the group, by default False
+        smoothing_sigma : float, optional
+            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+
+        Returns
+        -------
+        np.ndarray
+            _description_
+        """
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
@@ -461,6 +564,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     def get_ahead_behind_distance(self):
+        """get the ahead-behind distance for the decoding model
+
+        Returns
+        -------
+        distance_metrics : np.ndarray
+            Information about the distance of the animal to the mental position.
+        """
         # TODO: allow specification of specific time interval
         # TODO: allow specification of track graph
         # TODO: Handle decode intervals, store in table

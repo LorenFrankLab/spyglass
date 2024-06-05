@@ -16,6 +16,7 @@
 - Clean up old `TableChain.join` call in mixin delete. #982
 - Add pytests for position pipeline, various `test_mode` exceptions #966
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
+- Add documentation for common error messages #997
 
 ### Pipelines
 
@@ -28,6 +29,10 @@
     - `DLCPosVideo` table now inserts into self after `make` #966
 - Common
     - Don't insert lab member when creating lab team #983
+- Spikesorting
+    - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
+        #994
+    - Update docstrings #996
 
 ## [0.5.2] (April 22, 2024)
 
