@@ -4,6 +4,7 @@ import stat
 import string
 from pathlib import Path
 from time import time
+from uuid import uuid4
 
 import datajoint as dj
 import h5py
@@ -222,6 +223,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 export_io.export(io, nwbf)
         if alter_source_script:
             self._alter_spyglass_version(analysis_file_abs_path)
+
+        # create a new object id for the file
+        with h5py.File(nwb_file_abspath, "a") as f:
+            f.attrs["object_id"] = str(uuid4())
 
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
