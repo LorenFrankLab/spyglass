@@ -347,11 +347,12 @@ class SpyglassMixin:
             verbose=False,
         )
 
-        master_fts = restr_graph.ft_from_list(
-            self._part_masters, sort_from=self.full_table_name
-        )
+        if return_graph:
+            return restr_graph
 
-        if not master_fts and not disable_warning:
+        _, down_fts = restr_graph.find_orphans(self._part_masters)
+
+        if not down_fts and not disable_warning:
             logger.warning(
                 f"No part deletes found w/ {self.camel_name} & "
                 + f"{restriction}.\n\tIf this is unexpected, try importing "
@@ -359,9 +360,9 @@ class SpyglassMixin:
             )
 
         if dry_run:
-            return restr_graph if return_graph else master_fts
+            return down_fts
 
-        for master_ft in master_fts:
+        for master_ft in down_fts:
             master_ft.delete(**kwargs)
 
     def ddp(
@@ -374,18 +375,27 @@ class SpyglassMixin:
 
     @cached_property
     def _delete_deps(self) -> List[Table]:
-        """List of tables required for delete permission check.
+        """List of tables required for delete permission and orphan checks.
 
         LabMember, LabTeam, and Session are required for delete permission.
+        common_nwbfile.schema.external is required for deleting orphaned
+        external files. IntervalList is required for deleting orphaned interval
+        lists.
 
         Used to delay import of tables until needed, avoiding circular imports.
-        Each of these tables inheits SpyglassMixin.
+        Each of these tables inherits SpyglassMixin.
         """
-        from spyglass.common import LabMember, LabTeam, Session  # noqa F401
+        from spyglass.common import (  # noqa F401
+            IntervalList,
+            LabMember,
+            LabTeam,
+            Session,
+        )
+        from spyglass.common.common_nwbfile import schema  # noqa F401
 
         self._session_pk = Session.primary_key[0]
         self._member_pk = LabMember.primary_key[0]
-        return [LabMember, LabTeam, Session]
+        return [LabMember, LabTeam, Session, schema.external, IntervalList]
 
     def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
@@ -401,7 +411,7 @@ class SpyglassMixin:
             Summary of experimenters for session(s).
         """
 
-        Session = self._delete_deps[-1]
+        Session = self._delete_deps[2]
         SesExp = Session.Experimenter
 
         # Not called in delete permission check, only bare _get_exp_summary
@@ -424,7 +434,7 @@ class SpyglassMixin:
         """Path from Session table to self. False if no connection found."""
         from spyglass.utils.dj_graph import TableChain  # noqa F401
 
-        connection = TableChain(parent=self._delete_deps[-1], child=self)
+        connection = TableChain(parent=self._delete_deps[2], child=self)
         return connection if connection.has_link else False
 
     @cached_property
@@ -450,7 +460,7 @@ class SpyglassMixin:
             Permission denied because (a) Session has no experimenter, or (b)
             user is not on a team with Session experimenter(s).
         """
-        LabMember, LabTeam, Session = self._delete_deps
+        LabMember, LabTeam, Session, _ = self._delete_deps
 
         dj_user = dj.config["database.user"]
         if dj_user in LabMember().admin:  # bypass permission check for admin
@@ -522,8 +532,10 @@ class SpyglassMixin:
             )
 
     # TODO: Intercept datajoint delete confirmation prompt for merge deletes
-    def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
-        """Delete table rows after checking user permission.
+    def cautious_delete(
+        self, force_permission: bool = False, dry_run=False, *args, **kwargs
+    ):
+        """Permission check, then delete potential orphans and table rows.
 
         Permission is granted to users listed as admin in LabMember table or to
         users on a team with with the Session experimenter(s). If the table
@@ -531,22 +543,41 @@ class SpyglassMixin:
         continues. If the Session has no experimenter, or if the user is not on
         a team with the Session experimenter(s), a PermissionError is raised.
 
+        Potential downstream orphans are deleted first. These are master tables
+        whose parts have foreign keys so descendants of self. Then, rows from
+        self are deleted. Last, IntervalList and Nwbfile externals are deleted.
+
         Parameters
         ----------
         force_permission : bool, optional
             Bypass permission check. Default False.
+        dry_run : bool, optional
+            Default False. If True, return items to be deleted as
+            Tuple[Upstream, Downstream, externals['raw'], externals['analysis']]
+            If False, delete items.
         *args, **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
         start = time()
+        external = self._delete_deps[3]
 
-        if not force_permission:
+        if not force_permission or dry_run:
             self._check_delete_permission()
 
-        master_fts = self.delete_downstream_parts(
+        restr_graph = self.delete_downstream_parts(
             dry_run=True,
             disable_warning=True,
+            return_graph=True,
         )
+        up_fts, down_fts = restr_graph.find_orphans(self._part_masters)
+
+        if dry_run:
+            return (
+                up_fts,
+                down_fts,
+                external["raw"].unused(),
+                external["analysis"].unused(),
+            )
 
         safemode = (
             dj.config.get("safemode", True)
@@ -555,19 +586,24 @@ class SpyglassMixin:
         )
         _ = kwargs.pop("safemode", None)
 
-        if master_fts:
-            for part in master_fts:
+        if up_fts or down_fts:
+            for down_ft in down_fts:
                 dj_logger.info(
-                    f"Spyglass: Deleting {len(part)} rows from "
-                    + f"{part.full_table_name}"
+                    f"Spyglass: Deleting {len(down_ft)} rows from "
+                    + f"{down_ft.full_table_name}"
+                )
+            for up_ft in up_fts:
+                dj_logger.info(
+                    f"Spyglass: Deleting {len(up_ft)} rows from "
+                    + f"{up_ft.full_table_name} after next prompt"
                 )
             if (
                 self._test_mode
                 or not safemode
                 or user_choice("Commit deletes?", default="no") == "yes"
             ):
-                for master in master_fts:  # safemode off b/c already checked
-                    master.delete(safemode=False, **kwargs)
+                for down_ft in down_fts:  # safemode off b/c already checked
+                    down_ft.delete(safemode=False, **kwargs)
             else:
                 logger.info("Delete aborted.")
                 self._log_delete(start)
@@ -575,15 +611,24 @@ class SpyglassMixin:
 
         super().delete(*args, **kwargs)  # Additional confirm here
 
-        self._log_delete(start=start, master_deletes=master_fts)
+        if up_fts:
+            for up_ft in up_fts:
+                up_ft.delete(safemode=False, **kwargs)
 
-    def cdel(self, force_permission=False, *args, **kwargs):
+        for ext_type in ["raw", "analysis"]:
+            external[ext_type].delete(
+                delete_external=True, display_progress=True
+            )
+
+        self._log_delete(start=start, master_deletes=up_fts + down_fts)
+
+    def cdel(self, *args, **kwargs):
         """Alias for cautious_delete."""
-        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
+        return self.cautious_delete(*args, **kwargs)
 
-    def delete(self, force_permission=False, *args, **kwargs):
+    def delete(self, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
+        self.cautious_delete(*args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
@@ -596,7 +641,7 @@ class SpyglassMixin:
 
     @cached_property
     def _spyglass_version(self):
-        """Get Spyglass version from dj.config."""
+        """Get Spyglass version."""
         from spyglass import __version__ as sg_version
 
         return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch

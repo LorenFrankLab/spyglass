@@ -5,6 +5,7 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 
 from abc import ABC, abstractmethod
 from collections.abc import KeysView
+from copy import deepcopy
 from enum import Enum
 from functools import cached_property, partial
 from itertools import chain as iter_chain
@@ -13,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 from datajoint import FreeTable, Table
 from datajoint.condition import make_condition
 from datajoint.dependencies import unite_master_parts
+from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
     NetworkXNoPath,
@@ -74,6 +76,7 @@ class AbstractGraph(ABC):
     Properties
     ----------
     all_ft: Get all FreeTables for visited nodes with restrictions applied.
+    restr_ft: Get non-empty FreeTables for visited nodes with restrictions.
     as_dict: Get visited nodes as a list of dictionaries of
         {table_name: restriction}
     """
@@ -91,8 +94,14 @@ class AbstractGraph(ABC):
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
-        self.graph = seed_table.connection.dependencies
-        self.graph.load()
+        # Deepcopy graph to avoid seed `load()` resetting custom attributes
+        seed_table.connection.dependencies.load()
+        graph = seed_table.connection.dependencies
+        orig_conn = graph._conn  # Cannot deepcopy connection
+        graph._conn = None
+        self.graph = deepcopy(graph)
+        graph._conn = orig_conn
+
         # undirect not needed in all cases but need to do before adding ft nodes
         self.undirect_graph = self.graph.to_undirected()
 
@@ -114,7 +123,7 @@ class AbstractGraph(ABC):
 
     def __repr__(self):
         l_str = (
-            ",\n\t".join(self.leaves) + "\n"
+            ",\n\t".join(self._camel(self.leaves)) + "\n"
             if self.leaves
             else self._camel(self.seed_table)
         )
@@ -126,7 +135,7 @@ class AbstractGraph(ABC):
         return fuzzy_get(index, all_ft_names, self.all_ft)
 
     def __len__(self):
-        return len(self.all_ft)
+        return len(self.restr_ft)
 
     # ---------------------------- Logging Helpers ----------------------------
 
@@ -144,6 +153,7 @@ class AbstractGraph(ABC):
             table = list(table)
         if not isinstance(table, list):
             table = [table]
+        table = self._ensure_names(table)
         ret = [to_camel_case(t.split(".")[-1].strip("`")) for t in table]
         return ret[0] if len(ret) == 1 else ret
 
@@ -155,13 +165,17 @@ class AbstractGraph(ABC):
 
     # ------------------------------ Graph Nodes ------------------------------
 
-    def _ensure_names(self, table: Union[str, Table] = None) -> str:
+    def _ensure_names(
+        self, table: Union[str, Table] = None
+    ) -> Union[str, List[str]]:
         """Ensure table is a string."""
         if table is None:
             return None
         if isinstance(table, str):
             return table
-        if isinstance(table, Iterable):
+        if isinstance(table, Iterable) and not isinstance(
+            table, (Table, TableMeta)
+        ):
             return [self._ensure_names(t) for t in table]
         return getattr(table, "full_table_name", None)
 
@@ -177,6 +191,7 @@ class AbstractGraph(ABC):
 
     def _set_node(self, table, attr: str = "ft", value: Any = None):
         """Set attribute on node. General helper for various attributes."""
+        table = self._ensure_names(table)
         _ = self._get_node(table)  # Ensure node exists
         self.graph.nodes[table][attr] = value
 
@@ -224,6 +239,7 @@ class AbstractGraph(ABC):
             else restriction
         )
         existing = self._get_restr(table)
+
         if not replace and existing:
             if restriction == existing:
                 return
@@ -236,12 +252,13 @@ class AbstractGraph(ABC):
 
         self._set_node(table, "restr", restriction)
 
-    def _get_ft(self, table, with_restr=False):
+    def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
         table = self._ensure_names(table)
         if with_restr:
             if not (restr := self._get_restr(table) or False):
-                self._log_truncate(f"No restriction for {table}")
+                if warn:
+                    self._log_truncate(f"No restr for {self._camel(table)}")
         else:
             restr = True
 
@@ -478,15 +495,21 @@ class AbstractGraph(ABC):
 
         Topological sort logic adopted from datajoint.diagram.
         """
-        self.cascade()
+        self.cascade(warn=False)
         nodes = [n for n in self.visited if not n.isnumeric()]
         sorted_nodes = unite_master_parts(
             list(topological_sort(self.graph.subgraph(nodes)))
         )
-        all_ft = [
-            self._get_ft(table, with_restr=True) for table in sorted_nodes
+        ret = [
+            self._get_ft(table, with_restr=True, warn=False)
+            for table in sorted_nodes
         ]
-        return [ft for ft in all_ft if len(ft) > 0]
+        return ret
+
+    @property
+    def restr_ft(self):
+        """Get non-empty restricted FreeTables from all visited nodes."""
+        return [ft for ft in self.all_ft if len(ft) > 0]
 
     def ft_from_list(
         self,
@@ -515,7 +538,7 @@ class AbstractGraph(ABC):
             except (NodeNotFound, NetworkXNoPath):
                 return 99
 
-        self.cascade()
+        self.cascade(warn=False)
         tables = [self._ensure_names(t) for t in tables]
 
         if sort_from:
@@ -525,7 +548,10 @@ class AbstractGraph(ABC):
                 key=lambda t: graph_distance(sort_from, t),
             )
 
-        fts = [self._get_ft(table, with_restr=with_restr) for table in tables]
+        fts = [
+            self._get_ft(table, with_restr=with_restr, warn=False)
+            for table in tables
+        ]
 
         return [ft for ft in fts if len(ft) > 0]
 
@@ -593,7 +619,7 @@ class RestrGraph(AbstractGraph):
 
         if cascade:
             for dir in dir_list:
-                self._log_truncate(f"Start  {dir:<4}: {self.leaves}")
+                self._log_truncate(f"Start {dir:<4} : {self.leaves}")
                 self.cascade(direction=dir)
                 self.cascaded = False
                 self.visited -= self.leaves
@@ -656,12 +682,19 @@ class RestrGraph(AbstractGraph):
                 {"table_name": leaf, "restriction": default_restriction}
                 for leaf in leaves
             ]
+        hashable = True
         if all(isinstance(leaf, dict) for leaf in leaves):
-            leaves = [
-                {"table_name": k, "restriction": v}
-                for leaf in leaves
-                for k, v in leaf.items()
-            ]
+            new_leaves = []
+            for leaf in leaves:
+                for table, restr in leaf.items():
+                    if not isinstance(restr, (str, dict)):
+                        hashable = False  # likely a dj.AndList
+                    new_leaves.append(
+                        {"table_name": table, "restriction": restr}
+                    )
+            if not hashable:
+                return new_leaves
+            leaves = new_leaves
 
         return unique_dicts(leaves)
 
@@ -699,7 +732,7 @@ class RestrGraph(AbstractGraph):
 
     # ------------------------------ Graph Traversal --------------------------
 
-    def cascade(self, show_progress=None, direction="up") -> None:
+    def cascade(self, show_progress=None, direction="up", warn=True) -> None:
         """Cascade all restrictions up the graph.
 
         Parameters
@@ -708,7 +741,8 @@ class RestrGraph(AbstractGraph):
             Show tqdm progress bar. Default to verbose setting.
         """
         if self.cascaded:
-            self._log_truncate("Already cascaded")
+            if warn:
+                self._log_truncate("Already cascaded")
             return
 
         to_visit = self.leaves - self.visited
@@ -725,23 +759,10 @@ class RestrGraph(AbstractGraph):
             )
             self.cascade1(table, restr, direction=direction)
 
-        self.cascade_files()
-        self.cascaded = True
+        self.cascaded = True  # Mark here so next step can use `restr_ft`
+        self.cascade_files()  # Otherwise attempts to re-cascade, recursively
 
     # ----------------------------- File Handling -----------------------------
-
-    def _get_files(self, table):
-        """Get analysis files from graph node."""
-        return self._get_node(table).get("files", [])
-
-    def cascade_files(self):
-        """Set node attribute for analysis files."""
-        for table in self.visited:
-            ft = self._get_ft(table, with_restr=True)
-            if not set(self.analysis_pk).issubset(ft.heading.names):
-                continue
-            files = list(ft.fetch(*self.analysis_pk))
-            self._set_node(table, "files", files)
 
     @property
     def analysis_file_tbl(self) -> Table:
@@ -750,10 +771,14 @@ class RestrGraph(AbstractGraph):
 
         return AnalysisNwbfile()
 
-    @property
-    def analysis_pk(self) -> List[str]:
-        """Return primary key fields from analysis file table."""
-        return self.analysis_file_tbl.primary_key
+    def cascade_files(self):
+        """Set node attribute for analysis files."""
+        analysis_pk = self.analysis_file_tbl.primary_key
+        for ft in self.restr_ft:
+            if not set(analysis_pk).issubset(ft.heading.names):
+                continue
+            files = list(ft.fetch(*analysis_pk))
+            self._set_node(ft, "files", files)
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:
@@ -761,8 +786,8 @@ class RestrGraph(AbstractGraph):
 
         Included for debugging, to associate files with tables.
         """
-        self.cascade()
-        return {t: self._get_node(t).get("files", []) for t in self.visited}
+        self.cascade(warn=False)
+        return {t: self._get_node(t).get("files", []) for t in self.restr_ft}
 
     @property
     def file_paths(self) -> List[str]:
@@ -780,13 +805,66 @@ class RestrGraph(AbstractGraph):
             if file is not None
         ]
 
+    # ---------------------------- Orphan handling ----------------------------
+
+    @property
+    def interval_tbl_name(self) -> Table:
+        """Return the interval list table name. Avoids circular import."""
+        from spyglass.common import IntervalList
+
+        return IntervalList.full_table_name
+
+    def find_orphans(
+        self, part_masters: Union[List[str], List[FreeTable]]
+    ) -> Tuple[List[FreeTable], List[FreeTable]]:
+        """
+        Find would-be orphaned tables in IntervalList and downstream parts.
+
+        Parameters
+        ----------
+        part_masters : List
+            List of part master tables to check for orphans.
+        """
+        self.cascade(warn=False)
+        self._log_truncate("Orphan Search")
+
+        for ft in self.restr_ft:
+            if self.interval_tbl_name not in ft.parents():
+                continue
+
+            _, edge = self._get_edge(ft, self.interval_tbl_name)
+            interval_restr = self._bridge_restr(
+                table1=ft.full_table_name,
+                table2=self.interval_tbl_name,
+                restr=ft.restriction,
+                direction=Direction.UP,
+                **edge,
+            )
+
+            self._set_restr(
+                table=self.interval_tbl_name,
+                restriction=interval_restr,
+            )
+
+        interval_ft = self._get_ft(self.interval_tbl_name, with_restr=True)
+        self._log_truncate(f"IntervalList entries {len(interval_ft)}")
+
+        upstream = [interval_ft]  # As list for extensibility
+        downstream = self.ft_from_list(part_masters, sort_from=self.seed_table)
+
+        return upstream, downstream
+
 
 class TableChain(RestrGraph):
     """Class for representing a chain of tables.
 
     A chain is a sequence of tables from parent to child identified by
-    networkx.shortest_path. Parent -> Merge should use TableChains instead to
-    handle multiple paths to the respective parts of the Merge table.
+    networkx.shortest_path from parent to child. To avoid issues with merge
+    tables, use the Merge table as the child, not the part table.
+
+    Either the parent or child can be omitted if a search_restr is provided.
+    The missing table will be found by searching for where the restriction
+    can be applied.
 
     Attributes
     ----------
@@ -798,9 +876,6 @@ class TableChain(RestrGraph):
         Cached attribute to store whether parent is linked to child.
     path : List[str]
         Names of tables along the path from parent to child.
-    all_ft : List[dj.FreeTable]
-        List of FreeTable objects for each table in chain with restriction
-        applied.
 
     Methods
     -------
@@ -813,6 +888,8 @@ class TableChain(RestrGraph):
         Given a restriction at the beginning, return a restricted FreeTable
         object at the end of the chain. If direction is 'up', start at the child
         and move up to the parent. If direction is 'down', start at the parent.
+    cascade_search()
+        Search from the leaf node to find where a restriction can be applied.
     """
 
     def __init__(
@@ -843,7 +920,7 @@ class TableChain(RestrGraph):
 
         self._ignore_peripheral()
         self.no_visit.update(self._ensure_names(banned_tables) or [])
-        self.no_visit.difference_update([self.parent, self.child])
+        self.no_visit.difference_update(set([self.parent, self.child]))
         self.searched_tables = set()
         self.found_restr = False
         self.link_type = None
@@ -1062,7 +1139,6 @@ class TableChain(RestrGraph):
         search_graph = self.graph
 
         if not directed:
-            # FTs in self.graph prevent `to_undirected` from working.
             self.connection.dependencies.load()
             search_graph = self.undirect_graph
 

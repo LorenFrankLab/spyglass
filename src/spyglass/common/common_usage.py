@@ -251,7 +251,7 @@ class Export(SpyglassMixin, dj.Computed):
         # Writes but does not run mysqldump. Assumes single version per paper.
         version_key = query.fetch("spyglass_version", as_dict=True)[0]
         self.write_export(
-            free_tables=restr_graph.all_ft, **paper_key, **version_key
+            free_tables=restr_graph.restr_ft, **paper_key, **version_key
         )
 
         self.insert1({**key, **paper_key})
