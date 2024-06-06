@@ -163,7 +163,9 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
         KacheryZone.reset_zone()
 
     @staticmethod
-    def download_file(analysis_file_name: str) -> bool:
+    def download_file(
+        analysis_file_name: str, permit_fail: bool = False
+    ) -> bool:
         """Download the specified analysis file and associated linked files
         from kachery-cloud if possible
 
@@ -211,10 +213,10 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
                         raise Exception(
                             f"Linked file {linked_file_path} cannot be downloaded"
                         )
-        if not downloaded:
+        if not downloaded and not permit_fail:
             raise Exception(f"{analysis_file_name} cannot be downloaded")
 
-        return True
+        return downloaded
 
 
 def share_data_to_kachery(

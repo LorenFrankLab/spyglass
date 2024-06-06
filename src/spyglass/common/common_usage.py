@@ -12,12 +12,17 @@ from typing import List, Union
 import datajoint as dj
 from datajoint import FreeTable
 from datajoint import config as dj_config
+from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import export_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_graph import RestrGraph
-from spyglass.utils.dj_helper_fn import unique_dicts
+from spyglass.utils.dj_helper_fn import (
+    make_file_obj_id_unique,
+    unique_dicts,
+    update_analysis_for_dandi_standard,
+)
 
 schema = dj.schema("common_usage")
 
@@ -408,3 +413,33 @@ class Export(SpyglassMixin, dj.Computed):
         )
 
         # TODO: export conda env
+
+    def prepare_files_for_export(self, key, **kwargs):
+        """Resolve common known errors to make a set of analysis
+        files dandi compliant
+
+        Parameters
+        ----------
+        key : dict
+            restriction for a single entry of the Export table
+        """
+        key = (self & key).fetch1("KEY")
+        self._make_fileset_ids_unique(key)
+        file_list = (self.File() & key).fetch("file_path")
+        for file in file_list:
+            update_analysis_for_dandi_standard(file, **kwargs)
+
+    def _make_fileset_ids_unique(self, key):
+        """Make the object_id of each nwb in a dataset unique"""
+        key = (self & key).fetch1("KEY")
+        file_list = (self.File() & key).fetch("file_path")
+        unique_object_ids = []
+        for file_path in file_list:
+            with NWBHDF5IO(file_path, "r") as io:
+                nwb = io.read()
+                object_id = nwb.object_id
+            if object_id not in unique_object_ids:
+                unique_object_ids.append(object_id)
+            else:
+                new_id = make_file_obj_id_unique(file_path)
+                unique_object_ids.append(new_id)
