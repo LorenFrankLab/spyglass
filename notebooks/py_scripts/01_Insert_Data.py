@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -216,7 +216,7 @@ sgc.LabTeam.LabTeamMember()
 #   will still leave entries from parent tables.
 #
 
-sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_error=False)
+sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_err=False)
 
 # ## Inspecting the data
 #

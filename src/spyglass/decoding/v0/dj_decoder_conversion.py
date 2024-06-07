@@ -26,6 +26,21 @@ try:
         ObservationModel,
     )
 except ImportError as e:
+    (
+        Identity,
+        RandomWalk,
+        RandomWalkDirection1,
+        RandomWalkDirection2,
+        Uniform,
+        DiagonalDiscrete,
+        RandomDiscrete,
+        UniformDiscrete,
+        UserDefinedDiscrete,
+        Environment,
+        UniformInitialConditions,
+        UniformOneEnvironmentInitialConditions,
+        ObservationModel,
+    ) = [None] * 13
     logger.warning(e)
 from track_linearization import make_track_graph
 

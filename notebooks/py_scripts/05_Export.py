@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -192,6 +192,66 @@ Export().populate_paper(**paper_key)
 # run the resulting bash script. The result will be a `.sql` file that anyone
 # can use to replicate the database entries you used in your analysis.
 #
+
+# # Dandiset Upload
+
+# One benefit of the `Export` table is it provides a list of all raw data, intermediate analysis files,
+# and final analysis files needed to generate a set of figures in a work. To aid in data-sharing standards,
+# we have implemented tools to compile and upload this set of files as a Dandi dataset, which can then be used
+# by spyglass to directly read the data from the Dandi database if not available locally.
+#
+# We will walk through the steps to do so here:
+
+# <details>
+#    <summary style="font-size:1.5em"> Dandi data compliance (admins)</summary>
+#
+#    >__WARNING__: The following describes spyglass utilities that require database admin privileges to run. It involves altering database values to correct for metadata format errors generated prior to spyglass insert. As such it has the potential to violate data integrity and should be used with caution.
+#    >
+#    >The Dandi database has specific formatting standards for metadata and nwb files. If there were violations of this standard in the
+#    raw nwbfile, spyglass will propagate them into all generated analysis files. In this case, running the code below will result in a list of error printouts and an error raised within the `validate_dandiset` function.
+#    >
+#    >To aid in correcting common formatting errors identified with changes in dandi standards, we have included the method
+#    ```
+#    Export().prepare_files_for_export(paper_key)
+#    ```
+#    >which will attempt to resolve these issues for a set of paper files. The code is __not__ guaranteed to address all errors found within the file, but can be used as a template for your specific errors
+# </details>
+#
+#
+#
+
+# The first step you will need to do is to [create a Dandi account](https://www.dandiarchive.org/handbook/16_account/).
+# With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata.
+# Dandi's instructions for these steps are available [here](https://www.dandiarchive.org/handbook/13_upload/).
+#
+# The key information you will need from your registration is the `dandiset ID` and your account `api_key`, both of which are available from your registered account.
+#
+# Spyglass can then use this information to compile and upload the dandiset for your paper:
+
+# +
+from spyglass.common.common_dandi import DandiPath
+
+dandiset_id = 214304  # use the value for you registered dandiset
+dandi_api_key = (
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"  # key connected to your Dandi account
+)
+
+DandiPath().compile_dandiset(
+    paper_key,
+    dandiset_id=dandiset_id,
+    dandi_api_key=dandi_api_key,
+    dandi_instance="dandi",
+)  # use dandi_instance="dandi-staging" to use dandi's dev server
+# -
+
+# As well as uploading your dandiset, this function will populate the table `DandiPath` which will record the information needed to access a given analysis file from the Dandi server
+#
+
+DandiPath() & {"export_id": 14}
+
+# When fetching data with spyglass, if a file is not available locally, syglass will automatically use
+# this information to stream the file from Dandi's server if available, providing an additional method
+#  for sharing data with collaborators post-publication.
 
 # ## Up Next
 #

@@ -13,6 +13,7 @@ on:
     branches:
       - master
       - maint/*
+  workflow_dispatch: # Manually trigger with 'Run workflow' button
 defaults:
   run:
     shell: bash
@@ -20,10 +21,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
       - run: pip install --upgrade build twine
@@ -31,14 +32,14 @@ jobs:
         run: python -m build
       - run: twine check dist/*
       - name: Upload sdist and wheel artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
       - name: Build git archive
         run: mkdir archive && git archive -v -o archive/archive.tgz HEAD
       - name: Upload git archive artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: archive
           path: archive/
@@ -51,13 +52,13 @@ jobs:
     steps:
       - name: Download sdist and wheel artifacts
         if: matrix.package != 'archive'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
       - name: Download git archive artifact
         if: matrix.package == 'archive'
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: archive
           path: archive/
@@ -74,13 +75,9 @@ jobs:
       - name: Install sdist
         if: matrix.package == 'sdist'
         run: pip install dist/*.tar.gz
-      - name: Install archive
-        if: matrix.package == 'archive'
+      - name: Install archive # requires tag
+        if: matrix.package == 'archive' && startsWith(github.ref, 'refs/tags/')
         run: pip install archive/archive.tgz
-      # - name: Install test extras
-      #   run: pip install spyglass[test]
-      # - name: Run tests
-      #   run: pytest --doctest-modules -v --pyargs spyglass
   publish:
     name: Upload release to PyPI
     runs-on: ubuntu-latest
@@ -92,7 +89,7 @@ jobs:
       id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     steps:
-      - uses: actions/download-artifact@v3
+      - uses: actions/download-artifact@v4
         with:
           name: dist
           path: dist/
