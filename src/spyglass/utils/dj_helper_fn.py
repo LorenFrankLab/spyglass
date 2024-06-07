@@ -1,6 +1,7 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 
 import inspect
+import multiprocessing.pool
 import os
 from pathlib import Path
 from typing import List, Type, Union

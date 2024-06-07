@@ -1,3 +1,4 @@
+import multiprocessing.pool
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
 from collections import OrderedDict
@@ -130,6 +131,11 @@ class SpyglassMixin:
             if not cls.connection.in_transaction
             else nullcontext()
         )
+
+    @property
+    def parallel_make(self):
+        """If table is parallelized in make function, overide this function with True."""
+        return False
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -654,6 +660,50 @@ class SpyglassMixin:
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+    # -------------------------- non-daemon populate --------------------------
+    def populate(self, *restrictions, **kwargs):
+
+        # Pass through to super if not parallel in the make function or only a single process
+        processes = kwargs.pop("processes", 1)
+        if processes == 1 or not self.parallel_make:
+            return super().populate(*restrictions, **kwargs)
+
+        # If parallel in both make and populate, use non-daemon processes
+        keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+            "KEY", limit=kwargs.get("limit", None)
+        )
+
+        class NonDaemonPool(multiprocessing.pool.Pool):
+            def Process(self, *args, **kwds):
+                proc = super(NonDaemonPool, self).Process(*args, **kwds)
+
+                class NonDaemonProcess(proc.__class__):
+                    print("HI")
+                    """Monkey-patch process to ensure it is never daemonized"""
+
+                    @property
+                    def daemon(self):
+                        return False
+
+                    @daemon.setter
+                    def daemon(self, val):
+                        pass
+
+                proc.__class__ = NonDaemonProcess
+                return proc
+
+        pass_function = lambda key: super().populate(key, **kwargs)
+        pool = NonDaemonPool(processes=processes)
+        try:
+            pool.map(pass_function, keys)
+        except Exception as e:
+            pool.close()
+            pool.terminate()
+            raise e
+
+        pool.close()
+        pool.terminate()
 
     # ------------------------------- Export Log -------------------------------
 
