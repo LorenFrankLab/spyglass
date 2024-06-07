@@ -20,7 +20,12 @@ from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table, populate_pass_function, NonDaemonPool
+from spyglass.utils.dj_helper_fn import (
+    fetch_nwb,
+    get_nwb_table,
+    populate_pass_function,
+    NonDaemonPool,
+)
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
@@ -134,7 +139,7 @@ class SpyglassMixin:
 
     @property
     def parallel_make(self):
-        """If table is parallelized in make function, overide this function with True."""
+        """If table is parallelized in make function, override this function with True."""
         return False
 
     # ------------------------------- fetch_nwb -------------------------------
@@ -158,7 +163,9 @@ class SpyglassMixin:
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile if "-> Nwbfile" in self.definition else None
+            else Nwbfile
+            if "-> Nwbfile" in self.definition
+            else None
         )
 
         if not resolved:
@@ -665,7 +672,7 @@ class SpyglassMixin:
     def populate(self, *restrictions, **kwargs):
         """Populate table in parallel.
 
-        Superceeds datajoint.table.Table.populate for classes with that
+        Supersedes datajoint.table.Table.populate for classes with that
         spawn processes in their make function
         """
 

@@ -104,7 +104,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
     @property
     def parallel_make(self):
-        """If table is parallelized in make function, overide this function with True."""
+        """Indicate table is parallelized in make function"""
         return True
 
     def make(self, key):

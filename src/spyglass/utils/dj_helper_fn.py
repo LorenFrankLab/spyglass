@@ -467,6 +467,7 @@ def make_file_obj_id_unique(nwb_path: str):
     _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
     return new_id
 
+
 def populate_pass_function(value):
     """Pass function for parallel populate.
 
@@ -476,20 +477,23 @@ def populate_pass_function(value):
     Parameters
     ----------
     value : (table, key, kwargs)
-       Class of table to populate, key to populate, and kwargs fro populate
+       Class of table to populate, key to populate, and kwargs for populate
     """
     table, key, kwargs = value
     return table.populate(key, **kwargs)
+
 
 class NonDaemonPool(multiprocessing.pool.Pool):
     """NonDaemonPool. Used to create a pool of non-daemonized processes,
     which are required for parallel populate operations in DataJoint.
     """
+
     def Process(self, *args, **kwds):
         proc = super(NonDaemonPool, self).Process(*args, **kwds)
 
         class NonDaemonProcess(proc.__class__):
             """Monkey-patch process to ensure it is never daemonized"""
+
             @property
             def daemon(self):
                 return False
