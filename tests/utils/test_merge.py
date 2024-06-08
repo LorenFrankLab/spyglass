@@ -35,6 +35,25 @@ def test_nwb_table_missing(BadMerge, caplog, schema_test):
     assert "non-default definition" in txt, "Warning not caught."
 
 
+@pytest.fixture(scope="function")
+def NonMerge():
+    from spyglass.utils import SpyglassMixin
+
+    class NonMerge(SpyglassMixin, dj.Manual):
+        definition = """
+        merge_id : uuid
+        ---
+        source : varchar(32)
+        """
+
+    yield NonMerge
+
+
+def test_non_merge(NonMerge):
+    with pytest.raises(AttributeError):
+        NonMerge()
+
+
 def test_part_camel(merge_table):
     example_part = merge_table.parts(camel_case=True)[0]
     assert "_" not in example_part, "Camel case not applied."

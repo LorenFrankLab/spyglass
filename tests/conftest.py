@@ -301,11 +301,9 @@ def mini_insert(
 
     _ = SpikeSortingOutput()
 
-    LabMember().insert1(
-        ["Root User", "Root", "User"], skip_duplicates=not teardown
-    )
+    LabMember().insert1(["Root User", "Root", "User"], skip_duplicates=True)
     LabMember.LabMemberInfo().insert1(
-        ["Root User", "email", "root", 1], skip_duplicates=not teardown
+        ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
     dj_logger.info("Inserting test data.")
@@ -401,6 +399,32 @@ def populate_exception():
     from spyglass.common.errors import PopulateException
 
     yield PopulateException
+
+
+@pytest.fixture(scope="session")
+def frequent_imports():
+    """Often needed for graph cascade."""
+    from spyglass.common.common_ripple import RippleLFPSelection
+    from spyglass.decoding.v0.clusterless import UnitMarksIndicatorSelection
+    from spyglass.decoding.v0.sorted_spikes import (
+        SortedSpikesIndicatorSelection,
+    )
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.lfp.analysis.v1 import LFPBandSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1.ripple import RippleTimesV1
+    from spyglass.spikesorting.v0.figurl_views import SpikeSortingRecordingView
+
+    return (
+        LFPBandSelection,
+        MuaEventsV1,
+        PositionGroup,
+        RippleLFPSelection,
+        RippleTimesV1,
+        SortedSpikesIndicatorSelection,
+        SpikeSortingRecordingView,
+        UnitMarksIndicatorSelection,
+    )
 
 
 # ------------------------- FIXTURES, POSITION TABLES -------------------------

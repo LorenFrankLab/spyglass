@@ -110,14 +110,14 @@ class SpyglassMixin:
     def file_like(self, name=None, **kwargs):
         """Convenience method for wildcard search on file name fields."""
         if not name:
-            return self & True
+            return self
         attr = None
         for field in self.heading.names:
             if "file" in field:
                 attr = field
                 break
         if not attr:
-            logger.error(f"No file-like field found in {self.full_table_name}")
+            logger.error(f"No file_like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
 
@@ -300,6 +300,43 @@ class SpyglassMixin:
 
         return part_masters
 
+    def _commit_downstream_delete(self, down_fts, start=None, **kwargs):
+        """
+        Commit delete of downstream parts via down_fts. Logs with _log_delete.
+
+        Used by both delete_downstream_parts and cautious_delete.
+        """
+        start = start or time()
+
+        safemode = (
+            dj.config.get("safemode", True)
+            if kwargs.get("safemode") is None
+            else kwargs["safemode"]
+        )
+        _ = kwargs.pop("safemode", None)
+
+        ran_deletes = True
+        if down_fts:
+            for down_ft in down_fts:
+                dj_logger.info(
+                    f"Spyglass: Deleting {len(down_ft)} rows from "
+                    + f"{down_ft.full_table_name}"
+                )
+            if (
+                self._test_mode
+                or not safemode
+                or user_choice("Commit deletes?", default="no") == "yes"
+            ):
+                for down_ft in down_fts:  # safemode off b/c already checked
+                    down_ft.delete(safemode=False, **kwargs)
+            else:
+                logger.info("Delete aborted.")
+                ran_deletes = False
+
+        self._log_delete(start, del_blob=down_fts if ran_deletes else None)
+
+        return ran_deletes
+
     def delete_downstream_parts(
         self,
         restriction: str = None,
@@ -334,6 +371,8 @@ class SpyglassMixin:
         """
         from spyglass.utils.dj_graph import RestrGraph  # noqa F401
 
+        start = time()
+
         if reload_cache:
             _ = self.__dict__.pop("_part_masters", None)
 
@@ -350,7 +389,8 @@ class SpyglassMixin:
         if return_graph:
             return restr_graph
 
-        _, down_fts = restr_graph.find_orphans(self._part_masters)
+        # Depends on distance as a proxy for downstream-ness of each
+        down_fts = restr_graph.ft_from_list(self._part_masters, sort_from=self)
 
         if not down_fts and not disable_warning:
             logger.warning(
@@ -362,8 +402,7 @@ class SpyglassMixin:
         if dry_run:
             return down_fts
 
-        for master_ft in down_fts:
-            master_ft.delete(**kwargs)
+        self._commit_downstream_delete(down_fts, start, **kwargs)
 
     def ddp(
         self, *args, **kwargs
@@ -383,7 +422,7 @@ class SpyglassMixin:
         lists.
 
         Used to delay import of tables until needed, avoiding circular imports.
-        Each of these tables inherits SpyglassMixin.
+        Each of these tables inheits SpyglassMixin.
         """
         from spyglass.common import (  # noqa F401
             IntervalList,
@@ -460,7 +499,7 @@ class SpyglassMixin:
             Permission denied because (a) Session has no experimenter, or (b)
             user is not on a team with Session experimenter(s).
         """
-        LabMember, LabTeam, Session, _ = self._delete_deps
+        LabMember, LabTeam, Session, _, _ = self._delete_deps
 
         dj_user = dj.config["database.user"]
         if dj_user in LabMember().admin:  # bypass permission check for admin
@@ -509,7 +548,7 @@ class SpyglassMixin:
 
         return CautiousDelete()
 
-    def _log_delete(self, start, master_deletes=None, super_delete=False):
+    def _log_delete(self, start, del_blob=None, super_delete=False):
         """Log use of cautious_delete."""
         safe_insert = dict(
             duration=time() - start,
@@ -523,7 +562,7 @@ class SpyglassMixin:
                 dict(
                     **safe_insert,
                     restriction=restr_str[:255],
-                    merge_deletes=master_deletes,
+                    merge_deletes=del_blob,
                 )
             )
         except (DataJointError, DataError):
@@ -544,8 +583,8 @@ class SpyglassMixin:
         a team with the Session experimenter(s), a PermissionError is raised.
 
         Potential downstream orphans are deleted first. These are master tables
-        whose parts have foreign keys so descendants of self. Then, rows from
-        self are deleted. Last, IntervalList and Nwbfile externals are deleted.
+        whose parts have foreign keys to descendants of self. Then, rows from
+        self are deleted. Last, Nwbfile and IntervalList externals are deleted.
 
         Parameters
         ----------
@@ -559,68 +598,37 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         start = time()
-        external = self._delete_deps[3]
+        external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 
         if not force_permission or dry_run:
             self._check_delete_permission()
 
-        restr_graph = self.delete_downstream_parts(
+        down_fts = self.delete_downstream_parts(
             dry_run=True,
             disable_warning=True,
-            return_graph=True,
         )
-        up_fts, down_fts = restr_graph.find_orphans(self._part_masters)
 
         if dry_run:
             return (
-                up_fts,
                 down_fts,
+                IntervalList(),  # cleanup func relies on downstream deletes
                 external["raw"].unused(),
                 external["analysis"].unused(),
             )
 
-        safemode = (
-            dj.config.get("safemode", True)
-            if kwargs.get("safemode") is None
-            else kwargs["safemode"]
-        )
-        _ = kwargs.pop("safemode", None)
+        if not self._commit_downstream_delete(down_fts, start=start, **kwargs):
+            return  # Abort delete based on user input
 
-        if up_fts or down_fts:
-            for down_ft in down_fts:
-                dj_logger.info(
-                    f"Spyglass: Deleting {len(down_ft)} rows from "
-                    + f"{down_ft.full_table_name}"
-                )
-            for up_ft in up_fts:
-                dj_logger.info(
-                    f"Spyglass: Deleting {len(up_ft)} rows from "
-                    + f"{up_ft.full_table_name} after next prompt"
-                )
-            if (
-                self._test_mode
-                or not safemode
-                or user_choice("Commit deletes?", default="no") == "yes"
-            ):
-                for down_ft in down_fts:  # safemode off b/c already checked
-                    down_ft.delete(safemode=False, **kwargs)
-            else:
-                logger.info("Delete aborted.")
-                self._log_delete(start)
-                return
-
-        super().delete(*args, **kwargs)  # Additional confirm here
-
-        if up_fts:
-            for up_ft in up_fts:
-                up_ft.delete(safemode=False, **kwargs)
+        super().delete(*args, **kwargs)  # Confirmation here
 
         for ext_type in ["raw", "analysis"]:
             external[ext_type].delete(
-                delete_external=True, display_progress=True
+                delete_external_files=True, display_progress=False
             )
 
-        self._log_delete(start=start, master_deletes=up_fts + down_fts)
+        _ = IntervalList().nightly_cleanup(dry_run=False)
+
+        self._log_delete(start=start, del_blob=down_fts)
 
     def cdel(self, *args, **kwargs):
         """Alias for cautious_delete."""
@@ -850,6 +858,8 @@ class SpyglassMixin:
         try:
             ret = self.restrict(restriction)  # Save time trying first
             if len(ret) < len(self):
+                # If it actually restricts, if not it might by a dict that
+                # is not a valid restriction, returned as True
                 logger.warning("Restriction valid for this table. Using as is.")
                 return ret
         except DataJointError:
@@ -874,6 +884,9 @@ class SpyglassMixin:
             verbose=verbose,
             **kwargs,
         )
+
+        if not graph.found_restr:
+            return None
 
         if return_graph:
             return graph

@@ -127,6 +127,7 @@ dmypy.json
 .pyre/
 
 # Test Data Files
+tests/_data/*
 *.dat
 *.mda
 *.rec
