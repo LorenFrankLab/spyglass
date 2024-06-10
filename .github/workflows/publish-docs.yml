@@ -5,6 +5,7 @@ on:
       - "*.*.*" # For docs bump, use X.X.XaX
     branches:
       - test_branch
+  workflow_dispatch: # Manually trigger with 'Run workflow' button
 
 permissions:
   contents: write

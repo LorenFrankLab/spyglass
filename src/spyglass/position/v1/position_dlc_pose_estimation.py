@@ -35,7 +35,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def get_video_crop(cls, video_path):
+    def get_video_crop(cls, video_path, crop_input=None):
         """
         Queries the user to determine the cropping parameters for a given video
 
@@ -61,9 +61,13 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
         ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
         display(fig)
-        crop_input = input(
-            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
-        )
+
+        if crop_input is None:
+            crop_input = input(
+                "Please enter the crop parameters for your video in format "
+                + "xmin, xmax, ymin, ymax, or 'none'\n"
+            )
+
         plt.close()
         if crop_input.lower() == "none":
             return None
@@ -98,6 +102,10 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
 
         video_path, video_filename, _, _ = get_video_path(key)
         output_dir = infer_output_dir(key)
+
+        if not video_path:
+            raise FileNotFoundError(f"Video file not found for {key}")
+
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
             path=f"{output_dir.as_posix()}/log.log",

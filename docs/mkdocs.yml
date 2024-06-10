@@ -71,13 +71,14 @@ nav:
       - MUA Detection: notebooks/50_MUA_Detection.ipynb
   - Miscellaneous:
       - Overview: misc/index.md
-      - FigURL: misc/figurl_views.md
-      - Session Groups: misc/session_groups.md
-      - Insert Data: misc/insert_data.md
-      - Mixin: misc/mixin.md
-      - Merge Tables: misc/merge_tables.md
+      - Common Errors: misc/common_errs.md
       - Database Management: misc/database_management.md
       - Export: misc/export.md
+      - FigURL: misc/figurl_views.md
+      - Insert Data: misc/insert_data.md
+      - Merge Tables: misc/merge_tables.md
+      - Mixin: misc/mixin.md
+      - Session Groups: misc/session_groups.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md

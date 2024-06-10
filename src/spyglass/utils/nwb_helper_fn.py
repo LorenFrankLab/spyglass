@@ -59,9 +59,27 @@ def get_nwb_file(nwb_file_path):
             # the download functions assume just the filename, so we need to
             # get that from the path
             if not AnalysisNwbfileKachery.download_file(
-                os.path.basename(nwb_file_path)
+                os.path.basename(nwb_file_path), permit_fail=True
             ):
-                return None
+                logger.info(
+                    "NWB file not found in kachery; checking Dandi for "
+                    + f"{nwb_file_path}"
+                )
+                # Dandi fallback SB 2024-04-03
+                from ..common.common_dandi import DandiPath
+
+                dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath & dandi_key:
+                    # If not in Dandi, then we can't find the file
+                    raise FileNotFoundError(
+                        f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
+                    )
+                io, nwbfile = DandiPath().fetch_file_from_dandi(
+                    dandi_key
+                )  # TODO: consider case where file in multiple dandisets
+                __open_nwb_files[nwb_file_path] = (io, nwbfile)
+                return nwbfile
+
         # now open the file
         io = pynwb.NWBHDF5IO(
             path=nwb_file_path, mode="r", load_namespaces=True
@@ -70,6 +88,17 @@ def get_nwb_file(nwb_file_path):
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
 
     return nwbfile
+
+
+def file_from_dandi(filepath):
+    """helper to determine if open file is streamed from Dandi"""
+    if filepath not in __open_nwb_files:
+        return False
+    build_keys = __open_nwb_files[filepath][0]._HDF5IO__built.keys()
+    for k in build_keys:
+        if "HTTPFileSystem" in k:
+            return True
+    return False
 
 
 def get_config(nwb_file_path):

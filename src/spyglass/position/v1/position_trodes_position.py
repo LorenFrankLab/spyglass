@@ -11,6 +11,7 @@ from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_trodes_position")
@@ -337,11 +338,23 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         return data / cm_to_pixels
 
     @staticmethod
-    def fill_nan(variable, video_time, variable_time):
-        # TODO: Reduce duplication across dlc_utils and common_position
-        video_ind = np.digitize(variable_time, video_time[1:])
+    def fill_nan(variable, video_time, variable_time, truncate_data=False):
+        """Fill in missing values in variable with nans at video_time.
 
+        Parameters
+        ----------
+        variable : ndarray, shape (n_time,) or (n_time, n_dims)
+            The variable to fill in.
+        video_time : ndarray, shape (n_video_time,)
+            The time points of the video.
+        variable_time : ndarray, shape (n_variable_time,)
+            The time points of the variable.
+        """
+        # TODO: Reduce duplication across dlc_utils and common_position
+
+        video_ind = np.digitize(variable_time, video_time[1:])
         n_video_time = len(video_time)
+
         try:
             n_variable_dims = variable.shape[1]
             filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
@@ -365,6 +378,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         disable_progressbar=False,
         arrow_radius=15,
         circle_radius=8,
+        truncate_data=False,  # reduce data to min length across all variables
     ):
         import cv2
 
@@ -382,8 +396,31 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             output_video_filename, fourcc, frame_rate, frame_size, True
         )
 
+        if test_mode or truncate_data:
+            # pytest video data has mismatched shapes in some cases
+            #   centroid (267, 2), video_time (270, 2), position_time (5193,)
+            min_len = min(
+                n_frames,
+                len(video_time),
+                len(position_time),
+                len(position_mean),
+                len(orientation_mean),
+                min(len(v) for v in centroids.values()),
+            )
+            n_frames = min_len
+            video_time = video_time[:min_len]
+            position_time = position_time[:min_len]
+            position_mean = position_mean[:min_len]
+            orientation_mean = orientation_mean[:min_len]
+            for color, data in centroids.items():
+                centroids[color] = data[:min_len]
+
         centroids = {
-            color: self.fill_nan(data, video_time, position_time)
+            color: self.fill_nan(
+                variable=data,
+                video_time=video_time,
+                variable_time=position_time,
+            )
             for color, data in centroids.items()
         }
         position_mean = self.fill_nan(position_mean, video_time, position_time)
