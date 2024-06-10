@@ -225,7 +225,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             self._alter_spyglass_version(analysis_file_abs_path)
 
         # create a new object id for the file
-        with h5py.File(nwb_file_abspath, "a") as f:
+        with h5py.File(analysis_file_abs_path, "a") as f:
             f.attrs["object_id"] = str(uuid4())
 
         # change the permissions to only allow owner to write
