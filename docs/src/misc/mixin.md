@@ -141,7 +141,7 @@ order. The mixin provides a function, `delete_downstream_parts`, to handle this,
 which is run by default when calling `delete`.
 
 `delete_downstream_parts`, also aliased as `ddp`, identifies all part tables
-with foreign key references downsteam of where it is called. If `dry_run=True`,
+with foreign key references downstream of where it is called. If `dry_run=True`,
 it will return a list of entries that would be deleted, otherwise it will delete
 them.
 
