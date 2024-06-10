@@ -24,18 +24,20 @@
 
 - Common
     - `PositionVideo` table now inserts into self after `make` #966
+    - Don't insert lab member when creating lab team #983
     - Files created by `AnalysisNwbfile.create()` receive new object_id #999
+    - Remove unused `ElectrodeBrainRegion` table #1003
 - Decoding: Default values for classes on `ImportError` #966
-- DLC
+- Position
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
-- Common
-    - Don't insert lab member when creating lab team #983
+    - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
     - Update docstrings #996
+    - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
 
 ## [0.5.2] (April 22, 2024)
 

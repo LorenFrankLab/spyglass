@@ -907,13 +907,3 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 filtered_nwb["filtered_data"].timestamps, name="time"
             ),
         )
-
-
-@schema
-class ElectrodeBrainRegion(SpyglassMixin, dj.Manual):
-    definition = """
-    # Table with brain region of electrodes determined post-experiment e.g. via histological analysis or CT
-    -> Electrode
-    ---
-    -> BrainRegion
-    """
