@@ -98,9 +98,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         export_id = query.fetch1("export_id")
         export_key = {"export_id": export_id}
         if query := (Export & export_key):
-            if test_mode:
-                query.super_delete(warn=False, safemode=False)
-            query.super_delete(warn=False)
+            safemode = False if test_mode else None  # No prompt in tests
+            query.super_delete(warn=False, safemode=safemode)
         logger.info(f"{status} {export_key}")
         return export_id
 

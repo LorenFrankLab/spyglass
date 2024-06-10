@@ -14,6 +14,8 @@
 - Add long-distance restrictions via `<<` and `>>` operators. #943, #969
 - Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
 - Clean up old `TableChain.join` call in mixin delete. #982
+- Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
+- `cautious_delete` now checks `IntervalList` and externals tables. #1002
 
 ### Pipelines
 

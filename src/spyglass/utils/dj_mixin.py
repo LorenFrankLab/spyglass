@@ -879,7 +879,6 @@ class SpyglassMixin:
             direction=direction,
             search_restr=restriction,
             banned_tables=list(self._banned_search_tables),
-            allow_merge=True,
             cascade=True,
             verbose=verbose,
             **kwargs,

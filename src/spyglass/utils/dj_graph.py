@@ -261,15 +261,6 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    # ------------------------------ Ignore Nodes ------------------------------
-
-    def _ignore_peripheral(self, except_tables: List[str] = None):
-        """Ignore peripheral tables in graph traversal."""
-        except_tables = self._ensure_names(except_tables)
-        ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
-        self.no_visit.update(ignore_tables)
-        self.undirect_graph.remove_nodes_from(ignore_tables)
-
     # ---------------------------- Graph Traversal -----------------------------
 
     def _bridge_restr(
@@ -573,9 +564,6 @@ class RestrGraph(AbstractGraph):
             Default False
         verbose : bool, optional
             Whether to print verbose output. Default False
-        ignore_peripheral : bool, optional
-            Whether to ignore peripheral tables in graph traversal. Default
-            False
         """
         super().__init__(seed_table, verbose=verbose)
 
@@ -869,6 +857,15 @@ class TableChain(RestrGraph):
                 self.cascade(restriction=search_restr)
             self.cascaded = True
 
+    # ------------------------------ Ignore Nodes ------------------------------
+
+    def _ignore_peripheral(self, except_tables: List[str] = None):
+        """Ignore peripheral tables in graph traversal."""
+        except_tables = self._ensure_names(except_tables)
+        ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
+        self.no_visit.update(ignore_tables)
+        self.undirect_graph.remove_nodes_from(ignore_tables)
+
     # --------------------------- Dunder Properties ---------------------------
 
     def __str__(self):
@@ -970,20 +967,18 @@ class TableChain(RestrGraph):
                 + f"Restr: {restriction}"
             )
 
-    def _and_parts(self, table):
-        """Return table, its master and parts."""
-        ret = [table]
-        if master := get_master(table):
-            ret.append(master)
-        if parts := self._get_ft(table).parts():
-            ret.extend(parts)
-        return ret
-
     def _set_found_vars(self, table):
         """Set found_restr and searched_tables."""
         self._set_restr(table, self.search_restr, replace=True)
         self.found_restr = True
-        self.searched_tables.update(set(self._and_parts(table)))
+
+        and_parts = set([table])
+        if master := get_master(table):
+            and_parts.add(master)
+        if parts := self._get_ft(table).parts():
+            and_parts.update(parts)
+
+        self.searched_tables.update(and_parts)
 
         if self.direction == Direction.UP:
             self.parent = table
@@ -1121,6 +1116,8 @@ class TableChain(RestrGraph):
         )
 
         # Cascade will stop if any restriction is empty, so set rest to None
+        # This would cause issues if we want a table partway through the chain
+        # but that's not a typical use case, were the start and end are desired
         non_numeric = [t for t in self.path if not t.isnumeric()]
         if any(self._get_restr(t) is None for t in non_numeric):
             for table in non_numeric:

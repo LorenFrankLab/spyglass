@@ -157,7 +157,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         orphans = self - get_child_tables(self)
         if dry_run:
             return orphans
-        orphans.super_delete()
+        orphans.super_delete(warn=False)
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
