@@ -14,6 +14,7 @@ from spyglass.position.v1.dlc_utils import (
     make_video,
 )
 from spyglass.position.v1.position_dlc_pose_estimation import (
+    DLCPoseEstimation,
     DLCPoseEstimationSelection,
 )
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
@@ -26,6 +27,7 @@ source_class_dict = {
     "IntervalPositionInfo": CommonPos,
     "DLCPosV1": DLCPosV1,
     "TrodesPosV1": TrodesPosV1,
+    "DLCPoseEstimation": DLCPoseEstimation,
 }
 
 
@@ -260,3 +262,51 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             disable_progressbar=False,
         )
         self.insert1(key)
+
+
+@schema
+class PoseOutput(_Merge, SpyglassMixin):
+    """
+    Table to identify source of keypoint(s) tracking animal Pose from upstream options
+    (e.g. DLC, Sleap, etc...) To add another upstream option, a new Part table
+    should be added in the same syntax as DLCPos and TrodesPos.
+    """
+
+    definition = """
+    merge_id: uuid
+    ---
+    source: varchar(32)
+    """
+
+    class DLCPoseEstimation(SpyglassMixin, dj.Part):
+        """
+        Table to pass-through upstream DLC Pose Estimation information
+        """
+
+        definition = """
+        -> PoseOutput
+        ---
+        -> DLCPoseEstimation
+        """
+
+    def fetch_dataframe(self):
+        # proj replaces operator restriction to enable
+        # (TableName & restriction).fetch1_dataframe()
+        key = self.merge_restrict(self.proj()).proj()
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_dataframe()
+
+    def fetch_video_name(self):
+        key = self.merge_restrict(self.proj()).proj()
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_video_name()

@@ -406,6 +406,16 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             axis=1,
         )
 
+    def fetch_video_name(self):
+        """Return the video path for pose estimate
+
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        return (DLCPoseEstimationSelection & self).fetch1("video_path")
+
 
 def convert_to_cm(df, meters_to_pixels):
     CM_TO_METERS = 100
