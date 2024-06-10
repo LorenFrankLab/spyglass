@@ -389,8 +389,9 @@ class SpyglassMixin:
         if return_graph:
             return restr_graph
 
-        # Depends on distance as a proxy for downstream-ness of each
-        down_fts = restr_graph.ft_from_list(self._part_masters, sort_from=self)
+        down_fts = restr_graph.ft_from_list(
+            self._part_masters, sort_reverse=True
+        )
 
         if not down_fts and not disable_warning:
             logger.warning(

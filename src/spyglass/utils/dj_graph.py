@@ -30,7 +30,6 @@ from spyglass.utils.dj_helper_fn import (
     fuzzy_get,
     unique_dicts,
 )
-from spyglass.utils.dj_merge_tables import is_merge_table
 
 
 class Direction(Enum):
@@ -448,6 +447,30 @@ class AbstractGraph(ABC):
 
     # ---------------------------- Graph Properties ----------------------------
 
+    def _topo_sort(
+        self, nodes: List[str], subgraph: bool = True, reverse: bool = False
+    ) -> List[str]:
+        """Return topologically sorted list of nodes.
+
+        Parameters
+        ----------
+        nodes : List[str]
+            List of table names
+        subgraph : bool, optional
+            Whether to use subgraph. Default True
+        reverse : bool, optional
+            Whether to reverse the order. Default False. If true, bottom-up.
+            If None, return nodes as is.
+        """
+        nodes = self._ensure_names(nodes)
+        if reverse is None:
+            return nodes
+        graph = self.graph.subgraph(nodes) if subgraph else self.graph
+        ordered = unite_master_parts(list(topological_sort(graph)))
+        if reverse:
+            ordered.reverse()
+        return [n for n in ordered if n in nodes]
+
     @property
     def all_ft(self):
         """Get restricted FreeTables from all visited nodes.
@@ -456,14 +479,10 @@ class AbstractGraph(ABC):
         """
         self.cascade(warn=False)
         nodes = [n for n in self.visited if not n.isnumeric()]
-        sorted_nodes = unite_master_parts(
-            list(topological_sort(self.graph.subgraph(nodes)))
-        )
-        ret = [
+        return [
             self._get_ft(table, with_restr=True, warn=False)
-            for table in sorted_nodes
+            for table in self._topo_sort(nodes, subgraph=True, reverse=False)
         ]
-        return ret
 
     @property
     def restr_ft(self):
@@ -474,7 +493,7 @@ class AbstractGraph(ABC):
         self,
         tables: List[str],
         with_restr: bool = True,
-        sort_from: str = None,
+        sort_reverse: bool = None,
         return_empty: bool = False,
     ) -> List[FreeTable]:
         """Return non-empty FreeTable objects from list of table names.
@@ -485,34 +504,17 @@ class AbstractGraph(ABC):
             List of table names
         with_restr : bool, optional
             Restrict FreeTable to restriction. Default True.
-        sort_from : str, optional
-            Table name. Sort by decreasing distance from this table.
-            Default None, no sort.
+        sort_reverse : bool, optional
+            Sort reverse topologically. Default True. If None, no sort.
         """
 
-        def graph_distance(self, table1: str = None, table2: str = None) -> int:
-            """Sort tables by distance from root. If no root, do nothing."""
-            if not table1 or not table2:
-                return 0
-            try:
-                return len(shortest_path(self.undirect_graph, table1, table2))
-            except (NodeNotFound, NetworkXNoPath):
-                return 99
-
         self.cascade(warn=False)
-        tables = [self._ensure_names(t) for t in tables]
-
-        if sort_from:
-            sort_from = self._ensure_names(sort_from)
-            tables = sorted(
-                tables,
-                key=lambda t: graph_distance(sort_from, t),
-                reverse=True,  # sort from farthest to closest
-            )
 
         fts = [
             self._get_ft(table, with_restr=with_restr, warn=False)
-            for table in tables
+            for table in self._topo_sort(
+                tables, subgraph=False, reverse=sort_reverse
+            )
         ]
 
         return fts if return_empty else [ft for ft in fts if len(ft) > 0]
