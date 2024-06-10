@@ -348,8 +348,9 @@ def update_analysis_for_dandi_standard(
         species_value = file["/general/subject/species"][()].decode("utf-8")
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
-            print(
-                f"Adjusting subject species from '{species_value}' to '{new_species_value}'."
+            logger.info(
+                f"Adjusting subject species from '{species_value}' to "
+                + f"'{new_species_value}'."
             )
             file["/general/subject/species"][()] = new_species_value
 
@@ -357,9 +358,11 @@ def update_analysis_for_dandi_standard(
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
-                "Dandi upload requires species either be in Latin binomial form (e.g., 'Mus musculus' and 'Homo sapiens')"
-                + "or be a NCBI taxonomy link (e.g., 'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
-                + f"\n Please update species value of: {species_value}"
+                "Dandi upload requires species either be in Latin binomial form"
+                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
+                + "taxonomy link (e.g., "
+                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
+                + f"Please update species value of: {species_value}"
             )
 
         # add subject age dataset "P4M/P8M"
@@ -378,7 +381,8 @@ def update_analysis_for_dandi_standard(
         if experimenter_value != new_experimenter_value:
             new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
             logger.info(
-                f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
+                f"Adjusting experimenter from {experimenter_value} to "
+                + f"{new_experimenter_value}."
             )
             file["/general/experimenter"][:] = new_experimenter_value
 

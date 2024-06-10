@@ -19,7 +19,6 @@ from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
-from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 
@@ -390,7 +389,7 @@ class SpyglassMixin:
             return restr_graph
 
         down_fts = restr_graph.ft_from_list(
-            self._part_masters, sort_reverse=True
+            self._part_masters, sort_reverse=False
         )
 
         if not down_fts and not disable_warning:

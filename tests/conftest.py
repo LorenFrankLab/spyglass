@@ -238,6 +238,8 @@ def nodlc(request):
 def skipif_nodlc(request):
     if NO_DLC:
         yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
+    else:
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -842,6 +844,12 @@ def insert_project(
 
     from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v1 import LinearizationSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1 import RippleTimesV1
+
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     with verbose_context:
@@ -879,6 +887,13 @@ def insert_project(
     yield project_key, cfg, config_path
 
     if teardown:
+
+        """
+        DataJointError: Attempt to delete part table
+        `position_merge`.`position_output__d_l_c_pos_v1` before deleting from
+        its master `position_merge`.`position_output` first.
+        """
+
         (dlc_project_tbl & project_key).delete(safemode=False)
         shutil_rmtree(str(Path(config_path).parent))
 
@@ -1218,7 +1233,10 @@ def populate_orient(sgp, orient_selection):
 
 
 @pytest.fixture(scope="session")
-def dlc_selection(sgp, centroid_key, orient_key, populate_orient):
+def dlc_selection(
+    sgp, centroid_key, orient_key, populate_orient, populate_centroid
+):
+    _ = populate_orient, populate_centroid
     dlc_key = {
         key: val
         for key, val in centroid_key.items()
