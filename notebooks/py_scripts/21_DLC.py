@@ -772,29 +772,6 @@ PositionOutput.DLCPosV1() & dlc_key
 
 (PositionOutput.DLCPosV1() & dlc_key).fetch1_dataframe()
 
-# #### [PositionVideo](#TableOfContents)<a id='PositionVideo1'></a>
-#
-
-# We can use the `PositionVideo` table to create a video that overlays just the
-# centroid and orientation on the video. This table uses the parameter `plot` to
-# determine whether to plot the entry deriving from the DLC arm or from the Trodes
-# arm of the position pipeline. This parameter also accepts 'all', which will plot
-# both (if they exist) in order to compare results.
-#
-
-sgp.PositionVideoSelection().insert1(
-    {
-        "nwb_file_name": "J1620210604_.nwb",
-        "interval_list_name": "pos 13 valid times",
-        "trodes_position_id": 0,
-        "dlc_position_id": 1,
-        "plot": "DLC",
-        "output_dir": "/home/dgramling/Src/",
-    }
-)
-
-sgp.PositionVideo.populate({"plot": "DLC"})
-
 # ### _CONGRATULATIONS!!_
 #
 # Please treat yourself to a nice tea break :-)
