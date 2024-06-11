@@ -27,6 +27,8 @@
     - Don't insert lab member when creating lab team #983
     - Files created by `AnalysisNwbfile.create()` receive new object_id #999
     - Remove unused `ElectrodeBrainRegion` table #1003
+    - Files created by `AnalysisNwbfile.create()` receive new object_id #999,
+        #1004
 - Decoding: Default values for classes on `ImportError` #966
 - Position
     - Allow dlc without pre-existing tracking data #973, #975
