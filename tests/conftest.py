@@ -11,7 +11,6 @@ import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from time import sleep as tsleep
 
 import datajoint as dj
 import numpy as np
@@ -210,20 +209,9 @@ def raw_dir(base_dir):
 @pytest.fixture(scope="session")
 def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
+    DOWNLOADS.wait_for(TEST_FILE)  # wait for wget download to finish
 
-    # wait for wget download to finish
-    if (nwb_download := DOWNLOADS.file_downloads.get(TEST_FILE)) is not None:
-        nwb_download.wait()
-
-    # wait for download to finish
-    timeout, wait, found = 60, 5, False
-    for _ in range(timeout // wait):
-        if path.exists():
-            found = True
-            break
-        tsleep(wait)
-
-    if not found:
+    if not path.exists():
         raise ConnectionError("Download failed.")
 
     yield path
@@ -426,9 +414,9 @@ def frequent_imports():
 
 @pytest.fixture(scope="session")
 def video_keys(common, base_dir):
-    for file, download in DOWNLOADS.file_downloads.items():
-        if file.endswith(".h264") and download is not None:
-            download.wait()  # wait for videos to finish downloading
+    for file in DOWNLOADS.file_downloads:
+        if file.endswith(".h264"):
+            DOWNLOADS.wait_for(file)
     DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
@@ -850,6 +838,14 @@ def insert_project(
     from spyglass.mua.v1.mua import MuaEventsV1
     from spyglass.ripple.v1 import RippleTimesV1
 
+    _ = (
+        PositionGroup,
+        LinearizedPositionOutput,
+        LinearizationSelection,
+        MuaEventsV1,
+        RippleTimesV1,
+    )
+
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     with verbose_context:
@@ -887,13 +883,6 @@ def insert_project(
     yield project_key, cfg, config_path
 
     if teardown:
-
-        """
-        DataJointError: Attempt to delete part table
-        `position_merge`.`position_output__d_l_c_pos_v1` before deleting from
-        its master `position_merge`.`position_output` first.
-        """
-
         (dlc_project_tbl & project_key).delete(safemode=False)
         shutil_rmtree(str(Path(config_path).parent))
 
@@ -943,23 +932,8 @@ def labeled_vid_dir(extract_frames):
 
 
 @pytest.fixture(scope="session")
-def fix_downloaded(labeled_vid_dir, project_dir):
-    """Grabs CollectedData and img files from project_dir, moves to labeled"""
-    for file in project_dir.parent.parent.glob("*"):
-        if file.is_dir():
-            continue
-        dest = labeled_vid_dir / file.name
-        if dest.exists():
-            dest.unlink()
-        dest.write_bytes(file.read_bytes())
-        # TODO: revert to rename before merge
-        # file.rename(labeled_vid_dir / file.name)
-
-    yield
-
-
-@pytest.fixture(scope="session")
-def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
+def add_training_files(dlc_project_tbl, project_key, labeled_vid_dir):
+    DOWNLOADS.move_dlc_items(labeled_vid_dir)
     dlc_project_tbl.add_training_files(project_key, skip_duplicates=True)
     yield
 
@@ -1009,11 +983,13 @@ def model_train_key(sgp, project_key, training_params_key):
 
 
 @pytest.fixture(scope="session")
-def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
+def populate_training(
+    sgp, model_train_key, add_training_files, labeled_vid_dir
+):
     train_tbl = sgp.v1.DLCModelTraining
     if len(train_tbl & model_train_key) == 0:
         _ = add_training_files
-        _ = fix_downloaded
+        DOWNLOADS.move_dlc_items(labeled_vid_dir)
         sgp.v1.DLCModelTraining.populate(model_train_key)
     yield model_train_key
 
