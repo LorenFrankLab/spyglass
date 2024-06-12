@@ -488,6 +488,10 @@ class NonDaemonPool(multiprocessing.pool.Pool):
     which are required for parallel populate operations in DataJoint.
     """
 
+    # Explicitly set the start method to 'fork'
+    # Allows the pool to be used in MacOS, where the default start method is 'spawn'
+    multiprocessing.set_start_method("fork", force=True)
+
     def Process(self, *args, **kwds):
         proc = super(NonDaemonPool, self).Process(*args, **kwds)
 
