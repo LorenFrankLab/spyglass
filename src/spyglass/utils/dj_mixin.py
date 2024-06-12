@@ -20,11 +20,11 @@ from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (
+from spyglass.utils.dj_helper_fn import (  # NonDaemonPool,
+    NonDaemonPool,
     fetch_nwb,
     get_nwb_table,
     populate_pass_function,
-    NonDaemonPool,
 )
 from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
@@ -137,10 +137,7 @@ class SpyglassMixin:
             else nullcontext()
         )
 
-    @property
-    def parallel_make(self):
-        """If table is parallelized in make function, override this function with True."""
-        return False
+    _parallel_make = False
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -163,9 +160,7 @@ class SpyglassMixin:
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile
-            if "-> Nwbfile" in self.definition
-            else None
+            else Nwbfile if "-> Nwbfile" in self.definition else None
         )
 
         if not resolved:
@@ -678,7 +673,7 @@ class SpyglassMixin:
 
         # Pass through to super if not parallel in the make function or only a single process
         processes = kwargs.pop("processes", 1)
-        if processes == 1 or not self.parallel_make:
+        if processes == 1 or not self._parallel_make:
             return super().populate(*restrictions, **kwargs)
 
         # If parallel in both make and populate, use non-daemon processes
@@ -694,11 +689,10 @@ class SpyglassMixin:
         try:
             pool.map(populate_pass_function, call_list)
         except Exception as e:
+            raise e
+        finally:
             pool.close()
             pool.terminate()
-            raise e
-        pool.close()
-        pool.terminate()
 
     # ------------------------------- Export Log -------------------------------
 
