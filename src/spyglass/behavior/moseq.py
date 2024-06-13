@@ -1,3 +1,4 @@
+import hashlib
 import os
 from pathlib import Path
 
@@ -145,6 +146,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         )
         data, metadata = kpms.format_data(coordinates, confidences, **config())
 
+        # either initialize a new model or load an existing one
+        model_name = self._make_model_name(key)
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
             # fit pca of data
@@ -162,12 +165,13 @@ class MoseqModel(SpyglassMixin, dj.Computed):
                 project_dir,
                 ar_only=True,
                 num_iters=num_ar_iters,
+                model_name=model_name + "_ar",
             )
             epochs_trained = num_ar_iters
             # load model checkpoint
-            model, data, metadata, current_iter = kpms.load_checkpoint(
-                project_dir, model_name, iteration=num_ar_iters
-            )
+            # model, data, metadata, current_iter = kpms.load_checkpoint(
+            #     project_dir, model_name, iteration=num_ar_iters
+            # )
 
         else:
             # begin training from an existing model
@@ -177,7 +181,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
                     f"Initial model: {initial_model_key} not found"
                 )
             model = query.fetch_model()
-            model_name = query.fetch1("model_name")
             epochs_trained = query.fetch1("epochs_trained")
 
         # update the hyperparameters
@@ -206,20 +209,13 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             }
         )
 
-    def extend_training(self, key: dict, num_epochs: int):
-        """Method to run additional training epochs on a model and update the epochs_trained attribute
-
-        Parameters
-        ----------
-        key : dict
-            key to a single MoseqModel table entry
-
-        Raises
-        ------
-        NotImplementedError
-            This method is not implemented yet.
-        """
-        raise NotImplementedError("This method is not implemented yet.")
+    def _make_model_name(self, key: dict = None):
+        # make a unique model name based on the key
+        if key is None:
+            key = {}
+        key = (MoseqModelSelection & key).fetch1("KEY")
+        key_string = "_".join(key.values())
+        return hashlib.sha1(key_string.encode("utf-8")).hexdigest()[:10]
 
     def analyze_pca(self, key: dict = None):
         """Method to analyze the PCA of a model
