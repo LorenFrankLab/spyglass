@@ -21,6 +21,52 @@ class MoseqModelParams(SpyglassMixin, dj.Manual):
     model_params: longblob
     """
 
+    def make_training_extension_params(
+        self, model_key, num_epochs, new_name=None, skip_duplicates=False
+    ):
+        """Method to create a new set of model parameters for extending training
+
+        Parameters
+        ----------
+        model_key : dict
+            key to a single MoseqModelSelection table entry
+        num_epochs : int
+            number of epochs to extend training by
+        new_name : str, optional
+            name for the new model parameters, by default None
+        skip_duplicates : bool, optional
+            whether to skip duplicates, by default False
+        Returns
+        -------
+        dict
+            key to a single MoseqModelParams table entry
+        """
+        model_key = (MoseqModel & model_key).fetch1("KEY")
+        model_params = (self & model_key).fetch1("model_params")
+        model_params["num_epochs"] = num_epochs
+        model_params["initial_model"] = model_key
+        # increment param name
+        if new_name is None:
+            # increment the extension number
+            if model_key["model_params_name"][:-1].endswith("_extension"):
+                new_name = (
+                    model_key["model_params_name"][:-3]
+                    + f"{int(model_key['model_params_name'][-3:]) + 1:03}"
+                )
+            # add an extension number
+            else:
+                new_name = (
+                    model_key["pose_group_name"]
+                    + model_key["model_params_name"]
+                    + "_extension001"
+                )
+        new_key = {
+            "model_params_name": new_name,
+            "model_params": model_params,
+        }
+        self.insert1(new_key, skip_duplicates=skip_duplicates)
+        return new_key
+
 
 @schema
 class MoseqModelSelection(SpyglassMixin, dj.Manual):
@@ -99,26 +145,41 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         )
         data, metadata = kpms.format_data(coordinates, confidences, **config())
 
-        # fit pca of data
-        pca = kpms.fit_pca(**data, **config())
-        kpms.save_pca(pca, project_dir)
+        initial_model_key = model_params.get("initial_model", None)
+        if initial_model_key is None:
+            # fit pca of data
+            pca = kpms.fit_pca(**data, **config())
+            kpms.save_pca(pca, project_dir)
 
-        # create the model
-        model = kpms.init_model(data, pca=pca, **config())
-        # run the autoregressive fit on the model
-        num_ar_iters = model_params["num_ar_iters"]
-        model, model_name = kpms.fit_model(
-            model,
-            data,
-            metadata,
-            project_dir,
-            ar_only=True,
-            num_iters=num_ar_iters,
-        )
-        # load model checkpoint
-        model, data, metadata, current_iter = kpms.load_checkpoint(
-            project_dir, model_name, iteration=num_ar_iters
-        )
+            # create the model
+            model = kpms.init_model(data, pca=pca, **config())
+            # run the autoregressive fit on the model
+            num_ar_iters = model_params["num_ar_iters"]
+            model, model_name = kpms.fit_model(
+                model,
+                data,
+                metadata,
+                project_dir,
+                ar_only=True,
+                num_iters=num_ar_iters,
+            )
+            epochs_trained = num_ar_iters
+            # load model checkpoint
+            model, data, metadata, current_iter = kpms.load_checkpoint(
+                project_dir, model_name, iteration=num_ar_iters
+            )
+
+        else:
+            # begin training from an existing model
+            query = MoseqModel & initial_model_key
+            if not query:
+                raise ValueError(
+                    f"Initial model: {initial_model_key} not found"
+                )
+            model = query.fetch_model()
+            model_name = query.fetch1("model_name")
+            epochs_trained = query.fetch1("epochs_trained")
+
         # update the hyperparameters
         kappa = model_params["kappa"]
         model = kpms.update_hypparams(model, kappa=kappa)
@@ -131,8 +192,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             project_dir,
             model_name,
             ar_only=False,
-            start_iter=current_iter,
-            num_iters=current_iter + num_epochs,
+            start_iter=epochs_trained,
+            num_iters=epochs_trained + num_epochs,
         )[0]
         # reindex syllables by frequency
         kpms.reindex_syllables_in_checkpoint(project_dir, model_name)
@@ -140,7 +201,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             {
                 **key,
                 "project_dir": project_dir,
-                "epochs_trained": num_epochs + num_ar_iters,
+                "epochs_trained": num_epochs + epochs_trained,
                 "model_name": model_name,
             }
         )
@@ -239,7 +300,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
     -> MoseqSyllableSelection
     ---
     -> AnalysisNwbfile
-    moseq_object_id: int
+    moseq_object_id: varchar(80)
     """
 
     def make(self, key):
@@ -296,3 +357,8 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
 
         self.insert1(key)
+
+    def fetch1_dataframe(self):
+        dataframe = self.fetch_nwb()[0]["moseq"]
+        dataframe.set_index("time", inplace=True)
+        return dataframe
