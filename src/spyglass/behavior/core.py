@@ -161,3 +161,39 @@ def format_dataset_for_moseq(
         coordinates[video_name] = coordinates_i
         confidences[video_name] = confidences_i
     return coordinates, confidences
+
+
+def results_to_df(results):
+    for key in results.keys():
+        column_names, data = [], []
+
+        if "syllable" in results[key].keys():
+            column_names.append(["syllable"])
+            data.append(results[key]["syllable"].reshape(-1, 1))
+
+        if "centroid" in results[key].keys():
+            d = results[key]["centroid"].shape[1]
+            column_names.append(["centroid x", "centroid y", "centroid z"][:d])
+            data.append(results[key]["centroid"])
+
+        if "heading" in results[key].keys():
+            column_names.append(["heading"])
+            data.append(results[key]["heading"].reshape(-1, 1))
+
+        if "latent_state" in results[key].keys():
+            latent_dim = results[key]["latent_state"].shape[1]
+            column_names.append(
+                [f"latent_state {i}" for i in range(latent_dim)]
+            )
+            data.append(results[key]["latent_state"])
+
+        dfs = [
+            pd.DataFrame(arr, columns=cols)
+            for arr, cols in zip(data, column_names)
+        ]
+        df = pd.concat(dfs, axis=1)
+
+        for col in df.select_dtypes(include=[np.floating]).columns:
+            df[col] = df[col].astype(float).round(4)
+
+        return df
