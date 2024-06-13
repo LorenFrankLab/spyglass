@@ -112,7 +112,8 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
 
         if not len(table_entries) == len(bp_params_dict):
             raise ValueError(
-                "More entries in DLCSmoothInterp than bodyparts_params_dict"
+                f"Mismatch: DLCSmoothInterp {len(table_entries)} vs "
+                + f"bodyparts_params_dict {len(bp_params_dict)}"
             )
 
         table_column_names = list(table_entries[0].dtype.fields.keys())

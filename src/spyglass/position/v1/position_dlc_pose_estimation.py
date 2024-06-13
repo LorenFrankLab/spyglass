@@ -42,7 +42,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     log_path = None
 
     @classmethod
-    def get_video_crop(cls, video_path):
+    def get_video_crop(cls, video_path, crop_input=None):
         """
         Queries the user to determine the cropping parameters for a given video
 
@@ -55,6 +55,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         -------
         crop_ints : list
             list of 4 integers [x min, x max, y min, y max]
+        crop_input : str, optional
+            input string to determine cropping parameters. If None, user is queried
         """
         import cv2
 
@@ -68,10 +70,13 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
         ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
         display(fig)
-        crop_input = input(
-            "Please enter the crop parameters for your video in format "
-            + "xmin, xmax, ymin, ymax, or 'none'\n"
-        )
+
+        if crop_input is None:
+            crop_input = input(
+                "Please enter the crop parameters for your video in format "
+                + "xmin, xmax, ymin, ymax, or 'none'\n"
+            )
+
         plt.close()
         if crop_input.lower() == "none":
             return None
@@ -93,9 +98,10 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
 
         Parameters
         ----------
-        key: DataJoint key specifying a pairing of VideoRecording and Model.
-        task_mode (bool): Default 'trigger' computation.
-        Or 'load' existing results.
+        key: dict
+            DataJoint key specifying a pairing of VideoRecording and Model.
+        task_mode: bool, optional
+            Default 'trigger' computation. Or 'load' existing results.
         params (dict): Optional. Parameters passed to DLC's analyze_videos:
             videotype, gputouse, save_as_csv, batchsize, cropping,
             TFGPUinference, dynamic, robust_nframes, allow_growth, use_shelve
@@ -114,6 +120,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     ):
 
         v_path, v_fname, _, _ = get_video_path(key)
+        if not v_path:
+            raise FileNotFoundError(f"Video file not found for {key}")
         logger.info("Pose Estimation Selection")
         v_dir = Path(v_path).parent
         logger.info("video_dir: %s", v_dir)
@@ -340,6 +348,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 analysis_file_name=key["analysis_file_name"],
             )
             self.BodyPart.insert1(key)
+            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")

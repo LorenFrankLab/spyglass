@@ -37,11 +37,6 @@ def test_lfp_band_dataframe(lfp_band_analysis_raw, lfp_band, lfp_band_key):
     assert df_raw.equals(df_fetch), "LFPBand dataframe not match."
 
 
-@pytest.fixture(scope="module")
-def lfp_band_v1(lfp_band):
-    yield lfp_band.LFPBandV1()
-
-
 def test_lfp_band_compute_signal_invalid(lfp_band_v1):
     with pytest.raises(ValueError):
         lfp_band_v1.compute_analytic_signal([4])

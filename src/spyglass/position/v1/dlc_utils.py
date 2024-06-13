@@ -10,19 +10,16 @@ from collections import abc
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path, PosixPath
-from typing import Union
+from typing import Iterable, Union
 
 import datajoint as dj
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from datajoint.utils import from_camel_case
-from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
-from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 from spyglass.utils.logging import logger, stream_handler
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
 def validate_option(
@@ -63,7 +60,10 @@ def validate_option(
             f"Unknown {name}: {option} " f"Available options: {options}"
         )
 
-    if types and not isinstance(option, types):
+    if types is not None and not isinstance(types, Iterable):
+        types = (types,)
+
+    if types is not None and not isinstance(option, types):
         raise TypeError(f"{name} is {type(option)}. Available types {types}")
 
     if val_range and not (val_range[0] <= option <= val_range[1]):
@@ -302,8 +302,16 @@ def infer_output_dir(key, makedir=True):
     ----------
     key: DataJoint key specifying a pairing of VideoFile and Model.
     """
-    # TODO: add check to make sure interval_list_name refers to a single epoch
-    # Or make key include epoch in and of itself instead of interval_list_name
+
+    file_name = key.get("nwb_file_name")
+    dlc_model_name = key.get("dlc_model_name")
+    epoch = key.get("epoch")
+
+    if not all([file_name, dlc_model_name, epoch]):
+        raise ValueError(
+            "Key must contain 'nwb_file_name', 'dlc_model_name', and 'epoch'"
+        )
+
     nwb_file_name = key["nwb_file_name"].split("_.")[0]
     output_dir = Path(dlc_output_dir) / Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"

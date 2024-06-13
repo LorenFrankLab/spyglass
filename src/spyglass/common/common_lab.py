@@ -64,9 +64,9 @@ class LabMember(SpyglassMixin, dj.Manual):
             # each person is by default the member of their own LabTeam
             # (same as their name)
 
-            full_name, _, _ = decompose_name(experimenter)
+            full_name, first, last = decompose_name(experimenter)
             LabTeam.create_new_team(
-                team_name=full_name, team_members=[full_name]
+                team_name=full_name, team_members=[f"{last}, {first}"]
             )
 
     @classmethod
@@ -92,7 +92,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         """Load admin list."""
         cls._admin = list(
             (cls.LabMemberInfo & {"admin": True}).fetch("datajoint_user_name")
-        )
+        ) + ["root"]
 
     @property
     def admin(cls) -> list:
@@ -128,6 +128,20 @@ class LabMember(SpyglassMixin, dj.Manual):
             )
 
         return query[0]
+
+    def check_admin_privilege(
+        cls,
+        error_message: str = "User does not have database admin privileges",
+    ):
+        """Check if a user has admin privilege.
+
+        Parameters
+        ----------
+        error_message: str
+            The error message to display if the user is not an admin.
+        """
+        if dj.config["database.user"] not in cls.admin:
+            raise PermissionError(error_message)
 
 
 @schema
@@ -193,9 +207,10 @@ class LabTeam(SpyglassMixin, dj.Manual):
         member_list = []
         for team_member in team_members:
             LabMember.insert_from_name(team_member)
-            query = (
-                LabMember.LabMemberInfo() & {"lab_member_name": team_member}
-            ).fetch("google_user_name")
+            member_dict = {"lab_member_name": decompose_name(team_member)[0]}
+            query = (LabMember.LabMemberInfo() & member_dict).fetch(
+                "google_user_name"
+            )
             if not query:
                 logger.info(
                     f"Please add the Google user ID for {team_member} in "
@@ -203,7 +218,7 @@ class LabTeam(SpyglassMixin, dj.Manual):
                 )
             labteammember_dict = {
                 "team_name": team_name,
-                "lab_member_name": team_member,
+                **member_dict,
             }
             member_list.append(labteammember_dict)
             # clear cache for this member

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -137,17 +137,17 @@ LFPOutput.merge_view()
 # by referencing this or other features.
 #
 
-uuid_key = LFPOutput.fetch(limit=1, as_dict=True)[-1]
+uuid_key = (LFPOutput & nwb_file_dict).fetch(limit=1, as_dict=True)[-1]
 restrict = LFPOutput & uuid_key
 restrict
 
-result1 = restrict.fetch_nwb()
+result1 = restrict.fetch_nwb(restrict.fetch1("KEY"))
 result1
 
 nwb_key = LFPOutput.merge_restrict(nwb_file_dict).fetch(as_dict=True)[0]
 nwb_key
 
-result2 = (LFPOutput & nwb_key).fetch_nwb()
+result2 = LFPOutput().fetch_nwb(nwb_key)
 result2 == result1
 
 # ## Selecting data

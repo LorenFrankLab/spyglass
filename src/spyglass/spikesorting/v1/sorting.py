@@ -1,3 +1,4 @@
+import os
 import tempfile
 import time
 import uuid
@@ -22,7 +23,6 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
-import os
 
 schema = dj.schema("spikesorting_v1_sorting")
 
@@ -152,6 +152,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
 
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
@@ -232,6 +233,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params.pop("tempdir", None)
             sorter_params.pop("whiten", None)
             sorter_params.pop("outputs", None)
+            if "local_radius_um" in sorter_params:
+                sorter_params["radius_um"] = sorter_params.pop(
+                    "local_radius_um"
+                )  # correct existing parameter sets for spikeinterface>=0.99.1
 
             # Detect peaks for clusterless decoding
             detected_spikes = detect_peaks(recording, **sorter_params)
@@ -295,6 +300,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             (SpikeSortingSelection & key).fetch1("nwb_file_name"),
             key["analysis_file_name"],
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key, skip_duplicates=True)
 
     @classmethod

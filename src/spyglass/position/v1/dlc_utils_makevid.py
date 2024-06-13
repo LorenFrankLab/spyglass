@@ -290,7 +290,11 @@ class VideoMaker:
 
         if self.video_time:
             centroids = {
-                color: fill_nan(data, self.video_time, self.position_time)
+                color: fill_nan(
+                    variable=data,
+                    video_time=self.video_time,
+                    variable_time=self.position_time,
+                )
                 for color, data in self.centroids.items()
             }
             position_mean = fill_nan(

@@ -7,6 +7,7 @@ import datajoint as dj
 from spyglass.position.v1.dlc_utils import OutputLogger, file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import test_mode
 
 schema = dj.schema("position_v1_dlc_training")
 
@@ -177,6 +178,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         for k in ["shuffle", "trainingsetindex", "maxiters"]:
             if value := train_network_kwargs.get(k):
                 train_network_kwargs[k] = int(value)
+        if test_mode:
+            train_network_kwargs["maxiters"] = 2
 
         try:
             train_network(dlc_cfg_filepath, **train_network_kwargs)

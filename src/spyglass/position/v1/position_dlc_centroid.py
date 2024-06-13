@@ -240,6 +240,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
         else:
             final_df = interp_df.copy()
+
         logger.info("getting velocity")
         velocity = get_velocity(
             final_df.loc[:, idx[("x", "y")]].to_numpy(),
@@ -390,6 +391,9 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
+
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
 
@@ -719,6 +723,8 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
 
     idx = pd.IndexSlice
     centroid = np.zeros(shape=(len(pos_df), 2))
@@ -797,6 +803,8 @@ def one_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not params.get("points"):
+        raise KeyError("points need to be passed in params")
     idx = pd.IndexSlice
     PT1 = params["points"].pop("point1", None)
     centroid = pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy()

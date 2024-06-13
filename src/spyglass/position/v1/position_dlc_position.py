@@ -17,6 +17,8 @@ from spyglass.position.v1.dlc_utils import (
 )
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import test_mode
+
 
 schema = dj.schema("position_v1_dlc_position")
 
@@ -177,7 +179,12 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         params = (DLCSmoothInterpParams() & key).fetch1("params")
         # Get DLC output dataframe
         logger.info("fetching Pose Estimation Dataframe")
-        dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
+
+        bp_key = key.copy()
+        if test_mode:  # during testing, analysis_file not in BodyPart table
+            bp_key.pop("analysis_file_name", None)
+
+        dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
         logger.info("Identifying indices to NaN")
         df_w_nans, bad_inds = nan_inds(
@@ -216,7 +223,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         final_df = smooth_df.drop(["likelihood"], axis=1)
         final_df = final_df.rename_axis("time").reset_index()
         position_nwb_data = (
-            (DLCPoseEstimation.BodyPart() & key)
+            (DLCPoseEstimation.BodyPart() & bp_key)
             .fetch_nwb()[0]["dlc_pose_estimation_position"]
             .get_spatial_series()
         )
@@ -263,6 +270,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -329,6 +337,11 @@ def nan_inds(
     _, good_spans = get_good_spans(
         subthresh_inds_mask, inds_to_span=inds_to_span
     )
+
+    if len(good_spans) == 0:
+        # Prevents ref before assignment error of mask on return
+        # TODO: instead of raise, insert empty dataframe
+        raise ValueError("No good spans found in the data")
 
     for span in good_spans[::-1]:
         if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:

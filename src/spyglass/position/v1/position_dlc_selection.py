@@ -1,5 +1,6 @@
 import copy
 from pathlib import Path
+from time import time
 
 import datajoint as dj
 import numpy as np
@@ -57,6 +58,8 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         orig_key = copy.deepcopy(key)
+        # Add to Analysis NWB file
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
@@ -112,6 +115,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
         # Add to Analysis NWB file
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        key["analysis_file_name"] = analysis_file_name
         nwb_analysis_file = AnalysisNwbfile()
 
         key.update(
@@ -143,6 +147,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             part_name=to_camel_case(self.table_name.split("__")[-1]),
             skip_duplicates=True,
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -308,6 +313,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     ---
     """
 
+    # TODO: Shoultn't this keep track of the video file it creates?
+
     def make(self, key):
         M_TO_CM = 100
 
@@ -418,3 +425,4 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             crop=pose_estimation_params.get("cropping"),
             **params.get("video_params", {}),
         )
+        self.insert1(key)

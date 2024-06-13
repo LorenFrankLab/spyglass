@@ -5,15 +5,12 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
 from spyglass.position.v1.dlc_utils import (
     check_videofile,
-    convert_to_pixels,
-    fill_nan,
     get_video_path,
 )
 from spyglass.position.v1.dlc_utils_makevid import make_video
@@ -166,7 +163,9 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        analysis_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
 
         raw_position = RawPosition.PosObject & key
         spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
@@ -207,6 +206,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):

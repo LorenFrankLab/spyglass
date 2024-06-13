@@ -139,7 +139,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 ax.text(
                     interval[0] + np.diff(interval)[0] / 2,
                     interval_y,
-                    epoch.strip(" valid times"),
+                    epoch.replace(" valid times", ""),
                     ha="center",
                     va="bottom",
                 )
@@ -256,14 +256,14 @@ def consolidate_intervals(interval_list):
 def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
 
+    Each interval is (start time, stop time)
+
     Parameters
     ----------
     interval_list1 : np.array, (N,2) where N = number of intervals
     interval_list2 : np.array, (N,2) where N = number of intervals
     min_length : float, optional.
         Minimum length of intervals to include, default 0
-
-    Each interval is (start time, stop time)
 
     Returns
     -------
