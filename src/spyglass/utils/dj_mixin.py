@@ -78,6 +78,7 @@ class SpyglassMixin:
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
     _banned_search_tables = set()  # Tables to avoid in restrict_by
+    _parallel_make = False  # Tables that use parallel processing in make
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
@@ -136,8 +137,6 @@ class SpyglassMixin:
             if not cls.connection.in_transaction
             else nullcontext()
         )
-
-    _parallel_make = False
 
     # ------------------------------- fetch_nwb -------------------------------
 
