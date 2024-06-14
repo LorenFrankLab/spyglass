@@ -102,6 +102,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # the NWB object that stores the waveforms
     """
 
+    _parallel_make = True
+
     def make(self, key):
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
