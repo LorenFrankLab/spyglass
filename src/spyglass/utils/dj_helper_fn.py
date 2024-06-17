@@ -261,7 +261,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # skip the filepath checksum if streamed from Dandi
             rec_dict["nwb2load_filepath"] = file_path
             continue
-        rec_dict["nwb2load_filepath"] = (query_table & rec_dict).fetch1(
+
+        # Pulled from future cbroz1/ndo
+        # Full dict caused issues with dlc tables using dicts in secondary keys
+        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
 
@@ -346,8 +350,8 @@ def update_analysis_for_dandi_standard(
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
             print(
-                f"Adjusting subject species from '{species_value}' to f"
-                + "'{new_species_value}'."
+                f"Adjusting subject species from '{species_value}' to "
+                + f"'{new_species_value}'."
             )
             file["/general/subject/species"][()] = new_species_value
 
@@ -355,8 +359,8 @@ def update_analysis_for_dandi_standard(
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
-                "Dandi upload requires species either be in Latin binomial form "
-                + "(e.g., 'Mus musculus' and 'Homo sapiens')"
+                "Dandi upload requires species either be in Latin binomial form"
+                + " (e.g., 'Mus musculus' and 'Homo sapiens')"
                 + "or be a NCBI taxonomy link (e.g., "
                 + "'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
                 + f"\n Please update species value of: {species_value}"

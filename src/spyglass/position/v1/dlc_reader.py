@@ -21,7 +21,7 @@ class PoseEstimation:
         yml_path=None,
         filename_prefix="",
     ):
-        ActivityLog.log("dlc_reader: PoseEstimation")
+        ActivityLog.deprecate_log("dlc_reader: PoseEstimation")
         if dlc_dir is None:
             assert pkl_path and h5_path and yml_path, (
                 'If "dlc_dir" is not provided, then pkl_path, h5_path, and yml_path '

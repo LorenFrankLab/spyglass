@@ -82,7 +82,6 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         key: dict = None,
         **kwargs,
     ):
-        # Note: accepts decorator redundantly validated inputs of an enum
         cls.insert1(
             {
                 "dlc_model_name": dlc_model_name,
@@ -92,11 +91,9 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
             **kwargs,
         )
         part_table = getattr(cls, source)
-
         table_query = dj.FreeTable(
             dj.conn(), full_table_name=part_table.parents()[-1]
         ) & {"project_name": project_name}
-
         project_path = table_query.fetch1("project_path")
         part_table.insert1(
             {
@@ -107,7 +104,6 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
             },
             **kwargs,
         )
-        logger.info(f"Inserted {dlc_model_name} into {source}")
 
 
 @schema

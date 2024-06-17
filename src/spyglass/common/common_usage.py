@@ -68,7 +68,7 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def log(cls, name, warning=True) -> None:
+    def deprecate_log(cls, name, warning=True) -> None:
         if warning:
             logger.warning(f"Function scheduled for deprecation: {name}")
         cls.insert1(dict(dj_user=dj.config["database.user"], function=name))

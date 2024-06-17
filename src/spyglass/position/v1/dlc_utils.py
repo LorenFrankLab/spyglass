@@ -205,7 +205,7 @@ def file_log(logger, console=False):
 
 
 def get_dlc_root_data_dir():
-    ActivityLog().log("dlc_utils: get_dlc_root_data_dir")
+    ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
         if "dlc_root_data_dir" in dj.config["custom"]:
             dlc_root_dirs = dj.config.get("custom", {}).get("dlc_root_data_dir")
@@ -223,7 +223,7 @@ def get_dlc_root_data_dir():
 
 def get_dlc_processed_data_dir() -> str:
     """Returns session_dir relative to custom 'dlc_output_dir' root"""
-    ActivityLog().log("dlc_utils: get_dlc_processed_data_dir")
+    ActivityLog().deprecate_log("dlc_utils: get_dlc_processed_data_dir")
     if "custom" in dj.config:
         if "dlc_output_dir" in dj.config["custom"]:
             dlc_output_dir = dj.config.get("custom", {}).get("dlc_output_dir")
@@ -242,7 +242,7 @@ def find_full_path(root_directories, relative_path):
         :param relative_path: the relative path to find the valid root directory
         :return: full-path (Path object)
     """
-    ActivityLog().log("dlc_utils: find_full_path")
+    ActivityLog().deprecate_log("dlc_utils: find_full_path")
     relative_path = _to_Path(relative_path)
 
     if relative_path.exists():
@@ -271,7 +271,7 @@ def find_root_directory(root_directories, full_path):
         :param full_path: the full path to search the root directory
         :return: root_directory (Path object)
     """
-    ActivityLog().log("dlc_utils: find_full_path")
+    ActivityLog().deprecate_log("dlc_utils: find_full_path")
     full_path = _to_Path(full_path)
 
     if not full_path.exists():

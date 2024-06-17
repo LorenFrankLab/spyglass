@@ -822,12 +822,13 @@ def delete_downstream_merge(
 
     Passthrough to SpyglassMixin.delete_downstream_merge
     """
-    logger.warning(
-        "DEPRECATED: This function will be removed in `0.6`. "
-        + "Use AnyTable().delete_downstream_merge() instead."
-    )
 
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        "delete_downstream_merge. Use Table.delete_downstream_merge"
+    )
 
     if not isinstance(table, SpyglassMixin):
         raise ValueError("Input must be a Spyglass Table.")

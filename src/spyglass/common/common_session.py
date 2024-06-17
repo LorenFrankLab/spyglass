@@ -120,7 +120,7 @@ class Session(SpyglassMixin, dj.Imported):
             allow_direct_insert=True,  # for populate_all_common
         )
 
-        logger.info("Session populates Skipping Apparatus for now...")
+        logger.info("Skipping Apparatus for now...")
         # Apparatus().insert_from_nwbfile(nwbf)
 
         # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
@@ -148,8 +148,8 @@ class Session(SpyglassMixin, dj.Imported):
             }
             if len(query) == 0:
                 logger.warn(
-                    f"DataAcquisitionDevice with name {device_name} does not exist. "
-                    "Cannot link Session with DataAcquisitionDevice in Session.DataAcquisitionDevice."
+                    "Cannot link Session with DataAcquisitionDevice.\n"
+                    + f"DataAcquisitionDevice does not exist: {device_name}"
                 )
                 continue
             key = dict()
@@ -166,7 +166,7 @@ class Session(SpyglassMixin, dj.Imported):
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
                 logger.warn(
-                    "Cannot link Session with LabMember."
+                    "Cannot link Session with LabMember. "
                     + f"LabMember does not exist: {name}"
                 )
                 continue
