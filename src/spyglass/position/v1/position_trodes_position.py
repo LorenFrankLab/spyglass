@@ -1,6 +1,5 @@
 import copy
 import os
-from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -8,12 +7,10 @@ from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.position.v1.dlc_utils import (
-    check_videofile,
-    get_video_path,
-)
+from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
+from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
 from spyglass.position.v1.dlc_utils_makevid import make_video
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_trodes_position")
@@ -290,16 +287,26 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         )[0].as_posix()
 
         output_video_filename = (
-            Path(os.getcwd()) / key["nwb_file_name"].replace(".nwb", "")
-            + f"_{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
+            key["nwb_file_name"].replace(".nwb", "")
+            + f"_{epoch:02d}_"
+            + f'{key["trodes_pos_params_name"]}.mp4'
         )
+
+        adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
+
+        if test_mode:
+            # pytest video data has mismatched shapes in some cases
+            min_len = min(len(adj_df), len(pos_df), len(video_time))
+            adj_df = adj_df[:min_len]
+            pos_df = pos_df[:min_len]
+            video_time = video_time[:min_len]
 
         make_video(
             processor="opencv-trodes",
             video_filename=video_path,
             centroids={
-                "red": np.asarray(raw_df[["xloc", "yloc"]]),
-                "green": np.asarray(raw_df[["xloc2", "yloc2"]]),
+                "red": np.asarray(adj_df[["xloc", "yloc"]]),
+                "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
             },
             position_mean=np.asarray(pos_df[["position_x", "position_y"]]),
             orientation_mean=np.asarray(pos_df[["orientation"]]),

@@ -218,8 +218,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         METERS_PER_CM = 0.01
 
-        logger.logger.info("----------------------")
-        logger.logger.info("Pose Estimation")
+        logger.info("----------------------")
+        logger.info("Pose Estimation")
         # ID model and directories
         dlc_model = (DLCModel & key).fetch1()
         bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
@@ -249,7 +249,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             dlc_result.creation_time
         ).strftime("%Y-%m-%d %H:%M:%S")
 
-        logger.logger.info("getting raw position")
+        logger.info("getting raw position")
         interval_list_name = (
             convert_epoch_interval_name_to_position_interval_name(
                 {
@@ -271,7 +271,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         key["meters_per_pixel"] = spatial_series.conversion
 
         # Insert entry into DLCPoseEstimation
-        logger.logger.info(
+        logger.info(
             "Inserting %s, epoch %02d into DLCPoseEsimation",
             key["nwb_file_name"],
             key["epoch"],
@@ -293,9 +293,9 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 )
         idx = pd.IndexSlice
         for body_part, part_df in body_parts_df.items():
-            logger.logger.info("converting to cm")
+            logger.info("converting to cm")
             part_df = convert_to_cm(part_df, meters_per_pixel)
-            logger.logger.info("adding timestamps to DataFrame")
+            logger.info("adding timestamps to DataFrame")
             part_df = add_timestamps(
                 part_df, pos_time=pos_time, video_time=video_time
             )

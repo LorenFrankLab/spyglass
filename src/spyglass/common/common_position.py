@@ -705,7 +705,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
 
                 head_position = head_position_mean[time_ind]
                 head_position = self.convert_to_pixels(
-                    head_position, frame_size, cm_to_pixels
+                    data=head_position, cm_to_pixels=cm_to_pixels
                 )
                 head_orientation = head_orientation_mean[time_ind]
 

@@ -185,7 +185,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         project_path = Path((SourceTable & key).fetch1("project_path"))
 
         available_config = list(project_path.glob("*config.y*ml"))
-        dj_config = [path for path in available_config if "dj_dlc" in path]
+        dj_config = [path for path in available_config if "dj_dlc" in str(path)]
         config_path = (
             Path(dj_config[0])
             if len(dj_config) > 0

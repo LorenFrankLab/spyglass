@@ -31,12 +31,12 @@ class VideoMaker:
     def __init__(
         self,
         video_filename,
-        video_frame_inds,
         position_mean,
         orientation_mean,
         centroids,
-        likelihoods,
         position_time,
+        video_frame_inds=None,
+        likelihoods=None,
         processor="opencv",  # opencv, opencv-trodes, matplotlib
         video_time=None,
         frames=None,
@@ -130,7 +130,7 @@ class VideoMaker:
         )
         self.frame_rate = self.video.get(5)
 
-    def _intit_cv_video(self):
+    def _init_cv_video(self):
         _ = self._init_video()
         self.out = cv2.VideoWriter(
             filename=self.output_video_filename,
@@ -139,16 +139,25 @@ class VideoMaker:
             frameSize=self.frame_size,
             isColor=True,
         )
+        frames_log = (
+            f"\tFrames start: {self.frames[0]}\n" if np.any(self.frames) else ""
+        )
+        inds_log = (
+            f"\tVideo frame inds: {self.video_frame_inds[0]}\n"
+            if np.any(self.video_frame_inds)
+            else ""
+        )
         logger.info(
-            f"\tFrames start: {self.frames[0]}\n"
-            + f"\tVideo_frames start: {self.video_frame_inds[0]}\n"
-            + f"\tcv2 frame ind start: {int(self.video.get(1))}"
+            f"\n{frames_log}{inds_log}\tcv2 ind start: {int(self.video.get(1))}"
         )
 
     def _close_cv_video(self):
         self.video.release()
         self.out.release()
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
         logger.info(f"Finished video: {self.output_video_filename}")
 
     def _get_frame(self, frame, init_only=False, crop_order=(0, 1, 2, 3)):
@@ -219,10 +228,10 @@ class VideoMaker:
         )
 
     def make_video_opencv(self):
-        _ = self._intit_cv_video()
+        _ = self._init_cv_video()
 
         if self.video_time:
-            position_mean = {
+            self.position_mean = {
                 key: fill_nan(
                     self.position_mean[key]["position"],
                     self.video_time,
@@ -230,7 +239,7 @@ class VideoMaker:
                 )
                 for key in self.position_mean.keys()
             }
-            orientation_mean = {
+            self.orientation_mean = {
                 key: fill_nan(
                     self.position_mean[key]["orientation"],
                     self.video_time,
@@ -260,19 +269,17 @@ class VideoMaker:
             )
 
             if time_ind < self.video_frame_inds[0] - 1:
-                self.out.write(self.get_frame(frame, init_only=True))
+                self.out.write(self._get_frame(frame, init_only=True))
                 continue
 
             pos_ind = time_ind - self.video_frame_inds[0]
 
-            for key in position_mean:
-                position = (
-                    _to_px(
-                        position_mean[key][pos_ind],
-                        self.cm_to_pixels,
-                    ),
+            for key in self.position_mean:
+                position = _to_px(
+                    data=self.position_mean[key][pos_ind],
+                    cm_to_pixels=self.cm_to_pixels,
                 )
-                orientation = orientation_mean[key][pos_ind]
+                orientation = self.orientation_mean[key][pos_ind]
                 cv_kwargs = {
                     "img": frame,
                     "color": self.source_map[key],
@@ -286,9 +293,9 @@ class VideoMaker:
         return
 
     def make_trodes_video(self):
-        _ = self._intit_cv_video()
+        _ = self._init_cv_video()
 
-        if self.video_time:
+        if np.any(self.video_time):
             centroids = {
                 color: fill_nan(
                     variable=data,
@@ -314,7 +321,7 @@ class VideoMaker:
             red_centroid = centroids["red"][time_ind]
             green_centroid = centroids["green"][time_ind]
             position = position_mean[time_ind]
-            position = _to_px(position, self.cm_to_pixels)
+            position = _to_px(data=position, cm_to_pixels=self.cm_to_pixels)
             orientation = orientation_mean[time_ind]
 
             self._make_circle(data=red_centroid, img=frame, color=RGB_YELLOW)
@@ -460,7 +467,7 @@ class VideoMaker:
             self._update_plot,
             frames=self.frames,
             interval=1000 / fps,
-            blit=True,
+            # blit=True,
         )
         movie.save(self.output_video_filename, writer=writer, dpi=400)
         self.video.release()
@@ -470,7 +477,9 @@ class VideoMaker:
 
     def _get_centroid_data(self, pos_ind):
         def centroid_to_px(*idx):
-            return _to_px(self.position_mean[idx], self.cm_to_pixels)
+            return _to_px(
+                data=self.position_mean[idx], cm_to_pixels=self.cm_to_pixels
+            )
 
         if not self.crop:
             return centroid_to_px(pos_ind)
@@ -485,10 +494,13 @@ class VideoMaker:
         def orient_list(c):
             return [c, c + 30 * np.cos(self.orientation_mean[pos_ind])]
 
-        c0, c1 = self._get_centroid_data(frame, pos_ind)
-        self.orientation_line.set_data(orient_list(c0), orient_list(c1))
+        if np.all(np.isnan(self.orientation_mean[pos_ind])):
+            self.orientation_line.set_data((np.NaN, np.NaN))
+        else:
+            c0, c1 = self._get_centroid_data(pos_ind)
+            self.orientation_line.set_data(orient_list(c0), orient_list(c1))
 
-    def _update_plot(self, time_ind):
+    def _update_plot(self, time_ind, *args):
         _ = self._video_set_by_ind(time_ind)
 
         ret, frame = self.video.read()
@@ -513,13 +525,13 @@ class VideoMaker:
         neg_inds = np.where(likelihood_inds < 0)[0]
         likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
 
-        dlc_centroid_data = self._get_centroid_data(frame, pos_ind)
+        dlc_centroid_data = self._get_centroid_data(pos_ind)
 
         for bodypart in self.centroid_plot_objs:
             self.centroid_plot_objs[bodypart].set_offsets(
                 _to_px(
-                    self.centroids[bodypart][pos_ind],
-                    self.cm_to_pixels,
+                    data=self.centroids[bodypart][pos_ind],
+                    cm_to_pixels=self.cm_to_pixels,
                 )
             )
         self.centroid_position_dot.set_offsets(dlc_centroid_data)

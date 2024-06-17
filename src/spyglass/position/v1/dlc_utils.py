@@ -18,8 +18,8 @@ import pandas as pd
 
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
-from spyglass.utils.logging import logger, stream_handler
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
+from spyglass.utils.logging import logger, stream_handler
 
 
 def validate_option(
@@ -403,6 +403,10 @@ def check_videofile(
         paths to converted video file(s)
     """
     # TODO: This func is never called bare, only func()[0] and often with .as_posix()
+
+    if not video_path or not Path(video_path).exists():
+        raise FileNotFoundError(f"Video path does not exist: {video_path}")
+
     video_files = (
         [Path(video_path) / video_filename]
         if video_filename
@@ -522,7 +526,10 @@ def _check_packets(file, count_frames=False):
             f"Check packets error: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = check_process.communicate()
-    return int(out.decode("utf-8").split("\n")[0])
+    decoded_out = out.decode("utf-8").split("\n")[0]
+    if decoded_out.isnumeric():
+        return int(decoded_out)
+    raise ValueError(f"Check packets error: {out}")
 
 
 def get_gpu_memory():

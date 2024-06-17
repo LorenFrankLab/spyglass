@@ -4,10 +4,10 @@ from pathlib import Path
 
 import datajoint as dj
 
-from spyglass.position.v1.dlc_utils import OutputLogger, file_log
+from spyglass.position.v1.dlc_utils import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
-from spyglass.utils import SpyglassMixin, logger
 from spyglass.settings import test_mode
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_training")
 
@@ -114,7 +114,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         self.log_path = Path(config_path).parent / "log.log"
         self._logged_make(key)
 
-    @file_log(logger, console=True)
+    @file_log(logger, console=True)  # THIS WORKS
     def _logged_make(self, key):
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
@@ -147,7 +147,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 "project_path": Path(project_path).as_posix(),
                 "modelprefix": model_prefix,
                 "train_fraction": dlc_config["TrainingFraction"][
-                    int(dlc_config["trainingsetindex"])
+                    int(dlc_config.get("trainingsetindex", 0))
                 ],
                 "training_filelist_datajoint": [  # don't overwrite origin video_sets
                     Path(fp).as_posix()
@@ -167,7 +167,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             for k, v in dlc_config.items()
             if k in training_dataset_input_args
         }
-        logger.logger.info("creating training dataset")
+        logger.info("creating training dataset")
         create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
         # ---- Trigger DLC model training job ----
         train_network_kwargs = {
@@ -184,7 +184,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         try:
             train_network(dlc_cfg_filepath, **train_network_kwargs)
         except KeyboardInterrupt:
-            logger.logger.info("DLC training stopped via Keyboard Interrupt")
+            logger.info("DLC training stopped via Keyboard Interrupt")
 
         snapshots = (
             project_path

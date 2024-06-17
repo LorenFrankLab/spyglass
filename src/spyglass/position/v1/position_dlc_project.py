@@ -48,7 +48,7 @@ class BodyPart(SpyglassMixin, dj.Manual):
             bodyparts_dict = [
                 {"bodypart": bp, "bodypart_description": bp} for bp in bodyparts
             ]
-        cls.insert(bodyparts_dict, skip_duplicates=True)
+        cls().insert(bodyparts_dict, skip_duplicates=True)
 
 
 @schema
@@ -93,12 +93,13 @@ class DLCProject(SpyglassMixin, dj.Manual):
             raise ValueError("frames_per_video must be of type `int`")
         super().insert1(key, **kwargs)
 
-    def _existing_project(cls, project_name):
-        if project_name in cls.fetch("project_name"):
+    def _existing_project(self, project_name):
+        if project_name in self.fetch("project_name"):
             logger.warning(f"project name: {project_name} is already in use.")
-        return (cls & {"project_name": project_name}).fetch1(
-            "project_name", "config_path", as_dict=True
-        )
+            return (self & {"project_name": project_name}).fetch(
+                "project_name", "config_path", as_dict=True
+            )[0]
+        return None
 
     @classmethod
     def insert_existing_project(
@@ -127,7 +128,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         """
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        if (existing := cls._existing_project(project_name)) is not None:
+        if (existing := cls()._existing_project(project_name)) is not None:
             return existing
 
         cfg = read_config(config_path)
@@ -187,8 +188,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path.as_posix(),
             "frames_per_video": frames_per_video,
         }
-        cls.insert1(key, **kwargs)
-        cls.BodyPart.insert(
+        cls().insert1(key, **kwargs)
+        cls().BodyPart.insert(
             [
                 {"project_name": project_name, "bodypart": bp}
                 for bp in all_bodyparts
@@ -196,7 +197,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             **kwargs,
         )
         if add_to_files:  # Check for training files to add
-            cls.add_training_files(key, **kwargs)
+            cls().add_training_files(key, **kwargs)
 
         return {
             "project_name": project_name,
@@ -241,7 +242,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
         """
-        if (existing := cls._existing_project(project_name)) is not None:
+        from deeplabcut import create_new_project
+
+        if (existing := cls()._existing_project(project_name)) is not None:
             return existing
         if not bool(LabTeam() & {"team_name": lab_team}):
             raise ValueError(f"LabTeam does not exist: {lab_team}")
@@ -251,9 +254,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         # If dict, assume of form {'nwb_file_name': nwb_file_name, 'epoch': epoch}
         # and pass to get_video_path to reference VideoFile table for path
 
-        videos = cls._process_videos(video_list, output_path)
-
-        from deeplabcut import create_new_project
+        videos = cls()._process_videos(video_list, output_path)
 
         config_path = create_new_project(
             project=project_name,
@@ -282,8 +283,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path,
             "frames_per_video": frames_per_video,
         }
-        cls.insert1(key, **kwargs)
-        cls.BodyPart.insert(
+        cls().insert1(key, **kwargs)
+        cls().BodyPart.insert(
             [
                 {"project_name": project_name, "bodypart": bp}
                 for bp in bodyparts
@@ -291,7 +292,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             **kwargs,
         )
         if add_to_files:  # Add videos to training files
-            cls.add_training_files(key, **kwargs)
+            cls().add_training_files(key, **kwargs)
 
         if isinstance(config_path, PosixPath):
             config_path = config_path.as_posix()
@@ -302,7 +303,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         if all(isinstance(n, Dict) for n in video_list):
             videos_to_convert = []
             for video in video_list:
-                if (video_path := get_video_path(video)) is not None:
+                if (video_path := get_video_path(video))[0] is not None:
                     videos_to_convert.append(video_path)
 
         else:  # Otherwise, assume list of video file paths
@@ -347,7 +348,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         if add_to_files and not has_proj:
             raise ValueError("Cannot set add_to_files=True without passing key")
 
-        videos = cls._process_videos(video_list, output_path)
+        videos = cls()._process_videos(video_list, output_path)
 
         if add_new:
             from deeplabcut import add_new_videos
@@ -355,7 +356,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             add_new_videos(config=config_path, videos=videos, copy_videos=True)
 
         if add_to_files:  # Add videos to training files
-            cls.add_training_files(key, **kwargs)
+            cls().add_training_files(key, **kwargs)
         return videos
 
     @classmethod
@@ -397,7 +398,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                     "file_path": video,
                 }
             )
-        cls.File.insert(video_inserts, **kwargs)
+        cls().File.insert(video_inserts, **kwargs)
 
         if len(training_files) == 0:
             logger.warning("No training files to add")
@@ -405,7 +406,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
 
         for file in training_files:
             path_obj = Path(file)
-            cls.File.insert1(
+            cls().File.insert1(
                 {
                     **key,
                     "file_name": f"{path_obj.name}_labeled_data",
@@ -498,7 +499,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 new_video_path / f"CollectedData_{team_name}.h5",
                 "df_with_missing",
             )
-        cls.add_training_files(key, **kwargs)
+        cls().add_training_files(key, **kwargs)
 
 
 def add_to_config(

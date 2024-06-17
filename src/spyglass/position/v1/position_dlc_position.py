@@ -16,9 +16,8 @@ from spyglass.position.v1.dlc_utils import (
     validate_smooth_params,
 )
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
-from spyglass.utils import SpyglassMixin, logger
 from spyglass.settings import test_mode
-
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_position")
 
@@ -168,7 +167,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         self._logged_make(key)
         logger.info("inserted entry into DLCSmoothInterp")
 
-    @file_log(log_path)
+    @file_log(logger, console=False)
     def _logged_make(self, key):
 
         METERS_PER_CM = 0.01
@@ -189,7 +188,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         logger.info("Identifying indices to NaN")
         df_w_nans, bad_inds = nan_inds(
             dlc_df.copy(),
-            params["max_cm_between_pts"],
+            max_dist_between=params["max_cm_between_pts"],
             likelihood_thresh=params.pop("likelihood_thresh"),
             inds_to_span=params["num_inds_to_span"],
         )
@@ -437,6 +436,8 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
 
     if len(good) < 1:
         return None, good
+    elif len(good) == 1:  # if all good, no need to modify
+        return good, good
 
     modified_spans = []
     for (start1, stop1), (start2, stop2) in zip(good[:-1], good[1:]):

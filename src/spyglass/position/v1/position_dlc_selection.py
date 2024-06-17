@@ -313,28 +313,20 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     ---
     """
 
-    # TODO: Shoultn't this keep track of the video file it creates?
-
     def make(self, key):
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")
 
-        key["interval_list_name"] = (
-            convert_epoch_interval_name_to_position_interval_name(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "epoch": key["epoch"],
-                },
-                populate_missing=False,
-            )
+        interval_name = convert_epoch_interval_name_to_position_interval_name(
+            {
+                "nwb_file_name": key["nwb_file_name"],
+                "epoch": key["epoch"],
+            },
+            populate_missing=False,
         )
         epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
+            int(interval_name.replace("pos ", "").replace(" valid times", ""))
             + 1
         )
         pose_est_key = {
@@ -417,7 +409,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             centroids=centroids,
             likelihoods=likelihoods,
             position_time=np.asarray(pos_info_df.index),
-            processor=params.get("processor", "matplotlib"),
+            processor=params.get("processor", "opencv"),
             frames=np.arange(frames[0], frames[1]) if frames else None,
             percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
