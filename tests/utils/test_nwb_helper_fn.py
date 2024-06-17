@@ -36,7 +36,7 @@ def custom_nwbfile(common):
             filtering="filtering",
             group=elec_group,
         )
-    elecs_region = nwbfile.electrodes.create_region(
+    electrode_region = nwbfile.electrodes.create_region(
         name="electrodes",
         region=[2, 3, 4, 5],
         description="description",  # indices
@@ -46,7 +46,7 @@ def custom_nwbfile(common):
             name="eseries",
             data=[0, 1, 2],
             timestamps=[0.0, 1.0, 2.0],
-            electrodes=elecs_region,
+            electrodes=electrode_region,
         )
     )
     yield nwbfile

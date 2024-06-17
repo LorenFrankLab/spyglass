@@ -71,7 +71,7 @@ def add_member_team(common_lab, add_admin):
     yield
 
 
-def test_labmember_insert_file_str(mini_insert, common_lab, mini_copy_name):
+def test_lab_member_insert_file_str(mini_insert, common_lab, mini_copy_name):
     before = common_lab.LabMember.fetch()
     common_lab.LabMember.insert_from_nwbfile(mini_copy_name)
     after = common_lab.LabMember.fetch()
