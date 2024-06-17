@@ -1,3 +1,5 @@
+import uuid
+
 import datajoint as dj
 import numpy as np
 
@@ -9,7 +11,6 @@ from spyglass.lfp.v1.lfp_artifact_difference_detection import (
 )
 from spyglass.lfp.v1.lfp_artifact_MAD_detection import mad_artifact_detector
 from spyglass.utils.dj_mixin import SpyglassMixin
-import uuid
 
 schema = dj.schema("lfp_v1")
 
@@ -184,7 +185,6 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             dict(
                 artifact_times=artifact_times,
                 artifact_removed_valid_times=artifact_removed_valid_times,
-                # name for no-artifact time name using recording id
                 artifact_removed_interval_list_name=uuid.uuid4(),
             )
         )
@@ -193,11 +193,11 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             "nwb_file_name": key["nwb_file_name"],
             "interval_list_name": key["artifact_removed_interval_list_name"],
             "valid_times": key["artifact_removed_valid_times"],
-            "pipeline": "lfp_artifact",
+            "pipeline": self.full_table_name,
         }
 
-        LFPArtifactRemovedIntervalList.insert1(key, skip_duplicates=True)
-        IntervalList.insert1(interval_key, skip_duplicates=True)
+        LFPArtifactRemovedIntervalList.insert1(key)
+        IntervalList.insert1(interval_key)
         self.insert1(key)
 
 
