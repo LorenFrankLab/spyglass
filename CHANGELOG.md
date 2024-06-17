@@ -6,6 +6,12 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+from spyglass.common.common_behav import PositionIntervalMap
+
+PositionIntervalMap.alter()
+```
+
 ### Infrastructure
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
@@ -29,12 +35,18 @@
     - Remove unused `ElectrodeBrainRegion` table #1003
     - Files created by `AnalysisNwbfile.create()` receive new object_id #999,
         #1004
+    - Remove redundant calls to tables in `populate_all_common` #870
+    - Improve logging clarity in `populate_all_common` #870
+    - `PositionIntervalMap` now inserts null entries for missing intervals #870
 - Decoding: Default values for classes on `ImportError` #966
 - Position
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
     - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
+    - Add keyword args to all calls of `convert_to_pixels` #870
+    - Unify `make_video` logic across `DLCPosVideo` and `TrodesVideo` #870
+    - Replace `OutputLogger` context manager with decorator #870
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
