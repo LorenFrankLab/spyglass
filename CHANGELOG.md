@@ -25,6 +25,7 @@ PositionIntervalMap.alter()
 - Add pytests for position pipeline, various `test_mode` exceptions #966
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
+- Allow mixin tables with parallelization in `make` to run populate with `processes > 1` #1001
 
 ### Pipelines
 
