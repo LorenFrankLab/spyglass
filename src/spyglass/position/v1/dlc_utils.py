@@ -144,6 +144,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
     -------
     None
     """
+    ActivityLog().deprecate_log("dlc_utils: _set_permissions")
 
     directory = Path(directory)
     assert directory.exists(), f"Target directory: {directory} does not exist"

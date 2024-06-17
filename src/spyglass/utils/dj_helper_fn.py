@@ -141,7 +141,7 @@ def dj_replace(original_table, new_values, key_column, replace_column):
     return original_table
 
 
-def get_fetching_table_from_stack(stack):
+def get_all_tables_in_stack(stack):
     """Get all classes from a stack of tables."""
     classes = set()
     for frame_info in stack:
@@ -152,6 +152,12 @@ def get_fetching_table_from_stack(stack):
             if (name := obj.full_table_name) in PERIPHERAL_TABLES:
                 continue  # skip common_nwbfile tables
             classes.add(name)
+    return classes
+
+
+def get_fetching_table_from_stack(stack):
+    """Get all classes from a stack of tables."""
+    classes = get_all_tables_in_stack(stack)
     if len(classes) > 1:
         logger.warn(
             f"Multiple classes found in stack: {classes}. "
