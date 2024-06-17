@@ -503,8 +503,10 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---
-    position_interval_name: varchar(200)  # name of the corresponding position interval
+    position_interval_name="": varchar(200)  # name of the corresponding interval
     """
+
+    # #849 - Insert null to avoid rerun
 
     def make(self, key):
         self._no_transaction_make(key)
@@ -518,6 +520,8 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             # if not called in the context of a make function, call its own make function
             self.populate(key)
             return
+        if self & key:
+            return
 
         # *** HARD CODED VALUES ***
         EPSILON = 0.51  # tolerated time diff in bounds across epoch/pos
@@ -525,11 +529,13 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         nwb_file_name = key["nwb_file_name"]
         pos_intervals = get_pos_interval_list_names(nwb_file_name)
+        null_key = dict(key, position_interval_name="")
+        insert_opts = dict(allow_direct_insert=True, skip_duplicates=True)
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            # TODO: Now that populate_all accept errors, raise here?
             logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
+            self.insert1(null_key, **insert_opts)
             return
 
         valid_times = (IntervalList & key).fetch1("valid_times")
@@ -543,7 +549,6 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             f"nwb_file_name='{nwb_file_name}' AND interval_list_name=" + "'{}'"
         )
         for pos_interval in pos_intervals:
-            # cbroz: fetch1->fetch. fetch1 would fail w/o result
             pos_times = (IntervalList & restr.format(pos_interval)).fetch(
                 "valid_times"
             )
@@ -566,16 +571,18 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            # TODO: Now that populate_all accept errors, raise here?
             logger.warning(
-                f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
-                + f"{no_pop_msg}\n{matching_pos_intervals}"
+                f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos intervals for "
+                + f"\n\t{key}\n\tMatching intervals: {matching_pos_intervals}"
             )
+            self.insert1(null_key, **insert_opts)
             return
 
         # Insert into table
-        key["position_interval_name"] = matching_pos_intervals[0]
-        self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+        self.insert1(
+            dict(key, position_interval_name=matching_pos_intervals[0]),
+            **insert_opts,
+        )
         logger.info(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
@@ -617,18 +624,26 @@ def convert_epoch_interval_name_to_position_interval_name(
         )
 
     pos_query = PositionIntervalMap & key
+    pos_str = "position_interval_name"
 
-    if len(pos_query) == 0:
-        if populate_missing:
-            PositionIntervalMap()._no_transaction_make(key)
-            pos_query = PositionIntervalMap & key
+    no_entries = len(pos_query) == 0
+    null_entry = pos_query.fetch(pos_str)[0] == "" if len(pos_query) else False
 
-    if len(pos_query) == 0:
+    if populate_missing and (no_entries or null_entry):
+        if null_entry:
+            pos_query.delete(safemode=False)  # no prompt
+        PositionIntervalMap()._no_transaction_make(key)
+        pos_query = PositionIntervalMap & key
+
+    if pos_query.fetch(pos_str)[0] == "":
         logger.info(f"No position intervals found for {key}")
         return []
 
     if len(pos_query) == 1:
         return pos_query.fetch1("position_interval_name")
+
+    else:
+        raise ValueError(f"Multiple intervals found for {key}: {pos_query}")
 
 
 def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
