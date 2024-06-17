@@ -56,8 +56,8 @@ class PositionSource(SpyglassMixin, dj.Manual):
             keys = [keys]
         if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
             keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
-        for key in keys:
-            nwb_file_name = key.get("nwb_file_name")
+        nwb_files = set(key.get("nwb_file_name") for key in keys)
+        for nwb_file_name in nwb_files:  # Only unique nwb files
             if not nwb_file_name:
                 raise ValueError("PositionSource.make requires nwb_file_name")
             self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
@@ -311,7 +311,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
         if associated_files is None:
             logger.info(
                 "Unable to import StateScriptFile: no processing module named "
-                + '"associated_files" found in {nwb_file_name}.'
+                + f'"associated_files" found in {nwb_file_name}.'
             )
             return  # See #849
 
@@ -661,13 +661,12 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
 
 
 def populate_position_interval_map_session(nwb_file_name: str):
-    for interval_name in (TaskEpoch & {"nwb_file_name": nwb_file_name}).fetch(
-        "interval_list_name"
-    ):
-        with PositionIntervalMap._safe_context():
-            PositionIntervalMap().make(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_name,
-                }
-            )
+    # 1. remove redundancy in interval names
+    # 2. let PositionIntervalMap handle transaction context
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    intervals = (TaskEpoch & nwb_dict).fetch("interval_list_name")
+    for interval_name in set(intervals):
+        interval_dict = dict(interval_list_name=interval_name)
+        if PositionIntervalMap & interval_dict:
+            continue
+        PositionIntervalMap().make(dict(nwb_dict, **interval_dict))

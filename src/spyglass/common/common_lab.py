@@ -213,8 +213,8 @@ class LabTeam(SpyglassMixin, dj.Manual):
             )
             if not query:
                 logger.info(
-                    f"Please add the Google user ID for {team_member} in "
-                    + "LabMember.LabMemberInfo to help manage permissions."
+                    "To help manage permissions in LabMemberInfo, please add Google "
+                    + f"user ID for {team_member}"
                 )
             labteammember_dict = {
                 "team_name": team_name,
