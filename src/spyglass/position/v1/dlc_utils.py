@@ -331,10 +331,11 @@ def _to_Path(path):
     return Path(str(path).replace("\\", "/"))
 
 
-def get_video_path(key):
-    """
+def get_video_info(key):
+    """Returns video path for a given key.
+
     Given nwb_file_name and interval_list_name returns specified
-    video file filename and path
+    video file filename, path, meters_per_pixel, and timestamps.
 
     Parameters
     ----------
@@ -347,6 +348,10 @@ def get_video_path(key):
         path to the video file, including video filename
     video_filename : str
         filename of the video
+    meters_per_pixel : float
+        meters per pixel conversion factor
+    timestamps : np.array
+        timestamps of the video
     """
     import pynwb
 
@@ -375,15 +380,13 @@ def get_video_path(key):
     return video_dir, video_filename, meters_per_pixel, timestamps
 
 
-def check_videofile(
+def find_mp4(
     video_path: Union[str, PosixPath],
     output_path: Union[str, PosixPath] = dlc_video_dir,
     video_filename: str = None,
     video_filetype: str = "h264",
 ):
-    """
-    Checks the file extension of a video file to make sure it is .mp4 for
-    DeepLabCut processes. Converts to MP4 if not already.
+    """Check for video file and convert to .mp4 if necessary.
 
     Parameters
     ----------
@@ -392,18 +395,18 @@ def check_videofile(
     output_path : str or PosixPath object
         path to directory where converted video will be saved
     video_filename : str, Optional
-        filename of the video to convert, if not provided, video_filetype must be
-        and all video files of video_filetype in the directory will be converted
+        filename of the video to convert, if not provided, video_filetype must
+        be and all video files of video_filetype in the directory will be
+        converted
     video_filetype : str or List, Default 'h264', Optional
         If video_filename is not provided,
         all videos of this filetype will be converted to .mp4
 
     Returns
     -------
-    output_files : List of PosixPath objects
-        paths to converted video file(s)
+    PosixPath object
+        path to converted video file
     """
-    # TODO: This func is never called bare, only func()[0] and often with .as_posix()
 
     if not video_path or not Path(video_path).exists():
         raise FileNotFoundError(f"Video path does not exist: {video_path}")
@@ -414,20 +417,21 @@ def check_videofile(
         else Path(video_path).glob(f"*.{video_filetype}")
     )
 
-    output_files = []
-    for video_filepath in video_files:
-        if video_filepath.exists() and video_filepath.suffix == ".mp4":
-            output_files.append(video_filepath)
-            continue
-        video_file = (
-            video_filepath.as_posix()
-            .rsplit(video_filepath.parent.as_posix(), maxsplit=1)[-1]
-            .split("/")[-1]
+    if len(video_files) != 1:
+        raise FileNotFoundError(
+            f"Found {len(video_files)} video files in {video_path}"
         )
-        output_files.append(
-            _convert_mp4(video_file, video_path, output_path, videotype="mp4")
-        )
-    return output_files
+    video_filepath = video_files[0]
+
+    if video_filepath.exists() and video_filepath.suffix == ".mp4":
+        return video_filepath
+
+    video_file = (
+        video_filepath.as_posix()
+        .rsplit(video_filepath.parent.as_posix(), maxsplit=1)[-1]
+        .split("/")[-1]
+    )
+    return _convert_mp4(video_file, video_path, output_path, videotype="mp4")
 
 
 def _convert_mp4(

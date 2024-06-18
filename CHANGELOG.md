@@ -25,7 +25,8 @@ PositionIntervalMap.alter()
 - Add pytests for position pipeline, various `test_mode` exceptions #966
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
-- Allow mixin tables with parallelization in `make` to run populate with `processes > 1` #1001
+- Allow mixin tables with parallelization in `make` to run populate with
+    `processes > 1` #1001
 
 ### Pipelines
 
@@ -48,6 +49,8 @@ PositionIntervalMap.alter()
     - Add keyword args to all calls of `convert_to_pixels` #870
     - Unify `make_video` logic across `DLCPosVideo` and `TrodesVideo` #870
     - Replace `OutputLogger` context manager with decorator #870
+    - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
+        `get_video_info` to reflect actual use #870
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994

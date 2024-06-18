@@ -32,8 +32,6 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
     Parameters for calculating the centroid
     """
 
-    # TODO: whether to keep all params in a params dict
-    # or break out into individual secondary keys
     definition = """
     dlc_centroid_params_name: varchar(80) # name for this set of parameters
     ---
@@ -140,42 +138,8 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         self._logged_make(key)
         logger.info("inserted entry into DLCCentroid")
 
-    @file_log(logger)
-    def _logged_make(self, key):
-        idx = pd.IndexSlice
-        logger.info("-----------------------")
-        logger.info("Centroid Calculation")
-
-        # Get labels to smooth from Parameters table
-        cohort_entries = DLCSmoothInterpCohort.BodyPart & key
-        params = (DLCCentroidParams() & key).fetch1("params")
-        centroid_method = params.pop("centroid_method")
-        bodyparts_avail = cohort_entries.fetch("bodypart")
-        speed_smoothing_std_dev = params.pop("speed_smoothing_std_dev")
-
-        if not centroid_method:
-            raise ValueError("Please specify a centroid method to use.")
-        validate_option(option=centroid_method, options=_key_to_func_dict)
-
-        points = params.get("points")
-        required_points = _key_to_points.get(centroid_method)
-        validate_list(
-            required_items=required_points,
-            option_list=points,
-            name="params points",
-            condition=centroid_method,
-        )
-        for point in required_points:
-            bodypart = points[point]
-            if bodypart not in bodyparts_avail:
-                raise ValueError(
-                    "Bodypart in points not in model."
-                    f"\tBodypart {bodypart}"
-                    f"\tIn Model {bodyparts_avail}"
-                )
-        bodyparts_to_use = [points[point] for point in required_points]
-
-        pos_df = pd.concat(
+    def _fetch_pos_df(self, key, bodyparts_to_use):
+        return pd.concat(
             {
                 bodypart: (
                     DLCSmoothInterpCohort.BodyPart
@@ -185,9 +149,37 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
-        dt = np.median(np.diff(pos_df.index.to_numpy()))
-        sampling_rate = 1 / dt
-        logger.info("Calculating centroid with %s", str(centroid_method))
+
+    def _available_bodyparts(self, key):
+        return (DLCSmoothInterpCohort.BodyPart & key).fetch("bodypart")
+
+    @file_log(logger)
+    def _logged_make(self, key):
+        METERS_PER_CM = 0.01
+        idx = pd.IndexSlice
+        logger.info("Centroid Calculation")
+
+        # Get labels to smooth from Parameters table
+        params = (DLCCentroidParams() & key).fetch1("params")
+
+        if not (centroid_method := params.pop("centroid_method", None)):
+            raise ValueError("Please specify a centroid method to use.")
+        validate_option(option=centroid_method, options=_key_to_func_dict)
+
+        points = params.get("points")
+        required_points = _key_to_points.get(centroid_method)
+        for point in required_points:
+            if points[point] not in self._available_bodyparts(key):
+                raise ValueError(
+                    "Bodypart in points not in model."
+                    f"\tBodypart {points[point]}"
+                    f"\tIn Model {self._available_bodyparts(key)}"
+                )
+        bodyparts_to_use = [points[point] for point in required_points]
+
+        pos_df = self._fetch_pos_df(key=key, bodyparts_to_use=bodyparts_to_use)
+
+        logger.info(f"Calculating centroid with {centroid_method}")
         centroid_func = _key_to_func_dict.get(centroid_method)
         centroid = centroid_func(pos_df, **params)
         centroid_df = pd.DataFrame(
@@ -196,7 +188,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             index=pos_df.index.to_numpy(),
         )
 
-        if params["interpolate"]:
+        if params.get("interpolate"):
             if np.any(np.isnan(centroid)):
                 logger.info("interpolating over NaNs")
                 nan_inds = (
@@ -210,33 +202,23 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                     centroid_df.copy(), nan_spans, **params["interp_params"]
                 )
             else:
-                logger.info("no NaNs to interpolate over")
                 interp_df = centroid_df.copy()
         else:
             interp_df = centroid_df.copy()
 
-        if params["smooth"]:
-            smoothing_duration = params["smoothing_params"].get(
-                "smoothing_duration"
-            )
-            if not smoothing_duration:
-                raise KeyError(
-                    "smoothing_duration needs to be passed within smoothing_params"
-                )
+        sampling_rate = 1 / np.median(np.diff(pos_df.index.to_numpy()))
+        if params := params.get("smooth"):
+            smooth_params = params["smoothing_params"]
             dt = np.median(np.diff(pos_df.index.to_numpy()))
             sampling_rate = 1 / dt
-            logger.info("smoothing position")
             smooth_func = _key_to_smooth_func_dict[
-                params["smoothing_params"]["smooth_method"]
+                smooth_params["smooth_method"]
             ]
             logger.info(
-                "Smoothing using method: %s",
-                str(params["smoothing_params"]["smooth_method"]),
+                f"Smoothing using method: {smooth_func.__name__}",
             )
             final_df = smooth_func(
-                interp_df,
-                sampling_rate=sampling_rate,
-                **params["smoothing_params"],
+                interp_df, sampling_rate=sampling_rate, **smooth_params
             )
         else:
             final_df = interp_df.copy()
@@ -245,47 +227,43 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         velocity = get_velocity(
             final_df.loc[:, idx[("x", "y")]].to_numpy(),
             time=pos_df.index.to_numpy(),
-            sigma=speed_smoothing_std_dev,
+            sigma=params.pop("speed_smoothing_std_dev"),
             sampling_frequency=sampling_rate,
-        )  # cm/s
+        )
         speed = np.sqrt(np.sum(velocity**2, axis=1))  # cm/s
-        # Create dataframe
         velocity_df = pd.DataFrame(
             np.concatenate((velocity, speed[:, np.newaxis]), axis=1),
             columns=["velocity_x", "velocity_y", "speed"],
             index=pos_df.index.to_numpy(),
         )
         total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
-        pretrack_nan = np.sum(
-            final_df.iloc[:1000].loc[:, idx[("x", "y")]].isna().any(axis=1)
-        )
-        logger.info("total NaNs in centroid dataset: %d", total_nan)
-        logger.info(
-            "NaNs in centroid dataset before ind 1000: %d", pretrack_nan
-        )
+
+        logger.info(f"total NaNs in centroid dataset: {total_nan}")
+        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
         position = pynwb.behavior.Position()
         velocity = pynwb.behavior.BehavioralTimeSeries()
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
-        METERS_PER_CM = 0.01
+
+        common_attrs = {
+            "conversion": METERS_PER_CM,
+            "comments": spatial_series.comments,
+        }
         position.create_spatial_series(
             name="position",
             timestamps=final_df.index.to_numpy(),
-            conversion=METERS_PER_CM,
             data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
             reference_frame=spatial_series.reference_frame,
-            comments=spatial_series.comments,
             description="x_position, y_position",
+            **common_attrs,
         )
         velocity.create_timeseries(
             name="velocity",
             timestamps=velocity_df.index.to_numpy(),
-            conversion=METERS_PER_CM,
             unit="m/s",
             data=velocity_df.loc[
                 :, idx[("velocity_x", "velocity_y", "speed")]
             ].to_numpy(),
-            comments=spatial_series.comments,
             description="x_velocity, y_velocity, speed",
+            **common_attrs,
         )
         velocity.create_timeseries(
             name="video_frame_ind",
@@ -295,11 +273,18 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             description="video_frame_ind",
             comments="no comments",
         )
+
         # Add to Analysis NWB file
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
-        key.update(
+        nwb_analysis_file.add(
+            nwb_file_name=key["nwb_file_name"],
+            analysis_file_name=key["analysis_file_name"],
+        )
+
+        self.insert1(
             {
+                **key,
                 "analysis_file_name": analysis_file_name,
                 "dlc_position_object_id": nwb_analysis_file.add_nwb_object(
                     analysis_file_name, position
@@ -309,12 +294,6 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 ),
             }
         )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
-        )
-        self.insert1(key)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]

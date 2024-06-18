@@ -15,9 +15,9 @@ from spyglass.common.common_behav import (  # noqa: F401
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import (
-    check_videofile,
     file_log,
-    get_video_path,
+    find_mp4,
+    get_video_info,
     infer_output_dir,
 )
 from spyglass.position.v1.position_dlc_model import DLCModel
@@ -119,13 +119,13 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         self, key, task_mode, params, check_crop, skip_duplicates, output_dir
     ):
 
-        v_path, v_fname, _, _ = get_video_path(key)
+        v_path, v_fname, _, _ = get_video_info(key)
         if not v_path:
             raise FileNotFoundError(f"Video file not found for {key}")
         logger.info("Pose Estimation Selection")
         v_dir = Path(v_path).parent
         logger.info("video_dir: %s", v_dir)
-        v_path = check_videofile(video_path=v_dir, video_filename=v_fname)[0]
+        v_path = find_mp4(video_path=v_dir, video_filename=v_fname)
         if check_crop:
             params["cropping"] = self.get_video_crop(
                 video_path=v_path.as_posix()
@@ -262,7 +262,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         spatial_series = (
             RawPosition() & {**key, "interval_list_name": interval_list_name}
         ).fetch_nwb()[0]["raw_position"]
-        _, _, _, video_time = get_video_path(key)
+        _, _, _, video_time = get_video_info(key)
         pos_time = spatial_series.timestamps
 
         # TODO: should get timestamps from VideoFile, but need the

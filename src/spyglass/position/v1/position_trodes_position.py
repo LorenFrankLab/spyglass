@@ -8,7 +8,7 @@ from datajoint.utils import to_camel_case
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
-from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
@@ -273,7 +273,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             video_filename,
             meters_per_pixel,
             video_time,
-        ) = get_video_path(
+        ) = get_video_info(
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
 
@@ -281,10 +281,10 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             self.insert1(dict(**key, has_video=False))
             return
 
-        video_path = check_videofile(
+        video_path = find_mp4(
             video_path=os.path.dirname(video_path) + "/",
             video_filename=video_filename,
-        )[0].as_posix()
+        )
 
         output_video_filename = (
             key["nwb_file_name"].replace(".nwb", "")

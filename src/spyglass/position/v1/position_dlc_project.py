@@ -9,7 +9,7 @@ import pandas as pd
 from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
-from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
 
@@ -303,7 +303,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         if all(isinstance(n, Dict) for n in video_list):
             videos_to_convert = []
             for video in video_list:
-                if (video_path := get_video_path(video))[0] is not None:
+                if (video_path := get_video_info(video))[0] is not None:
                     videos_to_convert.append(video_path)
 
         else:  # Otherwise, assume list of video file paths
@@ -315,11 +315,11 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 videos_to_convert.append((vp.parent, vp.name))
 
         videos = [
-            check_videofile(
+            find_mp4(
                 video_path=video[0],
                 output_path=output_path,
                 video_filename=video[1],
-            )[0].as_posix()
+            )
             for video in videos_to_convert
         ]
 
