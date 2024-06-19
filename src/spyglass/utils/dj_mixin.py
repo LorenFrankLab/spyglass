@@ -1,4 +1,3 @@
-import multiprocessing.pool
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
 from collections import OrderedDict
@@ -128,6 +127,18 @@ class SpyglassMixin:
             logger.error(f"No file-like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+    def find_insert_fail(self, key):
+        """Find which parent table is causing an IntergrityError on insert."""
+        for parent in self.parents(as_objects=True):
+            parent_key = {
+                k: v for k, v in key.items() if k in parent.heading.names
+            }
+            parent_name = to_camel_case(parent.table_name)
+            if query := parent & parent_key:
+                logger.info(f"{parent_name}:\n{query}")
+            else:
+                logger.info(f"{parent_name}: MISSING")
 
     @classmethod
     def _safe_context(cls):
