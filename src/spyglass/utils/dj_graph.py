@@ -25,6 +25,7 @@ from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
+from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     PERIPHERAL_TABLES,
     fuzzy_get,
@@ -260,6 +261,16 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
+    def _is_out(self, table, warn=True):
+        """Check if table is outside of spyglass."""
+        table = self._ensure_names(table)
+        if self.graph.nodes.get(table):
+            return False
+        ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
+        if warn and ret:  # Log warning if outside
+            logger.warning(f"Skipping unimported: {table}")
+        return ret
+
     # ---------------------------- Graph Traversal -----------------------------
 
     def _bridge_restr(
@@ -299,15 +310,19 @@ class AbstractGraph(ABC):
         List[Dict[str, str]]
             List of dicts containing primary key fields for restricted table2.
         """
+        if self._is_out(table2) or self._is_out(table1):  # 2 more likely
+            return ["False"]  # Stop cascade if outside, see #1002
+
         if not all([direction, attr_map]):
             dir_bool, edge = self._get_edge(table1, table2)
             direction = "up" if dir_bool else "down"
             attr_map = edge.get("attr_map")
 
+        # May return empty table if outside imported and outside spyglass
         ft1 = self._get_ft(table1) & restr
         ft2 = self._get_ft(table2)
 
-        if len(ft1) == 0:
+        if len(ft1) == 0 or len(ft2) == 0:
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
@@ -462,9 +477,13 @@ class AbstractGraph(ABC):
             Whether to reverse the order. Default False. If true, bottom-up.
             If None, return nodes as is.
         """
-        nodes = self._ensure_names(nodes)
         if reverse is None:
             return nodes
+        nodes = [
+            node
+            for node in self._ensure_names(nodes)
+            if not self._is_out(node, warn=False)
+        ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
         ordered = unite_master_parts(list(topological_sort(graph)))
         if reverse:

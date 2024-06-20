@@ -239,14 +239,18 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_parts ------------------------
 
-    def _import_merge_tables(self):
+    def _import_part_masters(self):
         """Import all merge tables."""
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
+        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
         from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
         from spyglass.linearization.merge import (
             LinearizedPositionOutput,
         )  # noqa F401
         from spyglass.position.position_merge import PositionOutput  # noqa F401
+        from spyglass.spikesorting.analysis.v1.group import (  # noqa F401
+            SortedSpikesGroup,
+        )
         from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
             SpikeSortingOutput,
         )
@@ -255,7 +259,9 @@ class SpyglassMixin:
             DecodingOutput(),
             LFPOutput(),
             LinearizedPositionOutput(),
+            PositionGroup(),
             PositionOutput(),
+            SortedSpikesGroup(),
             SpikeSortingOutput(),
         )
 
@@ -286,7 +292,7 @@ class SpyglassMixin:
             _ = search_descendants(self)
         except NetworkXError:
             try:  # Attempt to import missing table
-                self._import_merge_tables()
+                self._import_part_masters()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
@@ -343,6 +349,7 @@ class SpyglassMixin:
         reload_cache: bool = False,
         disable_warning: bool = False,
         return_graph: bool = False,
+        verbose: bool = False,
         **kwargs,
     ) -> List[dj.FreeTable]:
         """Delete downstream merge table entries associated with restriction.
@@ -365,6 +372,8 @@ class SpyglassMixin:
             If True, return RestrGraph object used to identify downstream
             tables. Default False, return list of part FreeTables.
             True. If False, return dictionary of merge tables and their joins.
+        verbose : bool, optional
+            If True, call RestrGraph with verbose=True. Default False.
         **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
@@ -382,7 +391,7 @@ class SpyglassMixin:
             leaves={self.full_table_name: restriction},
             direction="down",
             cascade=True,
-            verbose=False,
+            verbose=verbose,
         )
 
         if return_graph:
