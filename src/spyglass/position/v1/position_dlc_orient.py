@@ -96,9 +96,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
     dlc_orientation_object_id : varchar(80)
     """
 
-    def make(self, key):
-        # Get labels to smooth from Parameters table
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+    def _get_pos_df(self, key):
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
         pos_df = pd.concat(
             {
@@ -110,14 +108,21 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
+        return pos_df
+
+    def make(self, key):
+        # Get labels to smooth from Parameters table
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+        pos_df = self._get_pos_df(key)
+
         params = (DLCOrientationParams() & key).fetch1("params")
         orientation_smoothing_std_dev = params.pop(
             "orientation_smoothing_std_dev", None
         )
-        dt = np.median(np.diff(pos_df.index.to_numpy()))
-        sampling_rate = 1 / dt
+        sampling_rate = 1 / np.median(np.diff(pos_df.index.to_numpy()))
         orient_func = _key_to_func_dict[params["orient_method"]]
         orientation = orient_func(pos_df, **params)
+
         if not params["orient_method"] == "none":
             # Smooth orientation
             is_nan = np.isnan(orientation)
@@ -141,6 +146,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             )
             # convert back to between -pi and pi
             orientation = np.angle(np.exp(1j * orientation))
+
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
@@ -152,6 +158,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             spatial_series = query.fetch_nwb()[0]["raw_position"]
         else:
             spatial_series = None
+
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
             name="orientation",

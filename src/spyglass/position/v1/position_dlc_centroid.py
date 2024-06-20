@@ -207,7 +207,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             interp_df = centroid_df.copy()
 
         sampling_rate = 1 / np.median(np.diff(pos_df.index.to_numpy()))
-        if params := params.get("smooth"):
+        if params.get("smooth"):
             smooth_params = params["smoothing_params"]
             dt = np.median(np.diff(pos_df.index.to_numpy()))
             sampling_rate = 1 / dt
@@ -279,7 +279,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         nwb_analysis_file = AnalysisNwbfile()
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=key["analysis_file_name"],
+            analysis_file_name=analysis_file_name,
         )
 
         self.insert1(

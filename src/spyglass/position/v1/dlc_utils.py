@@ -856,7 +856,6 @@ class Centroid:
             ) / 2
             points = ["midpoint", points[2]]
         coord_arrays = np.array([self.coords[point][mask] for point in points])
-        print(coord_arrays[0][0][0])
         self.centroid[mask] = np.nanmean(coord_arrays, axis=0)
 
     def too_sep(self, point1, point2):
@@ -879,9 +878,7 @@ class Centroid:
             points=self.point_names,
             mask=(~self.nans[p] for p in self.point_names),
         )
-        self.calc_centroid(  # All bad
-            mask=list(self.nans.values()), replace=True
-        )
+        self.calc_centroid(mask=self.nans.values(), replace=True)  # All bad
         for point in self.point_names:  # only one point
             self.calc_centroid(
                 points=[point],

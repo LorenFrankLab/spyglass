@@ -14,7 +14,7 @@ from spyglass.common.common_interval import IntervalList, interval_list_contains
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
-from spyglass.settings import video_dir
+from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
@@ -381,6 +381,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if not self.connection.in_transaction:
             self.populate(key)
             return
+        if test_mode:
+            skip_duplicates = True
 
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
