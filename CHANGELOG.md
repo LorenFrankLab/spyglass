@@ -21,6 +21,8 @@
 - Add documentation for common error messages #997
 - Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
 - `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- Allow mixin tables with parallelization in `make` to run populate with
+    `processes > 1` #1001
 
 ### Pipelines
 

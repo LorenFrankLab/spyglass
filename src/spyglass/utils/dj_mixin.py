@@ -18,7 +18,12 @@ from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
+from spyglass.utils.dj_helper_fn import (  # NonDaemonPool,
+    NonDaemonPool,
+    fetch_nwb,
+    get_nwb_table,
+    populate_pass_function,
+)
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 
@@ -70,6 +75,7 @@ class SpyglassMixin:
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
     _banned_search_tables = set()  # Tables to avoid in restrict_by
+    _parallel_make = False  # Tables that use parallel processing in make
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
@@ -653,6 +659,37 @@ class SpyglassMixin:
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+    # -------------------------- non-daemon populate --------------------------
+    def populate(self, *restrictions, **kwargs):
+        """Populate table in parallel.
+
+        Supersedes datajoint.table.Table.populate for classes with that
+        spawn processes in their make function
+        """
+
+        # Pass through to super if not parallel in the make function or only a single process
+        processes = kwargs.pop("processes", 1)
+        if processes == 1 or not self._parallel_make:
+            return super().populate(*restrictions, **kwargs)
+
+        # If parallel in both make and populate, use non-daemon processes
+        # Get keys to populate
+        keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+            "KEY", limit=kwargs.get("limit", None)
+        )
+        # package the call list
+        call_list = [(type(self), key, kwargs) for key in keys]
+
+        # Create a pool of non-daemon processes to populate a single entry each
+        pool = NonDaemonPool(processes=processes)
+        try:
+            pool.map(populate_pass_function, call_list)
+        except Exception as e:
+            raise e
+        finally:
+            pool.close()
+            pool.terminate()
 
     # ------------------------------- Export Log -------------------------------
 
