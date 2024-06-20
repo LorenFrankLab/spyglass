@@ -6,11 +6,11 @@ import uuid
 import warnings
 from pathlib import Path
 from typing import List
-from packaging import version
 
 import datajoint as dj
 import numpy as np
 import spikeinterface as si
+from packaging import version
 
 if version.parse(si.__version__) < version.parse("0.99.1"):
     raise ImportError(
@@ -20,6 +20,7 @@ if version.parse(si.__version__) < version.parse("0.99.1"):
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 
+from spyglass.common import BrainRegion, Electrode
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import waveforms_dir
@@ -32,6 +33,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
 )
 from spyglass.utils import SpyglassMixin, logger
 
+from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
 
 schema = dj.schema("spikesorting_curation")
@@ -226,6 +228,7 @@ class Curation(SpyglassMixin, dj.Manual):
         units_object_id : str
 
         """
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         sort_interval_valid_times = (
             IntervalList & {"interval_list_name": sort_interval_list_name}
@@ -246,7 +249,6 @@ class Curation(SpyglassMixin, dj.Manual):
             units_valid_times[unit_id] = sort_interval_valid_times
             units_sort_interval[unit_id] = [sort_interval]
 
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         object_ids = AnalysisNwbfile().add_units(
             analysis_file_name,
             units,
@@ -324,6 +326,9 @@ class Waveforms(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         recording = Curation.get_recording(key)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
@@ -349,15 +354,13 @@ class Waveforms(SpyglassMixin, dj.Computed):
             **waveform_params,
         )
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
         object_id = AnalysisNwbfile().add_units_waveforms(
             key["analysis_file_name"], waveform_extractor=waveforms
         )
         key["waveforms_object_id"] = object_id
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def load_waveforms(self, key: dict):
@@ -510,7 +513,13 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        analysis_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         waveform_extractor = Waveforms().load_waveforms(key)
+        key["analysis_file_name"] = (
+            analysis_file_name  # add to key here to prevent fetch errors
+        )
         qm = {}
         params = (MetricParameters & key).fetch1("metric_params")
         for metric_name, metric_params in params.items():
@@ -526,13 +535,11 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         logger.info(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, key["quality_metrics_path"])
 
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
         key["object_id"] = AnalysisNwbfile().add_units_metrics(
             key["analysis_file_name"], metrics=qm
         )
         AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 
@@ -926,17 +933,21 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
         unit_labels_to_remove = ["reject"]
         # check that the Curation has metrics
         metrics = (Curation & key).fetch1("quality_metrics")
         if metrics == {}:
-            Warning(
-                f"Metrics for Curation {key} should normally be calculated before insertion here"
+            logger.warning(
+                f"Metrics for Curation {key} should normally be calculated "
+                + "before insertion here"
             )
 
         sorting = Curation.get_curated_sorting(key)
         unit_ids = sorting.get_unit_ids()
-        # Get the labels for the units, add only those units that do not have 'reject' or 'noise' labels
+
+        # Get the labels for the units, add only those units that do not have
+        # 'reject' or 'noise' labels
         unit_labels = (Curation & key).fetch1("curation_labels")
         accepted_units = []
         for unit_id in unit_ids:
@@ -992,6 +1003,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             unit_ids=accepted_units,
             labels=labels,
         )
+
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
         # now add the units
@@ -1034,97 +1047,33 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         sorting_key = (cls & key).fetch1("KEY")
         return Curation.get_curated_sorting(sorting_key)
 
-
-@schema
-class UnitInclusionParameters(SpyglassMixin, dj.Manual):
-    definition = """
-    unit_inclusion_param_name: varchar(80) # the name of the list of thresholds for unit inclusion
-    ---
-    inclusion_param_dict: blob # the dictionary of inclusion / exclusion parameters
-    """
-
-    def insert1(self, key, **kwargs):
-        # check to see that the dictionary fits the specifications
-        # The inclusion parameter dict has the following form:
-        # param_dict['metric_name'] = (operator, value)
-        #    where operator is '<', '>', <=', '>=', or '==' and value is the comparison (float) value to be used ()
-        # param_dict['exclude_labels'] = [list of labels to exclude]
-        pdict = key["inclusion_param_dict"]
-        metrics_list = CuratedSpikeSorting().metrics_fields()
-
-        for k in pdict:
-            if k not in metrics_list and k != "exclude_labels":
-                raise Exception(
-                    f"key {k} is not a valid element of the inclusion_param_dict"
-                )
-            if k in metrics_list:
-                if pdict[k][0] not in _comparison_to_function:
-                    raise Exception(
-                        f"operator {pdict[k][0]} for metric {k} is not in the valid operators list: {_comparison_to_function.keys()}"
-                    )
-            if k == "exclude_labels":
-                for label in pdict[k]:
-                    if label not in valid_labels:
-                        raise Exception(
-                            f"exclude label {label} is not in the valid_labels list: {valid_labels}"
-                        )
-        super().insert1(key, **kwargs)
-
-    def get_included_units(
-        self, curated_sorting_key, unit_inclusion_param_name
-    ):
-        """Given a reference to a set of curated sorting units and the name of
-        a unit inclusion parameter list, returns unit key
+    @classmethod
+    def get_sort_group_info(cls, key):
+        """Returns the sort group information for the curation
+        (e.g. brain region, electrode placement, etc.)
 
         Parameters
         ----------
-        curated_sorting_key : dict
-            key to select a set of curated sorting
-        unit_inclusion_param_name : str
-            name of a unit inclusion parameter entry
+        key : dict
+            restriction on CuratedSpikeSorting table
 
         Returns
         -------
-        dict
-            key to select all of the included units
+        sort_group_info : Table
+            Table with information about the sort groups
         """
-        curated_sortings = (CuratedSpikeSorting() & curated_sorting_key).fetch()
-        inc_param_dict = (
-            UnitInclusionParameters
-            & {"unit_inclusion_param_name": unit_inclusion_param_name}
-        ).fetch1("inclusion_param_dict")
-        units = (CuratedSpikeSorting().Unit() & curated_sortings).fetch()
-        units_key = (CuratedSpikeSorting().Unit() & curated_sortings).fetch(
-            "KEY"
-        )
-        # get the list of labels to exclude if there is one
-        if "exclude_labels" in inc_param_dict:
-            exclude_labels = inc_param_dict["exclude_labels"]
-            del inc_param_dict["exclude_labels"]
-        else:
-            exclude_labels = []
-
-        # create a list of the units to kepp.
-        keep = np.asarray([True] * len(units))
-        for metric in inc_param_dict:
-            # for all units, go through each metric, compare it to the value
-            # specified, and update the list to be kept
-            keep = np.logical_and(
-                keep,
-                _comparison_to_function[inc_param_dict[metric][0]](
-                    units[metric], inc_param_dict[metric][1]
-                ),
+        electrode_restrict_list = []
+        for entry in cls & key:
+            # Just take one electrode entry per sort group
+            electrode_restrict_list.extend(
+                ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
+                    limit=1
+                )
             )
-
-        # now exclude by label if it is specified
-        if len(exclude_labels):
-            for unit_ind in np.ravel(np.argwhere(keep)):
-                labels = units[unit_ind]["label"].split(",")
-                for label in labels:
-                    if label in exclude_labels:
-                        keep[unit_ind] = False
-                        break
-
-        # return units that passed all of the tests
-        # TODO: Make this more efficient
-        return {i: units_key[i] for i in np.ravel(np.argwhere(keep))}
+        # Run joins with the tables with info and return
+        sort_group_info = (
+            (Electrode & electrode_restrict_list)
+            * (cls & key)
+            * SortGroup.SortGroupElectrode()
+        ) * BrainRegion()
+        return sort_group_info

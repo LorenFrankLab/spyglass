@@ -31,6 +31,9 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         """
 
     def make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         orig_key = copy.deepcopy(key)
 
         nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])
@@ -49,7 +52,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
 
         key["object_id"] = nwbfile.units.object_id
 
-        self.insert1(key, skip_duplicates=True)
+        self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
 
         part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(

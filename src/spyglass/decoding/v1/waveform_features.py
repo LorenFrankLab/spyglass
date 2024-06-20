@@ -1,5 +1,6 @@
 import os
 from itertools import chain
+from time import time
 
 import datajoint as dj
 import numpy as np
@@ -81,7 +82,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class UnitWaveformFeaturesSelection(dj.Manual):
+class UnitWaveformFeaturesSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> SpikeSortingOutput.proj(spikesorting_merge_id="merge_id")
     -> WaveformFeaturesParams
@@ -101,7 +102,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # the NWB object that stores the waveforms
     """
 
+    _parallel_make = True
+
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")
 
@@ -164,6 +168,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
+
         self.insert1(key)
 
     @staticmethod

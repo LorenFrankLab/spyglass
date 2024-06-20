@@ -62,6 +62,8 @@ Documentation can be found at -
 For installation instructions see -
 [https://lorenfranklab.github.io/spyglass/latest/installation/](https://lorenfranklab.github.io/spyglass/latest/installation/)
 
+Typical installation time is: 5-10 minutes
+
 ## Tutorials
 
 The tutorials for `spyglass` is currently in the form of Jupyter Notebooks and
@@ -80,6 +82,16 @@ for contributing instructions found at -
 
 License and Copyright notice can be found at
 [https://lorenfranklab.github.io/spyglass/latest/LICENSE/](https://lorenfranklab.github.io/spyglass/latest/LICENSE/)
+
+## System requirements
+
+Spyglass has been tested on Linux Ubuntu 20.04 and MacOS 10.15. It has not been tested on Windows and likely will not work.
+
+No specific hardware requirements are needed to run spyglass. However, the amount of data that can be stored and analyzed is limited by the available disk space and memory. GPUs are required for some of the analysis tools, such as DeepLabCut.
+
+See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or [environment_dlc.yml](environment_dlc.yml) for software dependencies.
+
+See [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt) for the conda environment used in the demo.
 
 ## Citation
 

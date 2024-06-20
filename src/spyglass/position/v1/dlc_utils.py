@@ -11,7 +11,7 @@ from collections import abc
 from contextlib import redirect_stdout
 from itertools import groupby
 from operator import itemgetter
-from typing import Union
+from typing import Iterable, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -20,8 +20,8 @@ import pandas as pd
 from tqdm import tqdm as tqdm
 
 from spyglass.common.common_behav import VideoFile
+from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
 from spyglass.utils import logger
-from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 
 
 def validate_option(
@@ -62,7 +62,10 @@ def validate_option(
             f"Unknown {name}: {option} " f"Available options: {options}"
         )
 
-    if types and not isinstance(option, tuple(types)):
+    if types is not None and not isinstance(types, Iterable):
+        types = (types,)
+
+    if types is not None and not isinstance(option, types):
         raise TypeError(f"{name} is {type(option)}. Available types {types}")
 
     if val_range and not (val_range[0] <= option <= val_range[1]):
@@ -108,7 +111,6 @@ def validate_smooth_params(params):
     if not params.get("smooth"):
         return
     smoothing_params = params.get("smoothing_params")
-    validate_option(smoother=smoothing_params, name="smoothing_params")
     validate_option(
         option=smoothing_params.get("smooth_method"),
         name="smooth_method",
@@ -194,7 +196,7 @@ class OutputLogger:  # TODO: migrate to spyglass.utils.logger
     def __init__(self, name, path, level="INFO", **kwargs):
         self.logger = self.setup_logger(name, path, **kwargs)
         self.name = self.logger.name
-        self.level = getattr(logging, level)
+        self.level = 30 if test_mode else getattr(logging, level)
 
     def setup_logger(
         self, name_logfile, path_logfile, print_console=False
@@ -383,7 +385,17 @@ def infer_output_dir(key, makedir=True):
     """
     # TODO: add check to make sure interval_list_name refers to a single epoch
     # Or make key include epoch in and of itself instead of interval_list_name
-    nwb_file_name = key["nwb_file_name"].split("_.")[0]
+
+    file_name = key.get("nwb_file_name")
+    dlc_model_name = key.get("dlc_model_name")
+    epoch = key.get("epoch")
+
+    if not all([file_name, dlc_model_name, epoch]):
+        raise ValueError(
+            "Key must contain 'nwb_file_name', 'dlc_model_name', and 'epoch'"
+        )
+
+    nwb_file_name = file_name.split("_.")[0]
     output_dir = pathlib.Path(dlc_output_dir) / pathlib.Path(
         f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
         f"_model_" + key["dlc_model_name"].replace(" ", "-")
@@ -1019,7 +1031,10 @@ def make_video(
         video.release()
         out.release()
         print("destroying cv2 windows")
-        cv2.destroyAllWindows()
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
         print("finished making video with opencv")
         return
 

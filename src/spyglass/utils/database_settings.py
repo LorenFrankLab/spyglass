@@ -1,7 +1,9 @@
 #!/usr/bin/env python
+
 import os
 import sys
 import tempfile
+from functools import cached_property
 from pathlib import Path
 
 import datajoint as dj
@@ -37,6 +39,7 @@ class DatabaseSettings:
         target_database=None,
         exec_user=None,
         exec_pass=None,
+        test_mode=False,
     ):
         """Class to manage common database settings
 
@@ -66,6 +69,9 @@ class DatabaseSettings:
             User for executing commands. If None, use dj.config
         exec_pass : str, optional
             Password for executing commands. If None, use dj.config
+        test_mode : bool, optional
+            Default False. If True, prepend sudo to commands for use in CI/CD
+            Only true in github actions, not true in local testing.
         """
         self.shared_modules = [f"{m}{ESC}" for m in SHARED_MODULES]
         self.user = user_name or dj.config["database.user"]
@@ -76,6 +82,7 @@ class DatabaseSettings:
         self.target_database = target_database or "mysql"
         self.exec_user = exec_user or dj.config["database.user"]
         self.exec_pass = exec_pass or dj.config["database.password"]
+        self.test_mode = test_mode
 
     @property
     def _create_roles_dict(self):
@@ -102,7 +109,7 @@ class DatabaseSettings:
             ],
         )
 
-    @property
+    @cached_property
     def _create_roles_sql(self):
         return sum(self._create_roles_dict.values(), [])
 
@@ -214,10 +221,16 @@ class DatabaseSettings:
         if self.debug:
             return
 
+        if self.test_mode:
+            prefix = "sudo mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial"
+        else:
+            prefix = f"mysql -h {self.host} -u {self.exec_user} -p"
+
         cmd = (
-            f"mysql -p -h {self.host} < {file.name}"
+            f"{prefix} < {file.name}"
             if self.target_database == "mysql"
             else f"docker exec -i {self.target_database} mysql -u "
             + f"{self.exec_user} --password={self.exec_pass} < {file.name}"
         )
+
         os.system(cmd)

@@ -9,4 +9,4 @@ def test_fetch1_dataframe(lin_v1, lin_merge, lin_merge_key):
     assert hash_df == hash_exp, "Dataframe differs from expected"
 
 
-## Todo: Add more tests of this pipeline, not just the fetch1_dataframe method
+# TODO: Add more tests of this pipeline, not just the fetch1_dataframe method

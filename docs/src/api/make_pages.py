@@ -16,8 +16,11 @@ for path in sorted(Path("src/spyglass/").glob("**/*.py")):
     if path.stem in ignored_stems or "cython" in path.stem:
         continue
     rel_path = path.relative_to("src/spyglass")
+
+    # parts[0] is the src directory, ignore as of mkdocstrings-python 1.9.1
+    module_path = ".".join([p for p in path.with_suffix("").parts[1:]])
+
     with mkdocs_gen_files.open(f"api/{rel_path.with_suffix('')}.md", "w") as f:
-        module_path = ".".join([p for p in path.with_suffix("").parts])
         print(f"::: {module_path}", file=f)
     nav[rel_path.parts] = f"{rel_path.with_suffix('')}.md"
 

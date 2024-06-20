@@ -35,7 +35,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def get_video_crop(cls, video_path):
+    def get_video_crop(cls, video_path, crop_input=None):
         """
         Queries the user to determine the cropping parameters for a given video
 
@@ -61,9 +61,13 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         ax.set_yticks(np.arange(ylims[0], ylims[-1], -50))
         ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
         display(fig)
-        crop_input = input(
-            "Please enter the crop parameters for your video in format xmin, xmax, ymin, ymax, or 'none'\n"
-        )
+
+        if crop_input is None:
+            crop_input = input(
+                "Please enter the crop parameters for your video in format "
+                + "xmin, xmax, ymin, ymax, or 'none'\n"
+            )
+
         plt.close()
         if crop_input.lower() == "none":
             return None
@@ -98,6 +102,10 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
 
         video_path, video_filename, _, _ = get_video_path(key)
         output_dir = infer_output_dir(key)
+
+        if not video_path:
+            raise FileNotFoundError(f"Video file not found for {key}")
+
         with OutputLogger(
             name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
             path=f"{output_dir.as_posix()}/log.log",
@@ -232,8 +240,10 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 dlc_result.creation_time
             ).strftime("%Y-%m-%d %H:%M:%S")
 
-            logger.logger.info("getting raw position")
-            interval_list_name = (
+            # get video information
+            _, _, meters_per_pixel, video_time = get_video_path(key)
+            # check if a position interval exists for this epoch
+            if interval_list_name := (
                 convert_epoch_interval_name_to_position_interval_name(
                     {
                         "nwb_file_name": key["nwb_file_name"],
@@ -241,16 +251,16 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     },
                     populate_missing=False,
                 )
-            )
-            spatial_series = (
-                RawPosition()
-                & {**key, "interval_list_name": interval_list_name}
-            ).fetch_nwb()[0]["raw_position"]
-            _, _, _, video_time = get_video_path(key)
-            pos_time = spatial_series.timestamps
-            # TODO: should get timestamps from VideoFile, but need the video_frame_ind from RawPosition,
-            # which also has timestamps
-            key["meters_per_pixel"] = spatial_series.conversion
+            ):
+                logger.logger.info("Getting raw position")
+                spatial_series = (
+                    RawPosition()
+                    & {**key, "interval_list_name": interval_list_name}
+                ).fetch_nwb()[0]["raw_position"]
+            else:
+                spatial_series = None
+
+            key["meters_per_pixel"] = meters_per_pixel
 
             # Insert entry into DLCPoseEstimation
             logger.logger.info(
@@ -276,15 +286,17 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             idx = pd.IndexSlice
             for body_part, part_df in body_parts_df.items():
                 logger.logger.info("converting to cm")
+                key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+                    key["nwb_file_name"]
+                )
                 part_df = convert_to_cm(part_df, meters_per_pixel)
                 logger.logger.info("adding timestamps to DataFrame")
                 part_df = add_timestamps(
-                    part_df, pos_time=pos_time, video_time=video_time
+                    part_df,
+                    pos_time=getattr(spatial_series, "timestamps", video_time),
+                    video_time=video_time,
                 )
                 key["bodypart"] = body_part
-                key["analysis_file_name"] = AnalysisNwbfile().create(
-                    key["nwb_file_name"]
-                )
                 position = pynwb.behavior.Position()
                 likelihood = pynwb.behavior.BehavioralTimeSeries()
                 position.create_spatial_series(
@@ -292,8 +304,10 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     timestamps=part_df.time.to_numpy(),
                     conversion=METERS_PER_CM,
                     data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                    reference_frame=spatial_series.reference_frame,
-                    comments=spatial_series.comments,
+                    reference_frame=getattr(
+                        spatial_series, "reference_frame", ""
+                    ),
+                    comments=getattr(spatial_series, "comments", "no commwnts"),
                     description="x_position, y_position",
                 )
                 likelihood.create_timeseries(
@@ -330,6 +344,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     analysis_file_name=key["analysis_file_name"],
                 )
                 self.BodyPart.insert1(key)
+                AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")

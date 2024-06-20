@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.settings import test_mode
+
 
 class PoseEstimation:
     def __init__(
@@ -32,10 +34,11 @@ class PoseEstimation:
             pkl_paths = list(
                 self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle")
             )
-            assert len(pkl_paths) == 1, (
-                "Unable to find one unique .pickle file in: "
-                + f"{dlc_dir} - Found: {len(pkl_paths)}"
-            )
+            if not test_mode:
+                assert len(pkl_paths) == 1, (
+                    "Unable to find one unique .pickle file in: "
+                    + f"{dlc_dir} - Found: {len(pkl_paths)}"
+                )
             self.pkl_path = pkl_paths[0]
         else:
             self.pkl_path = Path(pkl_path)
@@ -44,18 +47,20 @@ class PoseEstimation:
         # data file: h5 - body part outputs from the DLC post estimation step
         if h5_path is None:
             h5_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*.h5"))
-            assert len(h5_paths) == 1, (
-                "Unable to find one unique .h5 file in: "
-                + f"{dlc_dir} - Found: {len(h5_paths)}"
-            )
+            if not test_mode:
+                assert len(h5_paths) == 1, (
+                    "Unable to find one unique .h5 file in: "
+                    + f"{dlc_dir} - Found: {len(h5_paths)}"
+                )
             self.h5_path = h5_paths[0]
         else:
             self.h5_path = Path(h5_path)
             assert self.h5_path.exists()
 
-        assert (
-            self.pkl_path.stem == self.h5_path.stem + "_meta"
-        ), f"Mismatching h5 ({self.h5_path.stem}) and pickle {self.pkl_path.stem}"
+        if not test_mode:
+            assert (
+                self.pkl_path.stem == self.h5_path.stem + "_meta"
+            ), f"Mismatching h5 ({self.h5_path.stem}) and pickle {self.pkl_path.stem}"
 
         # config file: yaml - configuration for invoking the DLC post estimation step
         if yml_path is None:
@@ -65,10 +70,11 @@ class PoseEstimation:
                 yml_paths = [
                     val for val in yml_paths if val.stem == "dj_dlc_config"
                 ]
-            assert len(yml_paths) == 1, (
-                "Unable to find one unique .yaml file in: "
-                + f"{dlc_dir} - Found: {len(yml_paths)}"
-            )
+            if not test_mode:
+                assert len(yml_paths) == 1, (
+                    "Unable to find one unique .yaml file in: "
+                    + f"{dlc_dir} - Found: {len(yml_paths)}"
+                )
             self.yml_path = yml_paths[0]
         else:
             self.yml_path = Path(yml_path)
@@ -161,10 +167,15 @@ def read_yaml(fullpath, filename="*"):
 
     Parameters
     ----------
-    fullpath: String or pathlib path. Directory with yaml files
-    filename: String. Filename, no extension. Permits wildcards.
+    fullpath: Union[str, pathlib.Path]
+        Directory with yaml files
+    filename: str
+        Filename, no extension. Permits wildcards.
 
-    Returns filepath and contents as dict
+    Returns
+    -------
+    tuple
+        filepath and contents as dict
     """
     from deeplabcut.utils.auxiliaryfunctions import read_config
 

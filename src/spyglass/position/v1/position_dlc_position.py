@@ -1,3 +1,5 @@
+from time import time
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -11,6 +13,7 @@ from spyglass.position.v1.dlc_utils import (
     validate_option,
     validate_smooth_params,
 )
+from spyglass.settings import test_mode
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 from .position_dlc_pose_estimation import DLCPoseEstimation
@@ -167,13 +170,19 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             path=f"{output_dir.as_posix()}/log.log",
             print_console=False,
         ) as logger:
+            AnalysisNwbfile()._creation_times["pre_create_time"] = time()
             logger.logger.info("-----------------------")
             idx = pd.IndexSlice
             # Get labels to smooth from Parameters table
             params = (DLCSmoothInterpParams() & key).fetch1("params")
             # Get DLC output dataframe
             logger.logger.info("fetching Pose Estimation Dataframe")
-            dlc_df = (DLCPoseEstimation.BodyPart() & key).fetch1_dataframe()
+
+            bp_key = key.copy()
+            if test_mode:  # during testing, analysis_file not in BodyPart table
+                bp_key.pop("analysis_file_name", None)
+
+            dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             sampling_rate = 1 / dt
             logger.logger.info("Identifying indices to NaN")
@@ -220,11 +229,11 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             final_df = smooth_df.drop(["likelihood"], axis=1)
             final_df = final_df.rename_axis("time").reset_index()
             position_nwb_data = (
-                (DLCPoseEstimation.BodyPart() & key)
+                (DLCPoseEstimation.BodyPart() & bp_key)
                 .fetch_nwb()[0]["dlc_pose_estimation_position"]
                 .get_spatial_series()
             )
-            key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
                 key["nwb_file_name"]
             )
             # Add dataframe to AnalysisNwbfile
@@ -267,6 +276,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCSmoothInterp")
+            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -333,6 +343,11 @@ def nan_inds(
     _, good_spans = get_good_spans(
         subthresh_inds_mask, inds_to_span=inds_to_span
     )
+
+    if len(good_spans) == 0:
+        # Prevents ref before assignment error of mask on return
+        # TODO: instead of raise, insert empty dataframe
+        raise ValueError("No good spans found in the data")
 
     for span in good_spans[::-1]:
         if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:

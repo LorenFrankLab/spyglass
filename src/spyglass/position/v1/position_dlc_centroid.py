@@ -141,6 +141,10 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             path=f"{output_dir.as_posix()}/log.log",
             print_console=False,
         ) as logger:
+            # Add to Analysis NWB file
+            analysis_file_name = AnalysisNwbfile().create(  # logged
+                key["nwb_file_name"]
+            )
             logger.logger.info("-----------------------")
             logger.logger.info("Centroid Calculation")
 
@@ -166,7 +170,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             for point in required_points:
                 bodypart = points[point]
                 if bodypart not in bodyparts_avail:
-                    raise ValueError(
+                    raise ValueError(  # TODO: migrate to input validation
                         "Bodypart in points not in model."
                         f"\tBodypart {bodypart}"
                         f"\tIn Model {bodyparts_avail}"
@@ -218,6 +222,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                     "smoothing_duration"
                 )
                 if not smoothing_duration:
+                    # TODO: remove - validated with `validate_smooth_params`
                     raise KeyError(
                         "smoothing_duration needs to be passed within smoothing_params"
                     )
@@ -264,17 +269,19 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             position = pynwb.behavior.Position()
             velocity = pynwb.behavior.BehavioralTimeSeries()
-            spatial_series = (RawPosition() & key).fetch_nwb()[0][
-                "raw_position"
-            ]
+            if query := (RawPosition & key):
+                spatial_series = query.fetch_nwb()[0]["raw_position"]
+            else:
+                spatial_series = None
+
             METERS_PER_CM = 0.01
             position.create_spatial_series(
                 name="position",
                 timestamps=final_df.index.to_numpy(),
                 conversion=METERS_PER_CM,
                 data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
+                reference_frame=getattr(spatial_series, "reference_frame", ""),
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_position, y_position",
             )
             velocity.create_timeseries(
@@ -285,7 +292,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 data=velocity_df.loc[
                     :, idx[("velocity_x", "velocity_y", "speed")]
                 ].to_numpy(),
-                comments=spatial_series.comments,
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_velocity, y_velocity, speed",
             )
             velocity.create_timeseries(
@@ -298,8 +305,6 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
                 description="video_frame_ind",
                 comments="no comments",
             )
-            # Add to Analysis NWB file
-            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
             nwb_analysis_file = AnalysisNwbfile()
             key.update(
                 {
@@ -319,6 +324,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             )
             self.insert1(key)
             logger.logger.info("inserted entry into DLCCentroid")
+            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -363,6 +369,7 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
     """Determines the centroid of 4 LEDS on an implant LED ring.
     Assumed to be the Green LED, and 3 red LEDs called: redLED_C, redLED_L, redLED_R
     By default, uses (greenled + redLED_C) / 2 to calculate centroid
+
     If Green LED is NaN, but red center LED is not,
         then the red center LED is called the centroid
     If green and red center LEDs are NaN, but red left and red right LEDs are not,
@@ -392,6 +399,9 @@ def four_led_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
+
     centroid = np.zeros(shape=(len(pos_df), 2))
     idx = pd.IndexSlice
     # TODO: this feels messy, clean-up
@@ -717,6 +727,8 @@ def two_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not (params.get("max_LED_separation") and params.get("points")):
+        raise KeyError("max_LED_separation/points need to be passed in params")
 
     idx = pd.IndexSlice
     centroid = np.zeros(shape=(len(pos_df), 2))
@@ -792,6 +804,8 @@ def one_pt_centroid(pos_df: pd.DataFrame, **params):
         numpy array with shape (n_time, 2)
         centroid[0] is the x coord and centroid[1] is the y coord
     """
+    if not params.get("points"):
+        raise KeyError("points need to be passed in params")
     idx = pd.IndexSlice
     PT1 = params["points"].pop("point1", None)
     centroid = pos_df.loc[:, idx[PT1, ("x", "y")]].to_numpy()

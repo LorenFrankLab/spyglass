@@ -4,6 +4,7 @@ The Spyglass Mixin provides a way to centralize all Spyglass-specific
 functionalities that have been added to DataJoint tables. This includes...
 
 - Fetching NWB files
+- Long-distance restrictions.
 - Delete functionality, including permission checks and part/master pairs
 - Export logging. See [export doc](export.md) for more information.
 
@@ -11,16 +12,19 @@ To add this functionality to your own tables, simply inherit from the mixin:
 
 ```python
 import datajoint as dj
+
 from spyglass.utils import SpyglassMixin
 
-schema = dj.schema('my_schema')
+schema = dj.schema("my_schema")
+
 
 @schema
 class MyOldTable(dj.Manual):
     pass
 
+
 @schema
-class MyNewTable(SpyglassMixin, dj.Manual):)
+class MyNewTable(SpyglassMixin, dj.Manual):
     pass
 ```
 
@@ -43,6 +47,60 @@ This function will look at the table definition to determine if the raw file
 should be fetched from `Nwbfile` or an analysis file should be fetched from
 `AnalysisNwbfile`. If neither is foreign-key-referenced, the function will refer
 to a `_nwb_table` attribute.
+
+## Long-Distance Restrictions
+
+In complicated pipelines like Spyglass, there are often tables that 'bury' their
+foreign keys as secondary keys. This is done to avoid having to pass a long list
+of foreign keys through the pipeline, potentially hitting SQL limits (see also
+[Merge Tables](./merge_tables.md)). This burrying makes it difficult to restrict
+a given table by familiar attributes.
+
+Spyglass provides a function, `restrict_by`, to handle this. The function takes
+your restriction and checks parents/children until the restriction can be
+applied. Spyglass introduces `<<` as a shorthand for `restrict_by` an upstream
+key and `>>` as a shorthand for `restrict_by` a downstream key.
+
+```python
+from spyglass.example import AnyTable
+
+AnyTable() << 'upstream_attribute="value"'
+AnyTable() >> 'downstream_attribute="value"'
+
+# Equivalent to
+AnyTable().restrict_by('downstream_attribute="value"', direction="down")
+AnyTable().restrict_by('upstream_attribute="value"', direction="up")
+```
+
+Some caveats to this function:
+
+1. 'Peripheral' tables, like `IntervalList` and `AnalysisNwbfile` make it hard
+    to determine the correct parent/child relationship and have been removed
+    from this search by default.
+2. This function will raise an error if it attempts to check a table that has
+    not been imported into the current namespace. It is best used for exploring
+    and debugging, not for production code.
+3. It's hard to determine the attributes in a mixed dictionary/string
+    restriction. If you are having trouble, try using a pure string
+    restriction.
+4. The most direct path to your restriction may not be the path your data took,
+    especially when using Merge Tables. When the result is empty see the
+    warning about the path used. Then, ban tables from the search to force a
+    different path.
+
+```python
+my_table = MyTable()  # must be instanced
+my_table.ban_search_table(UnwantedTable1)
+my_table.ban_search_table([UnwantedTable2, UnwantedTable3])
+my_table.unban_search_table(UnwantedTable3)
+my_table.see_banned_tables()
+
+my_table << my_restriction
+my_table << upstream_restriction >> downstream_restriction
+```
+
+When providing a restriction of the parent, use 'up' direction. When providing a
+restriction of the child, use 'down' direction.
 
 ## Delete Functionality
 
@@ -83,7 +141,7 @@ function, `delete_downstream_merge`, to handle this, which is run by default
 when calling `delete`.
 
 `delete_downstream_merge`, also aliased as `ddm`, identifies all Merge tables
-downsteam of where it is called. If `dry_run=True`, it will return a list of
+downstream of where it is called. If `dry_run=True`, it will return a list of
 entries that would be deleted, otherwise it will delete them.
 
 Importantly, `delete_downstream_merge` cannot properly interact with tables that
@@ -103,7 +161,7 @@ from spyglass.example import MyMerge
 restricted_nwbfile.delete_downstream_merge(reload_cache=True, dry_run=False)
 ```
 
-Because each table keeps a cache of downsteam merge tables, it is important to
+Because each table keeps a cache of downstream merge tables, it is important to
 reload the cache if the table has been imported after the cache was created.
 Speed gains can also be achieved by avoiding re-instancing the table each time.
 
