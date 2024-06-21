@@ -160,10 +160,6 @@ def get_fetching_table_from_stack(stack):
     """Get all classes from a stack of tables."""
     classes = get_all_tables_in_stack(stack)
     if len(classes) > 1:
-        logger.warn(
-            f"Multiple classes found in stack: {classes}. "
-            "Please submit a bug report with the snippet used."
-        )
         classes = None  # predict only one but not sure, so return None
     return next(iter(classes)) if classes else None
 
