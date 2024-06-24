@@ -390,6 +390,7 @@ class SpyglassMixin:
         if reload_cache:
             _ = self.__dict__.pop("_part_masters", None)
 
+        _ = self._part_masters  # load cache before loading graph
         restriction = restriction or self.restriction or True
 
         restr_graph = RestrGraph(
