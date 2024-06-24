@@ -1,4 +1,6 @@
 import datajoint as dj
+import numpy as np
+import pandas as pd
 from non_local_detector import (
     ContFragClusterlessClassifier,
     ContFragSortedSpikesClassifier,
@@ -92,6 +94,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
     position_group_name: varchar(80)
     ----
     position_variables = NULL: longblob # list of position variables to decode
+    upsample_rate = NULL: float # upsampling rate for position data (Hz)
     """
 
     class Position(SpyglassMixinPart):
@@ -126,3 +129,106 @@ class PositionGroup(SpyglassMixin, dj.Manual):
                 },
                 skip_duplicates=True,
             )
+
+    def fetch_position_info(
+        self, key: dict = None, min_time: float = None, max_time: float = None
+    ) -> tuple[pd.DataFrame, list[str]]:
+        """fetch position information for decoding
+
+        Parameters
+        ----------
+        key : dict, optional
+            restriction to a single entry in PositionGroup, by default None
+        min_time : float, optional
+            restrict position information to times greater than min_time, by default None
+        max_time : float, optional
+            restrict position information to times less than max_time, by default None
+
+        Returns
+        -------
+        tuple[pd.DataFrame, list[str]]
+            position information and names of position variables
+        """
+        if key is None:
+            key = {}
+        key = (self & key).fetch1("KEY")
+        position_variable_names = (self & key).fetch1("position_variables")
+
+        position_info = []
+        upsample_rate = 1000  # (self & key).fetch1("upsample_rate") #TODO: alter PositionGroup to include upsample_rate key
+        for pos_merge_id in (self.Position & key).fetch("pos_merge_id"):
+            if upsample_rate is not None:
+                position_info.append(
+                    self._upsample(
+                        (
+                            PositionOutput & {"merge_id": pos_merge_id}
+                        ).fetch1_dataframe(),
+                        upsampling_sampling_rate=upsample_rate,
+                    )
+                )
+            else:
+                position_info.append(
+                    (
+                        PositionOutput & {"merge_id": pos_merge_id}
+                    ).fetch1_dataframe()
+                )
+
+        if min_time is None:
+            min_time = min([df.index.min() for df in position_info])
+        if max_time is None:
+            max_time = max([df.index.max() for df in position_info])
+        position_info = (
+            pd.concat(position_info, axis=0).loc[min_time:max_time].dropna()
+        )
+
+        return position_info, position_variable_names
+
+    @staticmethod
+    def _upsample(
+        position_df: pd.DataFrame,
+        upsampling_sampling_rate: float,
+        upsampling_interpolation_method: str = "linear",
+    ) -> pd.DataFrame:
+        """upsample position data to a fixed sampling rate
+
+        Parameters
+        ----------
+        position_df : pd.DataFrame
+            dataframe containing position data
+        upsampling_sampling_rate : float
+            sampling rate to upsample to
+        upsampling_interpolation_method : str, optional
+            pandas method for interpolation, by default "linear"
+
+        Returns
+        -------
+        pd.DataFrame
+            upsampled position data
+        """
+
+        upsampling_start_time = position_df.index[0]
+        upsampling_end_time = position_df.index[-1]
+
+        n_samples = (
+            int(
+                np.ceil(
+                    (upsampling_end_time - upsampling_start_time)
+                    * upsampling_sampling_rate
+                )
+            )
+            + 1
+        )
+        new_time = np.linspace(
+            upsampling_start_time, upsampling_end_time, n_samples
+        )
+        new_index = pd.Index(
+            np.unique(np.concatenate((position_df.index, new_time))),
+            name="time",
+        )
+        position_df = (
+            position_df.reindex(index=new_index)
+            .interpolate(method=upsampling_interpolation_method)
+            .reindex(index=new_time)
+        )
+
+        return position_df

@@ -349,20 +349,12 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
         }
-        position_variable_names = (PositionGroup & position_group_key).fetch1(
-            "position_variables"
-        )
-
-        position_info = []
-        for pos_merge_id in (PositionGroup.Position & position_group_key).fetch(
-            "pos_merge_id"
-        ):
-            position_info.append(
-                (PositionOutput & {"merge_id": pos_merge_id}).fetch1_dataframe()
-            )
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
-        position_info = (
-            pd.concat(position_info, axis=0).loc[min_time:max_time].dropna()
+        position_info, position_variable_names = (
+            PositionGroup & position_group_key
+        ).fetch_position_info(
+            min_time=min_time,
+            max_time=max_time,
         )
 
         return position_info, position_variable_names
