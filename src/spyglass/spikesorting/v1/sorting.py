@@ -212,8 +212,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             if artifact_removed_intervals_ind[-1][1] < len(timestamps):
                 list_triggers.append(
                     np.arange(
-                            artifact_removed_intervals_ind[-1][1],
-                            len(timestamps) - 1,
+                        artifact_removed_intervals_ind[-1][1],
+                        len(timestamps) - 1,
                     )
                 )
 
