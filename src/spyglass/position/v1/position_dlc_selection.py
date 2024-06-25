@@ -180,6 +180,10 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             index=index,
         )
 
+    def fetch_nwb(self, **kwargs):
+        attrs = [a for a in self.heading.names if not a == "pose_eval_result"]
+        return super().fetch_nwb(*attrs, **kwargs)
+
     @classmethod
     def evaluate_pose_estimation(cls, key):
         likelihood_thresh = []

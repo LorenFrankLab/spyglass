@@ -36,11 +36,13 @@
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
     - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
+    - Fix SQL query error in `DLCPosV1.fetch_nwb` #1011
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
     - Update docstrings #996
     - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
+    - Fix bug in identification of artifact samples to be zeroed out in `spikesorting.v1.SpikeSorting` #1009
 
 ## [0.5.2] (April 22, 2024)
 
