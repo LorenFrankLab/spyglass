@@ -246,29 +246,53 @@ class SpyglassMixin:
     # ------------------------ delete_downstream_parts ------------------------
 
     def _import_part_masters(self):
-        """Import all merge tables."""
-        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
-        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
-        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import (
-            LinearizedPositionOutput,
+        """Import tables that may constrain a RestrGraph. See #1002"""
+        from spyglass.common.common_ripple import (
+            RippleLFPSelection,
         )  # noqa F401
+        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
+        from spyglass.decoding.v0.clusterless import (  # noqa F401
+            UnitMarksIndicatorSelection,
+        )
+        from spyglass.decoding.v0.sorted_spikes import (  # noqa F401
+            SortedSpikesIndicatorSelection,
+        )
+        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
+        from spyglass.lfp.analysis.v1 import LFPBandSelection  # noqa F401
+        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
+        from spyglass.linearization.merge import (  # noqa F401
+            LinearizedPositionOutput,
+            LinearizedPositionV1,
+        )
+        from spyglass.mua.v1.mua import MuaEventsV1  # noqa F401
         from spyglass.position.position_merge import PositionOutput  # noqa F401
+        from spyglass.ripple.v1.ripple import RippleTimesV1  # noqa F401
         from spyglass.spikesorting.analysis.v1.group import (  # noqa F401
             SortedSpikesGroup,
         )
         from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
             SpikeSortingOutput,
         )
+        from spyglass.spikesorting.v0.figurl_views import (  # noqa F401
+            SpikeSortingRecordingView,
+        )
 
         _ = (
             DecodingOutput(),
+            LFPBandSelection(),
             LFPOutput(),
             LinearizedPositionOutput(),
+            LinearizedPositionV1(),
+            MuaEventsV1(),
             PositionGroup(),
             PositionOutput(),
+            RippleLFPSelection(),
+            RippleTimesV1(),
             SortedSpikesGroup(),
+            SortedSpikesIndicatorSelection(),
             SpikeSortingOutput(),
+            SpikeSortingRecordingView(),
+            UnitMarksIndicatorSelection(),
         )
 
     @cached_property
