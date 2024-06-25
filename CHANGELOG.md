@@ -41,6 +41,8 @@
         #994
     - Update docstrings #996
     - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
+    - Fix bug in identification of artifact samples to be zeroed out in `spikesorting.v1.SpikeSorting` #1009
+
 
 ## [0.5.2] (April 22, 2024)
 
