@@ -90,6 +90,26 @@ class PositionOutput(_Merge, SpyglassMixin):
         )
         return query.fetch1_dataframe()
 
+    def fetch_pose_dataframe(self):
+        key = self.merge_restrict(self.proj()).proj()
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_pose_dataframe()
+
+    def fetch_video_name(self):
+        key = self.merge_restrict(self.proj()).proj()
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_video_name()
+
 
 @schema
 class PositionVideoSelection(SpyglassMixin, dj.Manual):

@@ -7,6 +7,7 @@ import numpy as np
 from datajoint.utils import to_camel_case
 from tqdm import tqdm as tqdm
 
+from spyglass.common import PositionIntervalMap, TaskEpoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
@@ -232,6 +233,16 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
             self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
         )
 
+    def fetch_pose_dataframe(self):
+        raise NotImplementedError("No pose data for TrodesPosV1")
+
+    def fetch_video_path(self):
+        nwb_file_name = self.fetch1("nwb_file_name")
+        epoch = (
+            TaskEpoch() * PositionIntervalMap() & self.fetch1("KEY")
+        ).fetch("epoch")[0]
+        return get_video_path(nwb_file_name)
+
 
 @schema
 class TrodesPosVideo(SpyglassMixin, dj.Computed):
@@ -267,7 +278,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
                 .replace(" valid times", "")
             )
             + 1
-        )
+        )  # TODO: Fix this hack
 
         (
             video_path,

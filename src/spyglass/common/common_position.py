@@ -510,6 +510,12 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
         return df
 
+    def fetch_pose_datframe(self):
+        raise NotImplementedError("No Pose data available for this table")
+
+    def fetch_video_name(self):
+        return self.fetch_nwb()[0]["head_position"].get_comments()
+
 
 @schema
 class PositionVideo(SpyglassMixin, dj.Computed):

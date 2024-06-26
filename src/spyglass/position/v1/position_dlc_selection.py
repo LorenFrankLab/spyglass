@@ -248,6 +248,27 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         }
         return sub_thresh_percent_dict
 
+    def fetch_pose_dataframe(self):
+        """fetches the pose data from the pose estimation table
+
+        Returns
+        -------
+        pd.DataFrame
+            pose data
+        """
+        key = self.fetch1("KEY")
+        return (DLCPoseEstimation & key).fetch_dataframe()
+
+    def fetch_video_name(self):
+        """Return the video path for pose estimate
+
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        return (DLCPoseEstimationSelection & self).fetch1("video_path")
+
 
 @schema
 class DLCPosVideoParams(SpyglassMixin, dj.Manual):
