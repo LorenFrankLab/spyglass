@@ -30,23 +30,14 @@ def schema_test(teardown, dj_conn):
 
 
 @pytest.fixture(scope="module")
-def chains(Nwbfile):
-    """Return example TableChains object from Nwbfile."""
-    from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
+def chain(Nwbfile):
+    """Return example TableChain object from chains."""
     from spyglass.linearization.merge import (
         LinearizedPositionOutput,
     )  # noqa: F401
-    from spyglass.position.position_merge import PositionOutput  # noqa: F401
+    from spyglass.utils.dj_graph import TableChain
 
-    _ = LFPOutput, LinearizedPositionOutput, PositionOutput
-
-    yield Nwbfile._get_chain("linear")
-
-
-@pytest.fixture(scope="module")
-def chain(chains):
-    """Return example TableChain object from chains."""
-    yield chains[0]
+    yield TableChain(Nwbfile, LinearizedPositionOutput)
 
 
 @pytest.fixture(scope="module")

@@ -820,9 +820,8 @@ def delete_downstream_merge(
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
-    Passthrough to SpyglassMixin.delete_downstream_merge
+    Passthrough to SpyglassMixin.delete_downstream_parts
     """
-
     from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -834,4 +833,4 @@ def delete_downstream_merge(
         raise ValueError("Input must be a Spyglass Table.")
     table = table if isinstance(table, dj.Table) else table()
 
-    return table.delete_downstream_merge(**kwargs)
+    return table.delete_downstream_parts(**kwargs)

@@ -265,7 +265,6 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             rec_dict["nwb2load_filepath"] = file_path
             continue
 
-        # Pulled from future cbroz1/ndo
         # Full dict caused issues with dlc tables using dicts in secondary keys
         rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
         rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
@@ -352,7 +351,7 @@ def update_analysis_for_dandi_standard(
         species_value = file["/general/subject/species"][()].decode("utf-8")
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
-            print(
+            logger.info(
                 f"Adjusting subject species from '{species_value}' to "
                 + f"'{new_species_value}'."
             )
@@ -363,10 +362,10 @@ def update_analysis_for_dandi_standard(
         ):
             raise ValueError(
                 "Dandi upload requires species either be in Latin binomial form"
-                + " (e.g., 'Mus musculus' and 'Homo sapiens')"
-                + "or be a NCBI taxonomy link (e.g., "
-                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
-                + f"\n Please update species value of: {species_value}"
+                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
+                + "taxonomy link (e.g., "
+                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
+                + f"Please update species value of: {species_value}"
             )
 
         # add subject age dataset "P4M/P8M"
@@ -385,7 +384,8 @@ def update_analysis_for_dandi_standard(
         if experimenter_value != new_experimenter_value:
             new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
             logger.info(
-                f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
+                f"Adjusting experimenter from {experimenter_value} to "
+                + f"{new_experimenter_value}."
             )
             file["/general/experimenter"][:] = new_experimenter_value
 

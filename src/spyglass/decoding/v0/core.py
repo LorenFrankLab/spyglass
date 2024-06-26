@@ -13,6 +13,7 @@ try:
         ObservationModel,
     )
 except ImportError as e:
+    RandomWalk, Uniform, Environment, ObservationModel = None, None, None, None
     logger.warning(e)
 
 from spyglass.common.common_behav import PositionIntervalMap, RawPosition
