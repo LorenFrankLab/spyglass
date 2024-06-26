@@ -72,6 +72,7 @@ test = [
     "kachery",               # database access
     "kachery-client",
     "kachery-cloud>=0.4.0",
+    "opencv-python-headless", # for headless testing of Qt
     "pre-commit",            # linting
     "pytest",                # unit testing
     "pytest-cov",            # code coverage

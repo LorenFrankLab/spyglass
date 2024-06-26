@@ -1,5 +1,5 @@
-import os
 from datetime import datetime
+from pathlib import Path
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -14,10 +14,16 @@ from spyglass.common.common_behav import (  # noqa: F401
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.position.v1.dlc_utils import (
+    file_log,
+    find_mp4,
+    get_video_info,
+    infer_output_dir,
+)
+from spyglass.position.v1.position_dlc_model import DLCModel
+from spyglass.utils import SpyglassMixin, logger
 
-from .dlc_utils import OutputLogger, infer_output_dir
-from .position_dlc_model import DLCModel
+from . import dlc_reader
 
 schema = dj.schema("position_v1_dlc_pose_estimation")
 
@@ -33,6 +39,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     pose_estimation_output_dir='': varchar(255) # output dir relative to the root dir
     pose_estimation_params=null  : longblob     # analyze_videos params, if not default
     """
+    log_path = None
 
     @classmethod
     def get_video_crop(cls, video_path, crop_input=None):
@@ -48,6 +55,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         -------
         crop_ints : list
             list of 4 integers [x min, x max, y min, y max]
+        crop_input : str, optional
+            input string to determine cropping parameters. If None, user is queried
         """
         import cv2
 
@@ -75,9 +84,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         assert all(isinstance(val, int) for val in crop_ints)
         return crop_ints
 
-    @classmethod
     def insert_estimation_task(
-        cls,
+        self,
         key,
         task_mode="trigger",  # load or trigger
         params: dict = None,
@@ -98,40 +106,40 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
             videotype, gputouse, save_as_csv, batchsize, cropping,
             TFGPUinference, dynamic, robust_nframes, allow_growth, use_shelve
         """
-        from .dlc_utils import check_videofile, get_video_path
-
-        video_path, video_filename, _, _ = get_video_path(key)
         output_dir = infer_output_dir(key)
-
-        if not video_path:
-            raise FileNotFoundError(f"Video file not found for {key}")
-
-        with OutputLogger(
-            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
-            path=f"{output_dir.as_posix()}/log.log",
-        ) as logger:
-            logger.logger.info("Pose Estimation Selection")
-            video_dir = os.path.dirname(video_path) + "/"
-            logger.logger.info("video_dir: %s", video_dir)
-            video_path = check_videofile(
-                video_path=video_dir, video_filename=video_filename
-            )[0]
-            if check_crop is not None:
-                params["cropping"] = cls.get_video_crop(
-                    video_path=video_path.as_posix()
-                )
-            cls.insert1(
-                {
-                    **key,
-                    "task_mode": task_mode,
-                    "pose_estimation_params": params,
-                    "video_path": video_path,
-                    "pose_estimation_output_dir": output_dir,
-                },
-                skip_duplicates=skip_duplicates,
-            )
-        logger.logger.info("inserted entry into Pose Estimation Selection")
+        self.log_path = Path(output_dir) / "log.log"
+        self._insert_est_with_log(
+            key, task_mode, params, check_crop, skip_duplicates, output_dir
+        )
+        logger.info("inserted entry into Pose Estimation Selection")
         return {**key, "task_mode": task_mode}
+
+    @file_log(logger, console=False)
+    def _insert_est_with_log(
+        self, key, task_mode, params, check_crop, skip_duplicates, output_dir
+    ):
+
+        v_path, v_fname, _, _ = get_video_info(key)
+        if not v_path:
+            raise FileNotFoundError(f"Video file not found for {key}")
+        logger.info("Pose Estimation Selection")
+        v_dir = Path(v_path).parent
+        logger.info("video_dir: %s", v_dir)
+        v_path = find_mp4(video_path=v_dir, video_filename=v_fname)
+        if check_crop:
+            params["cropping"] = self.get_video_crop(
+                video_path=v_path.as_posix()
+            )
+        self.insert1(
+            {
+                **key,
+                "task_mode": task_mode,
+                "pose_estimation_params": params,
+                "video_path": v_path,
+                "pose_estimation_output_dir": output_dir,
+            },
+            skip_duplicates=skip_duplicates,
+        )
 
 
 @schema
@@ -154,6 +162,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         """
 
         _nwb_table = AnalysisNwbfile
+        log_path = None
 
         def fetch1_dataframe(self):
             nwb_data = self.fetch_nwb()[0]
@@ -199,152 +208,147 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """.populate() method will launch training for each PoseEstimationTask"""
-        from . import dlc_reader
-        from .dlc_utils import get_video_path
+        self.log_path = (
+            Path(infer_output_dir(key=key, makedir=False)) / "log.log"
+        )
+        self._logged_make(key)
+
+    @file_log(logger, console=True)
+    def _logged_make(self, key):
 
         METERS_PER_CM = 0.01
 
-        output_dir = infer_output_dir(key=key, makedir=False)
-        with OutputLogger(
-            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
-            path=f"{output_dir.as_posix()}/log.log",
-        ) as logger:
-            logger.logger.info("----------------------")
-            logger.logger.info("Pose Estimation")
-            # ID model and directories
-            dlc_model = (DLCModel & key).fetch1()
-            bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
-            task_mode, analyze_video_params, video_path, output_dir = (
-                DLCPoseEstimationSelection & key
-            ).fetch1(
-                "task_mode",
-                "pose_estimation_params",
-                "video_path",
-                "pose_estimation_output_dir",
+        logger.info("----------------------")
+        logger.info("Pose Estimation")
+        # ID model and directories
+        dlc_model = (DLCModel & key).fetch1()
+        bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
+        task_mode, analyze_video_params, video_path, output_dir = (
+            DLCPoseEstimationSelection & key
+        ).fetch1(
+            "task_mode",
+            "pose_estimation_params",
+            "video_path",
+            "pose_estimation_output_dir",
+        )
+        analyze_video_params = analyze_video_params or {}
+
+        project_path = dlc_model["project_path"]
+
+        # Trigger PoseEstimation
+        if task_mode == "trigger":
+            dlc_reader.do_pose_estimation(
+                video_path,
+                dlc_model,
+                project_path,
+                output_dir,
+                **analyze_video_params,
             )
-            analyze_video_params = analyze_video_params or {}
+        dlc_result = dlc_reader.PoseEstimation(output_dir)
+        creation_time = datetime.fromtimestamp(
+            dlc_result.creation_time
+        ).strftime("%Y-%m-%d %H:%M:%S")
 
-            project_path = dlc_model["project_path"]
+        logger.info("getting raw position")
+        interval_list_name = (
+            convert_epoch_interval_name_to_position_interval_name(
+                {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "epoch": key["epoch"],
+                },
+                populate_missing=False,
+            )
+        )
+        spatial_series = (
+            RawPosition() & {**key, "interval_list_name": interval_list_name}
+        ).fetch_nwb()[0]["raw_position"]
+        _, _, _, video_time = get_video_info(key)
+        pos_time = spatial_series.timestamps
 
-            # Trigger PoseEstimation
-            if task_mode == "trigger":
-                dlc_reader.do_pose_estimation(
-                    video_path,
-                    dlc_model,
-                    project_path,
-                    output_dir,
-                    **analyze_video_params,
-                )
-            dlc_result = dlc_reader.PoseEstimation(output_dir)
-            creation_time = datetime.fromtimestamp(
-                dlc_result.creation_time
-            ).strftime("%Y-%m-%d %H:%M:%S")
+        # TODO: should get timestamps from VideoFile, but need the
+        # video_frame_ind from RawPosition, which also has timestamps
 
-            # get video information
-            _, _, meters_per_pixel, video_time = get_video_path(key)
-            # check if a position interval exists for this epoch
-            if interval_list_name := (
-                convert_epoch_interval_name_to_position_interval_name(
+        key["meters_per_pixel"] = spatial_series.conversion
+
+        # Insert entry into DLCPoseEstimation
+        logger.info(
+            "Inserting %s, epoch %02d into DLCPoseEsimation",
+            key["nwb_file_name"],
+            key["epoch"],
+        )
+        self.insert1({**key, "pose_estimation_time": creation_time})
+
+        meters_per_pixel = key.pop("meters_per_pixel")
+        body_parts = dlc_result.df.columns.levels[0]
+        body_parts_df = {}
+        # Insert dlc pose estimation into analysis NWB file for
+        # each body part.
+        for body_part in bodyparts:
+            if body_part in body_parts:
+                body_parts_df[body_part] = pd.DataFrame.from_dict(
                     {
-                        "nwb_file_name": key["nwb_file_name"],
-                        "epoch": key["epoch"],
-                    },
-                    populate_missing=False,
+                        c: dlc_result.df.get(body_part).get(c).values
+                        for c in dlc_result.df.get(body_part).columns
+                    }
                 )
-            ):
-                logger.logger.info("Getting raw position")
-                spatial_series = (
-                    RawPosition()
-                    & {**key, "interval_list_name": interval_list_name}
-                ).fetch_nwb()[0]["raw_position"]
-            else:
-                spatial_series = None
-
-            key["meters_per_pixel"] = meters_per_pixel
-
-            # Insert entry into DLCPoseEstimation
-            logger.logger.info(
-                "Inserting %s, epoch %02d into DLCPoseEsimation",
-                key["nwb_file_name"],
-                key["epoch"],
+        idx = pd.IndexSlice
+        for body_part, part_df in body_parts_df.items():
+            logger.info("converting to cm")
+            part_df = convert_to_cm(part_df, meters_per_pixel)
+            logger.info("adding timestamps to DataFrame")
+            part_df = add_timestamps(
+                part_df, pos_time=pos_time, video_time=video_time
             )
-            self.insert1({**key, "pose_estimation_time": creation_time})
-            meters_per_pixel = key["meters_per_pixel"]
-            del key["meters_per_pixel"]
-            body_parts = dlc_result.df.columns.levels[0]
-            body_parts_df = {}
-            # Insert dlc pose estimation into analysis NWB file for
-            # each body part.
-            for body_part in bodyparts:
-                if body_part in body_parts:
-                    body_parts_df[body_part] = pd.DataFrame.from_dict(
-                        {
-                            c: dlc_result.df.get(body_part).get(c).values
-                            for c in dlc_result.df.get(body_part).columns
-                        }
-                    )
-            idx = pd.IndexSlice
-            for body_part, part_df in body_parts_df.items():
-                logger.logger.info("converting to cm")
-                key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-                    key["nwb_file_name"]
-                )
-                part_df = convert_to_cm(part_df, meters_per_pixel)
-                logger.logger.info("adding timestamps to DataFrame")
-                part_df = add_timestamps(
-                    part_df,
-                    pos_time=getattr(spatial_series, "timestamps", video_time),
-                    video_time=video_time,
-                )
-                key["bodypart"] = body_part
-                position = pynwb.behavior.Position()
-                likelihood = pynwb.behavior.BehavioralTimeSeries()
-                position.create_spatial_series(
-                    name="position",
-                    timestamps=part_df.time.to_numpy(),
-                    conversion=METERS_PER_CM,
-                    data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                    reference_frame=getattr(
-                        spatial_series, "reference_frame", ""
-                    ),
-                    comments=getattr(spatial_series, "comments", "no commwnts"),
-                    description="x_position, y_position",
-                )
-                likelihood.create_timeseries(
-                    name="likelihood",
-                    timestamps=part_df.time.to_numpy(),
-                    data=part_df.loc[:, idx["likelihood"]].to_numpy(),
-                    unit="likelihood",
-                    comments="no comments",
-                    description="likelihood",
-                )
-                likelihood.create_timeseries(
-                    name="video_frame_ind",
-                    timestamps=part_df.time.to_numpy(),
-                    data=part_df.loc[:, idx["video_frame_ind"]].to_numpy(),
-                    unit="index",
-                    comments="no comments",
-                    description="video_frame_ind",
-                )
-                nwb_analysis_file = AnalysisNwbfile()
-                key["dlc_pose_estimation_position_object_id"] = (
-                    nwb_analysis_file.add_nwb_object(
-                        analysis_file_name=key["analysis_file_name"],
-                        nwb_object=position,
-                    )
-                )
-                key["dlc_pose_estimation_likelihood_object_id"] = (
-                    nwb_analysis_file.add_nwb_object(
-                        analysis_file_name=key["analysis_file_name"],
-                        nwb_object=likelihood,
-                    )
-                )
-                nwb_analysis_file.add(
-                    nwb_file_name=key["nwb_file_name"],
+            key["bodypart"] = body_part
+            key["analysis_file_name"] = AnalysisNwbfile().create(
+                key["nwb_file_name"]
+            )
+            position = pynwb.behavior.Position()
+            likelihood = pynwb.behavior.BehavioralTimeSeries()
+            position.create_spatial_series(
+                name="position",
+                timestamps=part_df.time.to_numpy(),
+                conversion=METERS_PER_CM,
+                data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
+                reference_frame=spatial_series.reference_frame,
+                comments=spatial_series.comments,
+                description="x_position, y_position",
+            )
+            likelihood.create_timeseries(
+                name="likelihood",
+                timestamps=part_df.time.to_numpy(),
+                data=part_df.loc[:, idx["likelihood"]].to_numpy(),
+                unit="likelihood",
+                comments="no comments",
+                description="likelihood",
+            )
+            likelihood.create_timeseries(
+                name="video_frame_ind",
+                timestamps=part_df.time.to_numpy(),
+                data=part_df.loc[:, idx["video_frame_ind"]].to_numpy(),
+                unit="index",
+                comments="no comments",
+                description="video_frame_ind",
+            )
+            nwb_analysis_file = AnalysisNwbfile()
+            key["dlc_pose_estimation_position_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
                     analysis_file_name=key["analysis_file_name"],
+                    nwb_object=position,
                 )
-                self.BodyPart.insert1(key)
-                AnalysisNwbfile().log(key, table=self.full_table_name)
+            )
+            key["dlc_pose_estimation_likelihood_object_id"] = (
+                nwb_analysis_file.add_nwb_object(
+                    analysis_file_name=key["analysis_file_name"],
+                    nwb_object=likelihood,
+                )
+            )
+            nwb_analysis_file.add(
+                nwb_file_name=key["nwb_file_name"],
+                analysis_file_name=key["analysis_file_name"],
+            )
+            self.BodyPart.insert1(key)
+            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs):
         entries = (self.BodyPart & self).fetch("KEY")
@@ -362,12 +366,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             ),
             name="time",
         )
-        COLUMNS = [
-            "video_frame_ind",
-            "x",
-            "y",
-            "likelihood",
-        ]
+        COLUMNS = ["video_frame_ind", "x", "y", "likelihood"]
         return pd.concat(
             {
                 entry["bodypart"]: pd.DataFrame(

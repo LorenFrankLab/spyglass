@@ -56,6 +56,25 @@ class InsertError(dj.Manual):
 
 
 @schema
+class ActivityLog(dj.Manual):
+    """A log of suspected low-use features worth deprecating."""
+
+    definition = """
+    id: int auto_increment
+    ---
+    function: varchar(64)
+    dj_user: varchar(64)
+    timestamp=CURRENT_TIMESTAMP: timestamp
+    """
+
+    @classmethod
+    def deprecate_log(cls, name, warning=True) -> None:
+        if warning:
+            logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
+        cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
+
+
+@schema
 class ExportSelection(SpyglassMixin, dj.Manual):
     definition = """
     export_id: int auto_increment

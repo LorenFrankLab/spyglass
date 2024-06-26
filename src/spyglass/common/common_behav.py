@@ -14,7 +14,7 @@ from spyglass.common.common_interval import IntervalList, interval_list_contains
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
-from spyglass.settings import video_dir
+from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
@@ -56,8 +56,8 @@ class PositionSource(SpyglassMixin, dj.Manual):
             keys = [keys]
         if isinstance(keys[0], (dj.Table, dj.expression.QueryExpression)):
             keys = [k for tbl in keys for k in tbl.fetch("KEY", as_dict=True)]
-        for key in keys:
-            nwb_file_name = key.get("nwb_file_name")
+        nwb_files = set(key.get("nwb_file_name") for key in keys)
+        for nwb_file_name in nwb_files:  # Only unique nwb files
             if not nwb_file_name:
                 raise ValueError("PositionSource.make requires nwb_file_name")
             self.insert_from_nwbfile(nwb_file_name, skip_duplicates=True)
@@ -311,7 +311,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
         if associated_files is None:
             logger.info(
                 "Unable to import StateScriptFile: no processing module named "
-                + '"associated_files" found in {nwb_file_name}.'
+                + f'"associated_files" found in {nwb_file_name}.'
             )
             return  # See #849
 
@@ -377,10 +377,12 @@ class VideoFile(SpyglassMixin, dj.Imported):
     def make(self, key):
         self._no_transaction_make(key)
 
-    def _no_transaction_make(self, key, verbose=True):
+    def _no_transaction_make(self, key, verbose=True, skip_duplicates=False):
         if not self.connection.in_transaction:
             self.populate(key)
             return
+        if test_mode:
+            skip_duplicates = True
 
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -404,6 +406,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch1("valid_times")
+
         cam_device_str = r"camera_device (\d+)"
         is_found = False
         for ind, video in enumerate(videos.values()):
@@ -413,28 +416,35 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 # check to see if the times for this video_object are largely
                 # overlapping with the task epoch times
 
-                if len(
+                if not len(
                     interval_list_contains(valid_times, video_obj.timestamps)
                     > 0.9 * len(video_obj.timestamps)
                 ):
-                    nwb_cam_device = video_obj.device.name
-                    # returns whatever was captured in the first group (within the parentheses) of the regular expression -- in this case, 0
-                    key["video_file_num"] = int(
-                        re.match(cam_device_str, nwb_cam_device)[1]
+                    continue
+
+                nwb_cam_device = video_obj.device.name
+
+                # returns whatever was captured in the first group (within the
+                # parentheses) of the regular expression - in this case, 0
+
+                key["video_file_num"] = int(
+                    re.match(cam_device_str, nwb_cam_device)[1]
+                )
+                camera_name = video_obj.device.camera_name
+                if CameraDevice & {"camera_name": camera_name}:
+                    key["camera_name"] = video_obj.device.camera_name
+                else:
+                    raise KeyError(
+                        f"No camera with camera_name: {camera_name} found "
+                        + "in CameraDevice table."
                     )
-                    camera_name = video_obj.device.camera_name
-                    if CameraDevice & {"camera_name": camera_name}:
-                        key["camera_name"] = video_obj.device.camera_name
-                    else:
-                        raise KeyError(
-                            f"No camera with camera_name: {camera_name} found "
-                            + "in CameraDevice table."
-                        )
-                    key["video_file_object_id"] = video_obj.object_id
-                    self.insert1(
-                        key, skip_duplicates=True, allow_direct_insert=True
-                    )
-                    is_found = True
+                key["video_file_object_id"] = video_obj.object_id
+                self.insert1(
+                    key,
+                    skip_duplicates=skip_duplicates,
+                    allow_direct_insert=True,
+                )
+                is_found = True
 
         if not is_found and verbose:
             logger.info(
@@ -443,7 +453,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
 
     @classmethod
-    def update_entries(cls, restrict={}):
+    def update_entries(cls, restrict=True):
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_name"):
@@ -495,8 +505,10 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---
-    position_interval_name: varchar(200)  # name of the corresponding position interval
+    position_interval_name="": varchar(200)  # name of the corresponding interval
     """
+
+    # #849 - Insert null to avoid rerun
 
     def make(self, key):
         self._no_transaction_make(key)
@@ -510,6 +522,8 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             # if not called in the context of a make function, call its own make function
             self.populate(key)
             return
+        if self & key:
+            return
 
         # *** HARD CODED VALUES ***
         EPSILON = 0.51  # tolerated time diff in bounds across epoch/pos
@@ -517,11 +531,13 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         nwb_file_name = key["nwb_file_name"]
         pos_intervals = get_pos_interval_list_names(nwb_file_name)
+        null_key = dict(key, position_interval_name="")
+        insert_opts = dict(allow_direct_insert=True, skip_duplicates=True)
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            # TODO: Now that populate_all accept errors, raise here?
             logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
+            self.insert1(null_key, **insert_opts)
             return
 
         valid_times = (IntervalList & key).fetch1("valid_times")
@@ -535,7 +551,6 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             f"nwb_file_name='{nwb_file_name}' AND interval_list_name=" + "'{}'"
         )
         for pos_interval in pos_intervals:
-            # cbroz: fetch1->fetch. fetch1 would fail w/o result
             pos_times = (IntervalList & restr.format(pos_interval)).fetch(
                 "valid_times"
             )
@@ -558,16 +573,18 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            # TODO: Now that populate_all accept errors, raise here?
             logger.warning(
-                f"Found {len(matching_pos_intervals)} pos intervals for {key}; "
-                + f"{no_pop_msg}\n{matching_pos_intervals}"
+                f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos intervals for "
+                + f"\n\t{key}\n\tMatching intervals: {matching_pos_intervals}"
             )
+            self.insert1(null_key, **insert_opts)
             return
 
         # Insert into table
-        key["position_interval_name"] = matching_pos_intervals[0]
-        self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+        self.insert1(
+            dict(key, position_interval_name=matching_pos_intervals[0]),
+            **insert_opts,
+        )
         logger.info(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
@@ -609,18 +626,26 @@ def convert_epoch_interval_name_to_position_interval_name(
         )
 
     pos_query = PositionIntervalMap & key
+    pos_str = "position_interval_name"
 
-    if len(pos_query) == 0:
-        if populate_missing:
-            PositionIntervalMap()._no_transaction_make(key)
-            pos_query = PositionIntervalMap & key
+    no_entries = len(pos_query) == 0
+    null_entry = pos_query.fetch(pos_str)[0] == "" if len(pos_query) else False
 
-    if len(pos_query) == 0:
+    if populate_missing and (no_entries or null_entry):
+        if null_entry:
+            pos_query.delete(safemode=False)  # no prompt
+        PositionIntervalMap()._no_transaction_make(key)
+        pos_query = PositionIntervalMap & key
+
+    if pos_query.fetch(pos_str)[0] == "":
         logger.info(f"No position intervals found for {key}")
         return []
 
     if len(pos_query) == 1:
         return pos_query.fetch1("position_interval_name")
+
+    else:
+        raise ValueError(f"Multiple intervals found for {key}: {pos_query}")
 
 
 def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
@@ -653,13 +678,12 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
 
 
 def populate_position_interval_map_session(nwb_file_name: str):
-    for interval_name in (TaskEpoch & {"nwb_file_name": nwb_file_name}).fetch(
-        "interval_list_name"
-    ):
-        with PositionIntervalMap._safe_context():
-            PositionIntervalMap().make(
-                {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_name,
-                }
-            )
+    # 1. remove redundancy in interval names
+    # 2. let PositionIntervalMap handle transaction context
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    intervals = (TaskEpoch & nwb_dict).fetch("interval_list_name")
+    for interval_name in set(intervals):
+        interval_dict = dict(interval_list_name=interval_name)
+        if PositionIntervalMap & interval_dict:
+            continue
+        PositionIntervalMap().make(dict(nwb_dict, **interval_dict))

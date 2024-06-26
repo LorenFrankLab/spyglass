@@ -47,17 +47,34 @@ def test_validate_params(params_tbl):
 
 
 @pytest.mark.parametrize(
-    "key", ["four_led_centroid", "two_pt_centroid", "one_pt_centroid"]
+    "key", ["one_pt_centroid", "two_pt_centroid", "four_led_centroid"]
 )
 def test_centroid_calcs(key, sgp):
+    from spyglass.position.v1.dlc_utils import Centroid
+
     points = sgp.v1.position_dlc_centroid._key_to_points[key]
-    func = sgp.v1.position_dlc_centroid._key_to_func_dict[key]
 
     df = generate_led_df(points)
-    ret = func(df, max_LED_separation=100, points={p: p for p in points})
+    ret = Centroid(
+        df, max_LED_separation=100, points={p: p for p in points}
+    ).centroid
 
     assert np.all(ret[:-1] == 1), f"Centroid calculation failed for {key}"
     assert np.all(np.isnan(ret[-1])), f"Centroid calculation failed for {key}"
 
-    with pytest.raises(KeyError):
-        func(df)  # Missing led separation/point names
+
+def test_centroid_error(sgp):
+    from spyglass.position.v1.dlc_utils import Centroid
+
+    one_pt = {"point1": "point1"}
+    df = generate_led_df(one_pt)
+    Centroid(df, points=one_pt)  # no sep ok on one point
+
+    two_pt = {"point1": "point1", "point2": "point2"}
+    with pytest.raises(ValueError):
+        Centroid(df, points=two_pt)  # Missing led separation for valid points
+
+    three_pt = {"point1": "point1", "point2": "point2", "point3": "point3"}
+    three_pt_df = generate_led_df(three_pt)
+    with pytest.raises(ValueError):  # invalid point number
+        Centroid(three_pt_df, points=three_pt, max_LED_separation=100)

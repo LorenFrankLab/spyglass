@@ -12,10 +12,10 @@ def db_settings(user_name):
 
     return DatabaseSettings(
         user_name=user_name,
-        host_name=docker_server.creds["database.host"],
+        host_name=docker_server.credentials["database.host"],
         target_database=id,
-        exec_user=docker_server.creds["database.user"],
-        exec_pass=docker_server.creds["database.password"],
+        exec_user=docker_server.credentials["database.user"],
+        exec_pass=docker_server.credentials["database.password"],
         test_mode=no_docker,
     )
 

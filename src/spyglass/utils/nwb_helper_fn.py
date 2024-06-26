@@ -101,7 +101,7 @@ def file_from_dandi(filepath):
     return False
 
 
-def get_config(nwb_file_path):
+def get_config(nwb_file_path, calling_table=None):
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
 
@@ -122,8 +122,14 @@ def get_config(nwb_file_path):
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
     if not os.path.exists(config_path):
-        logger.info(f"No config found at file path {config_path}")
-        return dict()
+        from spyglass.settings import base_dir  # noqa: F401
+
+        rel_path = p.relative_to(base_dir)
+        table = f"{calling_table}: " if calling_table else ""
+        logger.info(f"{table}No config found at {rel_path}")
+        ret = dict()
+        __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
+        return ret
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
 

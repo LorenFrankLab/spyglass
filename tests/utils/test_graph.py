@@ -72,8 +72,10 @@ def test_add_leaf_restr_ft(restr_graph_new_leaf):
 
 
 @pytest.fixture(scope="session")
-def restr_graph_root(restr_graph, common, lfp_band, lin_v1):
+def restr_graph_root(restr_graph, common, lfp_band, lin_v1, frequent_imports):
     from spyglass.utils.dj_graph import RestrGraph
+
+    _ = lfp_band, lin_v1, frequent_imports  # tables populated
 
     yield RestrGraph(
         seed_table=common.Session(),

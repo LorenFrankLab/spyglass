@@ -61,7 +61,8 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
     assert hash_df == hash_exp, "Dataframe differs from expected"
 
 
-def test_trodes_video(sgp):
+def test_trodes_video(sgp, trodes_pos_v1):
+    _ = trodes_pos_v1  # ensure table is populated
     vid_tbl = sgp.v1.TrodesPosVideo()
     _ = vid_tbl.populate()
     assert len(vid_tbl) == 2, "Failed to populate TrodesPosVideo"
