@@ -139,6 +139,7 @@ tests/_data/*
 *.videoTimeStamps
 *.cameraHWSync
 *.stateScriptLog
+tests/_data/*
 
 *.nwb
 *.DS_Store

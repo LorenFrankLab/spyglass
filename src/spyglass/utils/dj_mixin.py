@@ -126,6 +126,18 @@ class SpyglassMixin:
             return
         return self & f"{attr} LIKE '%{name}%'"
 
+    def find_insert_fail(self, key):
+        """Find which parent table is causing an IntergrityError on insert."""
+        for parent in self.parents(as_objects=True):
+            parent_key = {
+                k: v for k, v in key.items() if k in parent.heading.names
+            }
+            parent_name = to_camel_case(parent.table_name)
+            if query := parent & parent_key:
+                logger.info(f"{parent_name}:\n{query}")
+            else:
+                logger.info(f"{parent_name}: MISSING")
+
     @classmethod
     def _safe_context(cls):
         """Return transaction if not already in one."""

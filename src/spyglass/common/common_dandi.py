@@ -8,6 +8,8 @@ import h5py
 import pynwb
 from fsspec.implementations.cached import CachingFileSystem
 
+from spyglass.utils import logger
+
 try:
     import dandi.download
     import dandi.organize

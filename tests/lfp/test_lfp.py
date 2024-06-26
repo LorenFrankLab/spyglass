@@ -25,13 +25,13 @@ def test_lfp_dataframe(lfp, lfp_raw, lfp_merge_key):
 
 
 def test_lfp_band_dataframe(lfp_band_analysis_raw, lfp_band, lfp_band_key):
-    lfpb_raw = (
+    lfp_band_raw = (
         lfp_band_analysis_raw.processing["ecephys"]
         .fields["data_interfaces"]["LFP"]
         .electrical_series["filtered data"]
     )
-    lfpb_index = Index(lfpb_raw.timestamps, name="time")
-    df_raw = DataFrame(lfpb_raw.data, index=lfpb_index)
+    lfp_band_index = Index(lfp_band_raw.timestamps, name="time")
+    df_raw = DataFrame(lfp_band_raw.data, index=lfp_band_index)
     df_fetch = (lfp_band.LFPBandV1 & lfp_band_key).fetch1_dataframe()
 
     assert df_raw.equals(df_fetch), "LFPBand dataframe not match."
@@ -91,7 +91,7 @@ def test_invalid_band_selection(
         set_elec(**valid | {"reference_electrode_list": [3]})
 
 
-def test_artifactparam_defaults(art_params, art_param_defaults):
+def test_artifact_param_defaults(art_params, art_param_defaults):
     assert set(art_params.fetch("artifact_params_name")).issubset(
         set(art_param_defaults)
     ), "LFPArtifactDetectionParameters missing default item."

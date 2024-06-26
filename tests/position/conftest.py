@@ -30,6 +30,7 @@ def dlc_video_params(sgp):
             "params": {
                 "percent_frames": 0.05,
                 "incl_likelihood": True,
+                "processor": "opencv",
             },
         },
         skip_duplicates=True,

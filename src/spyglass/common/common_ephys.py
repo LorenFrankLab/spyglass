@@ -98,14 +98,10 @@ class Electrode(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
-        """Make without transaction
-
-        Allows populate_all_common to work within a single transaction."""
-
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
 
         if "Electrode" in config:
             electrode_config_dicts = {
@@ -202,7 +198,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=cls.__name__)
         if "Electrode" not in config:
             return  # See #849
 
@@ -323,7 +319,7 @@ class Raw(SpyglassMixin, dj.Imported):
         # same nwb_object_id
 
         logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n'
+            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
             + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
         )
 

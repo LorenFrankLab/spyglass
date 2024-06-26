@@ -99,7 +99,7 @@ class DataDownloader:
         _ = self.file_downloads
 
     def rename_files(self):
-        """Redund, but allows rerun later in startup process of conftest."""
+        """Redundant, but allows rerun later in startup process of conftest."""
         for path in self.file_paths:
             target, url = path["target_name"], path["url"]
             target_dir = self.base_dir / path["relative_dir"]

@@ -170,18 +170,18 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_creds(server):
-    yield server.creds
+def server_credentials(server):
+    yield server.credentials
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_creds, verbose, teardown):
+def dj_conn(request, server_credentials, verbose, teardown):
     """Fixture for datajoint connection."""
     config_file = "dj_local_conf.json_test"
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server_creds)
+    dj.config.update(server_credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
@@ -218,12 +218,12 @@ def mini_path(raw_dir):
 
 
 @pytest.fixture(scope="session")
-def nodlc(request):
+def no_dlc(request):
     yield NO_DLC
 
 
 @pytest.fixture(scope="session")
-def skipif_nodlc(request):
+def skipif_no_dlc(request):
     if NO_DLC:
         yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
     else:
@@ -821,6 +821,7 @@ def dlc_project_name():
 def insert_project(
     verbose_context,
     teardown,
+    video_keys,  # wait for video downloads
     dlc_project_name,
     dlc_project_tbl,
     common,
@@ -848,16 +849,16 @@ def insert_project(
 
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    video_list = common.VideoFile().fetch(
+        "nwb_file_name", "epoch", as_dict=True
+    )[:2]
     with verbose_context:
         project_key = dlc_project_tbl.insert_new_project(
             project_name=dlc_project_name,
             bodyparts=bodyparts,
             lab_team=team_name,
             frames_per_video=100,
-            video_list=[
-                {"nwb_file_name": mini_copy_name, "epoch": 0},
-                {"nwb_file_name": mini_copy_name, "epoch": 1},
-            ],
+            video_list=video_list,
             skip_duplicates=True,
         )
     config_path = (dlc_project_tbl & project_key).fetch1("config_path")
@@ -1019,7 +1020,7 @@ def populate_model(sgp, model_key):
 
 @pytest.fixture(scope="session")
 def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
-    yield sgp.v1.DLCPoseEstimationSelection.insert_estimation_task(
+    yield sgp.v1.DLCPoseEstimationSelection().insert_estimation_task(
         {
             "nwb_file_name": mini_copy_name,
             "epoch": 1,
@@ -1109,13 +1110,10 @@ def cohort_selection(sgp, si_key, si_params_name):
 
 
 @pytest.fixture(scope="session")
-def cohort_key(sgp, cohort_selection):
-    yield cohort_selection.copy()
-
-
-@pytest.fixture(scope="session")
-def populate_cohort(sgp, cohort_selection, populate_si):
-    sgp.v1.DLCSmoothInterpCohort.populate(cohort_selection)
+def cohort_key(sgp, cohort_selection, populate_si):
+    cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
+    cohort_tbl.populate(cohort_selection)
+    yield cohort_tbl.fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
@@ -1145,7 +1143,7 @@ def centroid_params(sgp):
 
 
 @pytest.fixture(scope="session")
-def centroid_selection(sgp, cohort_key, populate_cohort, centroid_params):
+def centroid_selection(sgp, cohort_key, centroid_params):
     centroid_key = cohort_key.copy()
     centroid_key = {
         key: val

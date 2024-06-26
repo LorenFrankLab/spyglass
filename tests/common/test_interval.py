@@ -23,5 +23,5 @@ def test_plot_epoch(mini_insert, interval_list):
     epoch_label = fig.get_axes()[0].get_yticklabels()[-1].get_text()
     assert epoch_label == "epoch", "plot_epoch failed"
 
-    epoch_interv = fig.get_axes()[0].lines[0].get_ydata()
-    assert array_equal(epoch_interv, [1, 1]), "plot_epoch failed"
+    epoch_interval = fig.get_axes()[0].lines[0].get_ydata()
+    assert array_equal(epoch_interval, [1, 1]), "plot_epoch failed"
