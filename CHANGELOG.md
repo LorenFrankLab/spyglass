@@ -46,6 +46,7 @@ PositionIntervalMap.alter()
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
     - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
+    - Fix SQL query error in `DLCPosV1.fetch_nwb` #1011
     - Add keyword args to all calls of `convert_to_pixels` #870
     - Unify `make_video` logic across `DLCPosVideo` and `TrodesVideo` #870
     - Replace `OutputLogger` context manager with decorator #870
@@ -56,6 +57,8 @@ PositionIntervalMap.alter()
         #994
     - Update docstrings #996
     - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
+    - Fix bug in identification of artifact samples to be zeroed out in
+        `spikesorting.v1.SpikeSorting` #1009
 
 ## [0.5.2] (April 22, 2024)
 
