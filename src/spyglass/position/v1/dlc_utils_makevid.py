@@ -467,7 +467,7 @@ class VideoMaker:
             self._update_plot,
             frames=self.frames,
             interval=1000 / fps,
-            # blit=True,
+            blit=True,
         )
         movie.save(self.output_video_filename, writer=writer, dpi=400)
         self.video.release()
