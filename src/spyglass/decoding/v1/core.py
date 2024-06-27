@@ -157,9 +157,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_variable_names = (self & key).fetch1("position_variables")
 
         position_info = []
-        upsample_rate = (self & key).fetch1(
-            "upsample_rate"
-        )  # TODO: alter PositionGroup to include upsample_rate key
+        upsample_rate = (self & key).fetch1("upsample_rate")
         for pos_merge_id in (self.Position & key).fetch("pos_merge_id"):
             if not np.isnan(upsample_rate):
                 position_info.append(
