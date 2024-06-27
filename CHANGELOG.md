@@ -61,6 +61,7 @@ PositionIntervalMap.alter()
     - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
     - Fix bug in identification of artifact samples to be zeroed out in
         `spikesorting.v1.SpikeSorting` #1009
+    - Remove deprecated dependencies on kachery_client #1014
 
 ## [0.5.2] (April 22, 2024)
 
