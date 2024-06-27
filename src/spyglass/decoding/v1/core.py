@@ -109,6 +109,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         group_name: str,
         keys: list[dict],
         position_variables: list[str] = ["position_x", "position_y"],
+        upsample_rate: float = np.nan,
     ):
         group_key = {
             "nwb_file_name": nwb_file_name,
@@ -118,6 +119,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             {
                 **group_key,
                 "position_variables": position_variables,
+                "upsample_rate": upsample_rate,
             },
             skip_duplicates=True,
         )
@@ -155,9 +157,11 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_variable_names = (self & key).fetch1("position_variables")
 
         position_info = []
-        upsample_rate = 1000  # (self & key).fetch1("upsample_rate") #TODO: alter PositionGroup to include upsample_rate key
+        upsample_rate = (self & key).fetch1(
+            "upsample_rate"
+        )  # TODO: alter PositionGroup to include upsample_rate key
         for pos_merge_id in (self.Position & key).fetch("pos_merge_id"):
-            if upsample_rate is not None:
+            if not np.isnan(upsample_rate):
                 position_info.append(
                     self._upsample(
                         (
@@ -178,7 +182,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
         position_info = (
-            pd.concat(position_info, axis=0).loc[min_time:max_time].dropna()
+            pd.concat(position_info, axis=0)
+            .loc[min_time:max_time]
+            .dropna(subset=position_variable_names)
         )
 
         return position_info, position_variable_names

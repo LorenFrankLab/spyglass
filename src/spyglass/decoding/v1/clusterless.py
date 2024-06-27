@@ -430,7 +430,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 axis=1,
             )
             .loc[min_time:max_time]
-            .dropna()
+            .dropna(subset=position_variable_names)
         )
 
     @staticmethod
