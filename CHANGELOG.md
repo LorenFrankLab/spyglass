@@ -8,8 +8,10 @@
 
 ```python
 from spyglass.common.common_behav import PositionIntervalMap
+from spyglass.decoding.v1.core import PositionGroup
 
 PositionIntervalMap.alter()
+PositionGroup.alter()
 ```
 
 ### Infrastructure
