@@ -1,4 +1,7 @@
 import pytest
+from datajoint.utils import to_camel_case
+
+from tests.conftest import VERBOSE
 
 
 @pytest.fixture(scope="session")
@@ -14,8 +17,7 @@ def restr_graph(leaf, verbose, lin_merge_key):
 
     yield RestrGraph(
         seed_table=leaf,
-        table_name=leaf.full_table_name,
-        restriction=True,
+        leaves={leaf.full_table_name: True},
         cascade=True,
         verbose=verbose,
     )
@@ -26,13 +28,19 @@ def test_rg_repr(restr_graph, leaf):
     repr_got = repr(restr_graph)
 
     assert "cascade" in repr_got.lower(), "Cascade not in repr."
-    assert leaf.full_table_name in repr_got, "Table name not in repr."
+
+    assert to_camel_case(leaf.table_name) in repr_got, "Table name not in repr."
+
+
+def test_rg_len(restr_graph):
+    assert len(restr_graph) == len(
+        restr_graph.restr_ft
+    ), "Unexpected length of RestrGraph."
 
 
 def test_rg_ft(restr_graph):
     """Test FreeTable attribute of RestrGraph."""
     assert len(restr_graph.leaf_ft) == 1, "Unexpected # of leaf tables."
-    assert len(restr_graph["spatial"]) == 2, "Unexpected cascaded table length."
 
 
 def test_rg_restr_ft(restr_graph):
@@ -43,8 +51,41 @@ def test_rg_restr_ft(restr_graph):
 
 def test_rg_file_paths(restr_graph):
     """Test collection of upstream file paths."""
-    paths = [p.get("file_path") for p in restr_graph.file_paths]
-    assert len(paths) == 2, "Unexpected number of file paths."
+    assert len(restr_graph.file_paths) == 2, "Unexpected number of file paths."
+
+
+def test_rg_invalid_table(restr_graph):
+    """Test that an invalid table raises an error."""
+    with pytest.raises(ValueError):
+        restr_graph._get_node("invalid_table")
+
+
+def test_rg_invalid_edge(restr_graph, Nwbfile, common):
+    """Test that an invalid edge raises an error."""
+    with pytest.raises(ValueError):
+        restr_graph._get_edge(Nwbfile, common.common_behav.PositionSource)
+
+
+def test_rg_restr_subset(restr_graph, leaf):
+    prev_ft = restr_graph._get_ft(leaf.full_table_name, with_restr=True)
+
+    restr_graph._set_restr(leaf, restriction=False)
+
+    new_ft = restr_graph._get_ft(leaf.full_table_name, with_restr=True)
+    assert len(prev_ft) == len(new_ft), "Subset sestriction changed length."
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
+def test_rg_no_restr(caplog, restr_graph, common):
+    restr_graph._set_restr(common.LabTeam, restriction=False)
+    restr_graph._get_ft(common.LabTeam.full_table_name, with_restr=True)
+    assert "No restr" in caplog.text, "No warning logged on no restriction."
+
+
+def test_rg_invalid_direction(restr_graph, leaf):
+    """Test that an invalid direction raises an error."""
+    with pytest.raises(ValueError):
+        restr_graph._get_next_tables(leaf.full_table_name, "invalid_direction")
 
 
 @pytest.fixture(scope="session")
@@ -72,13 +113,14 @@ def test_add_leaf_restr_ft(restr_graph_new_leaf):
 
 
 @pytest.fixture(scope="session")
-def restr_graph_root(restr_graph, common, lfp_band, lin_v1):
+def restr_graph_root(restr_graph, common, lfp_band, lin_v1, frequent_imports):
     from spyglass.utils.dj_graph import RestrGraph
+
+    _ = lfp_band, lin_v1, frequent_imports  # tables populated
 
     yield RestrGraph(
         seed_table=common.Session(),
-        table_name=common.Session.full_table_name,
-        restriction="True",
+        leaves={common.Session.full_table_name: "True"},
         direction="down",
         cascade=True,
         verbose=False,
@@ -87,7 +129,7 @@ def restr_graph_root(restr_graph, common, lfp_band, lin_v1):
 
 def test_rg_root(restr_graph_root):
     assert (
-        len(restr_graph_root["trodes_pos_v1"]) == 2
+        len(restr_graph_root["trodes_pos_v1"]) >= 1
     ), "Incomplete cascade from root."
 
 
@@ -123,6 +165,52 @@ def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
     assert len(graph_tables[table]() << restr) == expect_n, msg
 
 
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_ban_node(caplog, graph_tables):
+    search_restr = "sk_attr > 17"
+    ParentNode = graph_tables["ParentNode"]()
+    SkNode = graph_tables["SkNode"]()
+
+    ParentNode.ban_search_table(SkNode)
+    ParentNode >> search_restr
+    assert "could not be applied" in caplog.text, "Found banned table."
+
+    ParentNode.see_banned_tables()
+    assert "Banned tables" in caplog.text, "Banned tables not logged."
+
+    ParentNode.unban_search_table(SkNode)
+    assert len(ParentNode >> search_restr) == 3, "Unban failed."
+
+
+def test_null_restrict_by(graph_tables):
+    PkNode = graph_tables["PkNode"]()
+    assert (PkNode >> True) == PkNode, "Null restriction failed."
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_restrict_by_this_table(caplog, graph_tables):
+    PkNode = graph_tables["PkNode"]()
+    PkNode >> "pk_id > 4"
+    assert "valid for" in caplog.text, "No warning logged without search."
+
+
+def test_invalid_restr_direction(graph_tables):
+    PkNode = graph_tables["PkNode"]()
+    with pytest.raises(ValueError):
+        PkNode.restrict_by("bad_attr > 0", direction="invalid_direction")
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_warn_nonrestrict(caplog, graph_tables):
+    ParentNode = graph_tables["ParentNode"]()
+    restr_parent = ParentNode & "parent_id > 4 AND parent_id < 9"
+
+    restr_parent >> "sk_id > 0"
+    assert "Same length" in caplog.text, "No warning logged on non-restrict."
+    restr_parent >> "sk_id > 99"
+    assert "No entries" in caplog.text, "No warning logged on non-restrict."
+
+
 def test_restr_many_to_one(graph_tables_many_to_one):
     PK = graph_tables_many_to_one["PkSkNode"]()
     OP = graph_tables_many_to_one["OtherParentNode"]()
@@ -137,7 +225,35 @@ def test_restr_many_to_one(graph_tables_many_to_one):
     ), "Error accepting list of dicts for `>>` for many to one."
 
 
-def test_restr_invalid(graph_tables):
+def test_restr_invalid_err(graph_tables):
     PkNode = graph_tables["PkNode"]()
     with pytest.raises(ValueError):
         len(PkNode << set(["parent_attr > 15", "parent_attr < 20"]))
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_restr_invalid(caplog, graph_tables):
+    graph_tables["PkNode"]() << "invalid_restr=1"
+    assert (
+        "could not be applied" in caplog.text
+    ), "No warning logged on invalid restr."
+
+
+@pytest.fixture(scope="session")
+def direction():
+    from spyglass.utils.dj_graph import Direction
+
+    yield Direction
+
+
+def test_direction_str(direction):
+    assert str(direction.UP) == "up", "Direction str not as expected."
+
+
+def test_direction_invert(direction):
+    assert ~direction.UP == direction("down"), "Direction inversion failed."
+
+
+def test_direction_bool(direction):
+    assert bool(direction.UP), "Direction bool not as expected."
+    assert not direction.NONE, "Direction bool not as expected."

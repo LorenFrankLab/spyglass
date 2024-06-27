@@ -64,7 +64,7 @@ class Session(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
 
         # certain data are not associated with a single NWB file / session
         # because they may apply to multiple sessions. these data go into
@@ -77,26 +77,26 @@ class Session(SpyglassMixin, dj.Imported):
         # via fields of Session (e.g., Subject, Institution, Lab) or part
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
-        logger.info("Institution...")
+        logger.info("Session populates Institution...")
         Institution().insert_from_nwbfile(nwbf)
 
-        logger.info("Lab...")
+        logger.info("Session populates Lab...")
         Lab().insert_from_nwbfile(nwbf)
 
-        logger.info("LabMember...")
+        logger.info("Session populates LabMember...")
         LabMember().insert_from_nwbfile(nwbf)
 
-        logger.info("Subject...")
+        logger.info("Session populates Subject...")
         Subject().insert_from_nwbfile(nwbf)
 
         if not debug_mode:  # TODO: remove when demo files agree on device
-            logger.info("Populate DataAcquisitionDevice...")
+            logger.info("Session populates Populate DataAcquisitionDevice...")
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
 
-        logger.info("Populate CameraDevice...")
+        logger.info("Session populates Populate CameraDevice...")
         CameraDevice.insert_from_nwbfile(nwbf)
 
-        logger.info("Populate Probe...")
+        logger.info("Session populates Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
 
         if nwbf.subject is not None:
@@ -126,7 +126,7 @@ class Session(SpyglassMixin, dj.Imported):
         # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
         # a manual table that is also populated from NWB files
 
-        logger.info("IntervalList...")
+        logger.info("Session populates IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
         # logger.info('Unit...')
@@ -148,8 +148,8 @@ class Session(SpyglassMixin, dj.Imported):
             }
             if len(query) == 0:
                 logger.warn(
-                    f"DataAcquisitionDevice with name {device_name} does not exist. "
-                    "Cannot link Session with DataAcquisitionDevice in Session.DataAcquisitionDevice."
+                    "Cannot link Session with DataAcquisitionDevice.\n"
+                    + f"DataAcquisitionDevice does not exist: {device_name}"
                 )
                 continue
             key = dict()
@@ -166,8 +166,8 @@ class Session(SpyglassMixin, dj.Imported):
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
                 logger.warn(
-                    f"LabMember with name {name} does not exist. "
-                    "Cannot link Session with LabMember in Session.Experimenter."
+                    "Cannot link Session with LabMember. "
+                    + f"LabMember does not exist: {name}"
                 )
                 continue
 

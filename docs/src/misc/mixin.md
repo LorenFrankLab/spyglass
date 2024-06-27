@@ -136,29 +136,38 @@ masters, or null entry masters without matching data.
 
 For [Merge tables](./merge_tables.md), this is a significant problem. If a user
 wants to delete all entries associated with a given session, she must find all
-Merge entries and delete them in the correct order. The mixin provides a
-function, `delete_downstream_merge`, to handle this, which is run by default
-when calling `delete`.
+part table entries, including Merge tables, and delete them in the correct
+order. The mixin provides a function, `delete_downstream_parts`, to handle this,
+which is run by default when calling `delete`.
 
-`delete_downstream_merge`, also aliased as `ddm`, identifies all Merge tables
-downstream of where it is called. If `dry_run=True`, it will return a list of
-entries that would be deleted, otherwise it will delete them.
+`delete_downstream_parts`, also aliased as `ddp`, identifies all part tables
+with foreign key references downstream of where it is called. If `dry_run=True`,
+it will return a list of entries that would be deleted, otherwise it will delete
+them.
 
-Importantly, `delete_downstream_merge` cannot properly interact with tables that
+Importantly, `delete_downstream_parts` cannot properly interact with tables that
 have not been imported into the current namespace. If you are having trouble
 with part deletion errors, import the offending table and rerun the function
 with `reload_cache=True`.
 
 ```python
+import datajoint as dj
 from spyglass.common import Nwbfile
 
 restricted_nwbfile = Nwbfile() & "nwb_file_name LIKE 'Name%'"
-restricted_nwbfile.delete_downstream_merge(dry_run=False)
-# DataJointError("Attempt to delete part table MyMerge.Part before ...
+
+vanilla_dj_table = dj.FreeTable(dj.conn(), Nwbfile.full_table_name)
+vanilla_dj_table.delete()
+# DataJointError("Attempt to delete part table MyMerge.Part before ... ")
+
+restricted_nwbfile.delete()
+# [WARNING] Spyglass: No part deletes found w/ Nwbfile ...
+# OR
+# ValueError("Please import MyMerge and try again.")
 
 from spyglass.example import MyMerge
 
-restricted_nwbfile.delete_downstream_merge(reload_cache=True, dry_run=False)
+restricted_nwbfile.delete_downstream_parts(reload_cache=True, dry_run=False)
 ```
 
 Because each table keeps a cache of downstream merge tables, it is important to
@@ -169,13 +178,13 @@ Speed gains can also be achieved by avoiding re-instancing the table each time.
 # Slow
 from spyglass.common import Nwbfile
 
-(Nwbfile() & "nwb_file_name LIKE 'Name%'").ddm(dry_run=False)
-(Nwbfile() & "nwb_file_name LIKE 'Other%'").ddm(dry_run=False)
+(Nwbfile() & "nwb_file_name LIKE 'Name%'").ddp(dry_run=False)
+(Nwbfile() & "nwb_file_name LIKE 'Other%'").ddp(dry_run=False)
 
 # Faster
 from spyglass.common import Nwbfile
 
 nwbfile = Nwbfile()
-(nwbfile & "nwb_file_name LIKE 'Name%'").ddm(dry_run=False)
-(nwbfile & "nwb_file_name LIKE 'Other%'").ddm(dry_run=False)
+(nwbfile & "nwb_file_name LIKE 'Name%'").ddp(dry_run=False)
+(nwbfile & "nwb_file_name LIKE 'Other%'").ddp(dry_run=False)
 ```

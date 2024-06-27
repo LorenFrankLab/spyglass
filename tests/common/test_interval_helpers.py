@@ -111,7 +111,7 @@ def test_interval_list_contains_ind(common, interval_list_dict):
     ), "Problem with common_interval.interval_list_contains_ind"
 
 
-def test_insterval_list_contains(common, interval_list_dict):
+def test_interval_list_contains(common, interval_list_dict):
     idxs = common.common_interval.interval_list_contains(**interval_list_dict)
     assert np.array_equal(
         idxs, np.array([1, 7, 8])

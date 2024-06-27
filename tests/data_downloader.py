@@ -1,9 +1,13 @@
 from functools import cached_property
 from os import environ as os_environ
 from pathlib import Path
+from shutil import copy as shutil_copy
 from subprocess import DEVNULL, Popen
 from sys import stderr, stdout
+from time import sleep as time_sleep
 from typing import Dict, Union
+
+from datajoint import logger as dj_logger
 
 UCSF_BOX_USER = os_environ.get("UCSF_BOX_USER")
 UCSF_BOX_TOKEN = os_environ.get("UCSF_BOX_TOKEN")
@@ -87,6 +91,7 @@ class DataDownloader:
             self.cmd_kwargs = dict(stdout=stdout, stderr=stderr)
 
         self.base_dir = Path(base_dir).resolve()
+        self.download_dlc = download_dlc
         self.file_paths = file_paths if download_dlc else file_paths[:NON_DLC]
         self.base_dir.mkdir(exist_ok=True)
 
@@ -94,7 +99,7 @@ class DataDownloader:
         _ = self.file_downloads
 
     def rename_files(self):
-        """Redund, but allows rerun later in startup process of conftest."""
+        """Redundant, but allows rerun later in startup process of conftest."""
         for path in self.file_paths:
             target, url = path["target_name"], path["url"]
             target_dir = self.base_dir / path["relative_dir"]
@@ -112,28 +117,42 @@ class DataDownloader:
         for path in self.file_paths:
             target, url = path["target_name"], path["url"]
             target_dir = self.base_dir / path["relative_dir"]
-            dest = target_dir / target
-
-            if dest.exists():
-                ret[target] = None
-                continue
-
             target_dir.mkdir(exist_ok=True, parents=True)
-            ret[target] = Popen(self.cmd + [target_dir, url], **self.cmd_kwargs)
+            dest = target_dir / target
+            cmd = (
+                ["echo", f"Already have {target}"]
+                if dest.exists()
+                else self.cmd + [target_dir, url]
+            )
+            ret[target] = Popen(cmd, **self.cmd_kwargs)
         return ret
 
-    def check_download(self, download, info):
-        if download is not None:
-            download.wait()
-            if download.returncode:
-                return download
-        return None
+    def wait_for(self, target: str):
+        """Wait for target to finish downloading."""
+        status = self.file_downloads.get(target).poll()
+        limit = 10
+        while status is None and limit > 0:
+            time_sleep(5)  # Some
+            limit -= 1
+            status = self.file_downloads.get(target).poll()
+        if status != 0:
+            raise ValueError(f"Error downloading: {target}")
+        if limit < 1:
+            raise TimeoutError(f"Timeout downloading: {target}")
 
-    @property
-    def download_errors(self):
-        ret = []
-        for download, item in zip(self.file_downloads, self.file_paths):
-            if d_status := self.check_download(download, item):
-                ret.append(d_status)
-                continue
-        return ret
+    def move_dlc_items(self, dest_dir: Path):
+        """Move completed DLC files to dest_dir."""
+        if not self.download_dlc:
+            return
+        if not dest_dir.exists():
+            dest_dir.mkdir(parents=True)
+
+        for path in self.file_paths[NON_DLC:]:
+            target = path["target_name"]
+            self.wait_for(target)  # Could be faster if moved finished first
+
+            src_path = self.base_dir / path["relative_dir"] / target
+            dest_path = dest_dir / src_path.name
+            if not dest_path.exists():
+                shutil_copy(str(src_path), str(dest_path))
+                dj_logger.info(f"Moved: {src_path} -> {dest_path}")
