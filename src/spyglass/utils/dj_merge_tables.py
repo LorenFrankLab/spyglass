@@ -59,6 +59,8 @@ class Merge(dj.Manual):
     view rather than the master table itself.
     """
 
+    _dependencies_loaded = False
+
     def __init__(self):
         super().__init__()
         self._reserved_pk = RESERVED_PRIMARY_KEY
@@ -374,7 +376,9 @@ class Merge(dj.Manual):
 
         Otherwise parts returns none
         """
-        dj.conn.connection.dependencies.load()
+        if not cls._dependencies_loaded:
+            dj.conn.connection.dependencies.load()
+            cls._dependencies_loaded = True
 
     def insert(self, rows: list, **kwargs):
         """Merges table specific insert, ensuring data exists in part parents.
