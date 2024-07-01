@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
@@ -70,6 +70,7 @@ dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 import spyglass.common as sgc
 import spyglass.spikesorting.v0 as sgs
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -84,11 +85,12 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # If you haven't already done so, add yourself to `LabTeam`
 #
 
+# +
 # Full name, Google email address, DataJoint username, admin
 name, email, dj_user, admin = (
-    "Firstname Lastname",
-    "example@gmail.com",
-    "user",
+    "Firstname_spikesv0 Lastname_spikesv0",
+    "example_spikesv0@gmail.com",
+    dj.config["database.user"],  # use the same username as the database
     0,
 )
 sgc.LabMember.insert_from_name(name)
@@ -101,7 +103,25 @@ sgc.LabMember.LabMemberInfo.insert1(
     ],
     skip_duplicates=True,
 )
-sgc.LabMember.LabMemberInfo()
+
+# Make a lab team if doesn't already exist, otherwise insert yourself into team
+team_name = "My Team"
+if not sgc.LabTeam() & {"team_name": team_name}:
+    sgc.LabTeam().create_new_team(
+        team_name=team_name,  # Should be unique
+        team_members=[name],
+        team_description="test",  # Optional
+    )
+else:
+    sgc.LabTeam.LabTeamMember().insert1(
+        {"team_name": team_name, "lab_member_name": name}, skip_duplicates=True
+    )
+
+sgc.LabMember.LabMemberInfo() & {
+    "team_name": "My Team",
+    "lab_member_name": "Firstname_spikesv0 Lastname_spikesv0",
+}
+# -
 
 # We can try `fetch` to confirm.
 #
@@ -157,7 +177,8 @@ nwb_file_name = "minirec20230622_.nwb"
 # commonly use multiple electrodes in a `SortGroup` selected by what tetrode or
 # shank of a probe they were on.
 #
-# _Note:_ This will delete any existing entries. Answer 'yes' when prompted.
+# _Note:_ This will delete any existing entries. Answer 'yes' when prompted, or skip
+# running this cell to leave data in place.
 #
 
 sgs.SortGroup().set_group_by_shank(nwb_file_name)
@@ -332,7 +353,7 @@ artifact_key["artifact_params_name"] = "none"
 # into `ArtifactDetectionSelection`.
 #
 
-sgs.ArtifactDetectionSelection().insert1(artifact_key)
+sgs.ArtifactDetectionSelection().insert1(artifact_key, skip_duplicates=True)
 sgs.ArtifactDetectionSelection() & artifact_key
 
 # Then, we can populate `ArtifactDetection`, which will find periods where there
@@ -437,15 +458,201 @@ sgs.SpikeSortingSelection.insert1(ss_key, skip_duplicates=True)
 #
 
 # [(sgs.SpikeSortingSelection & ss_key).proj()]
-sgs.SpikeSorting.populate()
+sgs.SpikeSorting.populate(ss_key)
 
 # #### Check to make sure the table populated
 #
 
 sgs.SpikeSorting() & ss_key
 
-# ## Next Steps
+# ## Automatic Curation
 #
-# Congratulations, you've spike sorted! See our
-# [next notebook](./03_Curation.ipynb) for curation steps.
+# Spikesorting algorithms can sometimes identify noise or other undesired features as spiking units.
+# Spyglass provides a curation pipeline to detect and label such features to exclude them
+# from downstream analysis.
+#
+#
+
+# ### Initial Curation
+#
+# The `Curation` table keeps track of rounds of spikesorting curations in the spikesorting v0 pipeline.
+# Before we begin, we first insert an initial curation entry with the spiking results.
+
+# +
+for sorting_key in (sgs.SpikeSorting() & ss_key).fetch("KEY"):
+    # insert_curation will make an entry with a new curation_id regardless of whether it already exists
+    # to avoid this, we check if the curation already exists
+    if not (sgs.Curation() & sorting_key):
+        sgs.Curation.insert_curation(sorting_key)
+
+sgs.Curation() & ss_key
+# -
+
+# ### Waveform Extraction
+#
+# Some metrics used for curating units are dependent on features of the spike waveform.
+# We extract these for each unit's initial curation here
+
+# Parameters used for waveform extraction from the recording
+waveform_params_name = "default_whitened"
+sgs.WaveformParameters().insert_default()  # insert default parameter sets if not already in database
+(
+    sgs.WaveformParameters() & {"waveform_params_name": waveform_params_name}
+).fetch(as_dict=True)[0]
+
+# extract waveforms
+curation_keys = [
+    {**k, "waveform_params_name": waveform_params_name}
+    for k in (sgs.Curation() & ss_key & {"curation_id": 0}).fetch("KEY")
+]
+sgs.WaveformSelection.insert(curation_keys, skip_duplicates=True)
+sgs.Waveforms.populate(ss_key)
+
+# ### Quality Metrics
+#
+# With these waveforms, we can calculate the metrics used to determine the quality of each unit.
+
+# parameters which define what quality metrics are calculated and how
+metric_params_name = "franklab_default3"
+sgs.MetricParameters().insert_default()  # insert default parameter sets if not already in database
+(sgs.MetricParameters() & {"metric_params_name": metric_params_name}).fetch(
+    "metric_params"
+)[0]
+
+waveform_keys = [
+    {**k, "metric_params_name": metric_params_name}
+    for k in (sgs.Waveforms() & ss_key).fetch("KEY")
+]
+sgs.MetricSelection.insert(waveform_keys, skip_duplicates=True)
+sgs.QualityMetrics().populate(ss_key)
+sgs.QualityMetrics() & ss_key
+
+# Look at the quality metrics for the first curation
+(sgs.QualityMetrics() & ss_key).fetch_nwb()[0]["object_id"]
+
+# ### Automatic Curation Labeling
+#
+# With these metrics, we can assign labels to the sorted units using the `AutomaticCuration` table
+
+# We can select our criteria for unit labeling here
+auto_curation_params_name = "default"
+sgs.AutomaticCurationParameters().insert_default()
+(
+    sgs.AutomaticCurationParameters()
+    & {"auto_curation_params_name": auto_curation_params_name}
+).fetch1()
+
+# We can now apply the automatic curation criteria to the quality metrics
+metric_keys = [
+    {**k, "auto_curation_params_name": auto_curation_params_name}
+    for k in (sgs.QualityMetrics() & ss_key).fetch("KEY")
+]
+sgs.AutomaticCurationSelection.insert(metric_keys, skip_duplicates=True)
+# populating this table will make a new entry in the curation table
+sgs.AutomaticCuration().populate(ss_key)
+sgs.Curation() & ss_key
+
+# ### Insert desired curation into downstream and merge tables for future analysis
+#
+# Now that we've performed auto-curation, we can insert the results of our chosen curation into
+# `CuratedSpikeSorting` (the final table of this pipeline), and the merge table `SpikeSortingOutput`.
+# Downstream analyses such as decoding will access the spiking data from there
+
+# +
+# get the curation keys corresponding to the automatic curation
+auto_curation_key_list = (sgs.AutomaticCuration() & ss_key).fetch(
+    "auto_curation_key"
+)
+
+# insert into CuratedSpikeSorting
+for auto_key in auto_curation_key_list:
+    # get the full key information needed
+    curation_auto_key = (sgs.Curation() & auto_key).fetch1("KEY")
+    sgs.CuratedSpikeSortingSelection.insert1(
+        curation_auto_key, skip_duplicates=True
+    )
+sgs.CuratedSpikeSorting.populate(ss_key)
+
+# Add the curated spike sorting to the SpikeSortingOutput merge table
+keys_for_merge_tables = (
+    sgs.CuratedSpikeSorting & auto_curation_key_list
+).fetch("KEY")
+SpikeSortingOutput.insert(
+    keys_for_merge_tables,
+    skip_duplicates=True,
+    part_name="CuratedSpikeSorting",
+)
+# Here's our result!
+SpikeSortingOutput.CuratedSpikeSorting() & ss_key
+# -
+
+# ## Manual Curation with figurl
+
+# As of June 2021, members of the Frank Lab can use the `sortingview` web app for
+# manual curation. To make use of this, we need to populate the `CurationFigurl` table.
+#
+# We begin by selecting a starting point from the curation entries. In this case we will use
+# the AutomaticCuration populated above as a starting point for manual curation, though you could also
+# start from the opriginal curation entry by selecting the proper key from the `Curation` table
+#
+# _Note_: This step requires setting up your kachery sharing through the [sharing notebook](02_Data_Sync.ipynb)
+#
+#
+
+# +
+starting_curations = (sgs.AutomaticCuration() & ss_key).fetch(
+    "auto_curation_key"
+)  # you could also select any key from the sgs.Curation table here
+
+username = "username"
+fig_url_repo = f"gh://LorenFrankLab/sorting-curations/main/{username}/"  # settings for franklab members
+
+sort_interval_name = interval_list_name
+gh_url = (
+    fig_url_repo
+    + str(nwb_file_name + "_" + sort_interval_name)  # session id
+    + "/{}"  # tetrode using auto_id['sort_group_id']
+    + "/curation.json"
+)  # url where the curation is stored
+
+for auto_id in starting_curations:
+    auto_curation_out_key = dict(
+        **(sgs.Curation() & auto_id).fetch1("KEY"),
+        new_curation_uri=gh_url.format(str(auto_id["sort_group_id"])),
+    )
+    sgs.CurationFigurlSelection.insert1(
+        auto_curation_out_key, skip_duplicates=True
+    )
+    sgs.CurationFigurl.populate(auto_curation_out_key)
+# -
+
+# We can then access the url for the curation figurl like so:
+
+print((sgs.CurationFigurl & ss_key).fetch("url")[0])
+
+# This will take you to a workspace on the `sortingview` app. The workspace, which
+# you can think of as a list of recording and associated sorting objects, was
+# created at the end of spike sorting. On the workspace view, you will see a set
+# of recordings that have been added to the workspace.
+#
+# ![Workspace view](./../notebook-images/workspace.png)
+#
+# Clicking on a recording then takes you to a page that gives you information
+# about the recording as well as the associated sorting objects.
+#
+# ![Recording view](./../notebook-images/recording.png)
+#
+# Click on a sorting to see the curation view. Try exploring the many
+# visualization widgets.
+#
+# ![Unit table](./../notebook-images/unittable.png)
+#
+# The most important is the `Units Table` and the `Curation` menu, which allows
+# you to give labels to the units. The curation labels will persist even if you
+# suddenly lose connection to the app; this is because the curation actions are
+# appended to the workspace as soon as they are created. Note that if you are not
+# logged in with your Google account, `Curation` menu may not be visible. Log in
+# and refresh the page to access this feature.
+#
+# ![Curation](./../notebook-images/curation.png)
 #

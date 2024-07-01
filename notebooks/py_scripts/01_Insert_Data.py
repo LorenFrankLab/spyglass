@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -198,11 +198,25 @@ sgc.LabTeam.LabTeamMember()
 # - neural activity (extracellular recording of multiple brain areas)
 # - etc.
 #
-# _Note:_ this may take time as Spyglass creates the copy. You may see a prompt
+# _Notes:_ this may take time as Spyglass creates the copy. You may see a prompt
 # about inserting device information.
 #
+# By default, the session insert process is error permissive. It will log an
+# error and continue attempts across various tables. You have two options you can
+# toggle to adjust this.
+#
+# - `rollback_on_fail`: Default False. If True, errors will still be logged for
+#   all tables and, if any are registered, the `Nwbfile` entry will be deleted.
+#   This is helpful for knowing why your file failed, and making it easy to retry.
+# - `raise_err`: Default False. If True, errors will not be logged and will
+#   instead be raised. This is useful for debugging and exploring the error stack.
+#   The end result may be that some tables may still have entries from this file
+#   that will need to be manually deleted after a failed attempt. 'transactions'
+#   are used where possible to rollback sibling tables, but child table errors
+#   will still leave entries from parent tables.
+#
 
-sgi.insert_sessions(nwb_file_name)
+sgi.insert_sessions(nwb_file_name, rollback_on_fail=False, raise_err=False)
 
 # ## Inspecting the data
 #
@@ -364,7 +378,7 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 # ```python
 # nwbfile = sgc.Nwbfile()
 #
-# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_merge(
+# (nwbfile & {"nwb_file_name": nwb_copy_file_name}).delete_downstream_parts(
 #     dry_run=False, # True will show Merge Table entries that would be deleted
 # )
 # ```

@@ -12,7 +12,11 @@ from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
 
-def insert_sessions(nwb_file_names: Union[str, List[str]]):
+def insert_sessions(
+    nwb_file_names: Union[str, List[str]],
+    rollback_on_fail: bool = False,
+    raise_err: bool = False,
+):
     """
     Populate the dj database with new sessions.
 
@@ -23,6 +27,10 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         existing .nwb files. Each file represents a session. Also accepts
         strings with glob wildcards (e.g., *) so long as the wildcard specifies
         exactly one file.
+    rollback_on_fail : bool, optional
+        If True, undo all inserts if an error occurs. Default is False.
+    raise_err : bool, optional
+        If True, raise an error if an error occurs. Default is False.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -66,7 +74,11 @@ def insert_sessions(nwb_file_names: Union[str, List[str]]):
         # the raw data in the original file
         copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name)
         Nwbfile().insert_from_relative_file_name(out_nwb_file_name)
-        populate_all_common(out_nwb_file_name)
+        return populate_all_common(
+            out_nwb_file_name,
+            rollback_on_fail=rollback_on_fail,
+            raise_err=raise_err,
+        )
 
 
 def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
@@ -102,8 +114,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         if debug_mode:
             return out_nwb_file_abs_path
         logger.warning(
-            f"Output file {out_nwb_file_abs_path} exists and will be "
-            + "overwritten."
+            f"Output file exists, will be overwritten: {out_nwb_file_abs_path}"
         )
 
     with pynwb.NWBHDF5IO(

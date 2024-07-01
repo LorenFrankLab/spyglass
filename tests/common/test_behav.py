@@ -22,18 +22,18 @@ def test_valid_epoch_num(common):
     assert epoch_num == 1, "PositionSource get_epoch_num failed"
 
 
-def test_invalid_populate(common):
+def test_pos_source_make(common):
+    """Test custom populate"""
+    common.PositionSource().make(common.Session())
+
+
+def test_pos_source_make_invalid(common):
     """Test invalid populate"""
     with pytest.raises(ValueError):
-        common.PositionSource.populate(dict())
+        common.PositionSource().make(dict())
 
 
-def test_custom_populate(common):
-    """Test custom populate"""
-    common.PositionSource.populate(common.Session())
-
-
-def test_raw_position_fetchnwb(common, mini_pos, mini_pos_interval_dict):
+def test_raw_position_fetch_nwb(common, mini_pos, mini_pos_interval_dict):
     """Test RawPosition fetch nwb"""
     fetched = DataFrame(
         (common.RawPosition & mini_pos_interval_dict)
@@ -56,7 +56,7 @@ def test_raw_position_fetch1_df(common, mini_pos, mini_pos_interval_dict):
     assert fetched.equals(raw), "RawPosition fetch1_dataframe failed"
 
 
-def test_raw_position_fetch_mult_df(common, mini_pos, mini_pos_interval_dict):
+def test_raw_position_fetch_multi_df(common, mini_pos, mini_pos_interval_dict):
     """Test RawPosition fetch1 dataframe"""
     shape = common.RawPosition().fetch1_dataframe().shape
     assert shape == (542, 8), "RawPosition.PosObj fetch1_dataframe failed"
@@ -79,26 +79,22 @@ def test_populate_state_script(common, pop_state_script):
     ), "StateScript populate unexpected effect"
 
 
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_no_transaction(common, mini_restr):
-    """Test no transaction"""
-    common.VideoFile()._no_transaction_make(mini_restr)
-
-
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_update_entries(common):
+def test_videofile_update_entries(common, video_keys):
     """Test update entries"""
-    common.VideoFile().update_entries()
+    key = common.VideoFile().fetch(as_dict=True)[0]
+    common.VideoFile().update_entries(key)
 
 
-@pytest.mark.skip(reason="No video files in mini")
-def test_videofile_getabspath(common, mini_restr):
+def test_videofile_getabspath(common, video_keys):
     """Test get absolute path"""
-    common.VideoFile().getabspath(mini_restr)
+    key = video_keys[0]
+    path = common.VideoFile().get_abs_path(key)
+    file_part = key["nwb_file_name"].split("2")[0] + "_0" + str(key["epoch"])
+    assert file_part in path, "VideoFile get_abs_path failed"
 
 
 @pytest.mark.skipif(not TEARDOWN, reason="No teardown: expect no change.")
-def test_posinterval_no_transaction(verbose_context, common, mini_restr):
+def test_pos_interval_no_transaction(verbose_context, common, mini_restr):
     """Test no transaction"""
     before = common.PositionIntervalMap().fetch()
     with verbose_context:

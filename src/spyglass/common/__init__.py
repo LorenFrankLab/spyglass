@@ -42,9 +42,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
-    AnalysisNwbfileKachery,
     Nwbfile,
-    NwbfileKachery,
 )
 from spyglass.common.common_position import (
     IntervalLinearizationSelection,

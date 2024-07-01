@@ -174,6 +174,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        # create the analysis nwb file to store the results.
+        lfp_band_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
         lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
@@ -276,8 +280,6 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             )
             return None
 
-        # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
             lfp_band_file_name
         )
@@ -362,6 +364,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):

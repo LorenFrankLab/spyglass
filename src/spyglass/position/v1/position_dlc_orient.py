@@ -1,3 +1,5 @@
+from time import time
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -6,12 +8,25 @@ from position_tools.core import gaussian_smooth
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import get_span_start_stop
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.position.v1.dlc_utils import (
+    get_span_start_stop,
+    interp_orientation,
+    no_orientation,
+    red_led_bisector_orientation,
+    two_pt_head_orientation,
+)
+from spyglass.utils import SpyglassMixin, logger
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
 schema = dj.schema("position_v1_dlc_orient")
+
+# Add new functions for orientation calculation here
+_key_to_func_dict = {
+    "none": no_orientation,
+    "red_green_orientation": two_pt_head_orientation,
+    "red_led_bisector": red_led_bisector_orientation,
+}
 
 
 @schema
@@ -61,8 +76,6 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
 
 @schema
 class DLCOrientationSelection(SpyglassMixin, dj.Manual):
-    """ """
-
     definition = """
     -> DLCSmoothInterpCohort
     -> DLCOrientationParams
@@ -83,8 +96,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
     dlc_orientation_object_id : varchar(80)
     """
 
-    def make(self, key):
-        # Get labels to smooth from Parameters table
+    def _get_pos_df(self, key):
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
         pos_df = pd.concat(
             {
@@ -96,14 +108,21 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
+        return pos_df
+
+    def make(self, key):
+        # Get labels to smooth from Parameters table
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+        pos_df = self._get_pos_df(key)
+
         params = (DLCOrientationParams() & key).fetch1("params")
         orientation_smoothing_std_dev = params.pop(
             "orientation_smoothing_std_dev", None
         )
-        dt = np.median(np.diff(pos_df.index.to_numpy()))
-        sampling_rate = 1 / dt
+        sampling_rate = 1 / np.median(np.diff(pos_df.index.to_numpy()))
         orient_func = _key_to_func_dict[params["orient_method"]]
         orientation = orient_func(pos_df, **params)
+
         if not params["orient_method"] == "none":
             # Smooth orientation
             is_nan = np.isnan(orientation)
@@ -127,21 +146,27 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             )
             # convert back to between -pi and pi
             orientation = np.angle(np.exp(1j * orientation))
+
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
-        key["analysis_file_name"] = AnalysisNwbfile().create(
+        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
+        # if spatial series exists, get metadata from there
+        if query := (RawPosition & key):
+            spatial_series = query.fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
+
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
             name="orientation",
             timestamps=final_df.index.to_numpy(),
             conversion=1.0,
             data=final_df["orientation"].to_numpy(),
-            reference_frame=spatial_series.reference_frame,
-            comments=spatial_series.comments,
+            reference_frame=getattr(spatial_series, "reference_frame", ""),
+            comments=getattr(spatial_series, "comments", "no comments"),
             description="orientation",
         )
         nwb_analysis_file = AnalysisNwbfile()
@@ -155,6 +180,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self):
         nwb_data = self.fetch_nwb()[0]
@@ -164,9 +190,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             ),
             name="time",
         )
-        COLUMNS = [
-            "orientation",
-        ]
+        COLUMNS = ["orientation"]
         return pd.DataFrame(
             np.asarray(nwb_data["dlc_orientation"].get_spatial_series().data)[
                 :, np.newaxis
@@ -174,97 +198,3 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
             columns=COLUMNS,
             index=index,
         )
-
-
-def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on vector between two points"""
-    BP1 = params.pop("bodypart1", None)
-    BP2 = params.pop("bodypart2", None)
-    orientation = np.arctan2(
-        (pos_df[BP1]["y"] - pos_df[BP2]["y"]),
-        (pos_df[BP1]["x"] - pos_df[BP2]["x"]),
-    )
-    return orientation
-
-
-def no_orientation(pos_df: pd.DataFrame, **params):
-    fill_value = params.pop("fill_with", np.nan)
-    n_frames = len(pos_df)
-    orientation = np.full(
-        shape=(n_frames), fill_value=fill_value, dtype=np.float16
-    )
-    return orientation
-
-
-def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on 2 equally-spaced identifiers
-    that are assumed to be perpendicular to the orientation direction.
-    A third object is needed to determine forward/backward
-    """
-    LED1 = params.pop("led1", None)
-    LED2 = params.pop("led2", None)
-    LED3 = params.pop("led3", None)
-    orientation = []
-    for index, row in pos_df.iterrows():
-        x_vec = row[LED1]["x"] - row[LED2]["x"]
-        y_vec = row[LED1]["y"] - row[LED2]["y"]
-        if y_vec == 0:
-            if (row[LED3]["y"] > row[LED1]["y"]) & (
-                row[LED3]["y"] > row[LED2]["y"]
-            ):
-                orientation.append(np.pi / 2)
-            elif (row[LED3]["y"] < row[LED1]["y"]) & (
-                row[LED3]["y"] < row[LED2]["y"]
-            ):
-                orientation.append(-(np.pi / 2))
-            else:
-                raise Exception("Cannot determine head direction from bisector")
-        else:
-            length = np.sqrt(y_vec * y_vec + x_vec * x_vec)
-            norm = np.array([-y_vec / length, x_vec / length])
-            orientation.append(np.arctan2(norm[1], norm[0]))
-        if index + 1 == len(pos_df):
-            break
-    return np.array(orientation)
-
-
-# Add new functions for orientation calculation here
-
-_key_to_func_dict = {
-    "none": no_orientation,
-    "red_green_orientation": two_pt_head_orientation,
-    "red_led_bisector": red_led_bisector_orientation,
-}
-
-
-def interp_orientation(orientation, spans_to_interp, **kwargs):
-    idx = pd.IndexSlice
-    # TODO: add parameters to refine interpolation
-    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
-        if (span_stop + 1) >= len(orientation):
-            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
-                np.nan
-            )
-            print(f"ind: {ind} has no endpoint with which to interpolate")
-            continue
-        if span_start < 1:
-            orientation.loc[idx[span_start:span_stop], idx["orientation"]] = (
-                np.nan
-            )
-            print(f"ind: {ind} has no startpoint with which to interpolate")
-            continue
-        orient = [
-            orientation["orientation"].iloc[span_start - 1],
-            orientation["orientation"].iloc[span_stop + 1],
-        ]
-        start_time = orientation.index[span_start]
-        stop_time = orientation.index[span_stop]
-        orientnew = np.interp(
-            x=orientation.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[orient[0], orient[-1]],
-        )
-        orientation.loc[idx[start_time:stop_time], idx["orientation"]] = (
-            orientnew
-        )
-    return orientation

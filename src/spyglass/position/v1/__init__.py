@@ -1,12 +1,12 @@
 from .dlc_reader import do_pose_estimation, read_yaml, save_yaml
 from .dlc_utils import (
     _convert_mp4,
-    check_videofile,
     find_full_path,
+    find_mp4,
     find_root_directory,
     get_dlc_processed_data_dir,
     get_dlc_root_data_dir,
-    get_video_path,
+    get_video_info,
 )
 from .position_dlc_centroid import (
     DLCCentroid,

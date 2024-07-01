@@ -1,57 +1,80 @@
-name: Test conda env and run tests
+name: Tests
 
 on:
   push:
     branches: 
       - '!test_branch'
+      - '!documentation'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
+  workflow_dispatch: # Manually trigger with 'Run workflow' button
+
+concurrency: # Replace Cancel Workflow Action
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   run-tests:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     defaults:
      run:
        shell: bash -l {0}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]  #, macos-latest, windows-latest]
     env:
-      OS: ${{ matrix.os }}
-      PYTHON: '3.8'
+      OS: ubuntu-latest
+      PYTHON: '3.9'
+      UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
+      UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
+    services:
+      mysql:
+        image: datajoint/mysql:8.0
+        env: # args: mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial -e "CMD;"
+          MYSQL_DATABASE: localhost
+          MYSQL_ROOT_PASSWORD: tutorial
+        ports:
+          - 3308:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
     steps:
-    - name: Cancel Workflow Action
-      uses: styfle/cancel-workflow-action@0.11.0
-      with:
-        access_token: ${{ github.token }}
-        all_but_latest: true
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ env.PYTHON }}
-    - name: Set up conda environment
-      uses: conda-incubator/setup-miniconda@v2
+    - name: Set up conda
+      uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass
         environment-file: environment.yml
         miniforge-variant: Mambaforge
         miniforge-version: latest
-    - name: Install spyglass
+        use-mamba: true
+    - name: Install apt dependencies
       run: |
-        pip install -e .[test]
+        sudo apt-get update # First mysql options
+        sudo apt-get install mysql-client libmysqlclient-dev libgirepository1.0-dev -y
+        sudo apt-get install ffmpeg libsm6 libxext6 -y # non-dlc position deps
+    - name: Run pip install for test deps
+      run: | 
+        pip install --quiet .[test]
     - name: Download data
       env:
-        UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }}
-        UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
-        WEBSITE: ftps://ftp.box.com/trodes_to_nwb_test_data/minirec20230622.nwb
+        BASEURL: ftps://ftp.box.com/trodes_to_nwb_test_data/
+        NWBFILE: minirec20230622.nwb # Relative to Base URL
+        VID_ONE: 20230622_sample_01_a1/20230622_sample_01_a1.1.h264
+        VID_TWO: 20230622_sample_02_a1/20230622_sample_02_a1.1.h264
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
       run: |
-        mkdir -p $RAW_DIR
-        wget --recursive --no-verbose --no-host-directories --no-directories \
-        --user $UCSF_BOX_USER --password $UCSF_BOX_TOKEN \
-        -P $RAW_DIR $WEBSITE
+        mkdir -p $RAW_DIR $VID_DIR
+        wget_opts() { # Declare func with download options
+          wget \
+            --recursive --no-verbose --no-host-directories --no-directories \
+            --user "$UCSF_BOX_USER" --password "$UCSF_BOX_TOKEN" \
+            -P "$1" "$BASEURL""$2"
+        }
+        wget_opts $RAW_DIR $NWBFILE
+        wget_opts $VID_DIR $VID_ONE
+        wget_opts $VID_DIR $VID_TWO
     - name: Run tests
       run: |
-        pytest -rP  # env vars are set within certain tests
+        pytest --no-docker --no-dlc 

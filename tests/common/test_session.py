@@ -1,5 +1,4 @@
 import pytest
-from datajoint.errors import DataJointError
 
 
 @pytest.fixture
@@ -46,7 +45,7 @@ def add_session_to_group(session_group, mini_copy_name, group_name_dict):
     )
 
 
-def test_addremove_session_group(
+def test_add_remove_session_group(
     common_session,
     session_group,
     session_group_dict,

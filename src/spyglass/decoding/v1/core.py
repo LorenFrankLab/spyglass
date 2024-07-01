@@ -13,7 +13,7 @@ from spyglass.decoding.v1.dj_decoder_conversion import (
     restore_classes,
 )
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 schema = dj.schema("decoding_core_v1")
 
@@ -94,7 +94,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
     position_variables = NULL: longblob # list of position variables to decode
     """
 
-    class Position(SpyglassMixin, dj.Part):
+    class Position(SpyglassMixinPart):
         definition = """
         -> PositionGroup
         -> PositionOutput.proj(pos_merge_id='merge_id')
