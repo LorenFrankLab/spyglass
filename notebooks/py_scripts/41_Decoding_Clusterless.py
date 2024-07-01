@@ -125,7 +125,7 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 #
 # We use the the `PositionOutput` table to figure out the `merge_id` associated with `nwb_file_name` to get the position data associated with the NWB file of interest. In this case, we only have one position to insert, but we could insert multiple positions if we wanted to decode from multiple sessions.
 #
-# Note that the position data sampling frequency is what determines the time step of the decoding. In this case, the position data sampling frequency is 30 Hz, so the time step of the decoding will be 1/30 seconds. In practice, you will want to use a smaller time step such as 500 Hz. This will allow you to decode at a finer time scale. To do this, you will want to interpolate the position data to a higher sampling frequency as shown in the [position trodes notebook](./20_Position_Trodes.ipynb).
+# Note that we can use the `upsample_rate` parameter to define the rate to which position data will be upsampled to to for decoding in Hz. This is useful if we want to decode at a finer time scale than the position data sampling frequency. In practice, a value of 500Hz is used in many analyses. Skipping or providing a null value for this parameter will default to using the position sampling rate.
 #
 # You will also want to specify the name of the position variables if they are different from the default names. The default names are `position_x` and `position_y`.
 
@@ -181,6 +181,7 @@ PositionGroup().create_group(
     nwb_file_name=nwb_copy_file_name,
     group_name="test_group",
     keys=[{"pos_merge_id": merge_id} for merge_id in position_merge_ids],
+    upsample_rate=500,
 )
 
 PositionGroup & {
