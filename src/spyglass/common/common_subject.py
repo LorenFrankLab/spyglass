@@ -18,7 +18,7 @@ class Subject(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Get the subject info from the NWBFile, insert into the Subject.
 
         Parameters

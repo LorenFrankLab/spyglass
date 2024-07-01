@@ -130,7 +130,7 @@ class Session(SpyglassMixin, dj.Imported):
         self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
         self._add_experimenter_part(nwb_file_name, nwbf, config)
 
-    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config):
+    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config={}):
         # get device names from both the NWB file and the associated config file
         device_names, _, _ = DataAcquisitionDevice.get_all_device_names(
             nwbf, config
@@ -152,7 +152,7 @@ class Session(SpyglassMixin, dj.Imported):
             key["data_acquisition_device_name"] = device_name
             Session.DataAcquisitionDevice.insert1(key)
 
-    def _add_experimenter_part(self, nwb_file_name, nwbf, config):
+    def _add_experimenter_part(self, nwb_file_name, nwbf, config={}):
         # Use config file over nwb file
         if members := config.get("LabMember"):
             experimenter_list = [
