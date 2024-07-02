@@ -59,9 +59,27 @@ def get_nwb_file(nwb_file_path):
             # the download functions assume just the filename, so we need to
             # get that from the path
             if not AnalysisNwbfileKachery.download_file(
-                os.path.basename(nwb_file_path)
+                os.path.basename(nwb_file_path), permit_fail=True
             ):
-                return None
+                logger.info(
+                    "NWB file not found in kachery; checking Dandi for "
+                    + f"{nwb_file_path}"
+                )
+                # Dandi fallback SB 2024-04-03
+                from ..common.common_dandi import DandiPath
+
+                dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath & dandi_key:
+                    # If not in Dandi, then we can't find the file
+                    raise FileNotFoundError(
+                        f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
+                    )
+                io, nwbfile = DandiPath().fetch_file_from_dandi(
+                    dandi_key
+                )  # TODO: consider case where file in multiple dandisets
+                __open_nwb_files[nwb_file_path] = (io, nwbfile)
+                return nwbfile
+
         # now open the file
         io = pynwb.NWBHDF5IO(
             path=nwb_file_path, mode="r", load_namespaces=True
@@ -72,7 +90,18 @@ def get_nwb_file(nwb_file_path):
     return nwbfile
 
 
-def get_config(nwb_file_path):
+def file_from_dandi(filepath):
+    """helper to determine if open file is streamed from Dandi"""
+    if filepath not in __open_nwb_files:
+        return False
+    build_keys = __open_nwb_files[filepath][0]._HDF5IO__built.keys()
+    for k in build_keys:
+        if "HTTPFileSystem" in k:
+            return True
+    return False
+
+
+def get_config(nwb_file_path, calling_table=None):
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
 
@@ -93,8 +122,14 @@ def get_config(nwb_file_path):
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
     if not os.path.exists(config_path):
-        logger.info(f"No config found at file path {config_path}")
-        return dict()
+        from spyglass.settings import base_dir  # noqa: F401
+
+        rel_path = p.relative_to(base_dir)
+        table = f"{calling_table}: " if calling_table else ""
+        logger.info(f"{table}No config found at {rel_path}")
+        ret = dict()
+        __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
+        return ret
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
 
@@ -513,7 +548,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
-    logger.warning("This function is deprecated and will be removed soon.")
+    logger.warning("DEPRECATED: This function will be removed in `0.6`.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids

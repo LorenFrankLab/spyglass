@@ -36,7 +36,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert data acquisition devices from an NWB file.
 
         Note that this does not link the DataAcquisitionDevices with a Session.
@@ -252,7 +252,7 @@ class CameraDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert camera devices from an NWB file
 
         Parameters
@@ -356,7 +356,7 @@ class Probe(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert probe devices from an NWB file.
 
         Parameters
@@ -720,6 +720,8 @@ def prompt_insert(
 
     if table_type:
         table_type += " "
+    else:
+        table_type = ""
 
     logger.info(
         f"{table}{table_type} '{name}' was not found in the"

@@ -10,23 +10,6 @@ and related discussions
 [here](https://github.com/datajoint/datajoint-python/issues/151) and
 [here](https://github.com/LorenFrankLab/spyglass/issues/469).
 
-**Note:** Deleting entries upstream of Merge Tables will throw errors related to
-deleting a part entry before the master. To circumvent this, you can add
-`force_parts=True` to the
-[`delete` function](https://datajoint.com/docs/core/datajoint-python/0.14/api/datajoint/__init__/#datajoint.table.Table.delete)
-call, but this will leave and orphaned primary key in the master. Instead, use
-`(YourTable & restriction).delete_downstream_merge()` to delete master/part
-pairs. If errors persist, identify and import the offending part table and rerun
-`delete_downstream_merge` with `reload_cache=True`. This process will be faster
-for subsequent calls if you reassign the your table after importing.
-
-```python
-from spyglass.common import Nwbfile
-
-nwbfile = Nwbfile()
-(nwbfile & "nwb_file_name LIKE 'Name%'").delete_downstream_merge()
-```
-
 ## What
 
 A Merge Table is fundamentally a master table with one part for each divergent

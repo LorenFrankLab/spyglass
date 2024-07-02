@@ -45,6 +45,9 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -69,7 +72,7 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
                 else:  # if negative x coordinate
                     # define target location as left hemisphere
                     key["target_hemisphere"] = "Left"
-            self.insert1(key, skip_duplicates=True)
+            self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
 
 
 @schema
@@ -98,7 +101,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
 
         if "Electrode" in config:
             electrode_config_dicts = {
@@ -108,23 +111,32 @@ class Electrode(SpyglassMixin, dj.Imported):
         else:
             electrode_config_dicts = dict()
 
+        electrode_constants = {
+            "x_warped": 0,
+            "y_warped": 0,
+            "z_warped": 0,
+            "contacts": "",
+        }
+
+        electrode_inserts = []
         electrodes = nwbf.electrodes.to_dataframe()
         for elect_id, elect_data in electrodes.iterrows():
-            key["electrode_id"] = elect_id
-            key["name"] = str(elect_id)
-            key["electrode_group_name"] = elect_data.group_name
-            key["region_id"] = BrainRegion.fetch_add(
-                region_name=elect_data.group.location
+            key.update(
+                {
+                    "electrode_id": elect_id,
+                    "name": str(elect_id),
+                    "electrode_group_name": elect_data.group_name,
+                    "region_id": BrainRegion.fetch_add(
+                        region_name=elect_data.group.location
+                    ),
+                    "x": elect_data.get("x"),
+                    "y": elect_data.get("y"),
+                    "z": elect_data.get("z"),
+                    "filtering": elect_data.get("filtering", "unfiltered"),
+                    "impedance": elect_data.get("imp"),
+                    **electrode_constants,
+                }
             )
-            key["x"] = elect_data.x
-            key["y"] = elect_data.y
-            key["z"] = elect_data.z
-            key["x_warped"] = 0
-            key["y_warped"] = 0
-            key["z_warped"] = 0
-            key["contacts"] = ""
-            key["filtering"] = elect_data.filtering
-            key["impedance"] = elect_data.get("imp")
 
             # rough check of whether the electrodes table was created by
             # rec_to_nwb and has the appropriate custom columns used by
@@ -140,13 +152,17 @@ class Electrode(SpyglassMixin, dj.Imported):
                 and "bad_channel" in elect_data
                 and "ref_elect_id" in elect_data
             ):
-                key["probe_id"] = elect_data.group.device.probe_type
-                key["probe_shank"] = elect_data.probe_shank
-                key["probe_electrode"] = elect_data.probe_electrode
-                key["bad_channel"] = (
-                    "True" if elect_data.bad_channel else "False"
+                key.update(
+                    {
+                        "probe_id": elect_data.group.device.probe_type,
+                        "probe_shank": elect_data.probe_shank,
+                        "probe_electrode": elect_data.probe_electrode,
+                        "bad_channel": (
+                            "True" if elect_data.bad_channel else "False"
+                        ),
+                        "original_reference_electrode": elect_data.ref_elect_id,
+                    }
                 )
-                key["original_reference_electrode"] = elect_data.ref_elect_id
 
             # override with information from the config YAML based on primary
             # key (electrode id)
@@ -163,8 +179,13 @@ class Electrode(SpyglassMixin, dj.Imported):
                     )
                 else:
                     key.update(electrode_config_dicts[elect_id])
+            electrode_inserts.append(key.copy())
 
-            self.insert1(key, skip_duplicates=True)
+        self.insert(
+            electrode_inserts,
+            skip_duplicates=True,
+            allow_direct_insert=True,  # for no_transaction, pop_all_common
+        )
 
     @classmethod
     def create_from_config(cls, nwb_file_name: str):
@@ -177,7 +198,7 @@ class Electrode(SpyglassMixin, dj.Imported):
         """
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=cls.__name__)
         if "Electrode" not in config:
             return  # See #849
 
@@ -246,10 +267,14 @@ class Raw(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         raw_interval_name = "raw data valid times"
+
         # get the acquisition object
         try:
             # TODO this assumes there is a single item in NWBFile.acquisition
@@ -261,19 +286,21 @@ class Raw(SpyglassMixin, dj.Imported):
                 + f"Skipping entry in {self.full_table_name}"
             )
             return
+
         if rawdata.rate is not None:
-            sampling_rate = rawdata.rate
+            key["sampling_rate"] = rawdata.rate
         else:
             logger.info("Estimating sampling rate...")
             # NOTE: Only use first 1e6 timepoints to save time
-            sampling_rate = estimate_sampling_rate(
+            key["sampling_rate"] = estimate_sampling_rate(
                 np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
             )
-        key["sampling_rate"] = sampling_rate
 
-        interval_dict = dict()
-        interval_dict["nwb_file_name"] = key["nwb_file_name"]
-        interval_dict["interval_list_name"] = raw_interval_name
+        interval_dict = {
+            "nwb_file_name": key["nwb_file_name"],
+            "interval_list_name": raw_interval_name,
+        }
+
         if rawdata.rate is not None:
             interval_dict["valid_times"] = np.array(
                 [[0, len(rawdata.data) / rawdata.rate]]
@@ -291,18 +318,25 @@ class Raw(SpyglassMixin, dj.Imported):
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id
 
-        key["raw_object_id"] = rawdata.object_id
-        key["sampling_rate"] = sampling_rate
         logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz'
+            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
+            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
         )
-        logger.info(
-            f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
+
+        key.update(
+            {
+                "raw_object_id": rawdata.object_id,
+                "interval_list_name": raw_interval_name,
+                "comments": rawdata.comments,
+                "description": rawdata.description,
+            }
         )
-        key["interval_list_name"] = raw_interval_name
-        key["comments"] = rawdata.comments
-        key["description"] = rawdata.description
-        self.insert1(key, skip_duplicates=True)
+
+        self.insert1(
+            key,
+            skip_duplicates=True,
+            allow_direct_insert=True,
+        )
 
     def nwb_object(self, key):
         # TODO return the nwb_object; FIX: this should be replaced with a fetch
@@ -330,6 +364,9 @@ class SampleCount(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        """Make without transaction
+
+        Allows populate_all_common to work within a single transaction."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -343,7 +380,7 @@ class SampleCount(SpyglassMixin, dj.Imported):
             )
             return  # see #849
         key["sample_count_object_id"] = sample_count.object_id
-        self.insert1(key)
+        self.insert1(key, allow_direct_insert=True)
 
 
 @schema
@@ -411,6 +448,7 @@ class LFP(SpyglassMixin, dj.Imported):
     def make(self, key):
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
@@ -465,8 +503,6 @@ class LFP(SpyglassMixin, dj.Imported):
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
@@ -502,6 +538,7 @@ class LFP(SpyglassMixin, dj.Imported):
             },
             replace=True,
         )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -584,7 +621,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
                 f"lfp_band_sampling rate {lfp_band_sampling_rate} is not an integer divisor of lfp "
-                f"samping rate {lfp_sampling_rate}"
+                f"sampling rate {lfp_sampling_rate}"
             )
         # filter
         query = FirFilterParameters() & {
@@ -666,6 +703,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        # create the analysis nwb file to store the results.
+        lfp_band_file_name = AnalysisNwbfile().create(  # logged
+            key["nwb_file_name"]
+        )
         # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
         lfp_object = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
@@ -774,8 +815,6 @@ class LFPBand(SpyglassMixin, dj.Computed):
             )
             return None
 
-        # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
             lfp_band_file_name
         )
@@ -853,6 +892,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
+        AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs):
@@ -863,13 +903,3 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 filtered_nwb["filtered_data"].timestamps, name="time"
             ),
         )
-
-
-@schema
-class ElectrodeBrainRegion(SpyglassMixin, dj.Manual):
-    definition = """
-    # Table with brain region of electrodes determined post-experiment e.g. via histological analysis or CT
-    -> Electrode
-    ---
-    -> BrainRegion
-    """

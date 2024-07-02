@@ -1,4 +1,5 @@
 import uuid
+from time import time
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -215,6 +216,8 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
     -> LabTeam
     """
 
+    _parallel_make = True
+
     @classmethod
     def insert_selection(cls, key: dict):
         """Insert a row into SpikeSortingRecordingSelection with an
@@ -250,6 +253,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # DO:
         # - get valid times for sort interval
         # - proprocess recording
@@ -281,6 +285,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().add(
             (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
             key["analysis_file_name"],
+        )
+        AnalysisNwbfile().log(
+            recording_nwb_file_name, table=self.full_table_name
         )
         self.insert1(key)
 

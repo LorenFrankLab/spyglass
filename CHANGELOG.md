@@ -1,5 +1,99 @@
 # Change Log
 
+## [0.5.3] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+```python
+from spyglass.common.common_behav import PositionIntervalMap
+
+PositionIntervalMap.alter()
+```
+
+### Infrastructure
+
+- Create class `SpyglassGroupPart` to aid delete propagations #899
+- Fix bug report template #955
+- Add rollback option to `populate_all_common` #957, #971
+- Add long-distance restrictions via `<<` and `>>` operators. #943, #969
+- Fix relative pathing for `mkdocstring-python=>1.9.1`. #967, #968
+- Add method to export a set of files to Dandi. #956
+- Add `fetch_nwb` fallback to stream files from Dandi. #956
+- Clean up old `TableChain.join` call in mixin delete. #982
+- Add pytests for position pipeline, various `test_mode` exceptions #966
+- Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
+- Add documentation for common error messages #997
+- Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
+- `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- Allow mixin tables with parallelization in `make` to run populate with
+    `processes > 1` #1001
+
+### Pipelines
+
+- Common
+    - `PositionVideo` table now inserts into self after `make` #966
+    - Don't insert lab member when creating lab team #983
+    - Files created by `AnalysisNwbfile.create()` receive new object_id #999
+    - Remove unused `ElectrodeBrainRegion` table #1003
+    - Files created by `AnalysisNwbfile.create()` receive new object_id #999,
+        #1004
+    - Remove redundant calls to tables in `populate_all_common` #870
+    - Improve logging clarity in `populate_all_common` #870
+    - `PositionIntervalMap` now inserts null entries for missing intervals #870
+- Decoding: Default values for classes on `ImportError` #966
+- Position
+    - Allow dlc without pre-existing tracking data #973, #975
+    - Raise `KeyError` for missing input parameters across helper funcs #966
+    - `DLCPosVideo` table now inserts into self after `make` #966
+    - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
+    - Fix SQL query error in `DLCPosV1.fetch_nwb` #1011
+    - Add keyword args to all calls of `convert_to_pixels` #870
+    - Unify `make_video` logic across `DLCPosVideo` and `TrodesVideo` #870
+    - Replace `OutputLogger` context manager with decorator #870
+    - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
+        `get_video_info` to reflect actual use #870
+- Spikesorting
+    - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
+        #994
+    - Update docstrings #996
+    - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
+    - Fix bug in identification of artifact samples to be zeroed out in
+        `spikesorting.v1.SpikeSorting` #1009
+    - Remove deprecated dependencies on kachery_client #1014
+
+## [0.5.2] (April 22, 2024)
+
+### Infrastructure
+
+- Refactor `TableChain` to include `_searched` attribute. #867
+- Fix errors in config import #882
+- Save current spyglass version in analysis nwb files to aid diagnosis #897
+- Add functionality to export vertical slice of database. #875
+- Add pynapple support #898
+- Update PR template checklist to include db changes. #903
+- Avoid permission check on personnel tables. #903
+- Add documentation for `SpyglassMixin`. #903
+- Add helper to identify merge table by definition. #903
+- Prioritize datajoint filepath entry for defining abs_path of analysis nwbfile
+    #918
+- Fix potential duplicate entries in Merge part tables #922
+- Add logging of AnalysisNwbfile creation time and size #937
+- Fix error on empty delete call in merge table. #940
+- Add log of AnalysisNwbfile creation time, size, and access count #937, #941
+
+### Pipelines
+
+- Spikesorting
+    - Update calls in v0 pipeline for spikeinterface>=0.99 #893
+    - Fix method type of `get_spike_times` #904
+    - Add helper functions for restricting spikesorting results and linking to
+        probe info #910
+- Decoding
+    - Handle dimensions of clusterless `get_ahead_behind_distance` #904
+    - Fix improper handling of nwb file names with .strip #929
+
 ## [0.5.1] (March 7, 2024)
 
 ### Infrastructure
@@ -11,14 +105,19 @@
 
 ### Pipelines
 
+- Common:
+    - Add ActivityLog to `common_usage` to track unreferenced utilities. #870
 - Position:
     - Fixes to `environment-dlc.yml` restricting tensortflow #834
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
+    - Refactoring to reduce redundancy #870
+    - Migrate `OutputLogger` behavior to decorator #870
 - Spikesorting:
-    - Increase`spikeinterface` version to >=0.99.1, <0.100 #852
+    - Increase`spikeinterface` version to >=0.99.1, \<0.100 #852
     - Bug fix in single artifact interval edge case #859
+    - Bug fix in FigURL #871
 - LFP
     - In LFPArtifactDetection, only apply referencing if explicitly selected #863
 
@@ -193,3 +292,6 @@
 [0.4.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.2
 [0.4.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.4.3
 [0.5.0]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.0
+[0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
+[0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
+[0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3

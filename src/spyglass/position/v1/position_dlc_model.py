@@ -1,14 +1,12 @@
-import glob
 import os
-from pathlib import Path, PosixPath, PurePath
+from pathlib import Path
 
 import datajoint as dj
 import ruamel.yaml as yaml
 
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 from . import dlc_reader
-from .dlc_decorators import accepts
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
 from .position_dlc_training import DLCModelTraining  # noqa: F401
 
@@ -31,10 +29,11 @@ class DLCModelInput(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         # expects key from DLCProject with config_path
         project_path = Path(key["config_path"]).parent
-        assert project_path.exists(), "project path does not exist"
+        if not project_path.exists():
+            raise FileNotFoundError(f"path does not exist: {project_path}")
         key["dlc_model_name"] = f'{project_path.name.split("model")[0]}model'
         key["project_path"] = project_path.as_posix()
-        del key["config_path"]
+        _ = key.pop("config_path")
         super().insert1(key, **kwargs)
         DLCModelSource.insert_entry(
             dlc_model_name=key["dlc_model_name"],
@@ -75,7 +74,6 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    @accepts(None, None, ("FromUpstream", "FromImport"), None)
     def insert_entry(
         cls,
         dlc_model_name: str,
@@ -144,7 +142,6 @@ class DLCModelSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCModelSource
     -> DLCModelParams
-    ---
     """
 
 
@@ -178,34 +175,41 @@ class DLCModel(SpyglassMixin, dj.Computed):
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
+
         SourceTable = getattr(DLCModelSource, table_source)
         params = (DLCModelParams & key).fetch1("params")
-        project_path = (SourceTable & key).fetch1("project_path")
-        if not isinstance(project_path, PosixPath):
-            project_path = Path(project_path)
-        config_query = PurePath(project_path, Path("*config.y*ml"))
-        available_config = glob.glob(config_query.as_posix())
-        dj_config = [path for path in available_config if "dj_dlc" in path]
-        if len(dj_config) > 0:
-            config_path = Path(dj_config[0])
-        elif len(available_config) == 1:
-            config_path = Path(available_config[0])
-        else:
-            config_path = PurePath(project_path, Path("config.yaml"))
+        project_path = Path((SourceTable & key).fetch1("project_path"))
+
+        available_config = list(project_path.glob("*config.y*ml"))
+        dj_config = [path for path in available_config if "dj_dlc" in str(path)]
+        config_path = (
+            Path(dj_config[0])
+            if len(dj_config) > 0
+            else (
+                Path(available_config[0])
+                if len(available_config) == 1
+                else project_path / "config.yaml"
+            )
+        )
+
         if not config_path.exists():
-            raise OSError(f"config_path {config_path} does not exist.")
+            raise FileNotFoundError(f"config does not exist: {config_path}")
+
         if config_path.suffix in (".yml", ".yaml"):
             with open(config_path, "rb") as f:
                 safe_yaml = yaml.YAML(typ="safe", pure=True)
                 dlc_config = safe_yaml.load(f)
-            if isinstance(params["params"], dict):
+            if isinstance(params.get("params"), dict):
                 dlc_config.update(params["params"])
                 del params["params"]
+
         # TODO: clean-up. this feels sloppy
         shuffle = params.pop("shuffle", 1)
         trainingsetindex = params.pop("trainingsetindex", None)
+
         if not isinstance(trainingsetindex, int):
             raise KeyError("no trainingsetindex specified in key")
+
         model_prefix = params.pop("model_prefix", "")
         model_description = params.pop("model_description", model_name)
         _ = params.pop("dlc_training_params_name", None)
@@ -217,10 +221,10 @@ class DLCModel(SpyglassMixin, dj.Computed):
             "snapshotindex",
             "TrainingFraction",
         ]
-        for attribute in needed_attributes:
-            assert (
-                attribute in dlc_config
-            ), f"Couldn't find {attribute} in config"
+        if not set(needed_attributes).issubset(set(dlc_config)):
+            raise KeyError(
+                f"Missing required config attributes: {needed_attributes}"
+            )
 
         scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
@@ -252,12 +256,12 @@ class DLCModel(SpyglassMixin, dj.Computed):
         # ---- Save DJ-managed config ----
         _ = dlc_reader.save_yaml(project_path, dlc_config)
 
-        # ____ Insert into table ----
+        # --- Insert into table ----
         self.insert1(key)
         self.BodyPart.insert(
             {**part_key, "bodypart": bp} for bp in dlc_config["bodyparts"]
         )
-        print(
+        logger.info(
             f"Finished inserting {model_name}, training iteration"
             f" {dlc_config['iteration']} into DLCModel"
         )

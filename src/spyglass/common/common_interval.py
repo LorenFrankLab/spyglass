@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
 
 from .common_session import Session  # noqa: F401
 
@@ -139,7 +140,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 ax.text(
                     interval[0] + np.diff(interval)[0] / 2,
                     interval_y,
-                    epoch.strip(" valid times"),
+                    epoch.replace(" valid times", ""),
                     ha="center",
                     va="bottom",
                 )
@@ -151,6 +152,12 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ax.grid(True)
         if return_fig:
             return fig
+
+    def nightly_cleanup(self, dry_run=True):
+        orphans = self - get_child_tables(self)
+        if dry_run:
+            return orphans
+        orphans.super_delete(warn=False)
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
@@ -256,14 +263,14 @@ def consolidate_intervals(interval_list):
 def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     """Finds the intersections between two interval lists
 
+    Each interval is (start time, stop time)
+
     Parameters
     ----------
     interval_list1 : np.array, (N,2) where N = number of intervals
     interval_list2 : np.array, (N,2) where N = number of intervals
     min_length : float, optional.
         Minimum length of intervals to include, default 0
-
-    Each interval is (start time, stop time)
 
     Returns
     -------

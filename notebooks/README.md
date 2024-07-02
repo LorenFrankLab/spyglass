@@ -55,14 +55,14 @@ Decoding can be from sorted or from unsorted data using spike waveform features
 (so-called clusterless decoding).
 
 The first notebook
-([Extracting Clusterless Waveform Features](./41_Extracting_Clusterless_Waveform_Features.ipynb))
+([Extracting Clusterless Waveform Features](./40_Extracting_Clusterless_Waveform_Features.ipynb))
 in this series shows how to retrieve the spike waveform features used for
 clusterless decoding.
 
-The second notebook ([Clusterless Decoding](./42_Decoding_Clusterless.ipynb))
+The second notebook ([Clusterless Decoding](./41_Decoding_Clusterless.ipynb))
 shows a detailed example of how to decode the position of the animal from the
 spike waveform features. The third notebook
-([Decoding](./43_Decoding_SortedSpikes.ipynb)) shows how to decode the position
+([Decoding](./42_Decoding_SortedSpikes.ipynb)) shows how to decode the position
 of the animal from the sorted spikes.
 
 ## Developer note
@@ -79,3 +79,11 @@ black .
 ```
 
 Unfortunately, jupytext-generated py script are not black-compliant by default.
+
+You can ensure black compliance with the `pre-commit` hook by running
+
+```bash
+pip install pre-commit
+```
+
+This will run black whenever you commit changes to the repository.

@@ -120,6 +120,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             logger.warn(f"No tasks processing module found in {nwbf}\n")
             return
 
+        task_inserts = []
         for task in tasks_mod.data_interfaces.values():
             if self.check_task_table(task):
                 # check if the task is in the Task table and if not, add it
@@ -169,7 +170,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                             break
                     # TODO case when interval is not found is not handled
                     key["interval_list_name"] = interval
-                    self.insert1(key)
+                    task_inserts.append(key.copy())
+        self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
     def update_entries(cls, restrict={}):

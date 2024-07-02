@@ -1,20 +1,17 @@
 import copy
-import glob
-import os
 import shutil
 from itertools import combinations
 from pathlib import Path, PosixPath
 from typing import Dict, List, Union
 
 import datajoint as dj
-import numpy as np
 import pandas as pd
-import ruamel.yaml
+from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
-from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_project")
 
@@ -51,7 +48,7 @@ class BodyPart(SpyglassMixin, dj.Manual):
             bodyparts_dict = [
                 {"bodypart": bp, "bodypart_description": bp} for bp in bodyparts
             ]
-        cls.insert(bodyparts_dict, skip_duplicates=True)
+        cls().insert(bodyparts_dict, skip_duplicates=True)
 
 
 @schema
@@ -90,13 +87,19 @@ class DLCProject(SpyglassMixin, dj.Manual):
         """
 
     def insert1(self, key, **kwargs):
-        assert isinstance(
-            key["project_name"], str
-        ), "project_name must be a string"
-        assert isinstance(
-            key["frames_per_video"], int
-        ), "frames_per_video must be of type `int`"
+        if not isinstance(key["project_name"], str):
+            raise ValueError("project_name must be a string")
+        if not isinstance(key["frames_per_video"], int):
+            raise ValueError("frames_per_video must be of type `int`")
         super().insert1(key, **kwargs)
+
+    def _existing_project(self, project_name):
+        if project_name in self.fetch("project_name"):
+            logger.warning(f"project name: {project_name} is already in use.")
+            return (self & {"project_name": project_name}).fetch(
+                "project_name", "config_path", as_dict=True
+            )[0]
+        return None
 
     @classmethod
     def insert_existing_project(
@@ -123,46 +126,43 @@ class DLCProject(SpyglassMixin, dj.Manual):
             optional list of bodyparts to label that
             are not already in existing config
         """
-
-        # Read config
-        project_names_in_use = np.unique(cls.fetch("project_name"))
-        if project_name in project_names_in_use:
-            print(f"project name: {project_name} is already in use.")
-            return_key = {}
-            return_key["project_name"], return_key["config_path"] = (
-                cls & {"project_name": project_name}
-            ).fetch1("project_name", "config_path")
-            return return_key
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
+        if (existing := cls()._existing_project(project_name)) is not None:
+            return existing
+
         cfg = read_config(config_path)
+        all_bodyparts = cfg["bodyparts"]
         if bodyparts:
             bodyparts_to_add = [
                 bodypart
                 for bodypart in bodyparts
                 if bodypart not in cfg["bodyparts"]
             ]
-            all_bodyparts = bodyparts_to_add + cfg["bodyparts"]
-        else:
-            all_bodyparts = cfg["bodyparts"]
+            all_bodyparts += bodyparts_to_add
+
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
                 raise ValueError(
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
+
         # check bodyparts are in config, if not add
         if len(bodyparts_to_add) > 0:
             add_to_config(config_path, bodyparts=bodyparts_to_add)
+
         # Get frames per video from config. If passed as arg, check match
         if frames_per_video:
             if frames_per_video != cfg["numframes2pick"]:
                 add_to_config(
                     config_path, **{"numframes2pick": frames_per_video}
                 )
+
         config_path = Path(config_path)
         project_path = config_path.parent
         dlc_project_path = dlc_project_dir
+
         if dlc_project_path not in project_path.as_posix():
             project_dirname = project_path.name
             dest_folder = Path(f"{dlc_project_path}/{project_dirname}/")
@@ -179,6 +179,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             ), "config.yaml does not exist in new project directory"
             config_path = new_config_path
             add_to_config(config_path, **{"project_path": new_proj_dir})
+
         # TODO still need to copy videos over to video dir
         key = {
             "project_name": project_name,
@@ -187,21 +188,17 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path.as_posix(),
             "frames_per_video": frames_per_video,
         }
-        cls.insert1(key, **kwargs)
-        cls.BodyPart.insert(
+        cls().insert1(key, **kwargs)
+        cls().BodyPart.insert(
             [
                 {"project_name": project_name, "bodypart": bp}
                 for bp in all_bodyparts
             ],
             **kwargs,
         )
-        if add_to_files:
-            del key["bodyparts"]
-            del key["team_name"]
-            del key["config_path"]
-            del key["frames_per_video"]
-            # Check for training files to add
-            cls.add_training_files(key, **kwargs)
+        if add_to_files:  # Check for training files to add
+            cls().add_training_files(key, **kwargs)
+
         return {
             "project_name": project_name,
             "config_path": config_path.as_posix(),
@@ -245,68 +242,24 @@ class DLCProject(SpyglassMixin, dj.Manual):
             target path to output converted videos
             (Default is '/nimbus/deeplabcut/videos/')
         """
-        project_names_in_use = np.unique(cls.fetch("project_name"))
-        if project_name in project_names_in_use:
-            print(f"project name: {project_name} is already in use.")
-            return_key = {}
-            return_key["project_name"], return_key["config_path"] = (
-                cls & {"project_name": project_name}
-            ).fetch1("project_name", "config_path")
-            return return_key
+        from deeplabcut import create_new_project
+
+        if (existing := cls()._existing_project(project_name)) is not None:
+            return existing
+        if not bool(LabTeam() & {"team_name": lab_team}):
+            raise ValueError(f"LabTeam does not exist: {lab_team}")
 
         add_to_files = kwargs.pop("add_to_files", True)
-        if not bool(LabTeam() & {"team_name": lab_team}):
-            raise ValueError(f"team_name: {lab_team} does not exist in LabTeam")
         skeleton_node = None
         # If dict, assume of form {'nwb_file_name': nwb_file_name, 'epoch': epoch}
         # and pass to get_video_path to reference VideoFile table for path
 
-        if all(isinstance(n, Dict) for n in video_list):
-            videos_to_convert = [
-                get_video_path(video_key) for video_key in video_list
-            ]
-            videos = [
-                check_videofile(
-                    video_path=video[0],
-                    output_path=output_path,
-                    video_filename=video[1],
-                )[0].as_posix()
-                for video in videos_to_convert
-                if video[0] is not None
-            ]
-            if len(videos) < 1:
-                raise ValueError(
-                    f"no .mp4 videos found in {videos_to_convert[0][0]}"
-                    + f" for key: {video_list[0]}"
-                )
-
-        # If not dict, assume list of video file paths that may or may not need to be converted
-        else:
-            videos = []
-            if not all([Path(video).exists() for video in video_list]):
-                raise OSError("at least one file in video_list does not exist")
-            for video in video_list:
-                video_path = Path(video).parent
-                video_filename = video.rsplit(
-                    video_path.as_posix(), maxsplit=1
-                )[-1].split("/")[-1]
-                videos.extend(
-                    [
-                        check_videofile(
-                            video_path=video_path,
-                            output_path=output_path,
-                            video_filename=video_filename,
-                        )[0].as_posix()
-                    ]
-                )
-            if len(videos) < 1:
-                raise ValueError(f"no .mp4 videos found in{video_path}")
-        from deeplabcut import create_new_project
+        videos = cls()._process_videos(video_list, output_path)
 
         config_path = create_new_project(
-            project_name,
-            lab_team,
-            videos,
+            project=project_name,
+            experimenter=sanitize_filename(lab_team),
+            videos=videos,
             working_directory=project_directory,
             copy_videos=True,
             multianimal=False,
@@ -318,9 +271,11 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 )
         kwargs_copy = copy.deepcopy(kwargs)
         kwargs_copy.update({"numframes2pick": frames_per_video, "dotsize": 3})
+
         add_to_config(
             config_path, bodyparts, skeleton_node=skeleton_node, **kwargs_copy
         )
+
         key = {
             "project_name": project_name,
             "team_name": lab_team,
@@ -328,24 +283,50 @@ class DLCProject(SpyglassMixin, dj.Manual):
             "config_path": config_path,
             "frames_per_video": frames_per_video,
         }
-        cls.insert1(key, **kwargs)
-        cls.BodyPart.insert(
+        cls().insert1(key, **kwargs)
+        cls().BodyPart.insert(
             [
                 {"project_name": project_name, "bodypart": bp}
                 for bp in bodyparts
             ],
             **kwargs,
         )
-        if add_to_files:
-            del key["bodyparts"]
-            del key["team_name"]
-            del key["config_path"]
-            del key["frames_per_video"]
-            # Add videos to training files
-            cls.add_training_files(key, **kwargs)
+        if add_to_files:  # Add videos to training files
+            cls().add_training_files(key, **kwargs)
+
         if isinstance(config_path, PosixPath):
             config_path = config_path.as_posix()
         return {"project_name": project_name, "config_path": config_path}
+
+    def _process_videos(self, video_list, output_path):
+        # If dict, assume {'nwb_file_name': nwb_file_name, 'epoch': epoch}
+        if all(isinstance(n, Dict) for n in video_list):
+            videos_to_convert = []
+            for video in video_list:
+                if (video_path := get_video_info(video))[0] is not None:
+                    videos_to_convert.append(video_path)
+
+        else:  # Otherwise, assume list of video file paths
+            if not all([Path(video).exists() for video in video_list]):
+                raise FileNotFoundError(f"Couldn't find video(s): {video_list}")
+            videos_to_convert = []
+            for video in video_list:
+                vp = Path(video)
+                videos_to_convert.append((vp.parent, vp.name))
+
+        videos = [
+            find_mp4(
+                video_path=video[0],
+                output_path=output_path,
+                video_filename=video[1],
+            )
+            for video in videos_to_convert
+        ]
+
+        if len(videos) < 1:
+            raise ValueError(f"no .mp4 videos found from {video_list}")
+
+        return videos
 
     @classmethod
     def add_video_files(
@@ -353,108 +334,87 @@ class DLCProject(SpyglassMixin, dj.Manual):
         video_list,
         config_path=None,
         key=None,
-        output_path: str = os.getenv("DLC_VIDEO_PATH"),
+        output_path: str = dlc_video_dir,
         add_new=False,
         add_to_files=True,
         **kwargs,
     ):
         has_config_or_key = bool(config_path) or bool(key)
-
         if add_new and not has_config_or_key:
             raise ValueError("If add_new, must provide key or config_path")
-        config_path = config_path or (cls & key).fetch1("config_path")
 
-        if (
-            add_to_files
-            and not key
-            and len(cls & {"config_path": config_path}) != 1
-        ):
+        config_path = config_path or (cls & key).fetch1("config_path")
+        has_proj = bool(key) or len(cls & {"config_path": config_path}) == 1
+        if add_to_files and not has_proj:
             raise ValueError("Cannot set add_to_files=True without passing key")
 
-        if all(isinstance(n, Dict) for n in video_list):
-            videos_to_convert = [
-                get_video_path(video_key) for video_key in video_list
-            ]
-            videos = [
-                check_videofile(
-                    video_path=video[0],
-                    output_path=output_path,
-                    video_filename=video[1],
-                )[0].as_posix()
-                for video in videos_to_convert
-            ]
-        # If not dict, assume list of video file paths
-        # that may or may not need to be converted
-        else:
-            videos = []
-            if not all([Path(video).exists() for video in video_list]):
-                raise OSError("at least one file in video_list does not exist")
-            for video in video_list:
-                video_path = Path(video).parent
-                video_filename = video.rsplit(
-                    video_path.as_posix(), maxsplit=1
-                )[-1].split("/")[-1]
-                videos.append(
-                    check_videofile(
-                        video_path=video_path,
-                        output_path=output_path,
-                        video_filename=video_filename,
-                    )[0].as_posix()
-                )
-            if len(videos) < 1:
-                raise ValueError(f"no .mp4 videos found in{video_path}")
+        videos = cls()._process_videos(video_list, output_path)
+
         if add_new:
             from deeplabcut import add_new_videos
 
             add_new_videos(config=config_path, videos=videos, copy_videos=True)
-        if add_to_files:
-            # Add videos to training files
-            cls.add_training_files(key, **kwargs)
+
+        if add_to_files:  # Add videos to training files
+            cls().add_training_files(key, **kwargs)
         return videos
 
     @classmethod
     def add_training_files(cls, key, **kwargs):
         """Add training videos and labeled frames .h5
         and .csv to DLCProject.File"""
+        from deeplabcut.utils.auxiliaryfunctions import read_config
+
         config_path = (cls & {"project_name": key["project_name"]}).fetch1(
             "config_path"
         )
-        from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        if "config_path" in key:
-            del key["config_path"]
+        key = {  # Remove non-essential vals from key
+            k: v
+            for k, v in key.items()
+            if k
+            not in [
+                "bodyparts",
+                "team_name",
+                "config_path",
+                "frames_per_video",
+            ]
+        }
+
         cfg = read_config(config_path)
-        video_names = list(cfg["video_sets"].keys())
+        video_names = list(cfg["video_sets"])
+        label_dir = Path(cfg["project_path"]) / "labeled-data"
         training_files = []
+
+        video_inserts = []
         for video in video_names:
-            video_name = os.path.splitext(
-                video.split(os.path.dirname(video) + "/")[-1]
-            )[0]
-            training_files.extend(
-                glob.glob(
-                    f"{cfg['project_path']}/"
-                    f"labeled-data/{video_name}/*Collected*"
-                )
+            vid_path_obj = Path(video)
+            video_name = vid_path_obj.stem
+            training_files.extend((label_dir / video_name).glob("*Collected*"))
+            key.update(
+                {
+                    "file_name": video_name,
+                    "file_ext": vid_path_obj.suffix[1:],  # remove leading '.'
+                    "file_path": video,
+                }
             )
-        for video in video_names:
-            key["file_name"] = f'{os.path.splitext(video.split("/")[-1])[0]}'
-            key["file_ext"] = os.path.splitext(video.split("/")[-1])[-1].split(
-                "."
-            )[-1]
-            key["file_path"] = video
-            cls.File.insert1(key, **kwargs)
-        if len(training_files) > 0:
-            for file in training_files:
-                video_name = os.path.dirname(file).split("/")[-1]
-                file_type = os.path.splitext(
-                    file.split(os.path.dirname(file) + "/")[-1]
-                )[-1].split(".")[-1]
-                key["file_name"] = f"{video_name}_labeled_data"
-                key["file_ext"] = file_type
-                key["file_path"] = file
-                cls.File.insert1(key, **kwargs)
-        else:
-            Warning("No training files to add")
+        cls().File.insert(video_inserts, **kwargs)
+
+        if len(training_files) == 0:
+            logger.warning("No training files to add")
+            return
+
+        for file in training_files:
+            path_obj = Path(file)
+            cls().File.insert1(
+                {
+                    **key,
+                    "file_name": f"{path_obj.name}_labeled_data",
+                    "file_ext": path_obj.suffix[1:],
+                    "file_path": file,
+                },
+                **kwargs,
+            )
 
     @classmethod
     def run_extract_frames(cls, key, **kwargs):
@@ -474,7 +434,11 @@ class DLCProject(SpyglassMixin, dj.Manual):
         cannot be run through ssh tunnel
         """
         config_path = (cls & key).fetch1("config_path")
-        from deeplabcut import label_frames
+        try:
+            from deeplabcut import label_frames
+        except (ModuleNotFoundError, ImportError):
+            logger.error("DLC loaded in light mode, cannot label frames")
+            return
 
         label_frames(config_path)
 
@@ -492,7 +456,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
     def import_labeled_frames(
         cls,
         key: Dict,
-        import_project_path: Union[str, PosixPath],
+        new_proj_path: Union[str, PosixPath],
         video_filenames: Union[str, List],
         **kwargs,
     ):
@@ -503,63 +467,46 @@ class DLCProject(SpyglassMixin, dj.Manual):
         ----------
         key : Dict
             key to specify entry in DLCProject table to add labeled frames to
-        import_project_path : str
+        new_proj_path : Union[str, PosixPath]
             absolute path to project directory containing
             labeled frames to import
         video_filenames : str or List
-            filename or list of filenames of video(s)
-            from which to import frames.
-            without file extension
+            filename or list of filenames of video(s) from which to import
+            frames. Without file extension
         """
         project_entry = (cls & key).fetch1()
-        team_name = project_entry["team_name"]
-        current_project_path = Path(project_entry["config_path"]).parent
-        current_labeled_data_path = Path(
-            f"{current_project_path.as_posix()}/labeled-data"
+        team_name = project_entry["team_name"].replace(" ", "_")
+        this_proj_path = Path(project_entry["config_path"]).parent
+        this_data_path = this_proj_path / "labeled-data"
+        new_proj_path = Path(new_proj_path)  # If Path(Path), no change
+        new_data_path = new_proj_path / "labeled-data"
+
+        if not new_data_path.exists():
+            raise FileNotFoundError(f"Cannot find directory: {new_data_path}")
+
+        videos = (
+            video_filenames
+            if isinstance(video_filenames, List)
+            else [video_filenames]
         )
-        if isinstance(import_project_path, PosixPath):
-            assert import_project_path.exists(), (
-                "import_project_path: "
-                f"{import_project_path.as_posix()} does not exist"
-            )
-            import_labeled_data_path = Path(
-                f"{import_project_path.as_posix()}/labeled-data"
-            )
-        else:
-            assert Path(
-                import_project_path
-            ).exists(), (
-                f"import_project_path: {import_project_path} does not exist"
-            )
-            import_labeled_data_path = Path(
-                f"{import_project_path}/labeled-data"
-            )
-        assert (
-            import_labeled_data_path.exists()
-        ), "import_project has no directory 'labeled-data'"
-        if not isinstance(video_filenames, List):
-            video_filenames = [video_filenames]
-        for video_file in video_filenames:
-            h5_file = glob.glob(
-                f"{import_labeled_data_path.as_posix()}/{video_file}/*.h5"
-            )[0]
+        for video_file in videos:
+            h5_file = next((new_data_path / video_file).glob("*h5"))
             dlc_df = pd.read_hdf(h5_file)
             dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
+            new_video_path = this_data_path / video_file
+            new_video_path.mkdir(exist_ok=True)
             dlc_df.to_hdf(
-                Path(
-                    f"{current_labeled_data_path.as_posix()}/"
-                    f"{video_file}/CollectedData_{team_name}.h5"
-                ).as_posix(),
+                new_video_path / f"CollectedData_{team_name}.h5",
                 "df_with_missing",
             )
-        cls.add_training_files(key, **kwargs)
+        cls().add_training_files(key, **kwargs)
 
 
 def add_to_config(
     config, bodyparts: List = None, skeleton_node: str = None, **kwargs
 ):
-    """
-    Add necessary items to the config.yaml for the model
+    """Add necessary items to the config.yaml for the model
+
     Parameters
     ----------
     config : str
@@ -572,28 +519,43 @@ def add_to_config(
         Other parameters of config to modify in key:value pairs
     """
 
-    yaml = ruamel.yaml.YAML()
+    yaml = YAML()
     with open(config) as fp:
         data = yaml.load(fp)
+
     if bodyparts:
         data["bodyparts"] = bodyparts
-        led_parts = [element for element in bodyparts if "LED" in element]
-        if skeleton_node is not None:
-            bodypart_skeleton = [
+        led_parts = [bp for bp in bodyparts if "LED" in bp]
+        bodypart_skeleton = (
+            [
                 list(link)
                 for link in combinations(led_parts, 2)
                 if skeleton_node in link
             ]
-        else:
-            bodypart_skeleton = list(combinations(led_parts, 2))
+            if skeleton_node
+            else list(combinations(led_parts, 2))
+        )
         other_parts = list(set(bodyparts) - set(led_parts))
         for ind, part in enumerate(other_parts):
             other_parts[ind] = [part, part]
         bodypart_skeleton.append(other_parts)
         data["skeleton"] = bodypart_skeleton
-    for kwarg, val in kwargs.items():
-        if not isinstance(kwarg, str):
-            kwarg = str(kwarg)
-        data[kwarg] = val
+
+    kwargs.update(
+        {str(k): v for k, v in kwargs.items() if not isinstance(k, str)}
+    )
+
     with open(config, "w") as fw:
         yaml.dump(data, fw)
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename to remove special characters"""
+    char_map = {
+        " ": "_",
+        ".": "_",
+        ",": "-",
+        "&": "and",
+        "'": "",
+    }
+    return "".join([char_map.get(c, c) for c in filename])

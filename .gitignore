@@ -59,6 +59,8 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+tests/_data/*
+wget-log*
 
 # Translations
 *.mo
@@ -127,6 +129,7 @@ dmypy.json
 .pyre/
 
 # Test Data Files
+tests/_data/*
 *.dat
 *.mda
 *.rec
@@ -136,6 +139,7 @@ dmypy.json
 *.videoTimeStamps
 *.cameraHWSync
 *.stateScriptLog
+tests/_data/*
 
 *.nwb
 *.DS_Store

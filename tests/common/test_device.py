@@ -2,7 +2,7 @@ import pytest
 from numpy import array_equal
 
 
-def test_invalid_device(common, populate_exception):
+def test_invalid_device(common, populate_exception, mini_insert):
     device_dict = common.DataAcquisitionDevice.fetch(as_dict=True)[0]
     device_dict["other"] = "invalid"
     with pytest.raises(populate_exception):
@@ -16,7 +16,7 @@ def test_get_device(common, mini_content):
     assert len(dev) == 3, "Unexpected number of devices found"
 
 
-def test_spikegadets_system_alias(mini_insert, common):
+def test_spike_gadgets_system_alias(mini_insert, common):
     assert (
         common.DataAcquisitionDevice()._add_system("MCU") == "SpikeGadgets"
     ), "SpikeGadgets MCU alias not found"
