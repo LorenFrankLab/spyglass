@@ -36,7 +36,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert data acquisition devices from an NWB file.
 
         Note that this does not link the DataAcquisitionDevices with a Session.
@@ -252,13 +252,16 @@ class CameraDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert camera devices from an NWB file
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
 
         Returns
         -------
@@ -268,7 +271,6 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
-                device_dict = dict()
                 # TODO ideally the ID is not encoded in the name formatted in a
                 # particular way device.name must have the form "[any string
                 # without a space, usually camera] [int]"
@@ -282,6 +284,21 @@ class CameraDevice(SpyglassMixin, dj.Manual):
                 }
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])
+        # Append devices from config file
+        if device_list := config.get("CameraDevice"):
+            device_inserts = [
+                {
+                    "camera_id": device.get("camera_id", -1),
+                    "camera_name": device.get("camera_name"),
+                    "manufacturer": device.get("manufacturer"),
+                    "model": device.get("model"),
+                    "lens": device.get("lens"),
+                    "meters_per_pixel": device.get("meters_per_pixel", 0),
+                }
+                for device in device_list
+            ]
+            cls.insert(device_inserts, skip_duplicates=True)
+            device_name_list.extend([d["camera_name"] for d in device_inserts])
         if device_name_list:
             logger.info(f"Inserted camera devices {device_name_list}")
         else:
@@ -339,7 +356,7 @@ class Probe(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config={}):
         """Insert probe devices from an NWB file.
 
         Parameters

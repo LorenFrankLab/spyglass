@@ -78,38 +78,33 @@ class Session(SpyglassMixin, dj.Imported):
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         logger.info("Session populates Institution...")
-        Institution().insert_from_nwbfile(nwbf)
+        institution_name = Institution().insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates Lab...")
-        Lab().insert_from_nwbfile(nwbf)
+        lab_name = Lab().insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates LabMember...")
-        LabMember().insert_from_nwbfile(nwbf)
+        LabMember().insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates Subject...")
-        Subject().insert_from_nwbfile(nwbf)
+        subject_id = Subject().insert_from_nwbfile(nwbf, config)
 
         if not debug_mode:  # TODO: remove when demo files agree on device
             logger.info("Session populates Populate DataAcquisitionDevice...")
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates Populate CameraDevice...")
-        CameraDevice.insert_from_nwbfile(nwbf)
+        CameraDevice.insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
-
-        if nwbf.subject is not None:
-            subject_id = nwbf.subject.subject_id
-        else:
-            subject_id = None
 
         Session().insert1(
             {
                 "nwb_file_name": nwb_file_name,
                 "subject_id": subject_id,
-                "institution_name": nwbf.institution,
-                "lab_name": nwbf.lab,
+                "institution_name": institution_name,
+                "lab_name": lab_name,
                 "session_id": nwbf.session_id,
                 "session_description": nwbf.session_description,
                 "session_start_time": nwbf.session_start_time,
@@ -133,9 +128,9 @@ class Session(SpyglassMixin, dj.Imported):
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
         self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
-        self._add_experimenter_part(nwb_file_name, nwbf)
+        self._add_experimenter_part(nwb_file_name, nwbf, config)
 
-    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config):
+    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config={}):
         # get device names from both the NWB file and the associated config file
         device_names, _, _ = DataAcquisitionDevice.get_all_device_names(
             nwbf, config
@@ -157,11 +152,18 @@ class Session(SpyglassMixin, dj.Imported):
             key["data_acquisition_device_name"] = device_name
             Session.DataAcquisitionDevice.insert1(key)
 
-    def _add_experimenter_part(self, nwb_file_name, nwbf):
-        if nwbf.experimenter is None:
+    def _add_experimenter_part(self, nwb_file_name, nwbf, config={}):
+        # Use config file over nwb file
+        if members := config.get("LabMember"):
+            experimenter_list = [
+                member["lab_member_name"] for member in members
+            ]
+        elif nwbf.experimenter is not None:
+            experimenter_list = nwbf.experimenter
+        else:
             return
 
-        for name in nwbf.experimenter:
+        for name in experimenter_list:
             # ensure that the foreign key exists and do nothing if not
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
