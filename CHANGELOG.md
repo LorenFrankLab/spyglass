@@ -8,8 +8,10 @@
 
 ```python
 from spyglass.common.common_behav import PositionIntervalMap
+from spyglass.decoding.v1.core import PositionGroup
 
 PositionIntervalMap.alter()
+PositionGroup.alter()
 ```
 
 ### Infrastructure
@@ -42,7 +44,9 @@ PositionIntervalMap.alter()
     - Remove redundant calls to tables in `populate_all_common` #870
     - Improve logging clarity in `populate_all_common` #870
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
-- Decoding: Default values for classes on `ImportError` #966
+- Decoding:
+    - Default values for classes on `ImportError` #966
+    - Add option to upsample data rate in `PositionGroup` #1008
 - Position
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
