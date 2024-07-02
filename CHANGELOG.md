@@ -31,6 +31,7 @@ PositionGroup.alter()
 - `cautious_delete` now checks `IntervalList` and externals tables. #1002
 - Allow mixin tables with parallelization in `make` to run populate with
     `processes > 1` #1001
+- Speed up fetch_nwb calls through merge tables #1017
 
 ### Pipelines
 
