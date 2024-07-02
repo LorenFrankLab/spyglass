@@ -521,14 +521,26 @@ class Merge(dj.Manual):
             Restriction to apply to parents before running fetch. Default True.
         multi_source: bool
             Return from multiple parents. Default False.
+
+        Notes
+        -----
+        Nwb files not strictly returned in same order as self
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
-
-        return self.merge_restrict_class(
-            restriction, permit_multiple_rows=True
-        ).fetch_nwb()
+        sources = set((self & restriction).fetch(self._reserved_sk))
+        nwb_list = []
+        for source in sources:
+            restriction_i = (
+                self & {self._reserved_sk: source} & restriction
+            ).fetch("KEY")
+            nwb_list.extend(
+                self.merge_restrict_class(
+                    restriction_i, permit_multiple_rows=True
+                ).fetch_nwb()
+            )
+        return nwb_list
 
     @classmethod
     def merge_get_part(
