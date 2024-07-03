@@ -11,7 +11,6 @@ import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from time import sleep as tsleep
 
 import datajoint as dj
 import numpy as np
@@ -171,18 +170,18 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_creds(server):
-    yield server.creds
+def server_credentials(server):
+    yield server.credentials
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_creds, verbose, teardown):
+def dj_conn(request, server_credentials, verbose, teardown):
     """Fixture for datajoint connection."""
     config_file = "dj_local_conf.json_test"
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server_creds)
+    dj.config.update(server_credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
@@ -210,34 +209,25 @@ def raw_dir(base_dir):
 @pytest.fixture(scope="session")
 def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
+    DOWNLOADS.wait_for(TEST_FILE)  # wait for wget download to finish
 
-    # wait for wget download to finish
-    if (nwb_download := DOWNLOADS.file_downloads.get(TEST_FILE)) is not None:
-        nwb_download.wait()
-
-    # wait for download to finish
-    timeout, wait, found = 60, 5, False
-    for _ in range(timeout // wait):
-        if path.exists():
-            found = True
-            break
-        tsleep(wait)
-
-    if not found:
+    if not path.exists():
         raise ConnectionError("Download failed.")
 
     yield path
 
 
 @pytest.fixture(scope="session")
-def nodlc(request):
+def no_dlc(request):
     yield NO_DLC
 
 
 @pytest.fixture(scope="session")
-def skipif_nodlc(request):
+def skipif_no_dlc(request):
     if NO_DLC:
         yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
+    else:
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -293,11 +283,9 @@ def mini_insert(
 
     _ = SpikeSortingOutput()
 
-    LabMember().insert1(
-        ["Root User", "Root", "User"], skip_duplicates=not teardown
-    )
+    LabMember().insert1(["Root User", "Root", "User"], skip_duplicates=True)
     LabMember.LabMemberInfo().insert1(
-        ["Root User", "email", "root", 1], skip_duplicates=not teardown
+        ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
     dj_logger.info("Inserting test data.")
@@ -395,14 +383,40 @@ def populate_exception():
     yield PopulateException
 
 
+@pytest.fixture(scope="session")
+def frequent_imports():
+    """Often needed for graph cascade."""
+    from spyglass.common.common_ripple import RippleLFPSelection
+    from spyglass.decoding.v0.clusterless import UnitMarksIndicatorSelection
+    from spyglass.decoding.v0.sorted_spikes import (
+        SortedSpikesIndicatorSelection,
+    )
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.lfp.analysis.v1 import LFPBandSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1.ripple import RippleTimesV1
+    from spyglass.spikesorting.v0.figurl_views import SpikeSortingRecordingView
+
+    return (
+        LFPBandSelection,
+        MuaEventsV1,
+        PositionGroup,
+        RippleLFPSelection,
+        RippleTimesV1,
+        SortedSpikesIndicatorSelection,
+        SpikeSortingRecordingView,
+        UnitMarksIndicatorSelection,
+    )
+
+
 # -------------------------- FIXTURES, COMMON TABLES --------------------------
 
 
 @pytest.fixture(scope="session")
 def video_keys(common, base_dir):
-    for file, download in DOWNLOADS.file_downloads.items():
-        if file.endswith(".h264") and download is not None:
-            download.wait()  # wait for videos to finish downloading
+    for file in DOWNLOADS.file_downloads:
+        if file.endswith(".h264"):
+            DOWNLOADS.wait_for(file)
     DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
@@ -807,6 +821,7 @@ def dlc_project_name():
 def insert_project(
     verbose_context,
     teardown,
+    video_keys,  # wait for video downloads
     dlc_project_name,
     dlc_project_tbl,
     common,
@@ -818,18 +833,32 @@ def insert_project(
 
     from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v1 import LinearizationSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1 import RippleTimesV1
+
+    _ = (
+        PositionGroup,
+        LinearizedPositionOutput,
+        LinearizationSelection,
+        MuaEventsV1,
+        RippleTimesV1,
+    )
+
     team_name = "sc_eb"
     common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    video_list = common.VideoFile().fetch(
+        "nwb_file_name", "epoch", as_dict=True
+    )[:2]
     with verbose_context:
         project_key = dlc_project_tbl.insert_new_project(
             project_name=dlc_project_name,
             bodyparts=bodyparts,
             lab_team=team_name,
             frames_per_video=100,
-            video_list=[
-                {"nwb_file_name": mini_copy_name, "epoch": 0},
-                {"nwb_file_name": mini_copy_name, "epoch": 1},
-            ],
+            video_list=video_list,
             skip_duplicates=True,
         )
     config_path = (dlc_project_tbl & project_key).fetch1("config_path")
@@ -904,23 +933,8 @@ def labeled_vid_dir(extract_frames):
 
 
 @pytest.fixture(scope="session")
-def fix_downloaded(labeled_vid_dir, project_dir):
-    """Grabs CollectedData and img files from project_dir, moves to labeled"""
-    for file in project_dir.parent.parent.glob("*"):
-        if file.is_dir():
-            continue
-        dest = labeled_vid_dir / file.name
-        if dest.exists():
-            dest.unlink()
-        dest.write_bytes(file.read_bytes())
-        # TODO: revert to rename before merge
-        # file.rename(labeled_vid_dir / file.name)
-
-    yield
-
-
-@pytest.fixture(scope="session")
-def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
+def add_training_files(dlc_project_tbl, project_key, labeled_vid_dir):
+    DOWNLOADS.move_dlc_items(labeled_vid_dir)
     dlc_project_tbl.add_training_files(project_key, skip_duplicates=True)
     yield
 
@@ -970,11 +984,13 @@ def model_train_key(sgp, project_key, training_params_key):
 
 
 @pytest.fixture(scope="session")
-def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
+def populate_training(
+    sgp, model_train_key, add_training_files, labeled_vid_dir
+):
     train_tbl = sgp.v1.DLCModelTraining
     if len(train_tbl & model_train_key) == 0:
         _ = add_training_files
-        _ = fix_downloaded
+        DOWNLOADS.move_dlc_items(labeled_vid_dir)
         sgp.v1.DLCModelTraining.populate(model_train_key)
     yield model_train_key
 
@@ -1004,7 +1020,7 @@ def populate_model(sgp, model_key):
 
 @pytest.fixture(scope="session")
 def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
-    yield sgp.v1.DLCPoseEstimationSelection.insert_estimation_task(
+    yield sgp.v1.DLCPoseEstimationSelection().insert_estimation_task(
         {
             "nwb_file_name": mini_copy_name,
             "epoch": 1,
@@ -1094,13 +1110,10 @@ def cohort_selection(sgp, si_key, si_params_name):
 
 
 @pytest.fixture(scope="session")
-def cohort_key(sgp, cohort_selection):
-    yield cohort_selection.copy()
-
-
-@pytest.fixture(scope="session")
-def populate_cohort(sgp, cohort_selection, populate_si):
-    sgp.v1.DLCSmoothInterpCohort.populate(cohort_selection)
+def cohort_key(sgp, cohort_selection, populate_si):
+    cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
+    cohort_tbl.populate(cohort_selection)
+    yield cohort_tbl.fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
@@ -1130,7 +1143,7 @@ def centroid_params(sgp):
 
 
 @pytest.fixture(scope="session")
-def centroid_selection(sgp, cohort_key, populate_cohort, centroid_params):
+def centroid_selection(sgp, cohort_key, centroid_params):
     centroid_key = cohort_key.copy()
     centroid_key = {
         key: val
@@ -1194,7 +1207,10 @@ def populate_orient(sgp, orient_selection):
 
 
 @pytest.fixture(scope="session")
-def dlc_selection(sgp, centroid_key, orient_key, populate_orient):
+def dlc_selection(
+    sgp, centroid_key, orient_key, populate_orient, populate_centroid
+):
+    _ = populate_orient, populate_centroid
     dlc_key = {
         key: val
         for key, val in centroid_key.items()

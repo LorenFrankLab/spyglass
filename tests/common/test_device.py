@@ -16,7 +16,7 @@ def test_get_device(common, mini_content):
     assert len(dev) == 3, "Unexpected number of devices found"
 
 
-def test_spikegadets_system_alias(mini_insert, common):
+def test_spike_gadgets_system_alias(mini_insert, common):
     assert (
         common.DataAcquisitionDevice()._add_system("MCU") == "SpikeGadgets"
     ), "SpikeGadgets MCU alias not found"

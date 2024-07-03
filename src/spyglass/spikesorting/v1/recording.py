@@ -216,6 +216,8 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
     -> LabTeam
     """
 
+    _parallel_make = True
+
     @classmethod
     def insert_selection(cls, key: dict):
         """Insert a row into SpikeSortingRecordingSelection with an

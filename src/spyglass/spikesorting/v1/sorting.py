@@ -171,15 +171,15 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         sorter, sorter_params = (
             SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
+        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+            recording_key["analysis_file_name"]
+        )
 
         # DO:
         # - load recording
         # - concatenate artifact removed intervals
         # - run spike sorting
         # - save output to NWB file
-        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
-            recording_key["analysis_file_name"]
-        )
         recording = se.read_nwb_recording(
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
@@ -200,7 +200,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             list_triggers = []
             if artifact_removed_intervals_ind[0][0] > 0:
                 list_triggers.append(
-                    np.array([0, artifact_removed_intervals_ind[0][0]])
+                    np.arange(0, artifact_removed_intervals_ind[0][0])
                 )
             for interval_ind in range(len(artifact_removed_intervals_ind) - 1):
                 list_triggers.append(
@@ -211,11 +211,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 )
             if artifact_removed_intervals_ind[-1][1] < len(timestamps):
                 list_triggers.append(
-                    np.array(
-                        [
-                            artifact_removed_intervals_ind[-1][1],
-                            len(timestamps) - 1,
-                        ]
+                    np.arange(
+                        artifact_removed_intervals_ind[-1][1],
+                        len(timestamps) - 1,
                     )
                 )
 

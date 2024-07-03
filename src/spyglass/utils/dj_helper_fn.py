@@ -1,6 +1,7 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 
 import inspect
+import multiprocessing.pool
 import os
 from pathlib import Path
 from typing import List, Type, Union
@@ -141,7 +142,7 @@ def dj_replace(original_table, new_values, key_column, replace_column):
     return original_table
 
 
-def get_fetching_table_from_stack(stack):
+def get_all_tables_in_stack(stack):
     """Get all classes from a stack of tables."""
     classes = set()
     for frame_info in stack:
@@ -152,11 +153,13 @@ def get_fetching_table_from_stack(stack):
             if (name := obj.full_table_name) in PERIPHERAL_TABLES:
                 continue  # skip common_nwbfile tables
             classes.add(name)
+    return classes
+
+
+def get_fetching_table_from_stack(stack):
+    """Get all classes from a stack of tables."""
+    classes = get_all_tables_in_stack(stack)
     if len(classes) > 1:
-        logger.warn(
-            f"Multiple classes found in stack: {classes}. "
-            "Please submit a bug report with the snippet used."
-        )
         classes = None  # predict only one but not sure, so return None
     return next(iter(classes)) if classes else None
 
@@ -261,7 +264,10 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # skip the filepath checksum if streamed from Dandi
             rec_dict["nwb2load_filepath"] = file_path
             continue
-        rec_dict["nwb2load_filepath"] = (query_table & rec_dict).fetch1(
+
+        # Full dict caused issues with dlc tables using dicts in secondary keys
+        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
 
@@ -331,7 +337,7 @@ def update_analysis_for_dandi_standard(
     # edit the file
     with h5py.File(filepath, "a") as file:
         sex_value = file["/general/subject/sex"][()].decode("utf-8")
-        if not sex_value in ["Female", "Male", "F", "M", "O", "U"]:
+        if sex_value not in ["Female", "Male", "F", "M", "O", "U"]:
             raise ValueError(f"Unexpected value for sex: {sex_value}")
 
         if len(sex_value) > 1:
@@ -345,8 +351,9 @@ def update_analysis_for_dandi_standard(
         species_value = file["/general/subject/species"][()].decode("utf-8")
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
-            print(
-                f"Adjusting subject species from '{species_value}' to '{new_species_value}'."
+            logger.info(
+                f"Adjusting subject species from '{species_value}' to "
+                + f"'{new_species_value}'."
             )
             file["/general/subject/species"][()] = new_species_value
 
@@ -354,9 +361,11 @@ def update_analysis_for_dandi_standard(
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
-                f"Dandi upload requires species either be in Latin binomial form (e.g., 'Mus musculus' and 'Homo sapiens')"
-                + "or be a NCBI taxonomy link (e.g., 'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
-                + f"\n Please update species value of: {species_value}"
+                "Dandi upload requires species either be in Latin binomial form"
+                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
+                + "taxonomy link (e.g., "
+                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
+                + f"Please update species value of: {species_value}"
             )
 
         # add subject age dataset "P4M/P8M"
@@ -375,7 +384,8 @@ def update_analysis_for_dandi_standard(
         if experimenter_value != new_experimenter_value:
             new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
             logger.info(
-                f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
+                f"Adjusting experimenter from {experimenter_value} to "
+                + f"{new_experimenter_value}."
             )
             file["/general/experimenter"][:] = new_experimenter_value
 
@@ -465,3 +475,45 @@ def make_file_obj_id_unique(nwb_path: str):
         f.attrs["object_id"] = new_id
     _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
     return new_id
+
+
+def populate_pass_function(value):
+    """Pass function for parallel populate.
+
+    Note: To avoid pickling errors, the table must be passed by class, NOT by instance.
+    Note: This function must be defined in the global namespace.
+
+    Parameters
+    ----------
+    value : (table, key, kwargs)
+       Class of table to populate, key to populate, and kwargs for populate
+    """
+    table, key, kwargs = value
+    return table.populate(key, **kwargs)
+
+
+class NonDaemonPool(multiprocessing.pool.Pool):
+    """NonDaemonPool. Used to create a pool of non-daemonized processes,
+    which are required for parallel populate operations in DataJoint.
+    """
+
+    # Explicitly set the start method to 'fork'
+    # Allows the pool to be used in MacOS, where the default start method is 'spawn'
+    multiprocessing.set_start_method("fork", force=True)
+
+    def Process(self, *args, **kwds):
+        proc = super(NonDaemonPool, self).Process(*args, **kwds)
+
+        class NonDaemonProcess(proc.__class__):
+            """Monkey-patch process to ensure it is never daemonized"""
+
+            @property
+            def daemon(self):
+                return False
+
+            @daemon.setter
+            def daemon(self, val):
+                pass
+
+        proc.__class__ = NonDaemonProcess
+        return proc

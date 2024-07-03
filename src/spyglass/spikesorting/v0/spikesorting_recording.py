@@ -381,6 +381,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     -> IntervalList.proj(sort_interval_list_name='interval_list_name')
     """
 
+    _parallel_make = True
+
     def make(self, key):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording(key)

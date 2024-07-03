@@ -15,7 +15,7 @@ from datajoint import config as dj_config
 from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import export_dir
+from spyglass.settings import export_dir, test_mode
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import (
@@ -53,6 +53,25 @@ class InsertError(dj.Manual):
     error_message: varchar(255)
     error_raw = null: blob
     """
+
+
+@schema
+class ActivityLog(dj.Manual):
+    """A log of suspected low-use features worth deprecating."""
+
+    definition = """
+    id: int auto_increment
+    ---
+    function: varchar(64)
+    dj_user: varchar(64)
+    timestamp=CURRENT_TIMESTAMP: timestamp
+    """
+
+    @classmethod
+    def deprecate_log(cls, name, warning=True) -> None:
+        if warning:
+            logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
+        cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
 
 
 @schema
@@ -103,7 +122,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         export_id = query.fetch1("export_id")
         export_key = {"export_id": export_id}
         if query := (Export & export_key):
-            query.super_delete(warn=False)
+            safemode = False if test_mode else None  # No prompt in tests
+            query.super_delete(warn=False, safemode=safemode)
         logger.info(f"{status} {export_key}")
         return export_id
 
@@ -174,9 +194,11 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         all_export_ids = query.fetch("export_id")
         return all_export_ids if return_all else max(all_export_ids)
 
-    def paper_export_id(self, paper_id: str) -> dict:
+    def paper_export_id(self, paper_id: str, return_all=False) -> dict:
         """Return the maximum export_id for a paper, used to populate Export."""
-        return {"export_id": self._max_export_id(paper_id)}
+        if not return_all:
+            return {"export_id": self._max_export_id(paper_id)}
+        return [{"export_id": id} for id in self._max_export_id(paper_id, True)]
 
 
 @schema
@@ -215,11 +237,11 @@ class Export(SpyglassMixin, dj.Computed):
         self.populate(ExportSelection().paper_export_id(paper_id))
 
     def make(self, key):
-        query = ExportSelection & key
-        paper_key = query.fetch("paper_id", as_dict=True)[0]
+        paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
+        query = ExportSelection & paper_key
 
         # Null insertion if export_id is not the maximum for the paper
-        all_export_ids = query._max_export_id(paper_key, return_all=True)
+        all_export_ids = ExportSelection()._max_export_id(paper_key, True)
         max_export_id = max(all_export_ids)
         if key.get("export_id") != max_export_id:
             logger.info(
@@ -240,7 +262,7 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
                 (self.Table & id_dict).delete_quick()
 
-        restr_graph = query.get_restr_graph(paper_key)
+        restr_graph = ExportSelection().get_restr_graph(paper_key)
         file_paths = unique_dicts(  # Original plus upstream files
             query.list_file_paths(paper_key) + restr_graph.file_paths
         )
@@ -256,7 +278,7 @@ class Export(SpyglassMixin, dj.Computed):
         # Writes but does not run mysqldump. Assumes single version per paper.
         version_key = query.fetch("spyglass_version", as_dict=True)[0]
         self.write_export(
-            free_tables=restr_graph.all_ft, **paper_key, **version_key
+            free_tables=restr_graph.restr_ft, **paper_key, **version_key
         )
 
         self.insert1({**key, **paper_key})

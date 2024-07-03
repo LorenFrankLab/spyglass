@@ -6,6 +6,14 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+from spyglass.common.common_behav import PositionIntervalMap
+from spyglass.decoding.v1.core import PositionGroup
+
+PositionIntervalMap.alter()
+PositionGroup.alter()
+```
+
 ### Infrastructure
 
 - Create class `SpyglassGroupPart` to aid delete propagations #899
@@ -19,6 +27,10 @@
 - Add pytests for position pipeline, various `test_mode` exceptions #966
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
+- Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
+- `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- Allow mixin tables with parallelization in `make` to run populate with
+    `processes > 1` #1001
 
 ### Pipelines
 
@@ -29,17 +41,31 @@
     - Remove unused `ElectrodeBrainRegion` table #1003
     - Files created by `AnalysisNwbfile.create()` receive new object_id #999,
         #1004
-- Decoding: Default values for classes on `ImportError` #966
+    - Remove redundant calls to tables in `populate_all_common` #870
+    - Improve logging clarity in `populate_all_common` #870
+    - `PositionIntervalMap` now inserts null entries for missing intervals #870
+- Decoding:
+    - Default values for classes on `ImportError` #966
+    - Add option to upsample data rate in `PositionGroup` #1008
 - Position
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
     - Remove unused `PositionVideoSelection` and `PositionVideo` tables #1003
+    - Fix SQL query error in `DLCPosV1.fetch_nwb` #1011
+    - Add keyword args to all calls of `convert_to_pixels` #870
+    - Unify `make_video` logic across `DLCPosVideo` and `TrodesVideo` #870
+    - Replace `OutputLogger` context manager with decorator #870
+    - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
+        `get_video_info` to reflect actual use #870
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
     - Update docstrings #996
     - Remove unused `UnitInclusionParameters` table from `spikesorting.v0` #1003
+    - Fix bug in identification of artifact samples to be zeroed out in
+        `spikesorting.v1.SpikeSorting` #1009
+    - Remove deprecated dependencies on kachery_client #1014
 
 ## [0.5.2] (April 22, 2024)
 
@@ -83,11 +109,15 @@
 
 ### Pipelines
 
+- Common:
+    - Add ActivityLog to `common_usage` to track unreferenced utilities. #870
 - Position:
     - Fixes to `environment-dlc.yml` restricting tensortflow #834
     - Video restriction for multicamera epochs #834
     - Fixes to `_convert_mp4` #834
     - Replace deprecated calls to `yaml.safe_load()` #834
+    - Refactoring to reduce redundancy #870
+    - Migrate `OutputLogger` behavior to decorator #870
 - Spikesorting:
     - Increase`spikeinterface` version to >=0.99.1, \<0.100 #852
     - Bug fix in single artifact interval edge case #859
