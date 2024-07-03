@@ -42,7 +42,7 @@ class LabMember(SpyglassMixin, dj.Manual):
     _admin = []
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert lab member information from an NWB file.
 
         Parameters
@@ -245,7 +245,7 @@ class Institution(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert institution information from an NWB file.
 
         Parameters
@@ -284,7 +284,7 @@ class Lab(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert lab name information from an NWB file.
 
         Parameters
@@ -300,6 +300,7 @@ class Lab(SpyglassMixin, dj.Manual):
         lab_name : string
             The name of the lab found in the NWB or config file, or None.
         """
+        config = config or dict()
         lab_list = config.get("Lab", [{}])
         if len(lab_list) > 1:
             logger.info(
