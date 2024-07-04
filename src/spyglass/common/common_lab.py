@@ -1,7 +1,6 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
 import datajoint as dj
-
 from spyglass.utils import SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
@@ -53,6 +52,7 @@ class LabMember(SpyglassMixin, dj.Manual):
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
         """
+        config = config or dict()
         if isinstance(nwbf, str):
             nwb_file_abspath = Nwbfile.get_abs_path(nwbf, new_file=True)
             nwbf = get_nwb_file(nwb_file_abspath)
@@ -261,6 +261,7 @@ class Institution(SpyglassMixin, dj.Manual):
         institution_name : string
             The name of the institution found in the NWB or config file, or None.
         """
+        config = config or dict()
         inst_list = config.get("Institution", [{}])
         if len(inst_list) > 1:
             logger.info(
