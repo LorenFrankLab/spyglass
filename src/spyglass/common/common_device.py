@@ -36,7 +36,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert data acquisition devices from an NWB file.
 
         Note that this does not link the DataAcquisitionDevices with a Session.
@@ -50,6 +50,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
         """
+        config = config or dict()
         _, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
 
         for device_name in ndx_devices:
@@ -108,6 +109,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         device_name_list : tuple
             List of data acquisition object names found in the NWB file.
         """
+        config = config or dict()
         # make a dict mapping device name to PyNWB device object for all devices
         # in the NWB file that are of type ndx_franklab_novela.DataAcqDevice and
         # thus have the required metadata
@@ -252,7 +254,7 @@ class CameraDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert camera devices from an NWB file
 
         Parameters
@@ -268,6 +270,7 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         device_name_list : list
             List of camera device object names found in the NWB file.
         """
+        config = config or dict()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
@@ -356,7 +359,7 @@ class Probe(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert probe devices from an NWB file.
 
         Parameters
@@ -372,6 +375,7 @@ class Probe(SpyglassMixin, dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
+        config = config or dict()
         all_probes_types, ndx_probes, _ = cls.get_all_probe_names(nwbf, config)
 
         for probe_type in all_probes_types:
