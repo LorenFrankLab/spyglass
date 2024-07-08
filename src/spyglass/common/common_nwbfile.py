@@ -737,13 +737,14 @@ class AnalysisNwbfileLog(dj.Manual):
         analysis_file_name : str
             The name of the analysis NWB file.
         """
+
         self.insert1(
             {
                 "dj_user": dj.config["database.user"],
                 "analysis_file_name": analysis_file_name,
                 "time_delta": time_delta,
                 "file_size": file_size,
-                "table": table,
+                "table": table[:64],
             }
         )
 
