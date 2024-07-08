@@ -44,6 +44,7 @@ PositionGroup.alter()
     - Remove redundant calls to tables in `populate_all_common` #870
     - Improve logging clarity in `populate_all_common` #870
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
+    - `AnalysisFileLog` now truncates table names that exceed field length #1021
 - Decoding:
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
