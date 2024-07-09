@@ -685,7 +685,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
-    def log(self, analysis_file_name, table=None):
+    def log(self, *args, **kwargs):
+        """Null log method. Revert to _disabled_log to turn back on."""
+        logger.debug("Logging disabled.")
+
+    def _disabled_log(self, analysis_file_name, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if isinstance(analysis_file_name, dict):
             analysis_file_name = analysis_file_name["analysis_file_name"]
