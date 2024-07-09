@@ -123,7 +123,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
-        except ImportError:
+        except (ImportError, ModuleNotFoundError):
             from deeplabcut.utils.auxiliaryfunctions import (
                 GetModelFolder as get_model_folder,
             )
