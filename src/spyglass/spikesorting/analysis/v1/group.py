@@ -150,8 +150,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get the spike times for each merge_id
         spike_times = []
-        for merge_id in merge_ids:
-            nwb_file = SpikeSortingOutput().fetch_nwb({"merge_id": merge_id})[0]
+        merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
+        nwb_file_list = (SpikeSortingOutput & merge_keys).fetch_nwb()
+        for nwb_file in nwb_file_list:
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
