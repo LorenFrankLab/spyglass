@@ -4,7 +4,8 @@ import yaml
 
 try:
     import click
-except ImportError:
+except (ImportError, ModuleNotFoundError):
+    click = None
     raise ImportError(
         "spyglass.cli.cli requires the 'click' package. "
         "You can install it with 'pip install click'."
