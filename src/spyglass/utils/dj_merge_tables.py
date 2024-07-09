@@ -532,12 +532,12 @@ class Merge(dj.Manual):
         sources = set((self & restriction).fetch(self._reserved_sk))
         nwb_list = []
         for source in sources:
-            restriction_i = (
+            source_restr = (
                 self & {self._reserved_sk: source} & restriction
             ).fetch("KEY")
             nwb_list.extend(
                 self.merge_restrict_class(
-                    restriction_i, permit_multiple_rows=True
+                    source_restr, permit_multiple_rows=True
                 ).fetch_nwb()
             )
         return nwb_list
