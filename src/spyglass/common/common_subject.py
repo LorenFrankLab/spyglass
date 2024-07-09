@@ -18,7 +18,7 @@ class Subject(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config={}):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Get the subject info from the NWBFile, insert into the Subject.
 
         Parameters
@@ -34,6 +34,7 @@ class Subject(SpyglassMixin, dj.Manual):
         subject_id : string
             The id of the subject found in the NWB or config file, or None.
         """
+        config = config or dict()
         if "Subject" not in config and nwbf.subject is None:
             logger.warn("No subject metadata found.\n")
             return None

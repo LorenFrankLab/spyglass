@@ -32,6 +32,7 @@ PositionGroup.alter()
 - Allow mixin tables with parallelization in `make` to run populate with
     `processes > 1` #1001
 - Speed up fetch_nwb calls through merge tables #1017
+- Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 
 ### Pipelines
 
@@ -45,6 +46,7 @@ PositionGroup.alter()
     - Remove redundant calls to tables in `populate_all_common` #870
     - Improve logging clarity in `populate_all_common` #870
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
+    - `AnalysisFileLog` now truncates table names that exceed field length #1021
 - Decoding:
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
