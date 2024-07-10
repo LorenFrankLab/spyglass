@@ -204,10 +204,11 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         query_expression * tbl.proj(nwb2load_filepath=attr_name)
     ).fetch(file_name_str)
 
-    if which == "analysis":  # log access of analysis files to log table
-        AnalysisNwbfile().increment_access(
-            nwb_files, table=get_fetching_table_from_stack(inspect.stack())
-        )
+    # Disabled #1024
+    # if which == "analysis":  # log access of analysis files to log table
+    #     AnalysisNwbfile().increment_access(
+    #         nwb_files, table=get_fetching_table_from_stack(inspect.stack())
+    #     )
 
     return nwb_files, file_path_fn
 
