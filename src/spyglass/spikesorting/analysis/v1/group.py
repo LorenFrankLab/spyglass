@@ -116,7 +116,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def fetch_spike_data(
-        key: dict, time_slice: list[float] = None
+        key: dict, time_slice: list[float] = None,
+        return_unit_ids: bool = False
     ) -> list[np.ndarray]:
         """fetch spike times for units in the group
 
@@ -126,6 +127,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             dictionary containing the group key
         time_slice : list of float, optional
             if provided, filter for spikes occurring in the interval [start, stop], by default None
+        return_unit_ids : bool, optional
+            if True, return the unit_ids along with the spike times, by default False
+            Unit ids defined as "{merge_id}_{unit_number}"
 
         Returns
         -------
@@ -150,9 +154,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get the spike times for each merge_id
         spike_times = []
+        unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
-        nwb_file_list = (SpikeSortingOutput & merge_keys).fetch_nwb()
-        for nwb_file in nwb_file_list:
+        nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(return_merge_ids=True)
+        for nwb_file,merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
@@ -164,6 +169,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
+            file_unit_ids = [f"{merge_id}_{unit_number}" for unit_number in range(len(sorting_spike_times))]
 
             # filter the spike times based on the labels if present
             if "label" in nwb_file[nwb_field_name]:
@@ -174,6 +180,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
+                )
+                file_unit_ids = list(
+                    compress(file_unit_ids, include_unit)
                 )
 
             # filter the spike times based on the time slice if provided
@@ -189,7 +198,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             # append the approved spike times to the list
             spike_times.extend(sorting_spike_times)
+            unit_ids.extend(file_unit_ids)
 
+        if return_unit_ids:
+            return spike_times, unit_ids
         return spike_times
 
     @classmethod
