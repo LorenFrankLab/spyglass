@@ -116,8 +116,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def fetch_spike_data(
-        key: dict, time_slice: list[float] = None,
-        return_unit_ids: bool = False
+        key: dict, time_slice: list[float] = None, return_unit_ids: bool = False
     ) -> list[np.ndarray]:
         """fetch spike times for units in the group
 
@@ -156,8 +155,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         spike_times = []
         unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
-        nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(return_merge_ids=True)
-        for nwb_file,merge_id in zip(nwb_file_list, merge_ids):
+        nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
+            return_merge_ids=True
+        )
+        for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
@@ -169,7 +170,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
-            file_unit_ids = [f"{merge_id}_{unit_number}" for unit_number in range(len(sorting_spike_times))]
+            file_unit_ids = [
+                f"{merge_id}_{unit_number}"
+                for unit_number in range(len(sorting_spike_times))
+            ]
 
             # filter the spike times based on the labels if present
             if "label" in nwb_file[nwb_field_name]:
@@ -181,9 +185,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
                 )
-                file_unit_ids = list(
-                    compress(file_unit_ids, include_unit)
-                )
+                file_unit_ids = list(compress(file_unit_ids, include_unit))
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
