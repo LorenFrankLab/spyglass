@@ -13,24 +13,48 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
     definition = """
     -> SpikeSortingOutput.proj(spikesorting_merge_id='merge_id')
     unit_id: int
-    annotation: varchar(128) # the kind of annotation (e.g. a table name, "cell_type", "firing_rate", etc.)
-    ---
-    label = NULL: varchar(128) # text labels from analysis
-    quantification = NULL: float # quantification label from analysis
     """
 
-    def insert1(self, key, **kwargs):
-        nwb_file = (
-            SpikeSortingOutput & {"merge_id": key["pos_merge_id"]}
-        ).fetch_nwb()[0]
-        nwb_field_name = self._get_spike_obj_name(nwb_file)
-        spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
-        if key["unit_id"] > len(spikes):
-            raise ValueError(
-                f"unit_id {key['unit_id']} is greater than ",
-                "the number of units in {key['pos_merge_id']}",
-            )
-        super().insert1(key, **kwargs)
+    class Annotation(SpyglassMixin, dj.Part):
+        definition = """
+        -> master
+        annotation: varchar(128) # the kind of annotation (e.g. a table name, "cell_type", "firing_rate", etc.)
+        ---
+        label = NULL: varchar(128) # text labels from analysis
+        quantification = NULL: float # quantification label from analysis
+        """
+
+    def add_annotation(self, key, **kwargs):
+        """Add an annotation to a unit. Creates the unit if it does not exist.
+
+        Parameters
+        ----------
+        key : dict
+            dictionary with key for Annotation
+
+        Raises
+        ------
+        ValueError
+            if unit_id is not valid for the sorting
+        """
+        # validate new units
+        unit_key = {
+            "spikesorting_merge_id": key["pos_merge_id"],
+            "unit_id": key["unit_id"],
+        }
+        if not self & unit_key:
+            nwb_file = (
+                SpikeSortingOutput & {"merge_id": key["pos_merge_id"]}
+            ).fetch_nwb()[0]
+            nwb_field_name = self._get_spike_obj_name(nwb_file)
+            spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
+            if key["unit_id"] > len(spikes):
+                raise ValueError(
+                    f"unit_id {key['unit_id']} is greater than ",
+                    f"the number of units in {key['pos_merge_id']}",
+                )
+            self.insert1(unit_key)
+        self.Annotation().insert1(key, **kwargs)
 
     def fetch_unit_spikes(self, return_unit_ids=False):
         """Fetch the spike times for a restricted set of units
