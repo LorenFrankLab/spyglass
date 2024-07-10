@@ -70,8 +70,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             "unit_filter_params_name": unit_filter_params_name,
         }
         if self & group_key:
-            raise ValueError(f"Group {nwb_file_name}: {group_name} already exists",
-                             "please delete the group before creating a new one")
+            raise ValueError(
+                f"Group {nwb_file_name}: {group_name} already exists",
+                "please delete the group before creating a new one",
+            )
 
         parts_insert = [{**key, **group_key} for key in keys]
 
@@ -160,7 +162,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             nwb_field_name = (
                 "object_id"
                 if "object_id" in nwb_file
-                else "units" if "units" in nwb_file else None
+                else "units"
+                if "units" in nwb_file
+                else None
             )
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
