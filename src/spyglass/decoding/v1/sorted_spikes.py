@@ -22,21 +22,20 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import (
-    DecodingParameters,
-    PositionGroup,
-)  # noqa: F401
+from spyglass.decoding.v1.core import DecodingParameters, PositionGroup  # noqa: F401
+from spyglass.position.position_merge import PositionOutput  # noqa: F401
+from spyglass.settings import config
+)
+
+# noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,
-)  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+)
 
-schema = dj.schema("decoding_sorted_spikes_v1")
-
-
+# noqa: F401
 @schema
 class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     definition = """
@@ -398,8 +397,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def fetch_spike_data(key, filter_by_interval=True, time_slice=None,
-                         return_unit_ids=False):
+    def fetch_spike_data(
+        key, filter_by_interval=True, time_slice=None, return_unit_ids=False
+    ):
         """Fetch the spike times for the decoding model
 
         Parameters
@@ -419,7 +419,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         list[np.ndarray]
             List of spike times for each unit in the model's spike group
         """
-        spike_times, unit_ids = SortedSpikesGroup.fetch_spike_data(key, return_unit_ids=True)
+        spike_times, unit_ids = SortedSpikesGroup.fetch_spike_data(
+            key, return_unit_ids=True
+        )
         if not filter_by_interval:
             return spike_times
 
