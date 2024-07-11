@@ -443,8 +443,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             The decoding selection key
         filter_by_interval : bool, optional
             Whether to filter for spike times in the model interval, by default True
-        time_slice : Slice, optional
-            User provided slice of time to restrict spikes to, by default None
 
         Returns
         -------
@@ -515,7 +513,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return spike_indicator
 
     @classmethod
-    def get_firing_rate(cls, key, time, multiunit=False):
+    def get_firing_rate(cls, key, time, multiunit=False) -> np.ndarray:
         """get time-dependent firing rate for units in the group
 
         Parameters
@@ -525,14 +523,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         time : np.ndarray
             time vector for which to calculate the firing rate
         multiunit : bool, optional
-            if True, return the multiunit firing rate for units in the group, by default False
-        smoothing_sigma : float, optional
-            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+            if True, return the multiunit firing rate for units in the group,
+            by default False
 
         Returns
         -------
         np.ndarray
-            _description_
         """
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
