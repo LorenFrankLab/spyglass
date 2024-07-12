@@ -188,7 +188,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         # To allow some times to occur before create
-        creation_time = self._creation_times.pop("pre_create_time", time())
+        # creation_time = self._creation_times.pop("pre_create_time", time())
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
@@ -232,7 +232,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
-        self._creation_times[analysis_file_name] = creation_time
+        # self._creation_times[analysis_file_name] = creation_time
 
         return analysis_file_name
 
@@ -685,7 +685,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
-    def log(self, analysis_file_name, table=None):
+    def log(self, *args, **kwargs):
+        """Null log method. Revert to _disabled_log to turn back on."""
+        logger.debug("Logging disabled.")
+
+    def _disabled_log(self, analysis_file_name, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if isinstance(analysis_file_name, dict):
             analysis_file_name = analysis_file_name["analysis_file_name"]
@@ -699,7 +703,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             table=table,
         )
 
-    def increment_access(self, keys, table=None):
+    def increment_access(self, *args, **kwargs):
+        """Null method. Revert to _disabled_increment_access to turn back on."""
+        logger.debug("Incrementing access disabled.")
+
+    def _disabled_increment_access(self, keys, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if not isinstance(keys, list):
             key = [keys]
@@ -737,13 +745,14 @@ class AnalysisNwbfileLog(dj.Manual):
         analysis_file_name : str
             The name of the analysis NWB file.
         """
+
         self.insert1(
             {
                 "dj_user": dj.config["database.user"],
                 "analysis_file_name": analysis_file_name,
                 "time_delta": time_delta,
                 "file_size": file_size,
-                "table": table,
+                "table": table[:64],
             }
         )
 
