@@ -180,9 +180,8 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
         position_info = (
-            pd.concat(position_info, axis=0)
-            .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
+            pd.concat(position_info, axis=0).loc[min_time:max_time]
+            # .dropna(subset=position_variable_names)
         )
 
         return position_info, position_variable_names
@@ -229,10 +228,31 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             np.unique(np.concatenate((position_df.index, new_time))),
             name="time",
         )
+
+        # Find NaN intervals
+        nan_intervals = {}
+        for column in position_df.columns:
+            is_nan = position_df[column].isna().values.astype(int)
+            st = np.where(np.diff(is_nan) == 1)[0] + 1
+            en = np.where(np.diff(is_nan) == -1)[0]
+            if is_nan[0]:
+                st = np.insert(st, 0, 0)
+            if is_nan[-1]:
+                en = np.append(en, len(is_nan) - 1)
+            st = position_df.index[st].values
+            en = position_df.index[en].values
+            nan_intervals[column] = list(zip(st, en))
+
+        # upsample and interpolate
         position_df = (
             position_df.reindex(index=new_index)
             .interpolate(method=upsampling_interpolation_method)
             .reindex(index=new_time)
         )
+
+        # Fill NaN intervals
+        for column, intervals in nan_intervals.items():
+            for st, en in intervals:
+                position_df[column][st:en] = np.nan
 
         return position_df
