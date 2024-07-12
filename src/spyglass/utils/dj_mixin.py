@@ -738,13 +738,16 @@ class SpyglassMixin:
 
         ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
 
+        if self._test_mode:
+            return ret[:16] if len(ret) > 16 else ret
+
         if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
             raise ValueError(
-                f"Spyglass version issues. Expected #.#.#, Got {sg_version}."
+                f"Spyglass version issues. Expected #.#.#, Got {ret}."
                 + "Please try running `hatch build` from your spyglass dir."
             )
 
-        return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch
+        return ret
 
     @cached_property
     def _export_table(self):
