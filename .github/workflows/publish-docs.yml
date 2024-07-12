@@ -44,7 +44,6 @@ jobs:
         uses: proudust/gh-describe@v2
 
       - name: Deploy
-        uses:
         run: | # github.ref_name is branch name if dispatch
           FULL_VERSION=${{ steps.ghd.outputs.tag }}
           export MAJOR_VERSION=${FULL_VERSION:0:3}
