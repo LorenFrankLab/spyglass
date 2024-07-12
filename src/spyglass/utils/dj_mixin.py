@@ -4,6 +4,7 @@ from contextlib import nullcontext
 from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
+from re import match as re_match
 from time import time
 from typing import Dict, List, Union
 
@@ -734,6 +735,14 @@ class SpyglassMixin:
     def _spyglass_version(self):
         """Get Spyglass version."""
         from spyglass import __version__ as sg_version
+
+        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
+
+        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
+            raise ValueError(
+                f"Spyglass version issues. Expected #.#.#, Got {sg_version}."
+                + "Please try running `hatch build` from your spyglass dir."
+            )
 
         return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch
 
