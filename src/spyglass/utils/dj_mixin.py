@@ -30,7 +30,7 @@ from spyglass.utils.logging import logger
 
 try:
     import pynapple  # noqa F401
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     pynapple = None
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"

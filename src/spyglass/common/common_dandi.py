@@ -21,7 +21,7 @@ try:
     from dandi.organize import OrganizeInvalid
     from dandi.validate_types import Severity
 
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
     (
         dandi.download,
         dandi.organize,
