@@ -6,7 +6,8 @@
 ![Spyglass Figure](docs/src/images/fig1.png)
 
 [Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F02_Insert_Data.ipynb&branch=main)
-| [Installation](https://lorenfranklab.github.io/spyglass/latest/installation/)
+|
+[Installation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 | [Docs](https://lorenfranklab.github.io/spyglass/) |
 [Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) |
 [Citation](#citation)

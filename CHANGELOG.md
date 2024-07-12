@@ -1,18 +1,6 @@
 # Change Log
 
-## [0.5.3] (Unreleased)
-
-### Release Notes
-
-<!-- Running draft to be removed immediately prior to release. -->
-
-```python
-from spyglass.common.common_behav import PositionIntervalMap
-from spyglass.decoding.v1.core import PositionGroup
-
-PositionIntervalMap.alter()
-PositionGroup.alter()
-```
+## [0.5.3] (July 15, 2024)
 
 ### Infrastructure
 
@@ -31,6 +19,9 @@ PositionGroup.alter()
 - `cautious_delete` now checks `IntervalList` and externals tables. #1002
 - Allow mixin tables with parallelization in `make` to run populate with
     `processes > 1` #1001
+- Revise docs organization.
+    - Misc -> Features/ForDevelopers. #1029
+    - Installation instructions -> Setup notebook. #1029
 
 ### Pipelines
 
@@ -59,6 +50,8 @@ PositionGroup.alter()
     - Replace `OutputLogger` context manager with decorator #870
     - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
         `get_video_info` to reflect actual use #870
+    - Fix `red_led_bisector` `np.nan` handling issue from #870. Fixed in #1029
+    - Fix `one_pt_centoid` `np.nan` handling issue from #870. Fixed in #1029
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
