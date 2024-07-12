@@ -22,11 +22,16 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import DecodingParameters, PositionGroup  # noqa: F401
+from spyglass.decoding.v1.core import (
+    DecodingParameters,
+    PositionGroup,
+)  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
-from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput  # noqa: F401
+from spyglass.spikesorting.spikesorting_merge import (
+    SpikeSortingOutput,
+)  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("decoding_sorted_spikes_v1")
@@ -537,10 +542,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
             return analysis.get_ahead_behind_distance2D(
                 position_info[position_variable_names].to_numpy(),
-                position_info[orientation_name].to_numpy(),
-                map_position,
-                classifier.environments[0].track_graphDD,
-            )
                 position_info[orientation_name].to_numpy(),
                 map_position,
                 classifier.environments[0].track_graphDD,
