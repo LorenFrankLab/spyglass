@@ -1,5 +1,11 @@
 # Coding for Reuse
 
+<!--
+NOTE: Code blocks are intentionally non-black-formatted.
+Disable pre-commit mdformat-black if editing. Or commit with --no-verify.
+https://github.com/hukkin/mdformat-black/issues/6
+-->
+
 *Reusing code requires that it be faster to read and change than it would be to
 start from scratch.*
 
@@ -12,20 +18,19 @@ We can speed up that process by ...
 5. Automating as much of the above as possible.
 
 This document will covers these topics in detail, pulling from resources like
-[Tidy First](https://www.oreilly.com/library/view/tidy-first/9781098151232/)
-and
+[Tidy First](https://www.oreilly.com/library/view/tidy-first/9781098151232/) and
 [SOLID Principles](https://arjancodes.com/blog/solid-principles-in-python-programming/).
 Experienced object-oriented developers may find these principles familiar.
 
 ## Predictable Formatting
 
 - Many programming languages offer flexibility in how they are written.
-- Tools like `black` and `isort` take away stylistic preferences in favor of
-one norm.
-- Strict line limits (e.g., 80) make it easier to do side by side comparisons
-in git interfaces.
+- Tools like `black` and `isort` take away stylistic preferences in favor of one
+    norm.
+- Strict line limits (e.g., 80) make it easier to do side by side comparisons in
+    git interfaces.
 - `black` is also useful for detecting an error on save - if it doesn't run on
-what you wrote, there's an error somewhere.
+    what you wrote, there's an error somewhere.
 
 Let's look at a few examples of the same code block formatted different ways...
 
@@ -210,8 +215,10 @@ class MyTable(dj.Computed):
 
 ### Embedding
 
-- The process of stream of consciousness coding often generates an embedding trail from core out
-- Our mental model of A -> B -> C -> D may actually read like `D( C( B( A )))` or ...
+- The process of stream of consciousness coding often generates an embedding
+    trail from core out
+- Our mental model of A -> B -> C -> D may actually read like `D( C( B( A )))`
+    or ...
 
 1. Prepare for D
 2. Open a loop for C
