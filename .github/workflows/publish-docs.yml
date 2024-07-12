@@ -28,6 +28,18 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Git describe # Get tags
+        id: ghd
+        uses: proudust/gh-describe@v2
+
+      - name: Check tag
+        run: |
+          echo "describe  : ${{ steps.ghd.outputs.describe }}"
+          echo "tag       : ${{ steps.ghd.outputs.tag }}"
+          echo "distance  : ${{ steps.ghd.outputs.distance }}"
+          echo "sha       : ${{ steps.ghd.outputs.sha }}"
+          echo "short-sha : ${{ steps.ghd.outputs.short-sha }}"
+
       - name: Set up Python runtime
         uses: actions/setup-python@v5
         with:
@@ -38,10 +50,6 @@ jobs:
         run: |
           pip install .[docs]
           git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
-
-      - name: Git describe # Get tags
-        id: ghd
-        uses: proudust/gh-describe@v2
 
       - name: Deploy
         run: | # github.ref_name is branch name if dispatch
