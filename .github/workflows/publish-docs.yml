@@ -39,9 +39,14 @@ jobs:
           pip install .[docs]
           git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
 
+      - name: Git describe # Get tags
+        id: ghd
+        uses: proudust/gh-describe@v2
+
       - name: Deploy
+        uses:
         run: | # github.ref_name is branch name if dispatch
-          FULL_VERSION=${{ git describe --tags --abbrev=0 }}
+          FULL_VERSION=${{ steps.ghd.outputs.tag }}
           export MAJOR_VERSION=${FULL_VERSION:0:3}
           echo "OWNER: ${REPO_OWNER}. BUILD: ${MAJOR_VERSION}"
           bash ./docs/build-docs.sh push $REPO_OWNER
