@@ -99,6 +99,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     position_info.index <= interval_end,
                 )
             ] = True
+        is_training[position_info[position_variable_names].isna().values.max(axis=1)] = False
+        
         if "is_training" not in decoding_kwargs:
             decoding_kwargs["is_training"] = is_training
 
@@ -394,7 +396,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 axis=1,
             )
             .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
+            # .dropna(subset=position_variable_names)
         )
 
     @staticmethod
