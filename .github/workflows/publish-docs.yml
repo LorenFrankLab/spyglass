@@ -29,16 +29,8 @@ jobs:
           fetch-depth: 0
 
       - name: Git describe # Get tags
-        id: ghd
+        id: ghd # see Deploy below. Will fail if no tags on branch
         uses: proudust/gh-describe@v2
-
-      - name: Check tag
-        run: |
-          echo "describe  : ${{ steps.ghd.outputs.describe }}"
-          echo "tag       : ${{ steps.ghd.outputs.tag }}"
-          echo "distance  : ${{ steps.ghd.outputs.distance }}"
-          echo "sha       : ${{ steps.ghd.outputs.sha }}"
-          echo "short-sha : ${{ steps.ghd.outputs.short-sha }}"
 
       - name: Set up Python runtime
         uses: actions/setup-python@v5

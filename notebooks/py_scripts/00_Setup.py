@@ -81,7 +81,7 @@
 #     - Debugger: Progressive running of code. Please search for tutorials
 #     - Autocompletion: Prompting for potential options when coding
 #
-# ```jsonc
+# ```json
 # {
 #     "recommendations": [
 #         // Python Extensions
@@ -118,7 +118,7 @@
 # settings file. Search settings in the command panel (cmd/ctrl+shift+P) to open
 # this file directly.
 #
-# ```jsonc
+# ```json
 # {
 #     // GENERAL
 #     "editor.insertSpaces": true, // tab -> spaces

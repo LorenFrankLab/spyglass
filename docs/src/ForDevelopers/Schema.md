@@ -18,7 +18,7 @@ Some of this will be redundant with general Python best practices and DataJoint
 documentation, but it is important be able to read a schema, espically if you
 plan to write your own.
 
-Later sections will depend on information presenten in the article on
+Later sections will depend on information presented in the article on
 [Table Types](./TableTypes.md).
 
 ## Goals of a schema
@@ -292,7 +292,7 @@ Each table can have a docstring that describes the table, and must have a
 
 - `field : datatype` defines a column using a
     [SQL datatype](https://datajoint.com/docs/core/datajoint-python/0.14/design/tables/attributes/)
-    
+
 
 - `->` indicates a foreign key reference to another table.
 
@@ -374,7 +374,9 @@ class SubjBlinded(SpyglassMixin, dj.Manual):
         return ret[0] if len(ret) == 1 else ret
 ```
 
-### Example Params Table
+### Example Table Types
+
+#### Params Table
 
 This stores the set of values that may be used in an analysis. For analyses that
 are unlikely to change, consider specifying all parameters in the table's
@@ -403,7 +405,7 @@ class MyParams(SpyglassMixin, dj.Lookup):  # Lookup allows for default values
         cls().insert(rows=cls.contents, skip_duplicates=True)
 ```
 
-### Example Selection Table
+#### Selection Table
 
 This is the staging area to pair sessions with parameter sets. Depending on what
 is inserted, you might pair the same subject with different parameter sets, or
@@ -430,7 +432,7 @@ class MyAnalysisSelection(SpyglassMixin, dj.Manual):
         )
 ```
 
-### Example Compute Table
+#### Compute Table
 
 This is how processing steps are paired with data entry. By running
 `MyAnalysis().populate()`, the `make` method is called for each foreign key

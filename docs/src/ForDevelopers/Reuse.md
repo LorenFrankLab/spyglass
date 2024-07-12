@@ -17,7 +17,7 @@ We can speed up that process by ...
 4. Getting ahead of errors
 5. Automating as much of the above as possible.
 
-This document will covers these topics in detail, pulling from resources like
+This document pulls from resources like
 [Tidy First](https://www.oreilly.com/library/view/tidy-first/9781098151232/) and
 [SOLID Principles](https://arjancodes.com/blog/solid-principles-in-python-programming/).
 Experienced object-oriented developers may find these principles familiar.
