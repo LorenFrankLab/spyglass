@@ -1,7 +1,7 @@
 import datajoint as dj
 import numpy as np
 
-from spyglass.spiksorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
 
@@ -24,6 +24,25 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         quantification = NULL: float # quantification label from analysis
         """
 
+        def fetch_unit_spikes(self, return_unit_ids=False):
+            """Fetch the spike times for a restricted set of units
+
+            Parameters
+            ----------
+            return_unit_ids : bool, optional
+               whether to return unit ids with spike times, by default False
+
+            Returns
+            -------
+            list of np.ndarray
+                list of spike times for each unit in the group,
+                if return_unit_ids is False
+            tuple of list of np.ndarray, list of str
+                list of spike times for each unit in the group and the unit ids,
+                if return_unit_ids is True
+            """
+            return (UnitAnnotation & self).fetch_unit_spikes(return_unit_ids)
+
     def add_annotation(self, key, **kwargs):
         """Add an annotation to a unit. Creates the unit if it does not exist.
 
@@ -39,21 +58,22 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         """
         # validate new units
         unit_key = {
-            "spikesorting_merge_id": key["pos_merge_id"],
+            "spikesorting_merge_id": key["spikesorting_merge_id"],
             "unit_id": key["unit_id"],
         }
         if not self & unit_key:
             nwb_file = (
-                SpikeSortingOutput & {"merge_id": key["pos_merge_id"]}
+                SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
             ).fetch_nwb()[0]
             nwb_field_name = self._get_spike_obj_name(nwb_file)
             spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
             if key["unit_id"] > len(spikes):
                 raise ValueError(
                     f"unit_id {key['unit_id']} is greater than ",
-                    f"the number of units in {key['pos_merge_id']}",
+                    f"the number of units in {key['spikesorting_merge_id']}",
                 )
             self.insert1(unit_key)
+        # add annotation
         self.Annotation().insert1(key, **kwargs)
 
     def fetch_unit_spikes(self, return_unit_ids=False):
