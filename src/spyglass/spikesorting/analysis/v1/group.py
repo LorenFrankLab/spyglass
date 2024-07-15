@@ -69,6 +69,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "unit_filter_params_name": unit_filter_params_name,
         }
+        if self & group_key:
+            raise ValueError(
+                f"Group {nwb_file_name}: {group_name} already exists",
+                "please delete the group before creating a new one",
+            )
+
         parts_insert = [{**key, **group_key} for key in keys]
 
         self.insert1(
