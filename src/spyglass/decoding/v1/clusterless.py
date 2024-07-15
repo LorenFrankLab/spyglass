@@ -23,12 +23,13 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import DecodingParameters, PositionGroup
-
-# noqa: F401
-from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures
-
-# noqa: F401
+from spyglass.decoding.v1.core import (
+    DecodingParameters,
+    PositionGroup,
+)  # noqa: F401
+from spyglass.decoding.v1.waveform_features import (
+    UnitWaveformFeatures,
+)  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -426,14 +427,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
 
-        return (
-            pd.concat(
-                [linear_position_df.set_index(position_df.index), position_df],
-                axis=1,
-            )
-            .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
-        )
+        return pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        ).loc[min_time:max_time]
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True):

@@ -392,13 +392,10 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
-        return (
-            pd.concat(
-                [linear_position_df.set_index(position_df.index), position_df],
-                axis=1,
-            ).loc[min_time:max_time]
-            # .dropna(subset=position_variable_names)
-        )
+        return pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        ).loc[min_time:max_time]
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True, time_slice=None):

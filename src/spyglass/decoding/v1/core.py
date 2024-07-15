@@ -179,10 +179,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             min_time = min([df.index.min() for df in position_info])
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
-        position_info = (
-            pd.concat(position_info, axis=0).loc[min_time:max_time]
-            # .dropna(subset=position_variable_names)
-        )
+        position_info = pd.concat(position_info, axis=0).loc[min_time:max_time]
 
         return position_info, position_variable_names
 
