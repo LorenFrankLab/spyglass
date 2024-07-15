@@ -37,7 +37,6 @@ from spyglass.utils import SpyglassMixin, logger
 schema = dj.schema("decoding_sorted_spikes_v1")
 
 
-# noqa: F401
 @schema
 class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     definition = """
@@ -550,9 +549,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             return analysis.get_ahead_behind_distance2D(
                 position_info[position_variable_names].to_numpy(),
                 position_info[orientation_name].to_numpy(),
-                map_position,
-                classifier.environments[0].track_graphDD,
-            )
                 map_position,
                 classifier.environments[0].track_graphDD,
             )
