@@ -25,7 +25,7 @@
 # ## SortedSpikesGroup
 #
 # In practice, downstream analyses of spikesorting will often need to combine results
-# from multiple sortings (e.g. across tetrodes groups in a single interval). To make
+# from multiple sorts (e.g. across tetrodes groups in a single interval). To make
 # this simple with spyglass's relational database, we use the `SortedSpikesGroup` table.
 #
 # `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline.
@@ -59,7 +59,7 @@ print(
 UnitSelectionParams()
 # -
 
-# We then define the set of curated sortings to include in the group
+# We then define the set of curated sorting results to include in the group
 #
 # Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's
 
