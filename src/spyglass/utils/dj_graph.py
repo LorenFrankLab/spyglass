@@ -890,7 +890,6 @@ class TableChain(RestrGraph):
         except_tables = self._ensure_names(except_tables)
         ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
         self.no_visit.update(ignore_tables)
-        self.undirect_graph.remove_nodes_from(ignore_tables)
 
     def _ignore_outside_spy(self, except_tables: List[str] = None):
         """Ignore tables not shared on shared prefixes."""
@@ -904,7 +903,6 @@ class TableChain(RestrGraph):
             ]
         )
         self.no_visit.update(ignore_tables)
-        self.undirect_graph.remove_nodes_from(ignore_tables)
 
     # --------------------------- Dunder Properties ---------------------------
 
