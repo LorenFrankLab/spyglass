@@ -33,6 +33,7 @@ PositionGroup.alter()
     `processes > 1` #1001
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
+- Use peripheral tables as fallback in `TableChains` #XXXX
 
 ### Pipelines
 

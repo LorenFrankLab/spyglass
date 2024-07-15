@@ -318,17 +318,19 @@ class SpyglassMixin:
         part_masters = set()
 
         def search_descendants(parent):
-            for desc in parent.descendants(as_objects=True):
+            for desc_name in parent.descendants():
                 if (  # Check if has master, is part
-                    not (master := get_master(desc.full_table_name))
-                    # has other non-master parent
-                    or not set(desc.parents()) - set([master])
+                    not (master := get_master(desc_name))
                     or master in part_masters  # already in cache
+                    or desc_name.replace("`", "").split("_")[0]
+                    not in SHARED_MODULES
                 ):
                     continue
-                if master not in part_masters:
-                    part_masters.add(master)
-                    search_descendants(dj.FreeTable(self.connection, master))
+                desc = dj.FreeTable(self.connection, desc_name)
+                if not set(desc.parents()) - set([master]):  # no other parent
+                    continue
+                part_masters.add(master)
+                search_descendants(dj.FreeTable(self.connection, master))
 
         try:
             _ = search_descendants(self)
@@ -488,7 +490,7 @@ class SpyglassMixin:
         self._member_pk = LabMember.primary_key[0]
         return [LabMember, LabTeam, Session, schema.external, IntervalList]
 
-    def _get_exp_summary(self):
+    def _get_exp_summary(self) -> Union[QueryExpression, None]:
         """Get summary of experimenters for session(s), including NULL.
 
         Parameters
@@ -498,9 +500,12 @@ class SpyglassMixin:
 
         Returns
         -------
-        str
-            Summary of experimenters for session(s).
+        Union[QueryExpression, None]
+            dj.Union object Summary of experimenters for session(s). If no link
+            to Session, return None.
         """
+        if not self._session_connection.has_link:
+            return None
 
         Session = self._delete_deps[2]
         SesExp = Session.Experimenter
@@ -525,8 +530,7 @@ class SpyglassMixin:
         """Path from Session table to self. False if no connection found."""
         from spyglass.utils.dj_graph import TableChain  # noqa F401
 
-        connection = TableChain(parent=self._delete_deps[2], child=self)
-        return connection if connection.has_link else False
+        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
 
     @cached_property
     def _test_mode(self) -> bool:
@@ -568,7 +572,13 @@ class SpyglassMixin:
             )
             return
 
-        sess_summary = self._get_exp_summary()
+        if not (sess_summary := self._get_exp_summary()):
+            logger.warn(
+                f"Could not find a connection from {self.camel_name} "
+                + "to Session.\n Be careful not to delete others' data."
+            )
+            return
+
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
             raise PermissionError(
