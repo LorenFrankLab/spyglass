@@ -52,6 +52,7 @@ PositionGroup.alter()
 - Decoding:
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
+    - Avoid interpolating over large `nan` intervals in position #1033
 - Position
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
