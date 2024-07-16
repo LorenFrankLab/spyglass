@@ -240,7 +240,6 @@
 #
 # #### LFP
 #
-#
 # The LFP pipeline uses `ghostipy`.
 #
 # __WARNING:__ If you are on an M1 Mac, you need to install `pyfftw` via `conda`
@@ -250,6 +249,14 @@
 # conda install -c conda-forge pyfftw # for M1 Macs
 # pip install ghostipy
 # ```
+#
+# #### Decoding
+#
+# The Decoding pipeline relies on `jax` to process data with GPUs. Please see
+# their conda installation steps
+# [here](https://jax.readthedocs.io/en/latest/installation.html#conda-installation).
+#
+#
 
 # ## Database
 #
@@ -400,8 +407,10 @@ SpyglassConfig().save_dj_config(
 # ### Managing Files
 #
 # [`kachery-cloud`](https://github.com/flatironinstitute/kachery-cloud) is a file
-# manager for collaborators who do not have access to a lab's central production
-# database. To customize `kachery` file paths, see `dj_local_conf_example.json`.
+# manager for collaborators to share files. This is an optional dependency for
+# collaborating teams who don't have direct access to one another's disk space,
+# but want to share a MySQL database instance.
+# To customize `kachery` file paths, see `dj_local_conf_example.json`.
 #
 # To set up a new `kachery` instance for your project, contact maintainers
 # of this package.
