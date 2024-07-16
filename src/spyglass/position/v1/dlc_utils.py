@@ -717,21 +717,22 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     orient = np.full(len(pos_df), np.nan)  # Initialize with NaNs
     x_vec = pos_df[LED1]["x"] - pos_df[LED2]["x"]
     y_vec = pos_df[LED1]["y"] - pos_df[LED2]["y"]
+    y_eq0 = np.isclose(y_vec, 0)
 
     # when y_vec is zero, 1&2 are equal. Compare to 3, determine if up or down
-    orient[y_vec.eq(0) & pos_df[LED3]["y"].gt(pos_df[LED1]["y"])] = np.pi / 2
-    orient[y_vec.eq(0) & pos_df[LED3]["y"].lt(pos_df[LED1]["y"])] = -np.pi / 2
+    orient[y_eq0 & pos_df[LED3]["y"].gt(pos_df[LED1]["y"])] = np.pi / 2
+    orient[y_eq0 & pos_df[LED3]["y"].lt(pos_df[LED1]["y"])] = -np.pi / 2
 
     # Handling error case where y_vec is zero and all Ys are the same
     y_1, y_2, y_3 = pos_df[LED1]["y"], pos_df[LED2]["y"], pos_df[LED3]["y"]
-    if np.any(y_vec.eq(0) & y_1.eq(y_2) & y_1.eq(y_3)):
+    if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
         raise Exception("Cannot determine head direction from bisector")
 
     # General case where y_vec is not zero. Use arctan2 to determine orientation
     length = np.sqrt(x_vec**2 + y_vec**2)
-    norm_x = (-y_vec / length)[~y_vec.eq(0)]
-    norm_y = (x_vec / length)[~y_vec.eq(0)]
-    orient[~y_vec.eq(0)] = np.arctan2(norm_y, norm_x)
+    norm_x = (-y_vec / length)[~y_eq0]
+    norm_y = (x_vec / length)[~y_eq0]
+    orient[~y_eq0] = np.arctan2(norm_y, norm_x)
 
     return orient
 
