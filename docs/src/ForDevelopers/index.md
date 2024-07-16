@@ -24,7 +24,7 @@ review the article on [database management](./Management.md).
 This folder also contains a number of articles on understanding pipelines in
 order to develop your own.
 
-- [Code for Reuse](./Reuse.md) discussed good practice for writing readable and
+- [Code for Reuse](./Reuse.md) discusses good practice for writing readable and
     reusable code in Python.
 - [Table Types](./TableTypes.md) explains the different table motifs in Spyglass
     and how to use them.
