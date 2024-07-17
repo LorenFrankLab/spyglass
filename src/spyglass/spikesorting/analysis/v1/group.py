@@ -166,11 +166,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             return_merge_ids=True
         )
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
-            nwb_field_name = (
-                "object_id"
-                if "object_id" in nwb_file
-                else "units" if "units" in nwb_file else None
-            )
+            nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
                 continue
@@ -291,3 +287,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             ],
             axis=1,
         )
+
+
+@staticmethod
+def _get_spike_obj_name(nwb_file, allow_empty=False):
+    nwb_field_name = (
+        "object_id"
+        if "object_id" in nwb_file
+        else "units" if "units" in nwb_file else None
+    )
+    if nwb_field_name is None and not allow_empty:
+        raise ValueError("NWB file does not have 'object_id' or 'units' field")
+    return nwb_field_name

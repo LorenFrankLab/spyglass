@@ -3,6 +3,7 @@ from typing import Optional, Union
 import datajoint as dj
 import numpy as np
 
+from spyglass.spikesorting.analysis.v1.group import _get_spike_obj_name
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
@@ -68,7 +69,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             nwb_file = (
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
             ).fetch_nwb()[0]
-            nwb_field_name = self._get_spike_obj_name(nwb_file)
+            nwb_field_name = _get_spike_obj_name(nwb_file)
             spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
             if key["unit_id"] > len(spikes):
                 raise ValueError(
@@ -116,7 +117,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         spikes = []
         unit_ids = []
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
-            nwb_field_name = self._get_spike_obj_name(nwb_file)
+            nwb_field_name = _get_spike_obj_name(nwb_file)
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
@@ -136,16 +137,3 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         if return_unit_ids:
             return spikes, unit_ids
         return spikes
-
-    @staticmethod
-    def _get_spike_obj_name(nwb_file):
-        nwb_field_name = (
-            "object_id"
-            if "object_id" in nwb_file
-            else "units" if "units" in nwb_file else None
-        )
-        if nwb_field_name is None:
-            raise ValueError(
-                "NWB file does not have 'object_id' or 'units' field"
-            )
-        return nwb_field_name
