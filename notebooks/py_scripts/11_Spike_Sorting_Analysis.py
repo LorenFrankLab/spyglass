@@ -25,8 +25,8 @@
 # ## SortedSpikesGroup
 #
 # In practice, downstream analyses of spikesorting will often need to combine results
-# from multiple sorts (e.g. across tetrodes groups in a single interval). To make
-# this simple with spyglass's relational database, we use the `SortedSpikesGroup` table.
+# from multiple sorts (e.g. across tetrodes groups in a single interval). To simplify
+# this process, we use the `SortedSpikesGroup` table.
 #
 # `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline.
 # It allows us to group the spikesorting results from multiple sources into a single

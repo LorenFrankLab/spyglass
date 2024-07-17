@@ -57,10 +57,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             if unit_id is not valid for the sorting
         """
         # validate new units
-        unit_key = {
-            "spikesorting_merge_id": key["spikesorting_merge_id"],
-            "unit_id": key["unit_id"],
-        }
+        unit_key = {k:v for k,v in key.items() if k in ["spikesorting_merge_id", "unit_id]}
         if not self & unit_key:
             nwb_file = (
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}

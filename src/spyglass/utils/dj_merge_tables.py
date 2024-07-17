@@ -544,7 +544,8 @@ class Merge(dj.Manual):
                     source_restr, permit_multiple_rows=True
                 ).fetch_nwb()
             )
-            merge_ids.extend([k[self._reserved_pk] for k in source_restr])
+            if return_merge_ids:
+                merge_ids.extend([k[self._reserved_pk] for k in source_restr])
         if return_merge_ids:
             return nwb_list, merge_ids
         return nwb_list
