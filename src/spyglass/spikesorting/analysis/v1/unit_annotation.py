@@ -1,3 +1,5 @@
+from typing import Optional, Union
+
 import datajoint as dj
 import numpy as np
 
@@ -57,7 +59,11 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             if unit_id is not valid for the sorting
         """
         # validate new units
-        unit_key = {k:v for k,v in key.items() if k in ["spikesorting_merge_id", "unit_id]}
+        unit_key = {
+            k: v
+            for k, v in key.items()
+            if k in ["spikesorting_merge_id", "unit_id"]
+        }
         if not self & unit_key:
             nwb_file = (
                 SpikeSortingOutput & {"merge_id": key["spikesorting_merge_id"]}
@@ -73,7 +79,9 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         # add annotation
         self.Annotation().insert1(key, **kwargs)
 
-    def fetch_unit_spikes(self, return_unit_ids=False):
+    def fetch_unit_spikes(
+        self, return_unit_ids=False
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for a restricted set of units
 
         Parameters
@@ -119,7 +127,10 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 [sorting_spike_times[unit_id] for unit_id in include_unit]
             )
             unit_ids.extend(
-                [f"{merge_id}_{unit_id}" for unit_id in include_unit]
+                [
+                    {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
+                    for unit_id in include_unit
+                ]
             )
 
         if return_unit_ids:
@@ -138,10 +149,3 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
                 "NWB file does not have 'object_id' or 'units' field"
             )
         return nwb_field_name
-
-    @staticmethod
-    def convert_unit_id_to_key(unit_id):
-        return {
-            "spikesorting_merge_id": unit_id.split("_")[0],
-            "unit_id": int(unit_id.split("_")[1]),
-        }

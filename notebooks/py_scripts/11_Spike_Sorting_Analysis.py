@@ -12,8 +12,6 @@
 #     name: python3
 # ---
 
-#
-
 # # Spike Sorting Analysis
 #
 # Sorted spike times are a starting point of many analysis pipelines. Spyglass provides
@@ -25,8 +23,8 @@
 # ## SortedSpikesGroup
 #
 # In practice, downstream analyses of spikesorting will often need to combine results
-# from multiple sorts (e.g. across tetrodes groups in a single interval). To simplify
-# this process, we use the `SortedSpikesGroup` table.
+# from multiple sorts (e.g. across tetrodes groups in a single interval). To make
+# this simple with spyglass's relational database, we use the `SortedSpikesGroup` table.
 #
 # `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline.
 # It allows us to group the spikesorting results from multiple sources into a single
@@ -126,8 +124,9 @@ SortedSpikesGroup().fetch_spike_data(group_key)
 #
 # Doing so requires a consistent manner of identifying a unit, and a location to track annotations
 #
-# Spyglass uses the unit identification system: `"{spikesorting_merge_id}_{unit_number}"`,
-# where `unit_number` is the index of a units in the saved nwb file. `fetch_spike_data`
+# Spyglass uses the unit identification system:
+# `{"spikesorting_merge_id" : merge_id, "unit_id" : unit_id}"`,
+# where `unit_id` is the index of a units in the saved nwb file. `fetch_spike_data`
 # can return these identifications by setting `return_unit_ids = True`
 
 spike_times, unit_ids = SortedSpikesGroup().fetch_spike_data(
@@ -136,27 +135,40 @@ spike_times, unit_ids = SortedSpikesGroup().fetch_spike_data(
 print(unit_ids[0])
 print(spike_times[0])
 
+# Further analysis may assign annotations to individual units. These can either be a
+# string `label` (e.g. "pyridimal_cell", "thirst_sensitive"), or a float `quantification`
+# (e.g. firing_rate, signal_correlation).
 #
+# The `UnitAnnotation` table can be used to track and cross reference these annottations
+# between analysis pipelines. Each unit has a single entry in `UnitAnnotation`, which
+# can be connected to multiple entries in the `UnitAnnotation.Annotation` part table.
+#
+# An `Annotation` entry should include an `annotation` describing the originating analysis,
+# along with a `label` and/or `quantification` with the analysis result.
+#
+# Here, we demonstrate adding quantification and label annotations to the units in
+# the spike group we created using the `add_annotation` function.
 
 # +
 from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
 
-unit_key_list = [
-    UnitAnnotation().convert_unit_id_to_key(unit_id) for unit_id in unit_ids
-]
-for spikes, unit_key in zip(spike_times, unit_key_list):
+for spikes, unit_key in zip(spike_times, unit_ids):
+    # add a quantification annotation for the number of spikes
     annotation_key = {
         **unit_key,
         "annotation": "spike_count",
         "quantification": len(spikes),
     }
     UnitAnnotation().add_annotation(annotation_key, skip_duplicates=True)
+    # add a label annotation for the unit id
+    annotation_key = {
+        **unit_key,
+        "annotation": "cell_type",
+        "label": "pyridimal" if len(spikes) < 1000 else "interneuron",
+    }
+    UnitAnnotation().add_annotation(annotation_key, skip_duplicates=True)
 
-annotations = (
-    UnitAnnotation().Annotation()
-    & unit_key_list
-    & {"annotation": "spike_count"}
-)
+annotations = UnitAnnotation().Annotation() & unit_ids
 annotations
 # -
 

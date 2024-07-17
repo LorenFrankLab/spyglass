@@ -1,4 +1,5 @@
 from itertools import compress
+from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -123,7 +124,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
     @staticmethod
     def fetch_spike_data(
         key: dict, time_slice: list[float] = None, return_unit_ids: bool = False
-    ) -> list[np.ndarray]:
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """fetch spike times for units in the group
 
         Parameters
@@ -134,7 +135,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if provided, filter for spikes occurring in the interval [start, stop], by default None
         return_unit_ids : bool, optional
             if True, return the unit_ids along with the spike times, by default False
-            Unit ids defined as "{merge_id}_{unit_number}"
+            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
@@ -177,8 +178,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 "spike_times"
             ].to_list()
             file_unit_ids = [
-                f"{merge_id}_{unit_number}"
-                for unit_number in range(len(sorting_spike_times))
+                {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
+                for unit_id in range(len(sorting_spike_times))
             ]
 
             # filter the spike times based on the labels if present
