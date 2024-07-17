@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 import copy
 import uuid
 from pathlib import Path
+from typing import Optional, Union
 
 import datajoint as dj
 import non_local_detector.analysis as analysis
@@ -400,7 +401,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     @staticmethod
     def fetch_spike_data(
         key, filter_by_interval=True, time_slice=None, return_unit_ids=False
-    ):
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for the decoding model
 
         Parameters
@@ -413,7 +414,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             User provided slice of time to restrict spikes to, by default None
         return_unit_ids : bool, optional
             if True, return the unit_ids along with the spike times, by default False
-            Unit ids defined as "{merge_id}_{unit_number}"
+            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
