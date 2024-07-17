@@ -75,7 +75,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         # create a cache to save downloaded data to disk (optional)
         fsspec_file = CachingFileSystem(
             fs=fs,
-            cache_storage=f"{export_dir}/nwb-cache",  # Local folder for the cache
+            cache_storage=f"{export_dir}/nwb-cache",  # Local folder for cache
         )
 
         # Open and return the file
@@ -101,7 +101,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
         dandi_api_key : str, optional
             API key for the dandi server. Optional if the environment variable
             DANDI_API_KEY is set.
-        dandi_instance : What instance of Dandi the dandiset is on. Defaults to the dev server
+        dandi_instance : str, optional
+            What instance of Dandi the dandiset is on. Defaults to dev server.
         """
         key = (Export & key).fetch1("KEY")
         paper_id = (Export & key).fetch1("paper_id")
@@ -118,13 +119,11 @@ class DandiPath(SpyglassMixin, dj.Manual):
         destination_dir = f"{paper_dir}/dandiset_{paper_id}"
         dandiset_dir = f"{paper_dir}/{dandiset_id}"
 
-        # check if pre-existing directories for dandi export exist. Remove if so to continue
+        # check if existing dirs for dandi export. If so, remove to continue
         for dandi_dir in destination_dir, dandiset_dir:
             if os.path.exists(dandi_dir):
-                from datajoint.utils import user_choice
-
                 if (
-                    user_choice(
+                    dj.utils.user_choice(
                         "Pre-existing dandi export dir exist."
                         + f"Delete existing export folder: {dandi_dir}",
                         default="no",
@@ -134,7 +133,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
                     shutil.rmtree(dandi_dir)
                     continue
                 raise RuntimeError(
-                    f"Directory must be removed prior to dandi export to ensure dandi-compatability: {dandi_dir}"
+                    "Directory must be removed prior to dandi export to ensure "
+                    + f"dandi-compatability: {dandi_dir}"
                 )
 
         os.makedirs(destination_dir, exist_ok=False)
@@ -148,7 +148,10 @@ class DandiPath(SpyglassMixin, dj.Manual):
         validate_dandiset(destination_dir, ignore_external_files=True)
 
         # given dandiset_id, download the dandiset to the export_dir
-        url = f"{known_instances[dandi_instance].gui}/dandiset/{dandiset_id}/draft"
+        url = (
+            f"{known_instances[dandi_instance].gui}"
+            + f"/dandiset/{dandiset_id}/draft"
+        )
         dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory
@@ -196,7 +199,8 @@ def _get_metadata(path):
 def translate_name_to_dandi(folder):
     """Uses dandi.organize to translate filenames to dandi paths
 
-    *Note* The name for a given file is dependent on that of all files in the folder
+    *Note* The name for a given file is dependent on that of all files in the
+    folder
 
     Parameters
     ----------
@@ -232,7 +236,8 @@ def validate_dandiset(
     folder : str
         location of dandiset to be validated
     min_severity : str
-        minimum severity level for errors to be reported, threshold for failed Dandi upload is "ERROR"
+        minimum severity level for errors to be reported, threshold for failed
+        Dandi upload is "ERROR"
     ignore_external_files : bool
         whether to ignore external file errors. Used if validating
         before the organize step
