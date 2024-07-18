@@ -194,16 +194,16 @@ def spikesorting_pipeline_populator(
         )
         SpikeSortingRecordingSelection.insert1(ssr_key, skip_duplicates=True)
 
-    SpikeSortingRecording.populate(interval_dict)
+    SpikeSortingRecording.populate(sort_dict)
 
     # Artifact detection
     logger.info("Running artifact detection")
     artifact_keys = [
         {**k, "artifact_params_name": artifact_parameters}
-        for k in (SpikeSortingRecordingSelection() & interval_dict).fetch("KEY")
+        for k in (SpikeSortingRecordingSelection() & sort_dict).fetch("KEY")
     ]
     ArtifactDetectionSelection().insert(artifact_keys, skip_duplicates=True)
-    ArtifactDetection.populate(interval_dict)
+    ArtifactDetection.populate(sort_dict)
 
     # Spike sorting
     logger.info("Running spike sorting")

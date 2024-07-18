@@ -33,6 +33,7 @@ PositionGroup.alter()
     `processes > 1` #1001
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
+- Ensure integrity of group tables #1026
 
 ### Pipelines
 
@@ -62,6 +63,8 @@ PositionGroup.alter()
     - Replace `OutputLogger` context manager with decorator #870
     - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
         `get_video_info` to reflect actual use #870
+    - Fix `red_led_bisector` `np.nan` handling issue from #870. Fixed in #1034
+    - Fix `one_pt_centoid` `np.nan` handling issue from #870. Fixed in #1034
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994

@@ -73,7 +73,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
             Optional. If True, no sort groups are defined for unitrodes.
         """
         # delete any current groups
-        # (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
+        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
         # get the electrodes from this NWB file
         electrodes = (
             Electrode()
