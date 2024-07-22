@@ -139,7 +139,7 @@ print(spike_times[0])
 # string `label` (e.g. "pyridimal_cell", "thirst_sensitive"), or a float `quantification`
 # (e.g. firing_rate, signal_correlation).
 #
-# The `UnitAnnotation` table can be used to track and cross reference these annottations
+# The `UnitAnnotation` table can be used to track and cross reference these annotations
 # between analysis pipelines. Each unit has a single entry in `UnitAnnotation`, which
 # can be connected to multiple entries in the `UnitAnnotation.Annotation` part table.
 #
