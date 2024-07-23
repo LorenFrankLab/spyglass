@@ -1,5 +1,5 @@
 import datajoint as dj
-import kachery_client as kc
+import kachery_cloud as kcl
 import spikeinterface as si
 from sortingview.SpikeSortingView import (
     SpikeSortingView as SortingViewSpikeSortingView,
@@ -38,7 +38,7 @@ class SpikeSortingView(SpyglassMixin, dj.Computed):
         recording: si.BaseRecording = si.load_extractor(recording_path)
         sorting: si.BaseSorting = si.load_extractor(sorting_path)
 
-        with kc.TemporaryDirectory() as tmpdir:
+        with kcl.TemporaryDirectory() as tmpdir:
             fname = f"{tmpdir}/spikesortingview.h5"
             logger.info("Preparing spikesortingview data")
             prepare_spikesortingview_data(

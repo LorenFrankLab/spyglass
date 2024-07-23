@@ -8,6 +8,8 @@ import h5py
 import pynwb
 from fsspec.implementations.cached import CachingFileSystem
 
+from spyglass.utils import logger
+
 try:
     import dandi.download
     import dandi.organize
@@ -19,7 +21,7 @@ try:
     from dandi.organize import OrganizeInvalid
     from dandi.validate_types import Severity
 
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
     (
         dandi.download,
         dandi.organize,

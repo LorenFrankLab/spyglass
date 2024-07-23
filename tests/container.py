@@ -190,7 +190,7 @@ class DockerMySQLManager:
             return None
 
     @property
-    def creds(self):
+    def credentials(self):
         """Datajoint credentials for this container."""
         return {
             "database.host": "localhost",
@@ -204,7 +204,7 @@ class DockerMySQLManager:
     @property
     def connected(self) -> bool:
         self.wait()
-        dj.config.update(self.creds)
+        dj.config.update(self.credentials)
         return dj.conn().is_connected
 
     def stop(self, remove=True) -> None:

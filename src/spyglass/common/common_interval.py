@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import get_child_tables
 
 from .common_session import Session  # noqa: F401
 
@@ -151,6 +152,12 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ax.grid(True)
         if return_fig:
             return fig
+
+    def nightly_cleanup(self, dry_run=True):
+        orphans = self - get_child_tables(self)
+        if dry_run:
+            return orphans
+        orphans.super_delete(warn=False)
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):

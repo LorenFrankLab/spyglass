@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import test_mode
 
 
@@ -20,6 +21,7 @@ class PoseEstimation:
         yml_path=None,
         filename_prefix="",
     ):
+        ActivityLog.deprecate_log("dlc_reader: PoseEstimation")
         if dlc_dir is None:
             assert pkl_path and h5_path and yml_path, (
                 'If "dlc_dir" is not provided, then pkl_path, h5_path, and yml_path '

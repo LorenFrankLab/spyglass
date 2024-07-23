@@ -30,7 +30,7 @@ from spyglass.utils.dj_helper_fn import deprecated_factory
 
 try:
     from position_tools import get_centroid
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     logger.warning("Please update position_tools to >= 0.1.0")
     from position_tools import get_centriod as get_centroid
 
@@ -705,7 +705,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
 
                 head_position = head_position_mean[time_ind]
                 head_position = self.convert_to_pixels(
-                    head_position, frame_size, cm_to_pixels
+                    data=head_position, cm_to_pixels=cm_to_pixels
                 )
                 head_orientation = head_orientation_mean[time_ind]
 

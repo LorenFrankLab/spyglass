@@ -72,6 +72,7 @@ test = [
     "kachery",               # database access
     "kachery-client",
     "kachery-cloud>=0.4.0",
+    "opencv-python-headless", # for headless testing of Qt
     "pre-commit",            # linting
     "pytest",                # unit testing
     "pytest-cov",            # code coverage
@@ -125,8 +126,8 @@ ignore-words-list = 'nevers'
 minversion = "7.0"
 addopts = [
     # "-sv", # no capture, verbose output
-    # "--sw", # stepwise: resume with next test after failure
-    # "--pdb", # drop into debugger on failure
+    "--sw", # stepwise: resume with next test after failure
+    "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
     # "--quiet-spy",   # don't show logging from spyglass

@@ -374,7 +374,8 @@ class Merge(dj.Manual):
 
         Otherwise parts returns none
         """
-        dj.conn.connection.dependencies.load()
+        if not dj.conn.connection.dependencies._loaded:
+            dj.conn.connection.dependencies.load()
 
     def insert(self, rows: list, **kwargs):
         """Merges table specific insert, ensuring data exists in part parents.
@@ -520,12 +521,26 @@ class Merge(dj.Manual):
             Restriction to apply to parents before running fetch. Default True.
         multi_source: bool
             Return from multiple parents. Default False.
+
+        Notes
+        -----
+        Nwb files not strictly returned in same order as self
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
-
-        return self.merge_restrict_class(restriction).fetch_nwb()
+        sources = set((self & restriction).fetch(self._reserved_sk))
+        nwb_list = []
+        for source in sources:
+            source_restr = (
+                self & {self._reserved_sk: source} & restriction
+            ).fetch("KEY")
+            nwb_list.extend(
+                self.merge_restrict_class(
+                    source_restr, permit_multiple_rows=True
+                ).fetch_nwb()
+            )
+        return nwb_list
 
     @classmethod
     def merge_get_part(
@@ -713,17 +728,20 @@ class Merge(dj.Manual):
             )
         return ret
 
-    def merge_restrict_class(self, key: dict) -> dj.Table:
+    def merge_restrict_class(
+        self, key: dict, permit_multiple_rows: bool = False
+    ) -> dj.Table:
         """Returns native parent class, restricted with key."""
-        parent_key = self.merge_get_parent(key).fetch("KEY", as_dict=True)
+        parent = self.merge_get_parent(key)
+        parent_key = parent.fetch("KEY", as_dict=True)
 
-        if len(parent_key) > 1:
+        if not permit_multiple_rows and len(parent_key) > 1:
             raise ValueError(
                 f"Ambiguous entry. Data has mult rows in parent:\n\tData:{key}"
                 + f"\n\t{parent_key}"
             )
 
-        parent_class = self.merge_get_parent_class(key)
+        parent_class = self.merge_get_parent_class(parent)
         return parent_class & parent_key
 
     @classmethod
@@ -820,17 +838,17 @@ def delete_downstream_merge(
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
-    Passthrough to SpyglassMixin.delete_downstream_merge
+    Passthrough to SpyglassMixin.delete_downstream_parts
     """
-    logger.warning(
-        "DEPRECATED: This function will be removed in `0.6`. "
-        + "Use AnyTable().delete_downstream_merge() instead."
-    )
-
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        "delete_downstream_merge. Use Table.delete_downstream_merge"
+    )
 
     if not isinstance(table, SpyglassMixin):
         raise ValueError("Input must be a Spyglass Table.")
     table = table if isinstance(table, dj.Table) else table()
 
-    return table.delete_downstream_merge(**kwargs)
+    return table.delete_downstream_parts(**kwargs)

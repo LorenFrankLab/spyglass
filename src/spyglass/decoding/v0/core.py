@@ -12,7 +12,8 @@ try:
     from replay_trajectory_classification.observation_model import (
         ObservationModel,
     )
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
+    RandomWalk, Uniform, Environment, ObservationModel = None, None, None, None
     logger.warning(e)
 
 from spyglass.common.common_behav import PositionIntervalMap, RawPosition

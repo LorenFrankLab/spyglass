@@ -27,7 +27,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.9
-      - run: pip install --upgrade build twine
+      - run: |
+          pip install --upgrade build twine
+          pip install importlib_metadata==7.2.1 # twine #977
       - name: Build sdist and wheel
         run: python -m build
       - run: twine check dist/*

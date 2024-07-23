@@ -28,8 +28,16 @@ try:
     from replay_trajectory_classification.initial_conditions import (
         UniformInitialConditions,
     )
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
+    (
+        _DEFAULT_CONTINUOUS_TRANSITIONS,
+        _DEFAULT_ENVIRONMENT,
+        _DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
+        DiagonalDiscrete,
+        UniformInitialConditions,
+    ) = [None] * 5
     logger.warning(e)
+
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,
 )

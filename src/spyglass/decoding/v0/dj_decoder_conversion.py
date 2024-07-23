@@ -25,7 +25,7 @@ try:
     from replay_trajectory_classification.observation_model import (
         ObservationModel,
     )
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
     (
         Identity,
         RandomWalk,

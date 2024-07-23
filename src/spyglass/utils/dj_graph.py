@@ -4,16 +4,16 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 """
 
 from abc import ABC, abstractmethod
-from collections.abc import KeysView
+from copy import deepcopy
 from enum import Enum
 from functools import cached_property
 from itertools import chain as iter_chain
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
-import datajoint as dj
 from datajoint import FreeTable, Table
 from datajoint.condition import make_condition
 from datajoint.dependencies import unite_master_parts
+from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
     NetworkXNoPath,
@@ -25,12 +25,12 @@ from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
+from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     PERIPHERAL_TABLES,
     fuzzy_get,
     unique_dicts,
 )
-from spyglass.utils.dj_merge_tables import is_merge_table
 
 
 class Direction(Enum):
@@ -70,10 +70,12 @@ class AbstractGraph(ABC):
     -------
     cascade: Abstract method implemented by child classes
     cascade1: Cascade a restriction up/down the graph, recursively
+    ft_from_list: Return non-empty FreeTable objects from list of table names
 
     Properties
     ----------
     all_ft: Get all FreeTables for visited nodes with restrictions applied.
+    restr_ft: Get non-empty FreeTables for visited nodes with restrictions.
     as_dict: Get visited nodes as a list of dictionaries of
         {table_name: restriction}
     """
@@ -91,11 +93,16 @@ class AbstractGraph(ABC):
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
-        # Undirected graph may not be needed, but adding FT to the graph
-        # prevents `to_undirected` from working. If using undirected, remove
-        # PERIPHERAL_TABLES from the graph.
-        self.graph = seed_table.connection.dependencies
-        self.graph.load()
+        # Deepcopy graph to avoid seed `load()` resetting custom attributes
+        seed_table.connection.dependencies.load()
+        graph = seed_table.connection.dependencies
+        orig_conn = graph._conn  # Cannot deepcopy connection
+        graph._conn = None
+        self.graph = deepcopy(graph)
+        graph._conn = orig_conn
+
+        # undirect not needed in all cases but need to do before adding ft nodes
+        self.undirect_graph = self.graph.to_undirected()
 
         self.verbose = verbose
         self.leaves = set()
@@ -111,6 +118,24 @@ class AbstractGraph(ABC):
         """Cascade restrictions through graph."""
         raise NotImplementedError("Child class mut implement `cascade` method")
 
+    # --------------------------- Dunder Properties ---------------------------
+
+    def __repr__(self):
+        l_str = (
+            ",\n\t".join(self._camel(self.leaves)) + "\n"
+            if self.leaves
+            else "Seed: " + self._camel(self.seed_table) + "\n"
+        )
+        casc_str = "Cascaded" if self.cascaded else "Uncascaded"
+        return f"{casc_str} {self.__class__.__name__}(\n\t{l_str})"
+
+    def __getitem__(self, index: Union[int, str]):
+        names = [t.full_table_name for t in self.restr_ft]
+        return fuzzy_get(index, names, self.restr_ft)
+
+    def __len__(self):
+        return len(self.restr_ft)
+
     # ---------------------------- Logging Helpers ----------------------------
 
     def _log_truncate(self, log_str: str, max_len: int = 80):
@@ -123,34 +148,33 @@ class AbstractGraph(ABC):
 
     def _camel(self, table):
         """Convert table name(s) to camel case."""
-        if isinstance(table, KeysView):
-            table = list(table)
-        if not isinstance(table, list):
-            table = [table]
-        ret = [to_camel_case(t.split(".")[-1].strip("`")) for t in table]
-        return ret[0] if len(ret) == 1 else ret
-
-    def _print_restr(self):
-        """Print restrictions for debugging."""
-        for table in self.visited:
-            if restr := self._get_restr(table):
-                logger.info(f"{table}: {restr}")
+        table = self._ensure_names(table)
+        if isinstance(table, str):
+            return to_camel_case(table.split(".")[-1].strip("`"))
+        if isinstance(table, Iterable) and not isinstance(
+            table, (Table, TableMeta)
+        ):
+            return [self._camel(t) for t in table]
 
     # ------------------------------ Graph Nodes ------------------------------
 
-    def _ensure_name(self, table: Union[str, Table] = None) -> str:
+    def _ensure_names(
+        self, table: Union[str, Table] = None
+    ) -> Union[str, List[str]]:
         """Ensure table is a string."""
         if table is None:
             return None
         if isinstance(table, str):
             return table
-        if isinstance(table, list):
-            return [self._ensure_name(t) for t in table]
+        if isinstance(table, Iterable) and not isinstance(
+            table, (Table, TableMeta)
+        ):
+            return [self._ensure_names(t) for t in table]
         return getattr(table, "full_table_name", None)
 
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph."""
-        table = self._ensure_name(table)
+        table = self._ensure_names(table)
         if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
@@ -160,6 +184,7 @@ class AbstractGraph(ABC):
 
     def _set_node(self, table, attr: str = "ft", value: Any = None):
         """Set attribute on node. General helper for various attributes."""
+        table = self._ensure_names(table)
         _ = self._get_node(table)  # Ensure node exists
         self.graph.nodes[table][attr] = value
 
@@ -175,8 +200,8 @@ class AbstractGraph(ABC):
             Tuple of boolean indicating direction and edge data. True if child
             is child of parent.
         """
-        child = self._ensure_name(child)
-        parent = self._ensure_name(parent)
+        child = self._ensure_names(child)
+        parent = self._ensure_names(parent)
 
         if edge := self.graph.get_edge_data(parent, child):
             return False, edge
@@ -196,7 +221,7 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        return self._get_node(self._ensure_name(table)).get("restr")
+        return self._get_node(self._ensure_names(table)).get("restr")
 
     def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
@@ -207,6 +232,7 @@ class AbstractGraph(ABC):
             else restriction
         )
         existing = self._get_restr(table)
+
         if not replace and existing:
             if restriction == existing:
                 return
@@ -219,12 +245,13 @@ class AbstractGraph(ABC):
 
         self._set_node(table, "restr", restriction)
 
-    def _get_ft(self, table, with_restr=False):
+    def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
-        table = self._ensure_name(table)
+        table = self._ensure_names(table)
         if with_restr:
             if not (restr := self._get_restr(table) or False):
-                self._log_truncate(f"No restriction for {table}")
+                if warn:
+                    self._log_truncate(f"No restr for {self._camel(table)}")
         else:
             restr = True
 
@@ -234,13 +261,14 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    def _and_parts(self, table):
-        """Return table, its master and parts."""
-        ret = [table]
-        if master := get_master(table):
-            ret.append(master)
-        if parts := self._get_ft(table).parts():
-            ret.extend(parts)
+    def _is_out(self, table, warn=True):
+        """Check if table is outside of spyglass."""
+        table = self._ensure_names(table)
+        if self.graph.nodes.get(table):
+            return False
+        ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
+        if warn and ret:  # Log warning if outside
+            logger.warning(f"Skipping unimported: {table}")
         return ret
 
     # ---------------------------- Graph Traversal -----------------------------
@@ -282,15 +310,19 @@ class AbstractGraph(ABC):
         List[Dict[str, str]]
             List of dicts containing primary key fields for restricted table2.
         """
+        if self._is_out(table2) or self._is_out(table1):  # 2 more likely
+            return ["False"]  # Stop cascade if outside, see #1002
+
         if not all([direction, attr_map]):
             dir_bool, edge = self._get_edge(table1, table2)
             direction = "up" if dir_bool else "down"
             attr_map = edge.get("attr_map")
 
+        # May return empty table if outside imported and outside spyglass
         ft1 = self._get_ft(table1) & restr
         ft2 = self._get_ft(table2)
 
-        if len(ft1) == 0:
+        if len(ft1) == 0 or len(ft2) == 0:
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
@@ -333,11 +365,16 @@ class AbstractGraph(ABC):
         G = self.graph
         dir_dict = {"direction": direction}
 
-        bonus = {}
+        bonus = {}  # Add master and parts to next tables
         direction = Direction(direction)
         if direction == Direction.UP:
             next_func = G.parents
-            bonus.update({part: {} for part in self._get_ft(table).parts()})
+            table_ft = self._get_ft(table)
+            for part in table_ft.parts():  # Assumes parts do not alias master
+                bonus[part] = {
+                    "attr_map": {k: k for k in table_ft.primary_key},
+                    **dir_dict,
+                }
         elif direction == Direction.DOWN:
             next_func = G.children
             if (master_name := get_master(table)) != "":
@@ -382,9 +419,12 @@ class AbstractGraph(ABC):
 
         next_tables, next_func = self._get_next_tables(table, direction)
 
-        self._log_truncate(
-            f"Checking {count:>2}: {self._camel(next_tables.keys())}"
-        )
+        if next_list := next_tables.keys():
+            self._log_truncate(
+                f"Checking {count:>2}: {self._camel(table)}"
+                + f" -> {self._camel(next_list)}"
+            )
+
         for next_table, data in next_tables.items():
             if next_table.isnumeric():  # Skip alias nodes
                 next_table, data = next_func(next_table).popitem()
@@ -422,21 +462,81 @@ class AbstractGraph(ABC):
 
     # ---------------------------- Graph Properties ----------------------------
 
+    def _topo_sort(
+        self, nodes: List[str], subgraph: bool = True, reverse: bool = False
+    ) -> List[str]:
+        """Return topologically sorted list of nodes.
+
+        Parameters
+        ----------
+        nodes : List[str]
+            List of table names
+        subgraph : bool, optional
+            Whether to use subgraph. Default True
+        reverse : bool, optional
+            Whether to reverse the order. Default False. If true, bottom-up.
+            If None, return nodes as is.
+        """
+        if reverse is None:
+            return nodes
+        nodes = [
+            node
+            for node in self._ensure_names(nodes)
+            if not self._is_out(node, warn=False)
+        ]
+        graph = self.graph.subgraph(nodes) if subgraph else self.graph
+        ordered = unite_master_parts(list(topological_sort(graph)))
+        if reverse:
+            ordered.reverse()
+        return [n for n in ordered if n in nodes]
+
     @property
     def all_ft(self):
         """Get restricted FreeTables from all visited nodes.
 
         Topological sort logic adopted from datajoint.diagram.
         """
-        self.cascade()
+        self.cascade(warn=False)
         nodes = [n for n in self.visited if not n.isnumeric()]
-        sorted_nodes = unite_master_parts(
-            list(topological_sort(self.graph.subgraph(nodes)))
-        )
-        all_ft = [
-            self._get_ft(table, with_restr=True) for table in sorted_nodes
+        return [
+            self._get_ft(table, with_restr=True, warn=False)
+            for table in self._topo_sort(nodes, subgraph=True, reverse=False)
         ]
-        return [ft for ft in all_ft if len(ft) > 0]
+
+    @property
+    def restr_ft(self):
+        """Get non-empty restricted FreeTables from all visited nodes."""
+        return [ft for ft in self.all_ft if len(ft) > 0]
+
+    def ft_from_list(
+        self,
+        tables: List[str],
+        with_restr: bool = True,
+        sort_reverse: bool = None,
+        return_empty: bool = False,
+    ) -> List[FreeTable]:
+        """Return non-empty FreeTable objects from list of table names.
+
+        Parameters
+        ----------
+        tables : List[str]
+            List of table names
+        with_restr : bool, optional
+            Restrict FreeTable to restriction. Default True.
+        sort_reverse : bool, optional
+            Sort reverse topologically. Default True. If None, no sort.
+        """
+
+        self.cascade(warn=False)
+
+        fts = [
+            self._get_ft(table, with_restr=with_restr, warn=False)
+            for table in self._topo_sort(
+                tables, subgraph=False, reverse=sort_reverse
+            )
+        ]
+
+        return fts if return_empty else [ft for ft in fts if len(ft) > 0]
 
     @property
     def as_dict(self) -> List[Dict[str, str]]:
@@ -453,9 +553,8 @@ class RestrGraph(AbstractGraph):
     def __init__(
         self,
         seed_table: Table,
-        table_name: str = None,
-        restriction: str = None,
         leaves: List[Dict[str, str]] = None,
+        destinations: List[str] = None,
         direction: Direction = "up",
         cascade: bool = False,
         verbose: bool = False,
@@ -473,13 +572,12 @@ class RestrGraph(AbstractGraph):
         ----------
         seed_table : Table
             Table to use to establish connection and graph
-        table_name : str, optional
-            Table name of single leaf, default None
-        restriction : str, optional
-            Restriction to apply to leaf. default None
         leaves : Dict[str, str], optional
             List of dictionaries with keys table_name and restriction. One
             entry per leaf node. Default None.
+        destinations : List[str], optional
+            List of endpoints of interest in the graph. Default None. Used to
+            ignore nodes not in the path(s) to the destination(s).
         direction : Direction, optional
             Direction to cascade. Default 'up'
         cascade : bool, optional
@@ -490,27 +588,18 @@ class RestrGraph(AbstractGraph):
         """
         super().__init__(seed_table, verbose=verbose)
 
-        self.add_leaf(
-            table_name=table_name, restriction=restriction, direction=direction
-        )
         self.add_leaves(leaves)
 
+        dir_list = ["up", "down"] if direction == "both" else [direction]
+
         if cascade:
-            self.cascade(direction=direction)
-
-    # --------------------------- Dunder Properties ---------------------------
-
-    def __repr__(self):
-        l_str = ",\n\t".join(self.leaves) + "\n" if self.leaves else ""
-        processed = "Cascaded" if self.cascaded else "Uncascaded"
-        return f"{processed} {self.__class__.__name__}(\n\t{l_str})"
-
-    def __getitem__(self, index: Union[int, str]):
-        all_ft_names = [t.full_table_name for t in self.all_ft]
-        return fuzzy_get(index, all_ft_names, self.all_ft)
-
-    def __len__(self):
-        return len(self.all_ft)
+            for dir in dir_list:
+                self._log_truncate(f"Start {dir:<4} : {self.leaves}")
+                self.cascade(direction=dir)
+                self.cascaded = False
+                self.visited -= self.leaves
+            self.cascaded = True
+            self.visited |= self.leaves
 
     # ---------------------------- Public Properties --------------------------
 
@@ -558,7 +647,13 @@ class RestrGraph(AbstractGraph):
             self.cascaded = True
 
     def _process_leaves(self, leaves=None, default_restriction=True):
-        """Process leaves to ensure they are unique and have required keys."""
+        """Process leaves to ensure they are unique and have required keys.
+
+        Accepts ...
+        - [str]: table names, use default_restriction
+        - [{'table_name': str, 'restriction': str}]: used for export
+        - [{table_name: restriction}]: userd for distance restriction
+        """
         if not leaves:
             return []
         if not isinstance(leaves, list):
@@ -568,10 +663,22 @@ class RestrGraph(AbstractGraph):
                 {"table_name": leaf, "restriction": default_restriction}
                 for leaf in leaves
             ]
-        if all(isinstance(leaf, dict) for leaf in leaves) and not all(
-            leaf.get("table_name") for leaf in leaves
-        ):
-            raise ValueError(f"All leaves must have table_name: {leaves}")
+        hashable = True
+        if all(isinstance(leaf, dict) for leaf in leaves):
+            new_leaves = []
+            for leaf in leaves:
+                if "table_name" in leaf and "restriction" in leaf:
+                    new_leaves.append(leaf)
+                    continue
+                for table, restr in leaf.items():
+                    if not isinstance(restr, (str, dict)):
+                        hashable = False  # likely a dj.AndList
+                    new_leaves.append(
+                        {"table_name": table, "restriction": restr}
+                    )
+            if not hashable:
+                return new_leaves
+            leaves = new_leaves
 
         return unique_dicts(leaves)
 
@@ -609,7 +716,7 @@ class RestrGraph(AbstractGraph):
 
     # ------------------------------ Graph Traversal --------------------------
 
-    def cascade(self, show_progress=None, direction="up") -> None:
+    def cascade(self, show_progress=None, direction="up", warn=True) -> None:
         """Cascade all restrictions up the graph.
 
         Parameters
@@ -618,6 +725,8 @@ class RestrGraph(AbstractGraph):
             Show tqdm progress bar. Default to verbose setting.
         """
         if self.cascaded:
+            if warn:
+                self._log_truncate("Already cascaded")
             return
 
         to_visit = self.leaves - self.visited
@@ -629,26 +738,15 @@ class RestrGraph(AbstractGraph):
             disable=not (show_progress or self.verbose),
         ):
             restr = self._get_restr(table)
-            self._log_truncate(f"Start     {table}: {restr}")
+            self._log_truncate(
+                f"Start  {direction:<4}: {self._camel(table)}, {restr}"
+            )
             self.cascade1(table, restr, direction=direction)
 
-        self.cascade_files()
-        self.cascaded = True
+        self.cascaded = True  # Mark here so next step can use `restr_ft`
+        self.cascade_files()  # Otherwise attempts to re-cascade, recursively
 
     # ----------------------------- File Handling -----------------------------
-
-    def _get_files(self, table):
-        """Get analysis files from graph node."""
-        return self._get_node(table).get("files", [])
-
-    def cascade_files(self):
-        """Set node attribute for analysis files."""
-        for table in self.visited:
-            ft = self._get_ft(table, with_restr=True)
-            if not set(self.analysis_pk).issubset(ft.heading.names):
-                continue
-            files = list(ft.fetch(*self.analysis_pk))
-            self._set_node(table, "files", files)
 
     @property
     def analysis_file_tbl(self) -> Table:
@@ -657,10 +755,14 @@ class RestrGraph(AbstractGraph):
 
         return AnalysisNwbfile()
 
-    @property
-    def analysis_pk(self) -> List[str]:
-        """Return primary key fields from analysis file table."""
-        return self.analysis_file_tbl.primary_key
+    def cascade_files(self):
+        """Set node attribute for analysis files."""
+        analysis_pk = self.analysis_file_tbl.primary_key
+        for ft in self.restr_ft:
+            if not set(analysis_pk).issubset(ft.heading.names):
+                continue
+            files = list(ft.fetch(*analysis_pk))
+            self._set_node(ft, "files", files)
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:
@@ -668,8 +770,8 @@ class RestrGraph(AbstractGraph):
 
         Included for debugging, to associate files with tables.
         """
-        self.cascade()
-        return {t: self._get_node(t).get("files", []) for t in self.visited}
+        self.cascade(warn=False)
+        return {t: self._get_node(t).get("files", []) for t in self.restr_ft}
 
     @property
     def file_paths(self) -> List[str]:
@@ -688,96 +790,16 @@ class RestrGraph(AbstractGraph):
         ]
 
 
-class TableChains:
-    """Class for representing chains from parent to Merge table via parts.
-
-    Functions as a plural version of TableChain, allowing a single `cascade`
-    call across all chains from parent -> Merge table.
-
-    Attributes
-    ----------
-    parent : Table
-        Parent or origin of chains.
-    child : Table
-        Merge table or destination of chains.
-    connection : datajoint.Connection, optional
-        Connection to database used to create FreeTable objects. Defaults to
-        parent.connection.
-    part_names : List[str]
-        List of full table names of child parts.
-    chains : List[TableChain]
-        List of TableChain objects for each part in child.
-    has_link : bool
-        Cached attribute to store whether parent is linked to child via any of
-        child parts. False if (a) child is not in parent.descendants or (b)
-        nx.NetworkXNoPath is raised by nx.shortest_path for all chains.
-
-    Methods
-    -------
-    __init__(parent, child, connection=None)
-        Initialize TableChains with parent and child tables.
-    __repr__()
-        Return full representation of chains.
-        Multiline parent -> child for each chain.
-    __len__()
-        Return number of chains with links.
-    __getitem__(index: Union[int, str])
-        Return TableChain object at index, or use substring of table name.
-    cascade(restriction: str = None)
-        Return list of cascade for each chain in self.chains.
-    """
-
-    def __init__(self, parent, child, direction=Direction.DOWN, verbose=False):
-        self.parent = parent
-        self.child = child
-        self.connection = parent.connection
-        self.part_names = child.parts()
-        self.chains = [
-            TableChain(parent, part, direction=direction, verbose=verbose)
-            for part in self.part_names
-        ]
-        self.has_link = any([chain.has_link for chain in self.chains])
-
-    # --------------------------- Dunder Properties ---------------------------
-
-    def __repr__(self):
-        l_str = ",\n\t".join([str(c) for c in self.chains]) + "\n"
-        return f"{self.__class__.__name__}(\n\t{l_str})"
-
-    def __len__(self):
-        return len([c for c in self.chains if c.has_link])
-
-    def __getitem__(self, index: Union[int, str]):
-        """Return FreeTable object at index."""
-        return fuzzy_get(index, self.part_names, self.chains)
-
-    # ---------------------------- Public Properties --------------------------
-
-    @property
-    def max_len(self):
-        """Return length of longest chain."""
-        return max([len(chain) for chain in self.chains])
-
-    # ------------------------------ Graph Traversal --------------------------
-
-    def cascade(
-        self, restriction: str = None, direction: Direction = Direction.DOWN
-    ):
-        """Return list of cascades for each chain in self.chains."""
-        restriction = restriction or self.parent.restriction or True
-        cascades = []
-        for chain in self.chains:
-            if joined := chain.cascade(restriction, direction):
-                cascades.append(joined)
-        return cascades
-
-
 class TableChain(RestrGraph):
     """Class for representing a chain of tables.
 
     A chain is a sequence of tables from parent to child identified by
-    networkx.shortest_path. Parent -> Merge should use TableChains instead to
-    handle multiple paths to the respective parts of the Merge table.
+    networkx.shortest_path from parent to child. To avoid issues with merge
+    tables, use the Merge table as the child, not the part table.
+
+    Either the parent or child can be omitted if a search_restr is provided.
+    The missing table will be found by searching for where the restriction
+    can be applied.
 
     Attributes
     ----------
@@ -789,9 +811,6 @@ class TableChain(RestrGraph):
         Cached attribute to store whether parent is linked to child.
     path : List[str]
         Names of tables along the path from parent to child.
-    all_ft : List[dj.FreeTable]
-        List of FreeTable objects for each table in chain with restriction
-        applied.
 
     Methods
     -------
@@ -804,6 +823,8 @@ class TableChain(RestrGraph):
         Given a restriction at the beginning, return a restricted FreeTable
         object at the end of the chain. If direction is 'up', start at the child
         and move up to the parent. If direction is 'down', start at the parent.
+    cascade_search()
+        Search from the leaf node to find where a restriction can be applied.
     """
 
     def __init__(
@@ -814,27 +835,21 @@ class TableChain(RestrGraph):
         search_restr: str = None,
         cascade: bool = False,
         verbose: bool = False,
-        allow_merge: bool = False,
         banned_tables: List[str] = None,
         **kwargs,
     ):
-        if not allow_merge and child is not None and is_merge_table(child):
-            raise TypeError("Child is a merge table. Use TableChains instead.")
-
-        self.parent = self._ensure_name(parent)
-        self.child = self._ensure_name(child)
+        self.parent = self._ensure_names(parent)
+        self.child = self._ensure_names(child)
 
         if not self.parent and not self.child:
             raise ValueError("Parent or child table required.")
-        if not search_restr and not (self.parent and self.child):
-            raise ValueError("Search restriction required to find path.")
 
         seed_table = parent if isinstance(parent, Table) else child
         super().__init__(seed_table=seed_table, verbose=verbose)
 
-        self.no_visit.update(PERIPHERAL_TABLES)
-        self.no_visit.update(self._ensure_name(banned_tables) or [])
-        self.no_visit.difference_update([self.parent, self.child])
+        self._ignore_peripheral(except_tables=[self.parent, self.child])
+        self.no_visit.update(self._ensure_names(banned_tables) or [])
+        self.no_visit.difference_update(set([self.parent, self.child]))
         self.searched_tables = set()
         self.found_restr = False
         self.link_type = None
@@ -843,6 +858,8 @@ class TableChain(RestrGraph):
 
         self.search_restr = search_restr
         self.direction = Direction(direction)
+        if self.parent and self.child and not self.direction:
+            self.direction = Direction.DOWN
 
         self.leaf = None
         if search_restr and not parent:
@@ -856,9 +873,19 @@ class TableChain(RestrGraph):
             self.add_leaf(self.leaf, True, cascade=False, direction=direction)
 
         if cascade and search_restr:
-            self.cascade_search()
-            self.cascade(restriction=search_restr)
+            self.cascade_search()  # only cascade if found or not looking
+            if (search_restr and self.found_restr) or not search_restr:
+                self.cascade(restriction=search_restr)
             self.cascaded = True
+
+    # ------------------------------ Ignore Nodes ------------------------------
+
+    def _ignore_peripheral(self, except_tables: List[str] = None):
+        """Ignore peripheral tables in graph traversal."""
+        except_tables = self._ensure_names(except_tables)
+        ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
+        self.no_visit.update(ignore_tables)
+        self.undirect_graph.remove_nodes_from(ignore_tables)
 
     # --------------------------- Dunder Properties ---------------------------
 
@@ -884,9 +911,6 @@ class TableChain(RestrGraph):
             return 0
         return len(self.path)
 
-    def __getitem__(self, index: Union[int, str]):
-        return fuzzy_get(index, self.path, self.all_ft)
-
     # ---------------------------- Public Properties --------------------------
 
     @property
@@ -900,25 +924,17 @@ class TableChain(RestrGraph):
             _ = self.path
         return self.link_type is not None
 
-    @cached_property
-    def all_ft(self) -> List[dj.FreeTable]:
-        """Return list of FreeTable objects for each table in chain.
-
-        Unused. Preserved for future debugging.
-        """
-        if not self.has_link:
-            return None
-        return [
-            self._get_ft(table, with_restr=False)
-            for table in self.path
-            if not table.isnumeric()
-        ]
-
     @property
     def path_str(self) -> str:
         if not self.path:
             return "No link"
         return self._link_symbol.join([self._camel(t) for t in self.path])
+
+    @property
+    def path_ft(self) -> List[FreeTable]:
+        """Return FreeTables along the path."""
+        path_with_ends = set([self.parent, self.child]) | set(self.path)
+        return self.ft_from_list(path_with_ends, with_restr=True)
 
     # ------------------------------ Graph Nodes ------------------------------
 
@@ -962,6 +978,7 @@ class TableChain(RestrGraph):
             replace=True,
         )
         if not self.found_restr:
+            self.link_type = None
             searched = (
                 "parents" if self.direction == Direction.UP else "children"
             )
@@ -975,7 +992,14 @@ class TableChain(RestrGraph):
         """Set found_restr and searched_tables."""
         self._set_restr(table, self.search_restr, replace=True)
         self.found_restr = True
-        self.searched_tables.update(set(self._and_parts(table)))
+
+        and_parts = set([table])
+        if master := get_master(table):
+            and_parts.add(master)
+        if parts := self._get_ft(table).parts():
+            and_parts.update(parts)
+
+        self.searched_tables.update(and_parts)
 
         if self.direction == Direction.UP:
             self.parent = table
@@ -1055,12 +1079,7 @@ class TableChain(RestrGraph):
             List of names in the path.
         """
         source, target = self.parent, self.child
-        search_graph = self.graph
-
-        if not directed:
-            self.connection.dependencies.load()
-            self.undirect_graph = self.connection.dependencies.to_undirected()
-            search_graph = self.undirect_graph
+        search_graph = self.graph if directed else self.undirect_graph
 
         search_graph.remove_nodes_from(self.no_visit)
 
@@ -1077,7 +1096,6 @@ class TableChain(RestrGraph):
         ignore_nodes = self.graph.nodes - set(path)
         self.no_visit.update(ignore_nodes)
 
-        self._log_truncate(f"Ignore     : {ignore_nodes}")
         return path
 
     @cached_property
@@ -1095,7 +1113,9 @@ class TableChain(RestrGraph):
 
         return path
 
-    def cascade(self, restriction: str = None, direction: Direction = None):
+    def cascade(
+        self, restriction: str = None, direction: Direction = None, **kwargs
+    ):
         if not self.has_link:
             return
 
@@ -1111,10 +1131,19 @@ class TableChain(RestrGraph):
 
         self.cascade1(
             table=start,
-            restriction=restriction or self._get_restr(start),
+            restriction=restriction or self._get_restr(start) or True,
             direction=direction,
             replace=True,
         )
+
+        # Cascade will stop if any restriction is empty, so set rest to None
+        # This would cause issues if we want a table partway through the chain
+        # but that's not a typical use case, were the start and end are desired
+        non_numeric = [t for t in self.path if not t.isnumeric()]
+        if any(self._get_restr(t) is None for t in non_numeric):
+            for table in non_numeric:
+                if table is not start:
+                    self._set_restr(table, False, replace=True)
 
         return self._get_ft(end, with_restr=True)
 

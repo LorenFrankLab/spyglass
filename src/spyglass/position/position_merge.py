@@ -1,20 +1,10 @@
 import datajoint as dj
-import numpy as np
-import pandas as pd
 from datajoint.utils import to_camel_case
 
 from spyglass.common.common_position import IntervalPositionInfo as CommonPos
-from spyglass.position.v1.dlc_utils import (
-    check_videofile,
-    get_video_path,
-    make_video,
-)
-from spyglass.position.v1.position_dlc_pose_estimation import (
-    DLCPoseEstimationSelection,
-)
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
 from spyglass.position.v1.position_trodes_position import TrodesPosV1
-from spyglass.utils import SpyglassMixin, _Merge, logger
+from spyglass.utils import SpyglassMixin, _Merge
 
 schema = dj.schema("position_merge")
 
