@@ -2,6 +2,7 @@ from os import system as os_system
 from pathlib import Path
 from typing import List
 
+import yaml
 from datajoint import FreeTable
 from datajoint import config as dj_config
 
@@ -161,15 +162,44 @@ class SQLDumpHelper:
                         database=database, table=table_name, where=where
                     )
                 )
+
+        self._remove_encoding(dump_script)
+        self._write_version_file()
+
         logger.info(f"Export script written to {dump_script}")
 
         self._export_conda_env()
 
+    def _remove_encoding(self, dump_script):
+        """Remove encoding from dump_content."""
+        charset_sed = r"sed -i 's/ DEFAULT CHARSET=[^ ]\w*//g' "
+        charset_sed = r"sed -i 's/ DEFAULT COLLATE [^ ]\w*//g' "
+        os_system(f"{charset_sed} {dump_script}")
+
+    def _write_version_file(self):
+        """Write spyglass version to paper directory."""
+        version_file = Path(export_dir) / self.paper_id / "spyglass_version"
+        if version_file.exists():
+            return
+        with version_file.open("w") as file:
+            file.write(self.spyglass_version)
+
     def _export_conda_env(self):
-        """Export conda environment to paper directory."""
+        """Export conda environment to paper directory.
+
+        Renames environment name to paper_id.
+        """
         yml_path = Path(export_dir) / self.paper_id / "environment.yml"
         if yml_path.exists():
             return
         command = f"conda env export > {yml_path}"
         os_system(command)
+
+        # RENAME ENVIRONMENT NAME TO PAPER ID
+        with yml_path.open("r") as file:
+            yml = yaml.safe_load(file)
+        yml["name"] = self.paper_id
+        with yml_path.open("w") as file:
+            yaml.dump(yml, file)
+
         logger.info(f"Conda environment exported to {yml_path}")
