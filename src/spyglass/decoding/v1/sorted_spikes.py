@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 import copy
 import uuid
 from pathlib import Path
+from typing import Optional, Union
 
 import datajoint as dj
 import non_local_detector.analysis as analysis
@@ -398,7 +399,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def fetch_spike_data(key, filter_by_interval=True, time_slice=None):
+    def fetch_spike_data(
+        key, filter_by_interval=True, time_slice=None, return_unit_ids=False
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for the decoding model
 
         Parameters
@@ -409,13 +412,18 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             Whether to filter for spike times in the model interval, by default True
         time_slice : Slice, optional
             User provided slice of time to restrict spikes to, by default None
+        return_unit_ids : bool, optional
+            if True, return the unit_ids along with the spike times, by default False
+            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
         list[np.ndarray]
             List of spike times for each unit in the model's spike group
         """
-        spike_times = SortedSpikesGroup.fetch_spike_data(key)
+        spike_times, unit_ids = SortedSpikesGroup.fetch_spike_data(
+            key, return_unit_ids=True
+        )
         if not filter_by_interval:
             return spike_times
 
@@ -431,6 +439,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             )
             new_spike_times.append(elec_spike_times[is_in_interval])
 
+        if return_unit_ids:
+            return new_spike_times, unit_ids
         return new_spike_times
 
     def spike_times_sorted_by_place_field_peak(self, time_slice=None):
