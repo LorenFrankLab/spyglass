@@ -34,6 +34,7 @@ PositionGroup.alter()
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 
 ### Pipelines
 

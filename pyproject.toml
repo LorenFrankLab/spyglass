@@ -172,4 +172,6 @@ omit = [ # which submodules have no tests
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
 line-length = 80
+
+[tool.ruff.lint]
 ignore = ["F401" , "E402", "E501"]
