@@ -19,9 +19,13 @@ import pandas as pd
 from position_tools import get_distance
 
 from spyglass.common.common_behav import VideoFile
+from spyglass.common.common_position import PositionVideo
 from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 from spyglass.utils.logging import logger, stream_handler
+
+convert_to_pixels = PositionVideo.convert_to_pixels
+fill_nan = PositionVideo.fill_nan
 
 
 def validate_option(
@@ -744,36 +748,6 @@ _key_to_func_dict = {
     "red_green_orientation": two_pt_head_orientation,
     "red_led_bisector": red_led_bisector_orientation,
 }
-
-
-def fill_nan(variable, video_time, variable_time):
-    video_ind = np.digitize(variable_time, video_time[1:])
-
-    n_video_time = len(video_time)
-    try:
-        n_variable_dims = variable.shape[1]
-        filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-    except IndexError:
-        filled_variable = np.full((n_video_time,), np.nan)
-    filled_variable[video_ind] = variable
-
-    return filled_variable
-
-
-def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
-    """Converts from cm to pixels and flips the y-axis.
-
-    Parameters
-    ----------
-    data : ndarray, shape (n_time, 2)
-    frame_size : array_like, shape (2,)
-    cm_to_pixels : float
-
-    Returns
-    -------
-    converted_data : ndarray, shape (n_time, 2)
-    """
-    return data / cm_to_pixels
 
 
 class Centroid:

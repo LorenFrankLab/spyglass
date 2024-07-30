@@ -4,6 +4,8 @@ import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
 
+from spyglass.decoding.v0.utils import discretize_and_trim
+
 
 def create_static_track_animation(
     *,
@@ -109,13 +111,6 @@ def generate_linearization_function(
     return inner
 
 
-def discretize_and_trim(base_slice: xr.DataArray):
-    i = np.multiply(base_slice, 255).astype(np.uint8)
-    i_stack = i.stack(unified_index=["time", "y_position", "x_position"])
-
-    return i_stack.where(i_stack > 0, drop=True).astype(np.uint8)
-
-
 def get_positions(
     i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]
 ):
@@ -137,7 +132,7 @@ def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
 def extract_slice_data(
     base_slice: xr.DataArray, location_fn: Callable[[Tuple[float, float]], int]
 ):
-    i_trim = discretize_and_trim(base_slice)
+    i_trim = discretize_and_trim(base_slice, ndim=3)
 
     positions = get_positions(i_trim, location_fn)
     observations_per_frame = get_observations_per_frame(i_trim, base_slice)

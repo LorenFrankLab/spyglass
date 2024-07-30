@@ -604,7 +604,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     @staticmethod
-    def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
+    def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
         """Converts from cm to pixels and flips the y-axis.
         Parameters
         ----------
