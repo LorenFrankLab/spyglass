@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import sortingview.views as vv
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
-from ripple_detection.core import gaussian_smooth, get_envelope
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import (
@@ -297,7 +296,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def get_Kay_ripple_consensus_trace(
         ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004
     ):
-        return RippleTimesV1.get_Kay_ripple_consensus_trace(
+        return RippleTimes.get_Kay_ripple_consensus_trace(
             ripple_filtered_lfps=ripple_filtered_lfps,
             sampling_frequency=sampling_frequency,
             smoothing_sigma=smoothing_sigma,
