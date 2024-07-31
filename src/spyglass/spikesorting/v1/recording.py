@@ -313,23 +313,27 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        if recording.get_num_segments() > 1:
-            frames_per_segment = [0]
-            for i in range(recording.get_num_segments()):
-                frames_per_segment.append(
-                    recording.get_num_frames(segment_index=i)
-                )
+        num_segments = recording.get_num_segments()
 
-            cumsum_frames = np.cumsum(frames_per_segment)
-            total_frames = np.sum(frames_per_segment)
+        if num_segments <= 1:
+            return recording.get_times()
 
-            timestamps = np.zeros((total_frames,))
-            for i in range(recording.get_num_segments()):
-                timestamps[cumsum_frames[i] : cumsum_frames[i + 1]] = (
-                    recording.get_times(segment_index=i)
-                )
-        else:
-            timestamps = recording.get_times()
+        frames_per_segment = [0] + [
+            recording.get_num_frames(segment_index=i)
+            for i in range(num_segments)
+        ]
+
+        cumsum_frames = np.cumsum(frames_per_segment)
+        total_frames = np.sum(frames_per_segment)
+
+        timestamps = np.zeros((total_frames,))
+        for i in range(num_segments):
+            start_index = cumsum_frames[i]
+            end_index = cumsum_frames[i + 1]
+            timestamps[start_index:end_index] = recording.get_times(
+                segment_index=i
+            )
+
         return timestamps
 
     def _get_sort_interval_valid_times(self, key: dict):

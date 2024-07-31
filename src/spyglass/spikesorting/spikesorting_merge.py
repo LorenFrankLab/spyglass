@@ -4,11 +4,11 @@ from datajoint.utils import to_camel_case
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
-from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
+from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
-)
-from spyglass.spikesorting.v1 import (  # noqa: F401
-    ArtifactDetectionSelection,
+)  # noqa: F401
+from spyglass.spikesorting.v1 import ArtifactDetectionSelection  # noqa: F401
+from spyglass.spikesorting.v1 import (
     CurationV1,
     MetricCurationSelection,
     SpikeSortingRecordingSelection,
@@ -208,7 +208,13 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return spike_indicator
 
     @classmethod
-    def get_firing_rate(cls, key, time, multiunit=False):
+    def get_firing_rate(
+        cls,
+        key: dict,
+        time: np.array,
+        multiunit: bool = False,
+        smoothing_sigma: float = 0.015,
+    ):
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
@@ -220,7 +226,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return np.stack(
             [
                 get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis], sampling_frequency
+                    indicator[:, np.newaxis],
+                    sampling_frequency,
+                    smoothing_sigma,
                 )
                 for indicator in spike_indicator.T
             ],

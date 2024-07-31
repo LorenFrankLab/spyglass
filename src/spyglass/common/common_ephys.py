@@ -607,11 +607,13 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         """
         # Error checks on parameters
         # electrode_list
+
         query = LFPSelection().LFPElectrode() & {"nwb_file_name": nwb_file_name}
         available_electrodes = query.fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
             raise ValueError(
-                "All elements in electrode_list must be valid electrode_ids in the LFPSelection table"
+                "All elements in electrode_list must be valid electrode_ids in "
+                + "the LFPSelection table"
             )
         # sampling rate
         lfp_sampling_rate = (LFP() & {"nwb_file_name": nwb_file_name}).fetch1(
@@ -620,8 +622,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         decimation = lfp_sampling_rate // lfp_band_sampling_rate
         if lfp_sampling_rate // decimation != lfp_band_sampling_rate:
             raise ValueError(
-                f"lfp_band_sampling rate {lfp_band_sampling_rate} is not an integer divisor of lfp "
-                f"sampling rate {lfp_sampling_rate}"
+                f"lfp_band_sampling rate {lfp_band_sampling_rate} is not an "
+                f"integer divisor of lfp sampling rate {lfp_sampling_rate}"
             )
         # filter
         query = FirFilterParameters() & {
@@ -630,7 +632,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         }
         if not query:
             raise ValueError(
-                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is not in the FirFilterParameters table"
+                f"filter {filter_name}, sampling rate {lfp_sampling_rate} is "
+                + "not in the FirFilterParameters table"
             )
         # interval_list
         query = IntervalList() & {
@@ -639,34 +642,36 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         }
         if not query:
             raise ValueError(
-                f"interval list {interval_list_name} is not in the IntervalList table; the list must be "
-                "added before this function is called"
+                f"interval list {interval_list_name} is not in the IntervalList "
+                + "table; the list must be added before this function is called"
             )
         # reference_electrode_list
         if len(reference_electrode_list) != 1 and len(
             reference_electrode_list
         ) != len(electrode_list):
             raise ValueError(
-                "reference_electrode_list must contain either 1 or len(electrode_list) elements"
+                "reference_electrode_list must contain either 1 or "
+                + "len(electrode_list) elements"
             )
         # add a -1 element to the list to allow for the no reference option
         available_electrodes = np.append(available_electrodes, [-1])
         if not np.all(np.isin(reference_electrode_list, available_electrodes)):
             raise ValueError(
-                "All elements in reference_electrode_list must be valid electrode_ids in the LFPSelection "
-                "table"
+                "All elements in reference_electrode_list must be valid "
+                + "electrode_ids in the LFPSelection table"
             )
 
         # make a list of all the references
         ref_list = np.zeros((len(electrode_list),))
         ref_list[:] = reference_electrode_list
 
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        key["filter_name"] = filter_name
-        key["filter_sampling_rate"] = lfp_sampling_rate
-        key["target_interval_list_name"] = interval_list_name
-        key["lfp_band_sampling_rate"] = lfp_sampling_rate // decimation
+        key = dict(
+            nwb_file_name=nwb_file_name,
+            filter_name=filter_name,
+            filter_sampling_rate=lfp_sampling_rate,
+            target_interval_list_name=interval_list_name,
+            lfp_band_sampling_rate=lfp_sampling_rate // decimation,
+        )
         # insert an entry into the main LFPBandSelectionTable
         self.insert1(key, skip_duplicates=True)
 

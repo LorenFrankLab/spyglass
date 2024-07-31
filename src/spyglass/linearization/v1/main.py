@@ -43,11 +43,11 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     definition = """
     track_graph_name : varchar(80)
     ----
-    environment : varchar(80)    # Type of Environment
-    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
-    edges: blob                  # shape (n_edges, 2)
-    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    environment : varchar(80)  # Type of Environment
+    node_positions : blob      # 2D position of nodes, (n_nodes, 2)
+    edges: blob                # shape (n_edges, 2)
+    linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
+    linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):

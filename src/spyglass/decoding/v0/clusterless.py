@@ -62,6 +62,7 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
+from spyglass.decoding.v0.utils import make_default_decoding_params
 from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
     CuratedSpikeSortingSelection,
@@ -509,72 +510,6 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         )
 
 
-def make_default_decoding_parameters_cpu() -> tuple[dict, dict, dict]:
-    """Default parameters for decoding on CPU
-
-    Returns
-    -------
-    classifier_parameters : dict
-    fit_parameters : dict
-    predict_parameters : dict
-    """
-
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        clusterless_algorithm="multiunit_likelihood_integer",
-        clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS,
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": False,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-def make_default_decoding_parameters_gpu() -> tuple[dict, dict, dict]:
-    """Default parameters for decoding on GPU
-
-    Returns
-    -------
-    classifier_parameters : dict
-    fit_parameters : dict
-    predict_parameters : dict
-    """
-
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        clusterless_algorithm="multiunit_likelihood_integer_gpu",
-        clusterless_algorithm_params={
-            "mark_std": 24.0,
-            "position_std": 6.0,
-        },
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": True,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
 @schema
 class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     """Decodes animal's mental position.
@@ -592,34 +527,12 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self) -> None:
-        """Insert the default parameter set"""
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_cpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_cpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
-            skip_duplicates=True,
-        )
-
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_gpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_gpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
+        """Insert the default parameter sets"""
+        self.insert(
+            [
+                make_default_decoding_params(clusterless=True),
+                make_default_decoding_params(clusterless=True, use_gpu=True),
+            ],
             skip_duplicates=True,
         )
 
@@ -661,6 +574,8 @@ def get_decoding_data_for_epoch(
         interval_list_name
     ]
     valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
+
+    # position interval
     position_interval_name = (
         convert_epoch_interval_name_to_position_interval_name(
             {
@@ -727,6 +642,7 @@ def get_data_for_multiple_epochs(
     environment_labels = []
 
     for epoch in epoch_names:
+        logger.info(epoch)
         data.append(
             get_decoding_data_for_epoch(
                 nwb_file_name,

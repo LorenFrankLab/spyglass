@@ -52,6 +52,7 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
+from spyglass.decoding.v0.utils import make_default_decoding_params
 from spyglass.spikesorting.v0.spikesorting_curation import CuratedSpikeSorting
 from spyglass.utils import SpyglassMixin, logger
 
@@ -174,51 +175,6 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
         )
 
 
-def make_default_decoding_parameters_cpu():
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        knot_spacing=10,
-        spike_model_penalty=1e1,
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": False,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-def make_default_decoding_parameters_gpu():
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        sorted_spikes_algorithm="spiking_likelihood_kde",
-        sorted_spikes_algorithm_params=_DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": True,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
 @schema
 class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """Stores parameters for decoding with sorted spikes"""
@@ -232,33 +188,11 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_cpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_cpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
-            skip_duplicates=True,
-        )
-
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_gpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_gpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
+        self.insert(
+            [
+                make_default_decoding_params(),
+                make_default_decoding_params(use_gpu=True),
+            ],
             skip_duplicates=True,
         )
 

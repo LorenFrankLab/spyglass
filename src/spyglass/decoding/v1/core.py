@@ -117,7 +117,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         }
         if self & group_key:
             raise ValueError(
-                f"Group {nwb_file_name}: {position_group_name} already exists",
+                f"Group {nwb_file_name}: {group_name} already exists",
                 "please delete the group before creating a new one",
             )
         self.insert1(

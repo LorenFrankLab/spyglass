@@ -23,10 +23,8 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import (
-    DecodingParameters,
-    PositionGroup,
-)  # noqa: F401
+from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
+from spyglass.decoding.v1.core import PositionGroup
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
@@ -353,10 +351,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
         position_info, position_variable_names = (
             PositionGroup & position_group_key
-        ).fetch_position_info(
-            min_time=min_time,
-            max_time=max_time,
-        )
+        ).fetch_position_info(min_time=min_time, max_time=max_time)
 
         return position_info, position_variable_names
 
@@ -389,6 +384,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+
         return (
             pd.concat(
                 [linear_position_df.set_index(position_df.index), position_df],
@@ -477,6 +473,11 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ]
         return new_spike_times
 
+    def get_orientation_col(self, df):
+        """Examine columns of a input df and return orientation col name"""
+        cols = df.columns
+        return "orientation" if "orientation" in cols else "head_orientation"
+
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
         """Get the ahead-behind distance of the decoded position from the animal's actual position
 
@@ -514,11 +515,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 self.fetch1("KEY")
             ).loc[time_slice]
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in linear_position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(linear_position_info)
 
             traj_data = analysis.get_trajectory_data(
                 posterior=posterior,
@@ -538,11 +535,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ]
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(position_info)
+
             position_variable_names = (
                 PositionGroup & self.fetch1("KEY")
             ).fetch1("position_variables")
