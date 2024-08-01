@@ -90,18 +90,10 @@ def make_default_decoding_params(clusterless=False, use_gpu=False):
             if use_gpu
             else "multiunit_likelihood_integer"
         )
-        clusterless_algorithm_params = (
-            {
-                "mark_std": 24.0,
-                "position_std": 6.0,
-            }
-            if use_gpu
-            else _DEFAULT_CLUSTERLESS_MODEL_KWARGS
-        )
         classifier_params.update(
             dict(
                 clusterless_algorithm=clusterless_algorithm,
-                clusterless_algorithm_params=clusterless_algorithm_params,
+                clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS,
             )
         )
     else:

@@ -219,8 +219,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 minlength=time.shape[0],
             )
 
-        # CB: spikesorting.analysis.get_spike_indicator checks ndim == 1
-        #     and returns spike_indicator[:, np.newaxis] if True. Do here?
+        if spike_indicator.ndim == 1:
+            spike_indicator = spike_indicator[:, np.newaxis]
 
         return spike_indicator
 
