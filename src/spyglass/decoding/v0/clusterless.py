@@ -208,6 +208,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
                     _get_peak_amplitude(
                         waveform_extractor=waveform_extractor,
                         peak_sign=peak_sign,
+                        unit_id=unit_id,
                         estimate_peak_time=estimate_peak_time,
                     )
                     for unit_id in nwb_units.index
