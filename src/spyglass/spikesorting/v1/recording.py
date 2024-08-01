@@ -19,7 +19,6 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.common.common_usage import ActivityLog
 from spyglass.spikesorting.utils import get_group_by_shank
 from spyglass.utils import SpyglassMixin, logger
 
