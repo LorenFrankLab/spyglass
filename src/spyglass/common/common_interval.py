@@ -5,11 +5,11 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pynwb import NWBFile
 
+from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
-
-from .common_session import Session  # noqa: F401
 
 schema = dj.schema("common_interval")
 
@@ -30,7 +30,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
     # See #630, #664. Excessive key length.
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
+    def insert_from_nwbfile(cls, nwbf: NWBFile, *, nwb_file_name: str):
         """Add each entry in the NWB file epochs table to the IntervalList.
 
         The interval list name for each epoch is set to the first tag for the
@@ -54,20 +54,23 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         epochs = nwbf.epochs.to_dataframe()
 
-        for _, epoch_data in epochs.iterrows():
-            epoch_dict = {
+        # Create a list of dictionaries to insert
+        epoch_inserts = epochs.apply(
+            lambda epoch_data: {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": (
                     epoch_data.tags[0]
                     if epoch_data.tags
-                    else f"interval_{epoch_data[0]}"
+                    else f"interval_{epoch_data.name}"
                 ),
                 "valid_times": np.asarray(
                     [[epoch_data.start_time, epoch_data.stop_time]]
                 ),
-            }
+            },
+            axis=1,
+        ).tolist()
 
-            cls.insert1(epoch_dict, skip_duplicates=True)
+        cls.insert(epoch_inserts, skip_duplicates=True)
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         interval_list = pd.DataFrame(self)

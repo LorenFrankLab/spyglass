@@ -519,7 +519,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         # epoch/pos intervals
 
         if not self.connection.in_transaction:
-            # if not called in the context of a make function, call its own make function
+            # if called w/o transaction, call add via `populate`
             self.populate(key)
             return
         if self & key:

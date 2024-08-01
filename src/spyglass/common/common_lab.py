@@ -1,6 +1,7 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
 import datajoint as dj
+
 from spyglass.utils import SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
@@ -265,7 +266,8 @@ class Institution(SpyglassMixin, dj.Manual):
         inst_list = config.get("Institution", [{}])
         if len(inst_list) > 1:
             logger.info(
-                "Multiple institution entries not allowed. Using the first entry only.\n"
+                "Multiple institution entries not allowed. "
+                + "Using the first entry only.\n"
             )
         inst_name = inst_list[0].get("institution_name") or getattr(
             nwbf, "institution", None

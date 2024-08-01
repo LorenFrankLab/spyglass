@@ -14,12 +14,6 @@ from position_tools import (
 )
 from position_tools.core import gaussian_smooth
 from tqdm import tqdm_notebook as tqdm
-from track_linearization import (
-    get_linearized_position,
-    make_track_graph,
-    plot_graph_as_1D,
-    plot_track_graph,
-)
 
 from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
@@ -70,7 +64,6 @@ class IntervalPositionInfoSelection(SpyglassMixin, dj.Lookup):
     definition = """
     -> PositionInfoParameters
     -> IntervalList
-    ---
     """
 
 
@@ -128,10 +121,10 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     def generate_pos_components(
         spatial_series,
         position_info,
-        analysis_fname,
-        prefix="head_",
-        add_frame_ind=False,
-        video_frame_ind=None,
+        analysis_fname: str,
+        prefix: str = "head_",
+        add_frame_ind: bool = False,
+        video_frame_ind: int = None,
     ):
         """Generate position, orientation and velocity components."""
         METERS_PER_CM = 0.01
@@ -139,9 +132,6 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         position = pynwb.behavior.Position()
         orientation = pynwb.behavior.CompassDirection()
         velocity = pynwb.behavior.BehavioralTimeSeries()
-
-        # NOTE: CBroz1 removed a try/except ValueError that surrounded all
-        #       .create_X_series methods. dpeg22 could not recall purpose
 
         time_comments = dict(
             comments=spatial_series.comments,
@@ -317,8 +307,8 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         spatial_df: pd.DataFrame,
         meters_to_pixels: float,
         position_smoothing_duration,
-        led1_is_front,
-        is_upsampled,
+        led1_is_front: bool,
+        is_upsampled: bool,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
         orient_smoothing_std_dev=None,
@@ -466,7 +456,9 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod
-    def _data_to_df(data, prefix="head_", add_frame_ind=False):
+    def _data_to_df(
+        data: pd.DataFrame, prefix: str = "head_", add_frame_ind: bool = False
+    ):
         pos, ori, vel = [
             prefix + c for c in ["position", "orientation", "velocity"]
         ]
@@ -526,17 +518,14 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
 
         logger.info("Loading position data...")
-        raw_position_df = (
-            RawPosition()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-            }
-        ).fetch1_dataframe()
+
+        nwb_dict = dict(nwb_file_name=key["nwb_file_name"])
+
+        raw_position_df = (RawPosition() & nwb_dict).fetch1_dataframe()
         position_info_df = (
             IntervalPositionInfo()
             & {
-                "nwb_file_name": key["nwb_file_name"],
+                **nwb_dict,
                 "interval_list_name": key["interval_list_name"],
                 "position_info_param_name": key["position_info_param_name"],
             }
@@ -551,10 +540,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             )
             + 1
         )
-        video_info = (
-            VideoFile()
-            & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
-        ).fetch1()
+        video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
         io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -634,18 +620,18 @@ class PositionVideo(SpyglassMixin, dj.Computed):
 
     def make_video(
         self,
-        video_filename,
+        video_filename: str,
         centroids,
-        head_position_mean,
-        head_orientation_mean,
+        head_position_mean: np.ndarray,
+        head_orientation_mean: np.ndarray,
         video_time,
         position_time,
-        output_video_filename="output.mp4",
-        cm_to_pixels=1.0,
-        disable_progressbar=False,
-        arrow_radius=15,
-        circle_radius=8,
-        truncate_data=False,  # reduce data to min length across all variables
+        output_video_filename: str = "output.mp4",
+        cm_to_pixels: float = 1.0,
+        disable_progressbar: bool = False,
+        arrow_radius: int = 15,
+        circle_radius: int = 8,
+        truncate_data: bool = False,  # reduce data to min len across all vars
     ):
         import cv2  # noqa: F401
 
