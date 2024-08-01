@@ -285,9 +285,33 @@ DandiPath() & {"export_id": 14}
 
 DandiPath().write_mysqldump(paper_key)
 
-# ### Generate Docker
+# ## Sharing the export
 #
-# Coming soon!
+# The steps above will generate several files in this paper's export directory.
+# By default, this is relative to your Spyglass base directory:
+# `{BASE_DIR}/export/{PAPER_ID}`.
+#
+# The `.sh` files should be run by a database administrator who is familiar with
+# running `mysqldump` commands.
+#
+# <details><summary>Note to administrators</summary>
+#
+# The dump process saves the exporter's credentials as a `.my.cnf` file
+# ([about these files](https://dev.mysql.com/doc/refman/8.4/en/option-files.html))
+# to allow running `mysqldump` without additional flags for user, password, etc.
+#
+# If database permissions permit running exports from the instance that runs the
+# exports, you can esure you have a similar `.my.cnf` config in place and run the
+# export shell scripts as-is. Some databases, like the one used by the Frank Lab
+# have protections in place that would require these script(s) to be run from the
+# database instance. Resulting `.sql` files should be placed in the same export
+# directory mentioned above.
+#
+# </details>
+#
+# Then, visit the dockerization repository
+# [here](https://github.com/LorenFrankLab/spyglass-export-docker)
+# and follow the instructions in 'Quick Start'.
 
 # ## Up Next
 #
