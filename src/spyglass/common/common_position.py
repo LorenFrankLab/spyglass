@@ -21,6 +21,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, test_mode, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
+from spyglass.utils.position import convert_to_pixels, fill_nan
 
 try:
     from position_tools import get_centroid
@@ -589,35 +590,6 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         )
         self.insert1(key)
 
-    @staticmethod
-    def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
-        """Converts from cm to pixels and flips the y-axis.
-        Parameters
-        ----------
-        data : ndarray, shape (n_time, 2)
-        frame_size : array_like, shape (2,)
-        cm_to_pixels : float
-
-        Returns
-        -------
-        converted_data : ndarray, shape (n_time, 2)
-        """
-        return data / cm_to_pixels
-
-    @staticmethod
-    def fill_nan(variable, video_time, variable_time):
-        video_ind = np.digitize(variable_time, video_time[1:])
-
-        n_video_time = len(video_time)
-        try:
-            n_variable_dims = variable.shape[1]
-            filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-        except IndexError:
-            filled_variable = np.full((n_video_time,), np.nan)
-        filled_variable[video_ind] = variable
-
-        return filled_variable
-
     def make_video(
         self,
         video_filename: str,
@@ -669,13 +641,13 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         )
 
         centroids = {
-            color: self.fill_nan(data, video_time, position_time)
+            color: fill_nan(data, video_time, position_time)
             for color, data in centroids.items()
         }
-        head_position_mean = self.fill_nan(
+        head_position_mean = fill_nan(
             head_position_mean, video_time, position_time
         )
-        head_orientation_mean = self.fill_nan(
+        head_orientation_mean = fill_nan(
             head_orientation_mean, video_time, position_time
         )
 
@@ -690,7 +662,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
                 green_centroid = centroids["green"][time_ind]
 
                 head_position = head_position_mean[time_ind]
-                head_position = self.convert_to_pixels(
+                head_position = convert_to_pixels(
                     data=head_position, cm_to_pixels=cm_to_pixels
                 )
                 head_orientation = head_orientation_mean[time_ind]

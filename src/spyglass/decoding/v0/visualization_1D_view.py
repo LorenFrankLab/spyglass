@@ -55,7 +55,7 @@ def create_1D_decode_view(
     if linear_position is not None:
         linear_position = np.asarray(linear_position).squeeze()
 
-    trimmed_posterior = discretize_and_trim(posterior, ndims=2)
+    trimmed_posterior = discretize_and_trim(posterior, ndims=1)
     observations_per_time = get_observations_per_time(
         trimmed_posterior, posterior
     )

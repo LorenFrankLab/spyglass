@@ -19,13 +19,9 @@ import pandas as pd
 from position_tools import get_distance
 
 from spyglass.common.common_behav import VideoFile
-from spyglass.common.common_position import PositionVideo
 from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir
 from spyglass.utils.logging import logger, stream_handler
-
-convert_to_pixels = PositionVideo.convert_to_pixels
-fill_nan = PositionVideo.fill_nan
 
 
 def validate_option(

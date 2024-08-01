@@ -36,7 +36,7 @@ def get_time_bins_from_interval(interval_times: np.array, sampling_rate: int):
     return np.linspace(start_time, end_time, n_samples)
 
 
-def discretize_and_trim(series: xr.DataArray, ndims=2) -> xr.DataArray:
+def discretize_and_trim(series: xr.DataArray, ndims=1) -> xr.DataArray:
     """Discretizes a continuous series and trims the zeros.
 
     Parameters
@@ -44,17 +44,20 @@ def discretize_and_trim(series: xr.DataArray, ndims=2) -> xr.DataArray:
     series : xr.DataArray, shape (n_time, n_position_bins)
         Continuous series to be discretized
     ndims : int, optional
-        Number of dimensions of the series. Default is 2 for 1D series (time,
-        position), 3 for 2D series (time, y_position, x_position)
+        Number of spatial dimensions of the series. Default is 1 for 1D series
+        (time, position), 2 for 2D series (time, y_position, x_position)
 
     Returns
     -------
     discretized : xr.DataArray, shape (n_time, n_position_bins)
         Discretized and trimmed series
     """
+    if ndims not in [1, 2]:
+        raise ValueError("ndims must be 1 or 2 spatial dimensions.")
+
     index = (
         ["time", "position"]
-        if ndims == 2
+        if ndims == 1
         else ["time", "y_position", "x_position"]
     )
     discretized = np.multiply(series, 255).astype(np.uint8)  # type: ignore
