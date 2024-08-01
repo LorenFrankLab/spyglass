@@ -51,8 +51,7 @@ def mad_artifact_detector(
     is_artifact = _extend_array_by_window(is_artifact, half_removal_window_idx)
 
     artifact_intervals_s = np.array(
-        _get_time_intervals_from_bool_array(
-        is_artifact, timestamps)
+        _get_time_intervals_from_bool_array(is_artifact, timestamps)
     )
 
     valid_times = np.array(
