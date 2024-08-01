@@ -132,7 +132,7 @@ def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
 def extract_slice_data(
     base_slice: xr.DataArray, location_fn: Callable[[Tuple[float, float]], int]
 ):
-    i_trim = discretize_and_trim(base_slice, ndim=2)
+    i_trim = discretize_and_trim(base_slice, ndims=2)
 
     positions = get_positions(i_trim, location_fn)
     observations_per_frame = get_observations_per_frame(i_trim, base_slice)

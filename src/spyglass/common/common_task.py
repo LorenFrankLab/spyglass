@@ -60,7 +60,7 @@ class Task(SpyglassMixin, dj.Manual):
             axis=1,
         ).tolist()
 
-        cls.insert1(task_dicts, skip_duplicates=True)
+        cls.insert(task_dicts, skip_duplicates=True)
 
     @classmethod
     def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
