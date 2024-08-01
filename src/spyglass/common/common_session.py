@@ -19,8 +19,8 @@ schema = dj.schema("common_session")
 class Session(SpyglassMixin, dj.Imported):
     definition = """
     # Table for holding experimental sessions.
-    # Note that each session can have multiple experimenters and data acquisition devices. See DataAcquisitionDevice
-    # and Experimenter part tables below.
+    # Note that each session can have multiple experimenters and data acquisition
+    # devices. See DataAcquisitionDevice and Experimenter part tables below.
     -> Nwbfile
     ---
     -> [nullable] Subject
@@ -35,7 +35,7 @@ class Session(SpyglassMixin, dj.Imported):
 
     class DataAcquisitionDevice(SpyglassMixin, dj.Part):
         definition = """
-        # Part table that allows a Session to be associated with multiple DataAcquisitionDevice entries.
+        # Part table linking Session to multiple DataAcquisitionDevice entries.
         -> Session
         -> DataAcquisitionDevice
         """
@@ -46,7 +46,7 @@ class Session(SpyglassMixin, dj.Imported):
 
     class Experimenter(SpyglassMixin, dj.Part):
         definition = """
-        # Part table that allows a Session to be associated with multiple LabMember entries.
+        # Part table linking Session to multiple LabMember entries.
         -> Session
         -> LabMember
         """
@@ -115,8 +115,9 @@ class Session(SpyglassMixin, dj.Imported):
         logger.info("Skipping Apparatus for now...")
         # Apparatus().insert_from_nwbfile(nwbf)
 
-        # interval lists depend on Session (as a primary key) but users may want to add these manually so this is
-        # a manual table that is also populated from NWB files
+        # interval lists depend on Session (as a primary key) but users may
+        # want to add these manually so this is a manual table that is also
+        # populated from NWB files
 
         logger.info("Session populates IntervalList...")
         IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)

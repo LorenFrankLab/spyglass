@@ -1,5 +1,6 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from unclustered spikes and spike waveform features. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from unclustered spikes and spike waveform features. See [1] for
+details.
 
 References
 ----------

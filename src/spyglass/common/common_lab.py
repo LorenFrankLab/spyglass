@@ -224,8 +224,8 @@ class LabTeam(SpyglassMixin, dj.Manual):
             )
             if not query:
                 logger.info(
-                    "To help manage permissions in LabMemberInfo, please add Google "
-                    + f"user ID for {team_member}"
+                    "To help manage permissions in LabMemberInfo, please add "
+                    + f"Google user ID for {team_member}"
                 )
             labteammember_dict = {
                 "team_name": team_name,
@@ -260,7 +260,8 @@ class Institution(SpyglassMixin, dj.Manual):
         Returns
         -------
         institution_name : string
-            The name of the institution found in the NWB or config file, or None.
+            The name of the institution found in the NWB or config file,
+            or None.
         """
         config = config or dict()
         inst_list = config.get("Institution", [{}])
@@ -307,7 +308,7 @@ class Lab(SpyglassMixin, dj.Manual):
         lab_list = config.get("Lab", [{}])
         if len(lab_list) > 1:
             logger.info(
-                "Multiple lab entries not allowed. Using the first entry only.\n"
+                "Multiple lab entries not allowed. Using the first entry only."
             )
         lab_name = lab_list[0].get("lab_name") or getattr(nwbf, "lab", None)
         if not lab_name:

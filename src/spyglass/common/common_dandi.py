@@ -75,7 +75,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         # create a cache to save downloaded data to disk (optional)
         fsspec_file = CachingFileSystem(
             fs=fs,
-            cache_storage=f"{export_dir}/nwb-cache",  # Local folder for the cache
+            cache_storage=f"{export_dir}/nwb-cache",  # Local folder for cache
         )
 
         # Open and return the file
@@ -150,7 +150,10 @@ class DandiPath(SpyglassMixin, dj.Manual):
         validate_dandiset(destination_dir, ignore_external_files=True)
 
         # given dandiset_id, download the dandiset to the export_dir
-        url = f"{known_instances[dandi_instance].gui}/dandiset/{dandiset_id}/draft"
+        url = (
+            f"{known_instances[dandi_instance].gui}"
+            + f"/dandiset/{dandiset_id}/draft"
+        )
         dandi.download.download(url, output_dir=paper_dir)
 
         # organize the files in the dandiset directory

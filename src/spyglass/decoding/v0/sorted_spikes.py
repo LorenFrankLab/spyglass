@@ -1,5 +1,5 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from clustered spikes times. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from clustered spikes times. See [1] for details.
 
 References
 ----------
@@ -201,7 +201,7 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
 def get_spike_indicator(
     key: dict, time_range: tuple[float, float], sampling_rate: float = 500.0
 ) -> pd.DataFrame:
-    """For a given key, returns a dataframe with the spike indicator for each unit
+    """Returns a dataframe with the spike indicator for each unit
 
     Parameters
     ----------

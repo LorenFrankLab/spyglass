@@ -158,10 +158,14 @@ def process_decoded_data(posterior: xr.DataArray):
     total_frame_count = len(posterior.time)
     final_frame_bounds = np.zeros(total_frame_count, dtype=np.uint8)
     # intentionally oversized preallocation--will trim later
-    # Note: By definition there can't be more than 255 observations per frame (since we drop any observation
-    # lower than 1/255 and the probabilities for any frame sum to 1). However, this preallocation may be way
-    # too big for memory for long recordings. We could use a smaller one, but would need to include logic
-    # to expand the length of the array if its actual allocated bounds are exceeded.
+
+    # Note: By definition there can't be more than 255 observations per frame
+    # (since we drop any observation lower than 1/255 and the probabilities for
+    # any frame sum to 1). However, this preallocation may be way too big for
+    # memory for long recordings. We could use a smaller one, but would need to
+    # include logic to expand the length of the array if its actual allocated
+    # bounds are exceeded.
+
     final_values = np.zeros(total_frame_count * 255, dtype=np.uint8)
     final_locations = np.zeros(total_frame_count * 255, dtype=np.uint16)
 
@@ -185,7 +189,10 @@ def process_decoded_data(posterior: xr.DataArray):
         ] = positions
         total_observations += len(observations)
         frames_done += frame_step_size
-    # These were intentionally oversized in preallocation; trim to the number of actual values.
+
+    # These were intentionally oversized in preallocation; trim to the number
+    # of actual values.
+
     final_values.resize(total_observations)
     final_locations.resize(total_observations)
 
@@ -296,8 +303,11 @@ def create_2D_decode_view(
 
     track_bin_width = place_bin_size[0]
     track_bin_height = place_bin_size[1]
+
     # NOTE: We expect caller to have converted from fortran ordering already
-    # i.e. somewhere upstream, centers = env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
+    # i.e. somewhere upstream, centers =
+    # env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
+
     upper_left_points = get_ul_corners(
         track_bin_width, track_bin_height, interior_place_bin_centers
     )

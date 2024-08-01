@@ -20,8 +20,7 @@ schema = dj.schema("decoding_waveform_features")
 
 @schema
 class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
-    """Defines the types of spike waveform features computed for a given spike
-    time."""
+    """Defines types of waveform features computed for a given spike time."""
 
     definition = """
     features_param_name : varchar(80) # a name for this set of parameters
@@ -34,7 +33,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             "estimate_peak_time": False,
         }
     }
-    _default_waveform_extraction_params = {
+    _default_waveform_extract_params = {
         "ms_before": 0.5,
         "ms_after": 0.5,
         "max_spikes_per_unit": None,
@@ -46,7 +45,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             "amplitude",
             {
                 "waveform_features_params": _default_waveform_feature_params,
-                "waveform_extraction_params": _default_waveform_extraction_params,
+                "waveform_extraction_params": _default_waveform_extract_params,
             },
         ],
         [
@@ -56,7 +55,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
                     "amplitude": _default_waveform_feature_params["amplitude"],
                     "spike_location": {},
                 },
-                "waveform_extraction_params": _default_waveform_extraction_params,
+                "waveform_extraction_params": _default_waveform_extract_params,
             },
         ],
     ]
@@ -92,8 +91,9 @@ class UnitWaveformFeaturesSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
-    """For each spike time, compute a spike waveform feature associated with that
-    spike. Used for clusterless decoding.
+    """For each spike time, compute waveform feature associated with that spike.
+
+    Used for clusterless decoding.
     """
 
     definition = """
@@ -115,7 +115,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             params["waveform_features_params"]
         ):
             raise NotImplementedError(
-                f"Features {set(params['waveform_features_params'])} are not supported"
+                f"Features {set(params['waveform_features_params'])} are "
+                + "not supported"
             )
 
         merge_key = {"merge_id": key["spikesorting_merge_id"]}
@@ -303,7 +304,7 @@ def _write_waveform_features_to_nwb(
     spike_times: pd.DataFrame,
     waveform_features: dict,
 ) -> tuple[str, str]:
-    """Save waveforms, metrics, labels, and merge groups to NWB in the units table.
+    """Save waveforms, metrics, labels, and merge groups to NWB units table.
 
     Parameters
     ----------
@@ -318,7 +319,8 @@ def _write_waveform_features_to_nwb(
     Returns
     -------
     analysis_nwb_file : str
-        name of analysis NWB file containing the sorting and curation information
+        name of analysis NWB file containing the sorting and curation
+        information
     object_id : str
         object_id of the units table in the analysis NWB file
     """

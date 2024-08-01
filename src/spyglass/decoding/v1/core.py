@@ -22,7 +22,7 @@ schema = dj.schema("decoding_core_v1")
 
 @schema
 class DecodingParameters(SpyglassMixin, dj.Lookup):
-    """Parameters for decoding the animal's mental position and some category of interest"""
+    """Params for decoding mental position and some category of interest"""
 
     definition = """
     decoding_param_name : varchar(80)  # a name for this set of parameters
@@ -31,22 +31,25 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     decoding_kwargs = NULL : BLOB      # additional keyword arguments
     """
 
+    pk = "decoding_param_name"
+    sk = "decoding_params"
+
     contents = [
         {
-            "decoding_param_name": f"contfrag_clusterless_{non_local_detector_version}",
-            "decoding_params": ContFragClusterlessClassifier(),
+            pk: f"contfrag_clusterless_{non_local_detector_version}",
+            sk: ContFragClusterlessClassifier(),
         },
         {
-            "decoding_param_name": f"nonlocal_clusterless_{non_local_detector_version}",
-            "decoding_params": NonLocalClusterlessDetector(),
+            pk: f"nonlocal_clusterless_{non_local_detector_version}",
+            sk: NonLocalClusterlessDetector(),
         },
         {
-            "decoding_param_name": f"contfrag_sorted_{non_local_detector_version}",
-            "decoding_params": ContFragSortedSpikesClassifier(),
+            pk: f"contfrag_sorted_{non_local_detector_version}",
+            sk: ContFragSortedSpikesClassifier(),
         },
         {
-            "decoding_param_name": f"nonlocal_sorted_{non_local_detector_version}",
-            "decoding_params": NonLocalSortedSpikesDetector(),
+            pk: f"nonlocal_sorted_{non_local_detector_version}",
+            sk: NonLocalSortedSpikesDetector(),
         },
     ]
 
@@ -147,9 +150,11 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         key : dict, optional
             restriction to a single entry in PositionGroup, by default None
         min_time : float, optional
-            restrict position information to times greater than min_time, by default None
+            restrict position information to times greater than min_time,
+            by default None
         max_time : float, optional
-            restrict position information to times less than max_time, by default None
+            restrict position information to times less than max_time,
+            by default None
 
         Returns
         -------

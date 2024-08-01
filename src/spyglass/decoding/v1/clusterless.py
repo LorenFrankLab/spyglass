@@ -1,5 +1,6 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from unclustered spikes and spike waveform features. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from unclustered spikes and spike waveform features. See [1] for
+details.
 
 References
 ----------
@@ -74,7 +75,7 @@ class ClusterlessDecodingSelection(SpyglassMixin, dj.Manual):
     -> DecodingParameters
     -> IntervalList.proj(encoding_interval='interval_list_name')
     -> IntervalList.proj(decoding_interval='interval_list_name')
-    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
+    estimate_decoding_params = 1 : bool # 1 to estimate the decoding parameters
     """
 
 
@@ -107,8 +108,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             position_variable_names,
         ) = self.fetch_position_info(key)
 
-        # Get the waveform features for the selected units
-        # Don't need to filter by interval since the non_local_detector code will do that
+        # Get the waveform features for the selected units. Don't need to filter
+        # by interval since the non_local_detector code will do that
+
         (
             spike_times,
             spike_waveform_features,
@@ -145,10 +147,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = ClusterlessDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-            # if estimating parameters, then we need to treat times outside decoding interval as missing
-            # this means that times outside the decoding interval will not use the spiking data
-            # a better approach would be to treat the intervals as multiple sequences
-            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
+            # if estimating parameters, then we need to treat times outside
+            # decoding interval as missing this means that times outside the
+            # decoding interval will not use the spiking data a better approach
+            # would be to treat the intervals as multiple sequences (see
+            # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
                 is_missing[
@@ -326,7 +331,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
-        """Get the maximum range of model times in the encoding and decoding intervals
+        """Return max range of model times in the encoding/decoding intervals
 
         Parameters
         ----------
@@ -440,9 +445,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         key : dict
             The decoding selection key
         filter_by_interval : bool, optional
-            Whether to filter for spike times in the model interval, by default True
+            Whether to filter for spike times in the model interval.
+            Default True
         time_slice : Slice, optional
-            User provided slice of time to restrict spikes to, by default None
+            User provided slice of time to restrict spikes to. Default None
 
         Returns
         -------
@@ -529,9 +535,11 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         time : np.ndarray
             time vector for which to calculate the firing rate
         multiunit : bool, optional
-            if True, return the multiunit firing rate for units in the group, by default False
+            if True, return the multiunit firing rate for units in the group.
+            Default False
         smoothing_sigma : float, optional
-            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds. Default 0.015
 
         Returns
         -------

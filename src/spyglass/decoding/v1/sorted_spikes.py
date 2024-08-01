@@ -1,5 +1,5 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from clustered spikes times. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from clustered spikes times. See [1] for details.
 
 References
 ----------
@@ -44,7 +44,7 @@ class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     -> DecodingParameters
     -> IntervalList.proj(encoding_interval='interval_list_name')
     -> IntervalList.proj(decoding_interval='interval_list_name')
-    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
+    estimate_decoding_params = 1 : bool # 1 to estimate the decoding parameters
     """
     # NOTE: Excessive key length fixed by reducing UnitSelectionParams.unit_filter_params_name
 
@@ -78,8 +78,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             position_variable_names,
         ) = self.fetch_position_info(key)
 
-        # Get the spike times for the selected units
-        # Don't need to filter by interval since the non_local_detector code will do that
+        # Get the spike times for the selected units. Don't need to filter by
+        # interval since the non_local_detector code will do that
+
         spike_times = self.fetch_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
@@ -113,10 +114,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-            # if estimating parameters, then we need to treat times outside decoding interval as missing
-            # this means that times outside the decoding interval will not use the spiking data
-            # a better approach would be to treat the intervals as multiple sequences
-            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
+            # if estimating parameters, then we need to treat times outside
+            # decoding interval as missing this means that times outside the
+            # decoding interval will not use the spiking data a better approach
+            # would be to treat the intervals as multiple sequences (see
+            # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
                 is_missing[
@@ -291,7 +295,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
-        """Get the maximum range of model times in the encoding and decoding intervals
+        """Return maximum range of model times in encoding/decoding intervals
 
         Parameters
         ----------
@@ -405,12 +409,14 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         key : dict
             The decoding selection key
         filter_by_interval : bool, optional
-            Whether to filter for spike times in the model interval, by default True
+            Whether to filter for spike times in the model interval,
+            by default True
         time_slice : Slice, optional
             User provided slice of time to restrict spikes to, by default None
         return_unit_ids : bool, optional
-            if True, return the unit_ids along with the spike times, by default False
-            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
+            if True, return the unit_ids along with the spike times, by default
+            False Unit ids defined as a list of dictionaries with keys
+            'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
@@ -479,7 +485,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return "orientation" if "orientation" in cols else "head_orientation"
 
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
-        """Get the ahead-behind distance of the decoded position from the animal's actual position
+        """Get relative decoded position from the animal's actual position
 
         Parameters
         ----------

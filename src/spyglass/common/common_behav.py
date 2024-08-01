@@ -505,7 +505,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     definition = """
     -> IntervalList
     ---
-    position_interval_name="": varchar(200)  # name of the corresponding interval
+    position_interval_name="": varchar(200)  # corresponding interval name
     """
 
     # #849 - Insert null to avoid rerun
@@ -574,8 +574,9 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
             logger.warning(
-                f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos intervals for "
-                + f"\n\t{key}\n\tMatching intervals: {matching_pos_intervals}"
+                f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos "
+                + f"intervals for\n\t{key}\n\t"
+                + f"Matching intervals: {matching_pos_intervals}"
             )
             self.insert1(null_key, **insert_opts)
             return

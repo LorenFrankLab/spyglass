@@ -59,12 +59,13 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
         group_name: str = "CA1",
         **kwargs,
     ):
-        """Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+        """Replaces all electrodes for an nwb file with specified electrodes.
 
         Parameters
         ----------
         key : dict
-            dictionary corresponding to the LFPBand entry to use for ripple detection
+            dictionary corresponding to the LFPBand entry to use for ripple
+            detection
         electrode_list : list
             list of electrodes from LFPBandSelection.LFPBandElectrode
             to be used as the ripple LFP during detection

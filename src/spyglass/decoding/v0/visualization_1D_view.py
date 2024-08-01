@@ -12,7 +12,9 @@ def get_observations_per_time(
 ) -> np.ndarray:
     times, counts = np.unique(trimmed_posterior.time.values, return_counts=True)
     indexed_counts = xr.DataArray(counts, coords={"time": times})
-    _, good_counts = xr.align(base_data.time, indexed_counts, join="left", fill_value=0)  # type: ignore
+    _, good_counts = xr.align(
+        base_data.time, indexed_counts, join="left", fill_value=0
+    )  # type: ignore
 
     return good_counts.values.astype(np.uint8)
 

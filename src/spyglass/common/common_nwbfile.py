@@ -129,7 +129,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile table.
+            The name of an NWB file in the Nwbfile table.
         """
         if not (Nwbfile() & {"nwb_file_name": nwb_file_name}):
             raise FileNotFoundError(
@@ -143,8 +143,8 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     def cleanup(delete_files: bool = False) -> None:
         """Remove the filepath entries for NWB files that are not in use.
 
-        This does not delete the files themselves unless delete_files=True is specified
-        Run this after deleting the Nwbfile() entries themselves.
+        This does not delete the files themselves unless delete_files=True is
+        specified. Run this after deleting the Nwbfile() entries themselves.
         """
         schema.external["raw"].delete(delete_external_files=delete_files)
 
@@ -157,7 +157,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 @schema
 class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
-    # Table for holding the NWB files that contain results of analysis, such as spike sorting.
+    # Table for NWB files that contain results of analysis.
     analysis_file_name: varchar(64)                # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
@@ -337,7 +337,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         analysis_nwb_file_name : str
-            The name of the NWB file that has been inserted into AnalysisNwbfile.
+            The name of the NWB file in AnalysisNwbfile.
 
         Returns
         -------
@@ -507,7 +507,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     data=label_values,
                 )
 
-            # If the waveforms were specified, add them as a dataframe to scratch
+            # If the waveforms were specified, add them as a df to scratch
             waveforms_object_id = ""
             if units_waveforms is not None:
                 waveforms_df = pd.DataFrame.from_dict(
@@ -570,9 +570,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 )
 
             # The following is a rough sketch of AnalysisNwbfile().add_waveforms
-            # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-            # or
-            # nwbfile = pynwb.NWBFile(...)
+            # analysis_file_name =
+            #   AnalysisNwbfile().create(key['nwb_file_name'])
+            #   or
+            #   nwbfile = pynwb.NWBFile(...)
             # (channels, spikes, samples)
             # wfs = [
             #         [     # elec 1
@@ -669,7 +670,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         Returns
         -------
         electrode_indices : numpy array
-            Array of indices in the electrodes table for the given electrode IDs.
+            Array of indices in the electrodes table for the given electrode
+            IDs.
         """
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
@@ -678,8 +680,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
-        Does not delete the files themselves unless delete_files=True is specified.
-        Run this after deleting the Nwbfile() entries themselves.
+        Does not delete the files themselves unless delete_files=True is
+        specified. Run this after deleting the Nwbfile() entries themselves.
 
         Parameters
         ----------

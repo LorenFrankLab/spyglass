@@ -53,7 +53,7 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         for electrode_group in nwbf.electrode_groups.values():
             key["electrode_group_name"] = electrode_group.name
-            # add electrode group location if it does not exist, and fetch the row
+            # add electrode group location if it not exist, and fetch the row
             key["region_id"] = BrainRegion.fetch_add(
                 region_name=electrode_group.location
             )
@@ -189,7 +189,7 @@ class Electrode(SpyglassMixin, dj.Imported):
 
     @classmethod
     def create_from_config(cls, nwb_file_name: str):
-        """Create or update Electrode entries from what is specified in the config YAML file.
+        """Create/update Electrode entries using config YAML file.
 
         Parameters
         ----------
@@ -433,7 +433,7 @@ class LFP(SpyglassMixin, dj.Imported):
     -> IntervalList             # the valid intervals for the data
     -> FirFilterParameters      # the filter used for the data
     -> AnalysisNwbfile          # the name of the nwb file with the lfp data
-    lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+    lfp_object_id: varchar(40)  # the ID for loading this object from the file
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
@@ -517,7 +517,7 @@ class LFP(SpyglassMixin, dj.Imported):
         key["lfp_object_id"] = lfp_object_id
         key["lfp_sampling_rate"] = sampling_rate // decimation
 
-        # finally, we need to censor the valid times to account for the downsampling
+        # finally, censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
         # add an interval list for the LFP valid times, skipping duplicates
         key["interval_list_name"] = "lfp valid times"
@@ -570,7 +570,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         -> LFPBandSelection
         -> LFPSelection.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
-        ---
         """
 
     def set_lfp_band_electrodes(
@@ -601,7 +600,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             The name of the interval list (from the IntervalList table).
         reference_electrode_list : list
             A single electrode id corresponding to the reference to use for all
-            electrodes or a list with one element per entry in the electrode_list
+            electrodes. Or a list with one element per entry in the
+            electrode_list
         lfp_band_sampling_rate : int
             The output sampling rate to be used for the filtered data; must be
             an integer divisor of the LFP sampling rate.
@@ -647,8 +647,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         }
         if not query:
             raise ValueError(
-                f"interval list {interval_list_name} is not in the IntervalList "
-                + "table; the list must be added before this function is called"
+                f"Item not in IntervalList: {interval_list_name}\n"
+                + "Item must be added before this function is called."
             )
         # reference_electrode_list
         if len(reference_electrode_list) != 1 and len(
@@ -717,7 +717,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
-        # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
+
+        # get the NWB object with the lfp data;
+        # FIX: change to fetch with additional infrastructure
         lfp_object = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch_nwb()[0]["lfp"]

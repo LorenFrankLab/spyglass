@@ -24,7 +24,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
     interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
-    pipeline = "": varchar(64)  # type of interval list (e.g. 'position', 'spikesorting_recording_v1')
+    pipeline = "": varchar(64)  # type of interval list
     """
 
     # See #630, #664. Excessive key length.
