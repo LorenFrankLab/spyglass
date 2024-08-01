@@ -522,7 +522,11 @@ class PositionVideo(SpyglassMixin, dj.Computed):
 
         nwb_dict = dict(nwb_file_name=key["nwb_file_name"])
 
-        raw_position_df = (RawPosition() & nwb_dict).fetch1_dataframe()
+        raw_position_df = (
+            RawPosition()
+            & nwb_dict
+            & {"interval_list_name": key["interval_list_name"]}
+        ).fetch1_dataframe()
         position_info_df = (
             IntervalPositionInfo()
             & {
