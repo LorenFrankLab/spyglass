@@ -19,6 +19,8 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_usage import ActivityLog
+from spyglass.spikesorting.utils import get_group_by_shank
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -74,106 +76,15 @@ class SortGroup(SpyglassMixin, dj.Manual):
         """
         # delete any current groups
         (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
-        # get the electrodes from this NWB file
-        electrodes = (
-            Electrode()
-            & {"nwb_file_name": nwb_file_name}
-            & {"bad_channel": "False"}
-        ).fetch()
-        e_groups = list(np.unique(electrodes["electrode_group_name"]))
-        e_groups.sort(key=int)  # sort electrode groups numerically
-        sort_group = 0
-        sg_key = dict()
-        sge_key = dict()
-        sg_key["nwb_file_name"] = sge_key["nwb_file_name"] = nwb_file_name
-        for e_group in e_groups:
-            # for each electrode group, get a list of the unique shank numbers
-            shank_list = np.unique(
-                electrodes["probe_shank"][
-                    electrodes["electrode_group_name"] == e_group
-                ]
-            )
-            sge_key["electrode_group_name"] = e_group
-            # get the indices of all electrodes in this group / shank and set their sorting group
-            for shank in shank_list:
-                sg_key["sort_group_id"] = sge_key["sort_group_id"] = sort_group
-                # specify reference electrode. Use 'references' if passed, otherwise use reference from config
-                if not references:
-                    shank_elect_ref = electrodes[
-                        "original_reference_electrode"
-                    ][
-                        np.logical_and(
-                            electrodes["electrode_group_name"] == e_group,
-                            electrodes["probe_shank"] == shank,
-                        )
-                    ]
-                    if np.max(shank_elect_ref) == np.min(shank_elect_ref):
-                        sg_key["sort_reference_electrode_id"] = shank_elect_ref[
-                            0
-                        ]
-                    else:
-                        ValueError(
-                            f"Error in electrode group {e_group}: reference "
-                            + "electrodes are not all the same"
-                        )
-                else:
-                    if e_group not in references.keys():
-                        raise Exception(
-                            f"electrode group {e_group} not a key in "
-                            + "references, so cannot set reference"
-                        )
-                    else:
-                        sg_key["sort_reference_electrode_id"] = references[
-                            e_group
-                        ]
-                # Insert sort group and sort group electrodes
-                reference_electrode_group = electrodes[
-                    electrodes["electrode_id"]
-                    == sg_key["sort_reference_electrode_id"]
-                ][
-                    "electrode_group_name"
-                ]  # reference for this electrode group
-                if (
-                    len(reference_electrode_group) == 1
-                ):  # unpack single reference
-                    reference_electrode_group = reference_electrode_group[0]
-                elif (int(sg_key["sort_reference_electrode_id"]) > 0) and (
-                    len(reference_electrode_group) != 1
-                ):
-                    raise Exception(
-                        "Should have found exactly one electrode group for "
-                        + "reference electrode, but found "
-                        + f"{len(reference_electrode_group)}."
-                    )
-                if omit_ref_electrode_group and (
-                    str(e_group) == str(reference_electrode_group)
-                ):
-                    logger.warn(
-                        f"Omitting electrode group {e_group} from sort groups "
-                        + "because contains reference."
-                    )
-                    continue
-                shank_elect = electrodes["electrode_id"][
-                    np.logical_and(
-                        electrodes["electrode_group_name"] == e_group,
-                        electrodes["probe_shank"] == shank,
-                    )
-                ]
-                if (
-                    omit_unitrode and len(shank_elect) == 1
-                ):  # omit unitrodes if indicated
-                    logger.warn(
-                        f"Omitting electrode group {e_group}, shank {shank} "
-                        + "from sort groups because unitrode."
-                    )
-                    continue
-                cls.insert1(sg_key, skip_duplicates=True)
-                for elect in shank_elect:
-                    sge_key["electrode_id"] = elect
-                    cls.SortGroupElectrode().insert1(
-                        sge_key, skip_duplicates=True
-                    )
-                sort_group += 1
+
+        sg_keys, sge_keys = get_group_by_shank(
+            nwb_file_name=nwb_file_name,
+            references=references,
+            omit_ref_electrode_group=omit_ref_electrode_group,
+            omit_unitrode=omit_unitrode,
+        )
+        cls.insert(sg_keys, skip_duplicates=True)
+        cls.SortGroupElectrode().insert(sge_keys, skip_duplicates=True)
 
 
 @schema

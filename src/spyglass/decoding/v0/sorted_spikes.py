@@ -52,7 +52,10 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
-from spyglass.decoding.v0.utils import make_default_decoding_params
+from spyglass.decoding.v0.utils import (
+    get_time_bins_from_interval,
+    make_default_decoding_params,
+)
 from spyglass.spikesorting.v0.spikesorting_curation import CuratedSpikeSorting
 from spyglass.utils import SpyglassMixin, logger
 
@@ -96,7 +99,7 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
             "sampling_rate"
         )
 
-        time = self.get_time_bins_from_interval(interval_times, sampling_rate)
+        time = get_time_bins_from_interval(interval_times, sampling_rate)
 
         spikes_nwb = (CuratedSpikeSorting & key).fetch_nwb()
         # restrict to cases with units
@@ -153,14 +156,6 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
             )
 
             self.insert1(key)
-
-    @staticmethod
-    def get_time_bins_from_interval(interval_times, sampling_rate):
-        """Gets the superset of the interval."""
-        start_time, end_time = interval_times[0][0], interval_times[-1][-1]
-        n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
-
-        return np.linspace(start_time, end_time, n_samples)
 
     def fetch1_dataframe(self):
         return self.fetch_dataframe()[0]

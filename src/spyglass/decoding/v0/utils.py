@@ -28,6 +28,14 @@ except (ImportError, ModuleNotFoundError) as e:
     logger.warning(e)
 
 
+def get_time_bins_from_interval(interval_times: np.array, sampling_rate: int):
+    """Gets the superset of the interval."""
+    start_time, end_time = interval_times[0][0], interval_times[-1][-1]
+    n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
+
+    return np.linspace(start_time, end_time, n_samples)
+
+
 def discretize_and_trim(series: xr.DataArray, ndims=2) -> xr.DataArray:
     """Discretizes a continuous series and trims the zeros.
 

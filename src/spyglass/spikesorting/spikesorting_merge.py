@@ -193,6 +193,20 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def get_spike_indicator(cls, key, time):
+        """Get spike indicator matrix for the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the spike indicator matrix
+
+        Returns
+        -------
+        np.ndarray
+            spike indicator matrix with shape (len(time), n_units)
+        """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
         spike_times = cls.fetch_spike_data(key)
@@ -204,6 +218,9 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 np.digitize(times, time[1:-1]),
                 minlength=time.shape[0],
             )
+
+        # CB: spikesorting.analysis.get_spike_indicator checks ndim == 1
+        #     and returns spike_indicator[:, np.newaxis] if True. Do here?
 
         return spike_indicator
 

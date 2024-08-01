@@ -54,6 +54,7 @@ from spyglass.common.common_behav import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.decoding.v0.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -62,7 +63,10 @@ from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
 )
-from spyglass.decoding.v0.utils import make_default_decoding_params
+from spyglass.decoding.v0.utils import (
+    get_time_bins_from_interval,
+    make_default_decoding_params,
+)
 from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
     CuratedSpikeSortingSelection,
@@ -200,8 +204,8 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
             marks = np.concatenate(
                 [
-                    UnitMarks._get_peak_amplitude(
-                        waveform=waveform_extractor.get_waveforms(unit_id),
+                    _get_peak_amplitude(
+                        waveform_extractor=waveform_extractor,
                         peak_sign=peak_sign,
                         estimate_peak_time=estimate_peak_time,
                     )
@@ -251,48 +255,6 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             index=pd.Index(nwb_data["marks"].timestamps, name="time"),
             columns=columns,
         )
-
-    @staticmethod
-    def _get_peak_amplitude(
-        waveform: np.array,
-        peak_sign: str = "neg",
-        estimate_peak_time: bool = False,
-    ) -> np.array:
-        """Returns the amplitudes of all channels at the time of the peak.
-
-        Amplitude across channels.
-
-        Parameters
-        ----------
-        waveform : np.array
-            array-like, shape (n_spikes, n_time, n_channels)
-        peak_sign : str, optional
-            One of 'pos', 'neg', 'both'. Direction of the peak in the waveform
-        estimate_peak_time : bool, optional
-            Find the peak times for each spike because some spikesorters do not
-            align the spike time (at index n_time // 2) to the peak
-
-        Returns
-        -------
-        peak_amplitudes : np.array
-            array-like, shape (n_spikes, n_channels)
-
-        """
-        if estimate_peak_time:
-            if peak_sign == "neg":
-                peak_inds = np.argmin(np.min(waveform, axis=2), axis=1)
-            elif peak_sign == "pos":
-                peak_inds = np.argmax(np.max(waveform, axis=2), axis=1)
-            elif peak_sign == "both":
-                peak_inds = np.argmax(np.max(np.abs(waveform), axis=2), axis=1)
-
-            # Get mode of peaks to find the peak time
-            values, counts = np.unique(peak_inds, return_counts=True)
-            spike_peak_ind = values[counts.argmax()]
-        else:
-            spike_peak_ind = waveform.shape[1] // 2
-
-        return waveform[:, spike_peak_ind]
 
     @staticmethod
     def _threshold(
@@ -369,7 +331,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
         marks_df = (UnitMarks & key).fetch1_dataframe()
 
-        time = self.get_time_bins_from_interval(interval_times, sampling_rate)
+        time = get_time_bins_from_interval(interval_times, sampling_rate)
 
         # Bin marks into time bins. No spike bins will have NaN
         marks_df = marks_df.loc[time.min() : time.max()]
@@ -397,16 +359,6 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
-
-    @staticmethod
-    def get_time_bins_from_interval(
-        interval_times: np.array, sampling_rate: int
-    ) -> np.array:
-        """Picks the superset of the interval"""
-        start_time, end_time = interval_times[0][0], interval_times[-1][-1]
-        n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
-
-        return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
     def plot_all_marks(

@@ -11,7 +11,7 @@ from spyglass.common.common_interval import (
     interval_list_intersect,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_ripple import RippleTimes
+from spyglass.common.common_ripple import RippleTimes, interpolate_to_new_time
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
@@ -27,20 +27,6 @@ RIPPLE_DETECTION_ALGORITHMS = {
 
 # Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
-
-
-def interpolate_to_new_time(
-    df, new_time, upsampling_interpolation_method="linear"
-):
-    old_time = df.index
-    new_index = pd.Index(
-        np.unique(np.concatenate((old_time, new_time))), name="time"
-    )
-    return (
-        df.reindex(index=new_index)
-        .interpolate(method=upsampling_interpolation_method)
-        .reindex(index=new_time)
-    )
 
 
 @schema
