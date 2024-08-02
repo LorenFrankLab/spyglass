@@ -35,6 +35,7 @@ PositionGroup.alter()
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
+- Merge duplicate functions in decoding and spikesorting #1050
 
 ### Pipelines
 

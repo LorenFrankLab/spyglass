@@ -25,14 +25,15 @@ MIN_LFP_INTERVAL_DURATION = 1.0  # 1 second minimum interval duration
 class LFPSelection(SpyglassMixin, dj.Manual):
     """The user's selection of LFP data to be filtered
 
-    This table is used to select the LFP data to be filtered.  The user can select
-    the LFP data by specifying the electrode group and the interval list to be used.
-    The interval list is used to select the times from the raw data that will be
-    filtered.  The user can also specify the filter to be used.
+    This table is used to select the LFP data to be filtered.  The user can
+    select the LFP data by specifying the electrode group and the interval list
+    to be used. The interval list is used to select the times from the raw data
+    that will be filtered.  The user can also specify the filter to be used.
 
-    The LFP data is filtered and downsampled to the user-defined sampling rate, specified
-    as lfp_sampling_rate.  The filtered data is stored in the AnalysisNwbfile table.
-    The valid times for the filtered data are stored in the IntervalList table.
+    The LFP data is filtered and downsampled to the user-defined sampling rate,
+    specified as lfp_sampling_rate.  The filtered data is stored in the
+    AnalysisNwbfile table. The valid times for the filtered data are stored in
+    the IntervalList table.
     """
 
     definition = """
@@ -40,7 +41,7 @@ class LFPSelection(SpyglassMixin, dj.Manual):
      -> IntervalList.proj(target_interval_list_name='interval_list_name')  # the original set of times to be filtered
      -> FirFilterParameters                                                # the filter to be used
      ---
-     target_sampling_rate = 1000 : float                                     # the desired output sampling rate, in HZ
+     target_sampling_rate = 1000 : float                                   # the desired output sampling rate, in HZ
      """
 
 
@@ -49,11 +50,11 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """The filtered LFP data"""
 
     definition = """
-    -> LFPSelection             # the user's selection of LFP data to be filtered
+    -> LFPSelection             # the user's selection of data to be filtered
     ---
     -> AnalysisNwbfile          # the name of the nwb file with the lfp data
-    -> IntervalList             # the final interval list of valid times for the data
-    lfp_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+    -> IntervalList             # final interval list of times for the data
+    lfp_object_id: varchar(40)  # object ID for loading from the NWB file
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
@@ -78,7 +79,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
         orig_key = copy.deepcopy(key)
         orig_key["interval_list_name"] = key["target_interval_list_name"]
         user_valid_times = (IntervalList() & orig_key).fetch1("valid_times")
-        # we remove the extra entry so we can insert this into the LFPOutput table.
+        # remove the extra entry so we can insert into the LFPOutput table.
         del orig_key["interval_list_name"]
 
         raw_valid_times = (
@@ -153,7 +154,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
         # need to censor the valid times to account for the downsampling
         lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
 
-        # add an interval list for the LFP valid times, or check that it matches the existing one
+        # add an interval list for the LFP valid times, or check that it
+        # matches the existing one
         key["interval_list_name"] = "_".join(
             (
                 "lfp",

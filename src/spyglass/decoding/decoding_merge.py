@@ -3,7 +3,6 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-from datajoint.utils import to_camel_case
 from non_local_detector.visualization.figurl_1D import create_1D_decode_view
 from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 

@@ -57,6 +57,8 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
+        # CB: Does this need to be a public method? Can other methods inherit
+        # the logic? It's a pretty simple wrapper around make_track_graph.
         if track_graph_parameters is None:
             track_graph_parameters = self.fetch1()
         return make_track_graph(
@@ -66,7 +68,9 @@ class TrackGraph(SpyglassMixin, dj.Manual):
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
         """Plot the track graph in 2D position space."""
-        track_graph = self.get_networkx_track_graph()
+        track_graph = self.get_networkx_track_graph(
+            track_graph_parameters=self.fetch1()
+        )
         plot_track_graph(
             track_graph, ax=ax, draw_edge_labels=draw_edge_labels, **kwds
         )
