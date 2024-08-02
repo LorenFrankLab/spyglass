@@ -345,7 +345,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             io.write(nwbf)
 
         # Reload NWB file to get h5py objects for data/timestamps
-        # NOTE: CBroz - why io context within io context? Unindenting
         with pynwb.NWBHDF5IO(
             path=analysis_file_abs_path, mode="a", load_namespaces=True
         ) as io:

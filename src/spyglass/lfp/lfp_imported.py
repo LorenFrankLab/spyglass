@@ -15,7 +15,7 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
     -> Session                      # the session to which this LFP belongs
     -> LFPElectrodeGroup            # the group of electrodes to be filtered
     -> IntervalList # the original set of times to be filtered
-    lfp_object_id: varchar(40)      # the NWB object ID for loading this object from the file
+    lfp_object_id: varchar(40)      # object ID for loading from the NWB file
     ---
     lfp_sampling_rate: float        # the sampling rate, in samples/sec
     -> AnalysisNwbfile

@@ -26,8 +26,10 @@ from spyglass.common.common_interval import (
 def get_valid_ephys_position_times_from_interval(
     interval_list_name: str, nwb_file_name: str
 ) -> np.ndarray:
-    """Finds the intersection of the valid times for the interval list, the valid times for the ephys data,
-    and the valid times for the position data.
+    """Returns the intersection of valid times across ephys and position data.
+
+    Finds the intersection of the valid times for the interval list, the
+    valid times for the ephys data, and the valid times for the position data.
 
     Parameters
     ----------
@@ -135,7 +137,7 @@ def get_valid_ephys_position_times_by_epoch(
 
 
 def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
-    """Converts the valid times to a list of slices so that arrays can be indexed easily.
+    """Converts valid times to a list of slices for easy indexing.
 
     Parameters
     ----------
@@ -153,7 +155,8 @@ def convert_valid_times_to_slice(valid_times: np.ndarray) -> list[slice]:
 def create_model_for_multiple_epochs(
     epoch_names: list[str], env_kwargs: dict
 ) -> tuple[list[ObservationModel], list[Environment], list[list[object]]]:
-    """Creates the observation model, environment, and continuous transition types for multiple epochs for decoding
+    """Creates the observation model, environment, and continuous transition
+    types for multiple epochs for decoding
 
     Parameters
     ----------

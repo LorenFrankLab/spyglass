@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from spyglass.position.v1.dlc_utils import convert_to_pixels as _to_px
-from spyglass.position.v1.dlc_utils import fill_nan
 from spyglass.utils import logger
+from spyglass.utils.position import convert_to_pixels as _to_px
+from spyglass.utils.position import fill_nan
 
 RGB_PINK = (234, 82, 111)
 RGB_YELLOW = (253, 231, 76)
