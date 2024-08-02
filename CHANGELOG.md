@@ -34,6 +34,8 @@ PositionGroup.alter()
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
+- Convert list of LFP artifact removed interval list to array #1046
+- Merge duplicate functions in decoding and spikesorting #1050
 
 ### Pipelines
 
@@ -73,6 +75,7 @@ PositionGroup.alter()
     - Fix bug in identification of artifact samples to be zeroed out in
         `spikesorting.v1.SpikeSorting` #1009
     - Remove deprecated dependencies on kachery_client #1014
+    - Add `UnitAnnotation` table and naming convention for units #1027
 
 ## [0.5.2] (April 22, 2024)
 
