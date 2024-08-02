@@ -54,8 +54,6 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         _, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
 
         for device_name in ndx_devices:
-            new_device_dict = dict()
-
             # read device properties into new_device_dict from PyNWB extension
             # device object
             nwb_device_obj = ndx_devices[device_name]
@@ -75,12 +73,14 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             if adc_circuit.title() == "Intan":
                 adc_circuit = "Intan"
 
-            new_device_dict["data_acquisition_device_name"] = name
-            new_device_dict["data_acquisition_device_system"] = system
-            new_device_dict["data_acquisition_device_amplifier"] = amplifier
-            new_device_dict["adc_circuit"] = adc_circuit
-
-            cls._add_device(new_device_dict)
+            cls._add_device(
+                dict(
+                    data_acquisition_device_name=name,
+                    data_acquisition_device_system=system,
+                    data_acquisition_device_amplifier=amplifier,
+                    adc_circuit=adc_circuit,
+                )
+            )
 
         if ndx_devices:
             logger.info(
@@ -638,41 +638,37 @@ class Probe(SpyglassMixin, dj.Manual):
 
             # only look at electrodes where the associated device is the one
             # specified
-            if eg_device_name == nwb_device_name:
-                device_found = True
+            if eg_device_name != nwb_device_name:
+                continue
 
-                # if a Shank has not yet been created from the electrode group,
-                # then create it
-                if electrode_group.name not in created_shanks:
-                    shank_index = len(created_shanks)
-                    created_shanks[electrode_group.name] = shank_index
+            device_found = True
 
-                    # build the dictionary of Probe.Shank data
-                    shank_dict[shank_index] = {
-                        "probe_id": new_probe_dict["probe_id"],
-                        "probe_shank": shank_index,
-                    }
+            # if a Shank has not yet been created from the electrode group,
+            # then create it
+            if electrode_group.name not in created_shanks:
+                shank_index = len(created_shanks)
+                created_shanks[electrode_group.name] = shank_index
 
-                # get the probe shank index associated with this Electrode
-                probe_shank = created_shanks[electrode_group.name]
-
-                # build the dictionary of Probe.Electrode data
-                elect_dict[elec_index] = {
+                # build the dictionary of Probe.Shank data
+                shank_dict[shank_index] = {
                     "probe_id": new_probe_dict["probe_id"],
-                    "probe_shank": probe_shank,
-                    "probe_electrode": elec_index,
+                    "probe_shank": shank_index,
                 }
-                if "rel_x" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_x"] = nwbfile.electrodes[
-                        elec_index, "rel_x"
-                    ]
-                if "rel_y" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_y"] = nwbfile.electrodes[
-                        elec_index, "rel_y"
-                    ]
-                if "rel_z" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_z"] = nwbfile.electrodes[
-                        elec_index, "rel_z"
+
+            # get the probe shank index associated with this Electrode
+            probe_shank = created_shanks[electrode_group.name]
+
+            # build the dictionary of Probe.Electrode data
+            elect_dict[elec_index] = {
+                "probe_id": new_probe_dict["probe_id"],
+                "probe_shank": probe_shank,
+                "probe_electrode": elec_index,
+            }
+
+            for dim in ["rel_x", "rel_y", "rel_z"]:
+                if dim in nwbfile.electrodes[elec_index]:
+                    elect_dict[elec_index][dim] = nwbfile.electrodes[
+                        elec_index, dim
                     ]
 
         if not device_found:

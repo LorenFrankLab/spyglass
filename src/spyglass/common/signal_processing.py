@@ -2,6 +2,8 @@ import numpy as np
 import pynwb
 import scipy.signal as signal
 
+from spyglass.common.common_usage import ActivityLog
+
 
 def hilbert_decomp(lfp_band_object, sampling_rate=1):
     """Generates analytical decomposition of signals in the lfp_band_object
@@ -21,6 +23,8 @@ def hilbert_decomp(lfp_band_object, sampling_rate=1):
     envelope : pynwb.ecephys.ElectricalSeries
         envelope of the signal
     """
+    ActivityLog().deprecate_log("common.signal_processing.hilbert_decomp")
+
     analytical_signal = signal.hilbert(lfp_band_object.data, axis=0)
 
     eseries_name = "envelope"

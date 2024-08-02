@@ -1,5 +1,6 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from unclustered spikes and spike waveform features. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from unclustered spikes and spike waveform features. See [1] for
+details.
 
 References
 ----------
@@ -23,10 +24,8 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import (
-    DecodingParameters,
-    PositionGroup,
-)  # noqa: F401
+from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
+from spyglass.decoding.v1.core import PositionGroup
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
@@ -76,7 +75,7 @@ class ClusterlessDecodingSelection(SpyglassMixin, dj.Manual):
     -> DecodingParameters
     -> IntervalList.proj(encoding_interval='interval_list_name')
     -> IntervalList.proj(decoding_interval='interval_list_name')
-    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
+    estimate_decoding_params = 1 : bool # 1 to estimate the decoding parameters
     """
 
 
@@ -109,8 +108,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             position_variable_names,
         ) = self.fetch_position_info(key)
 
-        # Get the waveform features for the selected units
-        # Don't need to filter by interval since the non_local_detector code will do that
+        # Get the waveform features for the selected units. Don't need to filter
+        # by interval since the non_local_detector code will do that
+
         (
             spike_times,
             spike_waveform_features,
@@ -150,10 +150,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = ClusterlessDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-            # if estimating parameters, then we need to treat times outside decoding interval as missing
-            # this means that times outside the decoding interval will not use the spiking data
-            # a better approach would be to treat the intervals as multiple sequences
-            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
+            # if estimating parameters, then we need to treat times outside
+            # decoding interval as missing this means that times outside the
+            # decoding interval will not use the spiking data a better approach
+            # would be to treat the intervals as multiple sequences (see
+            # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
                 is_missing[
@@ -331,7 +334,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
-        """Get the maximum range of model times in the encoding and decoding intervals
+        """Return max range of model times in the encoding/decoding intervals
 
         Parameters
         ----------
@@ -441,9 +444,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         key : dict
             The decoding selection key
         filter_by_interval : bool, optional
-            Whether to filter for spike times in the model interval, by default True
+            Whether to filter for spike times in the model interval.
+            Default True
         time_slice : Slice, optional
-            User provided slice of time to restrict spikes to, by default None
+            User provided slice of time to restrict spikes to. Default None
 
         Returns
         -------
@@ -514,7 +518,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return spike_indicator
 
     @classmethod
-    def get_firing_rate(cls, key, time, multiunit=False):
+    def get_firing_rate(
+        cls,
+        key: dict,
+        time: np.ndarray,
+        multiunit: bool = False,
+        smoothing_sigma: float = 0.015,
+    ) -> np.ndarray:
         """get time-dependent firing rate for units in the group
 
         Parameters
@@ -524,14 +534,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         time : np.ndarray
             time vector for which to calculate the firing rate
         multiunit : bool, optional
-            if True, return the multiunit firing rate for units in the group, by default False
+            if True, return the multiunit firing rate for units in the group.
+            Default False
         smoothing_sigma : float, optional
-            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds. Default 0.015
 
         Returns
         -------
         np.ndarray
-            _description_
+            time-dependent firing rate with shape (len(time), n_units)
         """
         spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
@@ -544,14 +556,21 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return np.stack(
             [
                 get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis], sampling_frequency
+                    indicator[:, np.newaxis],
+                    sampling_frequency,
+                    smoothing_sigma,
                 )
                 for indicator in spike_indicator.T
             ],
             axis=1,
         )
 
-    def get_ahead_behind_distance(self):
+    def get_orientation_col(self, df):
+        """Examine columns of a input df and return orientation col name"""
+        cols = df.columns
+        return "orientation" if "orientation" in cols else "head_orientation"
+
+    def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
         """get the ahead-behind distance for the decoding model
 
         Returns
@@ -563,24 +582,31 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # TODO: allow specification of track graph
         # TODO: Handle decode intervals, store in table
 
-        classifier = self.fetch_model()
-        results = self.fetch_results().squeeze()
-        posterior = results.acausal_posterior.unstack("state_bins").sum("state")
+        if time_slice is None:
+            time_slice = slice(-np.inf, np.inf)
 
-        if getattr(classifier.environments[0], "track_graph") is not None:
+        classifier = self.fetch_model()
+        posterior = (
+            self.fetch_results()
+            .acausal_posterior(time=time_slice)
+            .squeeze()
+            .unstack("state_bins")
+            .sum("state")
+        )
+
+        if track_graph is None:
+            track_graph = classifier.environments[0].track_graph
+
+        if track_graph is not None:
             linear_position_info = self.fetch_linear_position_info(
                 self.fetch1("KEY")
-            )
+            ).loc[time_slice]
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in linear_position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(linear_position_info)
 
             traj_data = analysis.get_trajectory_data(
                 posterior=posterior,
-                track_graph=classifier.environments[0].track_graph,
+                track_graph=track_graph,
                 decoder=classifier,
                 actual_projected_position=linear_position_info[
                     ["projected_x_position", "projected_y_position"]
@@ -593,14 +619,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 classifier.environments[0].track_graph, *traj_data
             )
         else:
-            position_info = self.fetch_position_info(self.fetch1("KEY"))
+            position_info = self.fetch_position_info(self.fetch1("KEY")).loc[
+                time_slice
+            ]
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(position_info)
             position_variable_names = (
                 PositionGroup & self.fetch1("KEY")
             ).fetch1("position_variables")

@@ -714,30 +714,27 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     LED2 = params.pop("led2", None)
     LED3 = params.pop("led3", None)
 
-    x_vec = pos_df[[LED1, LED2]].diff(axis=1).iloc[:, 0]
-    y_vec = pos_df[[LED1, LED2]].diff(axis=1).iloc[:, 1]
+    orient = np.full(len(pos_df), np.nan)  # Initialize with NaNs
+    x_vec = pos_df[LED1]["x"] - pos_df[LED2]["x"]
+    y_vec = pos_df[LED1]["y"] - pos_df[LED2]["y"]
+    y_eq0 = np.isclose(y_vec, 0)
 
-    y_is_zero = y_vec.eq(0)
-    perp_direction = pos_df[[LED3]].diff(axis=1)
+    # when y_vec is zero, 1&2 are equal. Compare to 3, determine if up or down
+    orient[y_eq0 & pos_df[LED3]["y"].gt(pos_df[LED1]["y"])] = np.pi / 2
+    orient[y_eq0 & pos_df[LED3]["y"].lt(pos_df[LED1]["y"])] = -np.pi / 2
 
-    # Handling the special case where y_vec is zero all Ys are the same
-    special_case = (
-        y_is_zero
-        & (pos_df[LED3]["y"] == pos_df[LED1]["y"])
-        & (pos_df[LED3]["y"] == pos_df[LED2]["y"])
-    )
-    if special_case.any():
+    # Handling error case where y_vec is zero and all Ys are the same
+    y_1, y_2, y_3 = pos_df[LED1]["y"], pos_df[LED2]["y"], pos_df[LED3]["y"]
+    if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
         raise Exception("Cannot determine head direction from bisector")
 
-    orientation = np.zeros(len(pos_df))
-    orientation[y_is_zero & perp_direction.iloc[:, 0].gt(0)] = np.pi / 2
-    orientation[y_is_zero & perp_direction.iloc[:, 0].lt(0)] = -np.pi / 2
+    # General case where y_vec is not zero. Use arctan2 to determine orientation
+    length = np.sqrt(x_vec**2 + y_vec**2)
+    norm_x = (-y_vec / length)[~y_eq0]
+    norm_y = (x_vec / length)[~y_eq0]
+    orient[~y_eq0] = np.arctan2(norm_y, norm_x)
 
-    orientation[~y_is_zero & ~x_vec.eq(0)] = np.arctan2(
-        y_vec[~y_is_zero], x_vec[~x_vec.eq(0)]
-    )
-
-    return orientation
+    return orient
 
 
 # Add new functions for orientation calculation here
@@ -747,36 +744,6 @@ _key_to_func_dict = {
     "red_green_orientation": two_pt_head_orientation,
     "red_led_bisector": red_led_bisector_orientation,
 }
-
-
-def fill_nan(variable, video_time, variable_time):
-    video_ind = np.digitize(variable_time, video_time[1:])
-
-    n_video_time = len(video_time)
-    try:
-        n_variable_dims = variable.shape[1]
-        filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-    except IndexError:
-        filled_variable = np.full((n_video_time,), np.nan)
-    filled_variable[video_ind] = variable
-
-    return filled_variable
-
-
-def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
-    """Converts from cm to pixels and flips the y-axis.
-
-    Parameters
-    ----------
-    data : ndarray, shape (n_time, 2)
-    frame_size : array_like, shape (2,)
-    cm_to_pixels : float
-
-    Returns
-    -------
-    converted_data : ndarray, shape (n_time, 2)
-    """
-    return data / cm_to_pixels
 
 
 class Centroid:
@@ -834,7 +801,8 @@ class Centroid:
         if isinstance(mask, list):
             mask = [reduce(np.logical_and, m) for m in mask]
 
-        if points is not None:  # Check that combinations of points close enough
+        # Check that combinations of points close enough
+        if points is not None and len(points) > 1:
             for pair in combinations(points, 2):
                 mask = (*mask, ~self.too_sep(pair[0], pair[1]))
 
@@ -846,10 +814,7 @@ class Centroid:
         if replace:
             self.centroid[mask] = np.nan
             return
-        if len(points) == 1:  # only one point
-            self.centroid[mask] = self.coords[points[0]][mask]
-            return
-        elif len(points) == 3:
+        if len(points) == 3:
             self.coords["midpoint"] = (
                 self.coords[points[0]] + self.coords[points[1]]
             ) / 2
@@ -867,10 +832,9 @@ class Centroid:
     def get_1pt_centroid(self):
         """Passthrough. If point is NaN, then centroid is NaN."""
         PT1 = self.points_dict.get("point1", None)
-        self.calc_centroid(
-            mask=(~self.nans[PT1],),
-            points=[PT1],
-        )
+        mask = ~self.nans[PT1]  # For good points, centroid is the point
+        self.centroid[mask] = self.coords[PT1][mask]
+        self.centroid[~mask] = np.nan  # For bad points, centroid is NaN
 
     def get_2pt_centroid(self):
         self.calc_centroid(  # Good points

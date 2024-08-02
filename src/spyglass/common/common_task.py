@@ -23,7 +23,7 @@ class Task(SpyglassMixin, dj.Manual):
      """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf: pynwb.NWBFile):
         """Insert tasks from an NWB file.
 
         Parameters
@@ -40,7 +40,7 @@ class Task(SpyglassMixin, dj.Manual):
                 cls.insert_from_task_table(task)
 
     @classmethod
-    def insert_from_task_table(cls, task_table):
+    def insert_from_task_table(cls, task_table: pynwb.core.DynamicTable):
         """Insert tasks from a pynwb DynamicTable containing task metadata.
 
         Duplicate tasks will not be added.
@@ -51,19 +51,23 @@ class Task(SpyglassMixin, dj.Manual):
             The table representing task metadata.
         """
         taskdf = task_table.to_dataframe()
-        for task_entry in taskdf.iterrows():
-            task_dict = dict()
-            task_dict["task_name"] = task_entry[1].task_name
-            task_dict["task_description"] = task_entry[1].task_description
-            cls.insert1(task_dict, skip_duplicates=True)
+
+        task_dicts = taskdf.apply(
+            lambda row: dict(
+                task_name=row.task_name,
+                task_description=row.task_description,
+            ),
+            axis=1,
+        ).tolist()
+
+        cls.insert(task_dicts, skip_duplicates=True)
 
     @classmethod
-    def check_task_table(cls, task_table):
-        """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
+    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+        """Check format of pynwb DynamicTable containing task metadata.
 
-
-        The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name' and
-        'task_description'.
+        The table should be an instance of pynwb.core.DynamicTable and contain
+        the columns 'task_name' and 'task_description'.
 
         Parameters
         ----------
@@ -73,7 +77,8 @@ class Task(SpyglassMixin, dj.Manual):
         Returns
         -------
         bool
-            Whether the DynamicTable conforms to the expected format for loading data into the Task table.
+            Whether the DynamicTable conforms to the expected format for loading
+            data into the Task table.
         """
         return (
             isinstance(task_table, pynwb.core.DynamicTable)
@@ -174,7 +179,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
-    def update_entries(cls, restrict={}):
+    def update_entries(cls, restrict=True):
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_names"):
@@ -185,9 +190,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             cls.update1(row=row)
 
     @classmethod
-    def check_task_table(cls, task_table) -> bool:
-        """Check whether the pynwb DynamicTable containing task metadata
-        conforms to the expected format.
+    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+        """Check format of pynwb DynamicTable containing task metadata.
 
         The table should be an instance of pynwb.core.DynamicTable and contain
         the columns 'task_name', 'task_description', 'camera_id', 'and

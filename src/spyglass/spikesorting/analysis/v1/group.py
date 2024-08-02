@@ -1,4 +1,5 @@
 from itertools import compress
+from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -122,8 +123,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def fetch_spike_data(
-        key: dict, time_slice: list[float] = None
-    ) -> list[np.ndarray]:
+        key: dict, time_slice: list[float] = None, return_unit_ids: bool = False
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """fetch spike times for units in the group
 
         Parameters
@@ -132,6 +133,9 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             dictionary containing the group key
         time_slice : list of float, optional
             if provided, filter for spikes occurring in the interval [start, stop], by default None
+        return_unit_ids : bool, optional
+            if True, return the unit_ids along with the spike times, by default False
+            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
@@ -156,20 +160,23 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         # get the spike times for each merge_id
         spike_times = []
+        unit_ids = []
         merge_keys = [dict(merge_id=merge_id) for merge_id in merge_ids]
-        nwb_file_list = (SpikeSortingOutput & merge_keys).fetch_nwb()
-        for nwb_file in nwb_file_list:
-            nwb_field_name = (
-                "object_id"
-                if "object_id" in nwb_file
-                else "units" if "units" in nwb_file else None
-            )
+        nwb_file_list, merge_ids = (SpikeSortingOutput & merge_keys).fetch_nwb(
+            return_merge_ids=True
+        )
+        for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
+            nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
             if nwb_field_name is None:
                 # case where no units found or curation removed all units
                 continue
             sorting_spike_times = nwb_file[nwb_field_name][
                 "spike_times"
             ].to_list()
+            file_unit_ids = [
+                {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
+                for unit_id in range(len(sorting_spike_times))
+            ]
 
             # filter the spike times based on the labels if present
             if "label" in nwb_file[nwb_field_name]:
@@ -181,6 +188,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
                 )
+                file_unit_ids = list(compress(file_unit_ids, include_unit))
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
@@ -195,12 +203,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             # append the approved spike times to the list
             spike_times.extend(sorting_spike_times)
+            unit_ids.extend(file_unit_ids)
 
+        if return_unit_ids:
+            return spike_times, unit_ids
         return spike_times
 
     @classmethod
     def get_spike_indicator(cls, key: dict, time: np.ndarray) -> np.ndarray:
-        """get spike indicator matrix for the group
+        """Get spike indicator matrix for the group
 
         Parameters
         ----------
@@ -276,3 +287,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             ],
             axis=1,
         )
+
+
+@staticmethod
+def _get_spike_obj_name(nwb_file, allow_empty=False):
+    nwb_field_name = (
+        "object_id"
+        if "object_id" in nwb_file
+        else "units" if "units" in nwb_file else None
+    )
+    if nwb_field_name is None and not allow_empty:
+        raise ValueError("NWB file does not have 'object_id' or 'units' field")
+    return nwb_field_name

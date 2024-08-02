@@ -34,6 +34,8 @@ PositionGroup.alter()
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
+- Convert list of LFP artifact removed interval list to array #1046
+- Merge duplicate functions in decoding and spikesorting #1050
 
 ### Pipelines
 
@@ -64,6 +66,8 @@ PositionGroup.alter()
     - Replace `OutputLogger` context manager with decorator #870
     - Rename `check_videofile` -> `find_mp4` and `get_video_path` ->
         `get_video_info` to reflect actual use #870
+    - Fix `red_led_bisector` `np.nan` handling issue from #870. Fixed in #1034
+    - Fix `one_pt_centoid` `np.nan` handling issue from #870. Fixed in #1034
 - Spikesorting
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
@@ -72,6 +76,7 @@ PositionGroup.alter()
     - Fix bug in identification of artifact samples to be zeroed out in
         `spikesorting.v1.SpikeSorting` #1009
     - Remove deprecated dependencies on kachery_client #1014
+    - Add `UnitAnnotation` table and naming convention for units #1027
 
 ## [0.5.2] (April 22, 2024)
 
