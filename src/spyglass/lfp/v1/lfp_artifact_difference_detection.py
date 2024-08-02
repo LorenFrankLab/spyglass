@@ -53,7 +53,8 @@ def difference_artifact_detector(
         Width of the window in milliseconds to mask out per artifact (window/2
         removed on each side of threshold crossing), defaults to 1 ms
     referencing : bool, optional
-        Whether or not the data passed to this function is referenced, defaults to False
+        Whether or not the data passed to this function is referenced, defaults
+        to False
 
     Returns
     -------

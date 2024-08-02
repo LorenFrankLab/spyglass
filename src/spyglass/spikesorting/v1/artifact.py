@@ -229,8 +229,7 @@ def _get_artifact_times(
     # detect frames that are above threshold in parallel
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
     logger.info(f"Using {n_jobs} jobs...")
-    func = _compute_artifact_chunk
-    init_func = _init_artifact_worker
+
     if n_jobs == 1:
         init_args = (
             recording,
@@ -247,10 +246,10 @@ def _get_artifact_times(
         )
 
     executor = ChunkRecordingExecutor(
-        recording,
-        func,
-        init_func,
-        init_args,
+        recording=recording,
+        func=_compute_artifact_chunk,
+        init_func=_init_artifact_worker,
+        init_args=init_args,
         verbose=verbose,
         handle_returns=True,
         job_name="detect_artifact_frames",

@@ -115,7 +115,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
         destination_dir = f"{paper_dir}/dandiset_{paper_id}"
         dandiset_dir = f"{paper_dir}/{dandiset_id}"
 
-        # check if existing dirs for dandi export. If so, remove to continue
+        # check if pre-existing directories for dandi export exist.
+        # Remove if so to continue
         for dandi_dir in destination_dir, dandiset_dir:
             if os.path.exists(dandi_dir):
                 if (
@@ -215,8 +216,7 @@ def _get_metadata(path):
 def translate_name_to_dandi(folder):
     """Uses dandi.organize to translate filenames to dandi paths
 
-    *Note* The name for a given file is dependent on that of all files in the
-    folder
+    NOTE: The name for a given file depends on all files in the folder
 
     Parameters
     ----------

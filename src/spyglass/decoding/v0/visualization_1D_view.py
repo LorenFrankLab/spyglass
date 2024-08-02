@@ -4,11 +4,7 @@ import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
 
-
-def discretize_and_trim(series: xr.DataArray) -> xr.DataArray:
-    discretized = np.multiply(series, 255).astype(np.uint8)  # type: ignore
-    stacked = discretized.stack(unified_index=["time", "position"])
-    return stacked.where(stacked > 0, drop=True).astype(np.uint8)
+from spyglass.decoding.v0.utils import discretize_and_trim
 
 
 def get_observations_per_time(
@@ -16,7 +12,9 @@ def get_observations_per_time(
 ) -> np.ndarray:
     times, counts = np.unique(trimmed_posterior.time.values, return_counts=True)
     indexed_counts = xr.DataArray(counts, coords={"time": times})
-    _, good_counts = xr.align(base_data.time, indexed_counts, join="left", fill_value=0)  # type: ignore
+    _, good_counts = xr.align(
+        base_data.time, indexed_counts, join="left", fill_value=0
+    )  # type: ignore
 
     return good_counts.values.astype(np.uint8)
 
@@ -57,7 +55,7 @@ def create_1D_decode_view(
     if linear_position is not None:
         linear_position = np.asarray(linear_position).squeeze()
 
-    trimmed_posterior = discretize_and_trim(posterior)
+    trimmed_posterior = discretize_and_trim(posterior, ndims=1)
     observations_per_time = get_observations_per_time(
         trimmed_posterior, posterior
     )
