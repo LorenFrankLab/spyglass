@@ -129,13 +129,17 @@ class Curation(SpyglassMixin, dj.Manual):
         # convert unit_ids in labels to integers for labels from sortingview.
         new_labels = {int(unit_id): labels[unit_id] for unit_id in labels}
 
-        sorting_key["curation_id"] = curation_id
-        sorting_key["parent_curation_id"] = parent_curation_id
-        sorting_key["description"] = description
-        sorting_key["curation_labels"] = new_labels
-        sorting_key["merge_groups"] = merge_groups
-        sorting_key["quality_metrics"] = metrics
-        sorting_key["time_of_creation"] = int(time.time())
+        sorting_key.update(
+            {
+                "curation_id": curation_id,
+                "parent_curation_id": parent_curation_id,
+                "description": description,
+                "curation_labels": new_labels,
+                "merge_groups": merge_groups,
+                "quality_metrics": metrics,
+                "time_of_creation": int(time.time()),
+            }
+        )
 
         # mike: added skip duplicates
         Curation.insert1(sorting_key, skip_duplicates=True)
@@ -1062,8 +1066,10 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         sort_group_info : Table
             Table with information about the sort groups
         """
+        table = cls & key
+
         electrode_restrict_list = []
-        for entry in cls & key:
+        for entry in table:
             # Just take one electrode entry per sort group
             electrode_restrict_list.extend(
                 ((SortGroup.SortGroupElectrode() & entry) * Electrode).fetch(
@@ -1073,7 +1079,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         # Run joins with the tables with info and return
         sort_group_info = (
             (Electrode & electrode_restrict_list)
-            * (cls & key)
+            * table
             * SortGroup.SortGroupElectrode()
         ) * BrainRegion()
         return sort_group_info

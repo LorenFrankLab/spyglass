@@ -211,7 +211,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_spike_indicator(cls, key: dict, time: np.ndarray) -> np.ndarray:
-        """get spike indicator matrix for the group
+        """Get spike indicator matrix for the group
 
         Parameters
         ----------

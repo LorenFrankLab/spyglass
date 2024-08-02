@@ -1,4 +1,5 @@
 import datajoint as dj
+from pynwb import NWBFile
 
 from spyglass.utils import SpyglassMixin, logger
 
@@ -18,14 +19,14 @@ class Subject(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
+    def insert_from_nwbfile(cls, nwbf: NWBFile, config: dict = None):
         """Get the subject info from the NWBFile, insert into the Subject.
 
         Parameters
         ----------
         nwbf: pynwb.NWBFile
             The NWB file with subject information.
-        config : dict
+        config : dict, optional
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
 
