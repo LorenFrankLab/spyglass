@@ -30,7 +30,7 @@ PositionGroup.alter()
 - Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
 - `cautious_delete` now checks `IntervalList` and externals tables. #1002
 - Allow mixin tables with parallelization in `make` to run populate with
-    `processes > 1` #1001
+    `processes > 1` #1001, #1052
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
@@ -75,7 +75,7 @@ PositionGroup.alter()
     - Fix bug in identification of artifact samples to be zeroed out in
         `spikesorting.v1.SpikeSorting` #1009
     - Remove deprecated dependencies on kachery_client #1014
-    - Add `UnitAnnotation` table and naming convention for units #1027
+    - Add `UnitAnnotation` table and naming convention for units #1027, #1052
 
 ## [0.5.2] (April 22, 2024)
 
