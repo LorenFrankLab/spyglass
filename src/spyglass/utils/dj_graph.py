@@ -1114,7 +1114,11 @@ class TableChain(RestrGraph):
         return path
 
     def cascade(
-        self, restriction: str = None, direction: Direction = None, **kwargs
+        self,
+        restriction: str = None,
+        direction: Direction = None,
+        null_on_fail: bool = True,
+        **kwargs,
     ):
         if not self.has_link:
             return
@@ -1139,10 +1143,12 @@ class TableChain(RestrGraph):
         # Cascade will stop if any restriction is empty, so set rest to None
         # This would cause issues if we want a table partway through the chain
         # but that's not a typical use case, were the start and end are desired
-        non_numeric = [t for t in self.path if not t.isnumeric()]
-        if any(self._get_restr(t) is None for t in non_numeric):
-            for table in non_numeric:
-                if table is not start:
+        if null_on_fail:
+            non_numeric = [
+                t for t in self.path if not t.isnumeric() and t != start
+            ]
+            if any(self._get_restr(t) is None for t in non_numeric):
+                for table in non_numeric:
                     self._set_restr(table, False, replace=True)
 
         return self._get_ft(end, with_restr=True)
@@ -1150,3 +1156,103 @@ class TableChain(RestrGraph):
     def restrict_by(self, *args, **kwargs) -> None:
         """Cascade passthrough."""
         return self.cascade(*args, **kwargs)
+
+
+import importlib
+import inspect
+from pathlib import Path
+
+
+class ImportedGraph(TableChain):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._class_map = None
+
+    @property
+    def class_map(self):
+        if not self._class_map:
+            self._class_map = self._map_package()
+        return self._class_map
+
+    def _set_class(self, table_name: str, class_obj: Any) -> None:
+        """Set class object for table name."""
+        self._set_node(table_name, "class", class_obj)
+
+    def _get_class(self, table_name: str) -> Any:
+        """Get class object for table name."""
+        class_obj = self._get_node(table_name).get("class")
+        if not class_obj:
+            class_obj = self._import_class(table_name)
+        return class_obj
+
+    def _map_package(self) -> dict:
+        package_name = "spyglass"
+        package = importlib.import_module("spyglass")
+        package_path = Path(package.__file__).parent
+
+        class_map = {}
+
+        for py_file in package_path.rglob("*.py"):
+            if py_file.stem.startswith("_"):
+                continue
+
+            # Convert file path to module path
+            relative_path = py_file.relative_to(package_path)
+            module_name = (
+                f"{package_name}.{relative_path.with_suffix('')}".replace(
+                    "/", "."
+                ).replace("\\", ".")
+            )
+
+            try:
+                module = importlib.import_module(module_name)
+
+                # Check if the module has a `schema` object
+                schema_obj = getattr(module, "schema", None)
+                if not schema_obj:
+                    self._log_truncate(f"Skipping: {module_name}")
+                    continue
+                schema_name = getattr(schema_obj, "database")
+                entry = {schema_name: module_name}
+
+                # Map class names to schema and module names
+                self._log_truncate(f"Mapping : {module_name}")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if "__" in name or "Mixin" in name:
+                        continue
+                    if "position_merge" in module_name:
+                        self._log_truncate(f"Add merge: {name}")
+                    if class_map.get(name):
+                        class_map[name].update(entry)
+                    else:
+                        class_map[name] = entry
+
+            except ImportError:
+                continue
+
+        return dict(class_map)
+
+    def _decompose_name(self, name: str) -> Tuple[str, str]:
+        """Decompose table name into schema and table name."""
+        schema, table = self._ensure_names(name).strip("`").split(".")
+        part = None
+        if "__" in table and "`__" not in table:
+            table, part = table.split("__")
+        return schema, self._camel(table), self._camel(part)
+
+    def _import_class(self, table_name: str) -> Any:
+        schema_name, class_name, part_name = self._decompose_name(table_name)
+        class_map = self.class_map
+        module_name = class_map.get(class_name, {}).get(schema_name.strip("`"))
+
+        if not module_name:
+            raise ImportError(f"Class {class_name} not found in the package.")
+
+        module = importlib.import_module(module_name)
+        table_class = getattr(module, class_name)
+        if part_name:
+            table_class = getattr(table_class, part_name)
+        return table_class
+
+    def get_classes(self, names: List[str] = None) -> None:
+        return [self._get_class(name) for name in self._ensure_names(names)]
