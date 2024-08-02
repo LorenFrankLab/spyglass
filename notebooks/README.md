@@ -27,6 +27,9 @@ This series of notebooks covers the process of spike sorting, from automated
 spike sorting to optional manual curation of the output of the automated
 sorting.
 
+Spikesorting results from any pipeline can then be organized and tracked using
+tools in [Spikesorting Analysis](./11_Spikesorting_Analysis.ipynb).
+
 ## 2. Position Pipeline
 
 This series of notebooks covers tracking the position(s) of the animal. The user

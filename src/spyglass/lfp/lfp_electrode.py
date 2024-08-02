@@ -11,8 +11,8 @@ schema = dj.schema("lfp_electrode")
 @schema
 class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
     definition = """
-     -> Session                             # the session to which this LFP belongs
-     lfp_electrode_group_name: varchar(200) # the name of this group of electrodes
+     -> Session                             # the session for this LFP
+     lfp_electrode_group_name: varchar(200) # name for this group of electrodes
      """
 
     class LFPElectrode(SpyglassMixin, dj.Part):

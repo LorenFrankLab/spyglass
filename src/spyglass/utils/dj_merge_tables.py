@@ -507,6 +507,7 @@ class Merge(dj.Manual):
         restriction: str = None,
         multi_source=False,
         disable_warning=False,
+        return_merge_ids=False,
         *attrs,
         **kwargs,
     ):
@@ -521,6 +522,8 @@ class Merge(dj.Manual):
             Restriction to apply to parents before running fetch. Default True.
         multi_source: bool
             Return from multiple parents. Default False.
+        return_merge_ids: bool
+            Default False. Return merge_ids with nwb files.
 
         Notes
         -----
@@ -531,6 +534,7 @@ class Merge(dj.Manual):
         restriction = restriction or self.restriction or True
         sources = set((self & restriction).fetch(self._reserved_sk))
         nwb_list = []
+        merge_ids = []
         for source in sources:
             source_restr = (
                 self & {self._reserved_sk: source} & restriction
@@ -540,6 +544,10 @@ class Merge(dj.Manual):
                     source_restr, permit_multiple_rows=True
                 ).fetch_nwb()
             )
+            if return_merge_ids:
+                merge_ids.extend([k[self._reserved_pk] for k in source_restr])
+        if return_merge_ids:
+            return nwb_list, merge_ids
         return nwb_list
 
     @classmethod

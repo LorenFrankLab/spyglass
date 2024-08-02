@@ -21,7 +21,10 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def fetch_add(
-        cls, region_name, subregion_name=None, subsubregion_name=None
+        cls,
+        region_name: str,
+        subregion_name: str = None,
+        subsubregion_name: str = None,
     ):
         """Return the region ID for names. If no match, add to the BrainRegion.
 

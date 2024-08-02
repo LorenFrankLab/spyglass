@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import sortingview.views as vv
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
-from ripple_detection.core import gaussian_smooth, get_envelope
 from scipy.stats import zscore
 
 from spyglass.common.common_interval import (
@@ -12,6 +11,7 @@ from spyglass.common.common_interval import (
     interval_list_intersect,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.common.common_ripple import RippleTimes, interpolate_to_new_time
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
@@ -27,20 +27,6 @@ RIPPLE_DETECTION_ALGORITHMS = {
 
 # Do we need this anymore given that LFPBand is no longer a merge table?
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
-
-
-def interpolate_to_new_time(
-    df, new_time, upsampling_interpolation_method="linear"
-):
-    old_time = df.index
-    new_index = pd.Index(
-        np.unique(np.concatenate((old_time, new_time))), name="time"
-    )
-    return (
-        df.reindex(index=new_index)
-        .interpolate(method=upsampling_interpolation_method)
-        .reindex(index=new_time)
-    )
 
 
 @schema
@@ -296,20 +282,10 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
     def get_Kay_ripple_consensus_trace(
         ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004
     ):
-        ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
-        not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
-
-        ripple_consensus_trace[not_null] = get_envelope(
-            np.asarray(ripple_filtered_lfps)[not_null]
-        )
-        ripple_consensus_trace = np.sum(ripple_consensus_trace**2, axis=1)
-        ripple_consensus_trace[not_null] = gaussian_smooth(
-            ripple_consensus_trace[not_null],
-            smoothing_sigma,
-            sampling_frequency,
-        )
-        return pd.DataFrame(
-            np.sqrt(ripple_consensus_trace), index=ripple_filtered_lfps.index
+        return RippleTimes.get_Kay_ripple_consensus_trace(
+            ripple_filtered_lfps=ripple_filtered_lfps,
+            sampling_frequency=sampling_frequency,
+            smoothing_sigma=smoothing_sigma,
         )
 
     @staticmethod
