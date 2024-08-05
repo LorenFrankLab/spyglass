@@ -1,6 +1,18 @@
 # Change Log
 
-## [0.5.3] (July 15, 2024)
+## [0.5.3] (Unreleased)
+
+## Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+```python
+from spyglass.common.common_behav import PositionIntervalMap
+from spyglass.decoding.v1.core import PositionGroup
+
+PositionIntervalMap.alter()
+PositionGroup.alter()
+```
 
 ### Infrastructure
 
