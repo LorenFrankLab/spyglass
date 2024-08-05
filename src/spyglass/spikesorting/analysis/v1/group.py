@@ -293,9 +293,7 @@ def _get_spike_obj_name(nwb_file, allow_empty=False):
     nwb_field_name = (
         "object_id"
         if "object_id" in nwb_file
-        else "units"
-        if "units" in nwb_file
-        else None
+        else "units" if "units" in nwb_file else None
     )
     if nwb_field_name is None and not allow_empty:
         raise ValueError("NWB file does not have 'object_id' or 'units' field")

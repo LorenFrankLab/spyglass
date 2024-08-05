@@ -251,17 +251,17 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             comments="no comments",
             description="video_frame_ind",
         )
-        key[
-            "dlc_smooth_interp_position_object_id"
-        ] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=position,
+        key["dlc_smooth_interp_position_object_id"] = (
+            nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=position,
+            )
         )
-        key[
-            "dlc_smooth_interp_info_object_id"
-        ] = nwb_analysis_file.add_nwb_object(
-            analysis_file_name=key["analysis_file_name"],
-            nwb_object=video_frame_ind,
+        key["dlc_smooth_interp_info_object_id"] = (
+            nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=video_frame_ind,
+            )
         )
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],

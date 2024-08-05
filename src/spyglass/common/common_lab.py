@@ -346,9 +346,7 @@ def decompose_name(full_name: str) -> tuple:
     delim = (
         ", "
         if full_trimmed.count(", ") == 1
-        else " "
-        if full_trimmed.count(" ") == 1
-        else None
+        else " " if full_trimmed.count(" ") == 1 else None
     )
 
     parts = full_trimmed.split(delim)

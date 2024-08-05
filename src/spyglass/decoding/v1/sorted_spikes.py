@@ -206,9 +206,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             vars(classifier).get("discrete_transition_coefficients_")
             is not None
         ):
-            results[
-                "discrete_transition_coefficients"
-            ] = classifier.discrete_transition_coefficients_
+            results["discrete_transition_coefficients"] = (
+                classifier.discrete_transition_coefficients_
+            )
 
         # Insert results
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
