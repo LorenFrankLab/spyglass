@@ -710,6 +710,7 @@ class SpyglassMixin:
         # Pass through to super if not parallel in the make function or only a single process
         processes = kwargs.pop("processes", 1)
         if processes == 1 or not self._parallel_make:
+            kwargs["processes"] = processes
             return super().populate(*restrictions, **kwargs)
 
         # If parallel in both make and populate, use non-daemon processes
