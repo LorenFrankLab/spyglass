@@ -446,8 +446,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         filter_by_interval : bool, optional
             Whether to filter for spike times in the model interval.
             Default True
-        time_slice : Slice, optional
-            User provided slice of time to restrict spikes to. Default None
 
         Returns
         -------
