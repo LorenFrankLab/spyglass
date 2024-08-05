@@ -76,7 +76,8 @@ PositionGroup.alter()
         `spikesorting.v1.SpikeSorting` #1009
     - Remove deprecated dependencies on kachery_client #1014
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
-
+    - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
+        #1039
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
