@@ -114,7 +114,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-
             # if estimating parameters, then we need to treat times outside
             # decoding interval as missing this means that times outside the
             # decoding interval will not use the spiking data a better approach
@@ -207,9 +206,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             vars(classifier).get("discrete_transition_coefficients_")
             is not None
         ):
-            results["discrete_transition_coefficients"] = (
-                classifier.discrete_transition_coefficients_
-            )
+            results[
+                "discrete_transition_coefficients"
+            ] = classifier.discrete_transition_coefficients_
 
         # Insert results
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?

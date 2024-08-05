@@ -239,14 +239,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         os.makedirs(waveforms_dir, exist_ok=True)
 
         logger.info("Extracting waveforms...")
-        if "sparse" in waveform_params.keys():
-            sparse = waveform_params["sparse"]
-        else:
-            sparse=False
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            sparse=sparse,
+            sparse=waveform_params.get("sparse", False),
             folder=waveforms_dir,
             overwrite=True,
             **waveform_params,

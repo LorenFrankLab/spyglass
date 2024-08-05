@@ -168,7 +168,9 @@ class SpyglassMixin:
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile if "-> Nwbfile" in self.definition else None
+            else Nwbfile
+            if "-> Nwbfile" in self.definition
+            else None
         )
 
         if not resolved:

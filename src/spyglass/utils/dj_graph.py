@@ -335,7 +335,9 @@ class AbstractGraph(ABC):
             result = (
                 "EMPTY"
                 if len(ret) == 0
-                else "FULL" if len(ft2) == len(ret) else "partial"
+                else "FULL"
+                if len(ft2) == len(ret)
+                else "partial"
             )
             path = f"{self._camel(table1)} -> {self._camel(table2)}"
             self._log_truncate(f"Bridge Link: {path}: result {result}")

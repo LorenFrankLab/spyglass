@@ -15,7 +15,9 @@ def main(*args):
     save_method = (
         "local"
         if filename == "dj_local_conf.json"
-        else "global" if filename is None else "custom"
+        else "global"
+        if filename is None
+        else "custom"
     )
 
     config.save_dj_config(

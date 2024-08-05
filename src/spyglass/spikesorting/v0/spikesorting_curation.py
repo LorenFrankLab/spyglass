@@ -521,9 +521,9 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             key["nwb_file_name"]
         )
         waveform_extractor = Waveforms().load_waveforms(key)
-        key["analysis_file_name"] = (
-            analysis_file_name  # add to key here to prevent fetch errors
-        )
+        key[
+            "analysis_file_name"
+        ] = analysis_file_name  # add to key here to prevent fetch errors
         qm = {}
         params = (MetricParameters & key).fetch1("metric_params")
         for metric_name, metric_params in params.items():

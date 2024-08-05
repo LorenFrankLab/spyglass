@@ -132,17 +132,17 @@ def restore_classes(params: dict) -> dict:
         _convert_env_dict(env_params)
         for env_params in params["classifier_params"]["environments"]
     ]
-    params["classifier_params"]["discrete_transition_type"] = (
-        _convert_dict_to_class(
-            params["classifier_params"]["discrete_transition_type"],
-            discrete_state_transition_types,
-        )
+    params["classifier_params"][
+        "discrete_transition_type"
+    ] = _convert_dict_to_class(
+        params["classifier_params"]["discrete_transition_type"],
+        discrete_state_transition_types,
     )
-    params["classifier_params"]["initial_conditions_type"] = (
-        _convert_dict_to_class(
-            params["classifier_params"]["initial_conditions_type"],
-            initial_conditions_types,
-        )
+    params["classifier_params"][
+        "initial_conditions_type"
+    ] = _convert_dict_to_class(
+        params["classifier_params"]["initial_conditions_type"],
+        initial_conditions_types,
     )
 
     if params["classifier_params"].get("observation_models"):
@@ -192,10 +192,10 @@ def convert_classes_to_dict(key: dict) -> dict:
                 key["classifier_params"]["environments"]
             )
         ]
-    key["classifier_params"]["continuous_transition_types"] = (
-        _convert_transitions_to_dict(
-            key["classifier_params"]["continuous_transition_types"]
-        )
+    key["classifier_params"][
+        "continuous_transition_types"
+    ] = _convert_transitions_to_dict(
+        key["classifier_params"]["continuous_transition_types"]
     )
     key["classifier_params"]["discrete_transition_type"] = _to_dict(
         key["classifier_params"]["discrete_transition_type"]
@@ -210,10 +210,10 @@ def convert_classes_to_dict(key: dict) -> dict:
         ]
 
     try:
-        key["classifier_params"]["clusterless_algorithm_params"] = (
-            _convert_algorithm_params(
-                key["classifier_params"]["clusterless_algorithm_params"]
-            )
+        key["classifier_params"][
+            "clusterless_algorithm_params"
+        ] = _convert_algorithm_params(
+            key["classifier_params"]["clusterless_algorithm_params"]
         )
     except KeyError:
         pass

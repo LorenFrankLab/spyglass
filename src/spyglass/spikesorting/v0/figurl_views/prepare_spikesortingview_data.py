@@ -102,16 +102,16 @@ def prepare_spikesortingview_data(
                             channel_neighborhood_size=channel_neighborhood_size,
                         )
                         if len(spike_train) >= 10:
-                            unit_peak_channel_ids[str(unit_id)] = (
-                                peak_channel_id
-                            )
+                            unit_peak_channel_ids[
+                                str(unit_id)
+                            ] = peak_channel_id
                         else:
-                            fallback_unit_peak_channel_ids[str(unit_id)] = (
-                                peak_channel_id
-                            )
-                        unit_channel_neighborhoods[str(unit_id)] = (
-                            channel_neighborhood
-                        )
+                            fallback_unit_peak_channel_ids[
+                                str(unit_id)
+                            ] = peak_channel_id
+                        unit_channel_neighborhoods[
+                            str(unit_id)
+                        ] = channel_neighborhood
         for unit_id in unit_ids:
             peak_channel_id = unit_peak_channel_ids.get(str(unit_id), None)
             if peak_channel_id is None:

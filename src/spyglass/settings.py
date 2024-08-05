@@ -186,7 +186,9 @@ class SpyglassConfig:
                 source_config = (
                     dj_dlc
                     if prefix == "dlc"
-                    else dj_kachery if prefix == "kachery" else dj_spyglass
+                    else dj_kachery
+                    if prefix == "kachery"
+                    else dj_spyglass
                 )
                 dir_location = (
                     source_config.get(dir)

@@ -183,7 +183,6 @@ def rename_default_cols(common_position):
     ],
 )
 def test_rename_columns(rename_default_cols, col_type, cols):
-
     _fix_col_names, defaults = rename_default_cols
     df = pd.DataFrame([range(len(cols) + 1)], columns=["junk"] + cols)
     result = _fix_col_names(df).columns.tolist()

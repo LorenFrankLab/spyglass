@@ -118,7 +118,6 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
     def _insert_est_with_log(
         self, key, task_mode, params, check_crop, skip_duplicates, output_dir
     ):
-
         v_path, v_fname, _, _ = get_video_info(key)
         if not v_path:
             raise FileNotFoundError(f"Video file not found for {key}")
@@ -215,7 +214,6 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
     @file_log(logger, console=True)
     def _logged_make(self, key):
-
         METERS_PER_CM = 0.01
 
         logger.info("----------------------")
@@ -331,17 +329,17 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 description="video_frame_ind",
             )
             nwb_analysis_file = AnalysisNwbfile()
-            key["dlc_pose_estimation_position_object_id"] = (
-                nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=position,
-                )
+            key[
+                "dlc_pose_estimation_position_object_id"
+            ] = nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=position,
             )
-            key["dlc_pose_estimation_likelihood_object_id"] = (
-                nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=likelihood,
-                )
+            key[
+                "dlc_pose_estimation_likelihood_object_id"
+            ] = nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=likelihood,
             )
             nwb_analysis_file.add(
                 nwb_file_name=key["nwb_file_name"],
