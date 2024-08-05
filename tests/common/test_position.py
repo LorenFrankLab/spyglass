@@ -159,11 +159,12 @@ def test_position_video(position_video, upsample_position):
     assert len(position_video) == 1, "Failed to populate PositionVideo table."
 
 
-def test_convert_to_pixels(position_video):
+def test_convert_to_pixels():
+    from spyglass.utils.position import convert_to_pixels
 
     data = np.array([[2, 4], [6, 8]])
     expect = np.array([[1, 2], [3, 4]])
-    output = position_video.convert_to_pixels(data, "junk", 2)
+    output = convert_to_pixels(data, "junk", 2)
 
     assert np.array_equal(output, expect), "Failed to convert to pixels."
 

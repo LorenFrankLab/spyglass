@@ -1,5 +1,5 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from clustered spikes times. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from clustered spikes times. See [1] for details.
 
 References
 ----------
@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 import copy
 import uuid
 from pathlib import Path
+from typing import Optional, Union
 
 import datajoint as dj
 import non_local_detector.analysis as analysis
@@ -22,10 +23,8 @@ from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.decoding.v1.core import (
-    DecodingParameters,
-    PositionGroup,
-)  # noqa: F401
+from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
+from spyglass.decoding.v1.core import PositionGroup
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
@@ -45,7 +44,7 @@ class SortedSpikesDecodingSelection(SpyglassMixin, dj.Manual):
     -> DecodingParameters
     -> IntervalList.proj(encoding_interval='interval_list_name')
     -> IntervalList.proj(decoding_interval='interval_list_name')
-    estimate_decoding_params = 1 : bool # whether to estimate the decoding parameters
+    estimate_decoding_params = 1 : bool # 1 to estimate the decoding parameters
     """
     # NOTE: Excessive key length fixed by reducing UnitSelectionParams.unit_filter_params_name
 
@@ -79,8 +78,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             position_variable_names,
         ) = self.fetch_position_info(key)
 
-        # Get the spike times for the selected units
-        # Don't need to filter by interval since the non_local_detector code will do that
+        # Get the spike times for the selected units. Don't need to filter by
+        # interval since the non_local_detector code will do that
+
         spike_times = self.fetch_spike_data(key, filter_by_interval=False)
 
         # Get the encoding and decoding intervals
@@ -114,10 +114,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-            # if estimating parameters, then we need to treat times outside decoding interval as missing
-            # this means that times outside the decoding interval will not use the spiking data
-            # a better approach would be to treat the intervals as multiple sequences
-            # (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
+            # if estimating parameters, then we need to treat times outside
+            # decoding interval as missing this means that times outside the
+            # decoding interval will not use the spiking data a better approach
+            # would be to treat the intervals as multiple sequences (see
+            # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
                 is_missing[
@@ -292,7 +295,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_interval_range(key):
-        """Get the maximum range of model times in the encoding and decoding intervals
+        """Return maximum range of model times in encoding/decoding intervals
 
         Parameters
         ----------
@@ -352,10 +355,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
         position_info, position_variable_names = (
             PositionGroup & position_group_key
-        ).fetch_position_info(
-            min_time=min_time,
-            max_time=max_time,
-        )
+        ).fetch_position_info(min_time=min_time, max_time=max_time)
 
         return position_info, position_variable_names
 
@@ -388,6 +388,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
         min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+
         return (
             pd.concat(
                 [linear_position_df.set_index(position_df.index), position_df],
@@ -398,7 +399,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
 
     @staticmethod
-    def fetch_spike_data(key, filter_by_interval=True, time_slice=None):
+    def fetch_spike_data(
+        key, filter_by_interval=True, time_slice=None, return_unit_ids=False
+    ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for the decoding model
 
         Parameters
@@ -406,16 +409,23 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         key : dict
             The decoding selection key
         filter_by_interval : bool, optional
-            Whether to filter for spike times in the model interval, by default True
+            Whether to filter for spike times in the model interval,
+            by default True
         time_slice : Slice, optional
             User provided slice of time to restrict spikes to, by default None
+        return_unit_ids : bool, optional
+            if True, return the unit_ids along with the spike times, by default
+            False Unit ids defined as a list of dictionaries with keys
+            'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
         list[np.ndarray]
             List of spike times for each unit in the model's spike group
         """
-        spike_times = SortedSpikesGroup.fetch_spike_data(key)
+        spike_times, unit_ids = SortedSpikesGroup.fetch_spike_data(
+            key, return_unit_ids=True
+        )
         if not filter_by_interval:
             return spike_times
 
@@ -431,6 +441,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             )
             new_spike_times.append(elec_spike_times[is_in_interval])
 
+        if return_unit_ids:
+            return new_spike_times, unit_ids
         return new_spike_times
 
     def spike_times_sorted_by_place_field_peak(self, time_slice=None):
@@ -467,8 +479,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ]
         return new_spike_times
 
+    def get_orientation_col(self, df):
+        """Examine columns of a input df and return orientation col name"""
+        cols = df.columns
+        return "orientation" if "orientation" in cols else "head_orientation"
+
     def get_ahead_behind_distance(self, track_graph=None, time_slice=None):
-        """Get the ahead-behind distance of the decoded position from the animal's actual position
+        """Get relative decoded position from the animal's actual position
 
         Parameters
         ----------
@@ -504,11 +521,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 self.fetch1("KEY")
             ).loc[time_slice]
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in linear_position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(linear_position_info)
 
             traj_data = analysis.get_trajectory_data(
                 posterior=posterior,
@@ -528,11 +541,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             ]
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
 
-            orientation_name = (
-                "orientation"
-                if "orientation" in position_info.columns
-                else "head_orientation"
-            )
+            orientation_name = self.get_orientation_col(position_info)
+
             position_variable_names = (
                 PositionGroup & self.fetch1("KEY")
             ).fetch1("position_variables")

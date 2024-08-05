@@ -2,6 +2,7 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.axes import Axes
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 
@@ -54,16 +55,17 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
     @staticmethod
     def set_lfp_electrodes(
         key,
-        electrode_list=None,
-        group_name="CA1",
+        electrode_list: list = None,
+        group_name: str = "CA1",
         **kwargs,
     ):
-        """Removes all electrodes for the specified nwb file and then adds back the electrodes in the list
+        """Replaces all electrodes for an nwb file with specified electrodes.
 
         Parameters
         ----------
         key : dict
-            dictionary corresponding to the LFPBand entry to use for ripple detection
+            dictionary corresponding to the LFPBand entry to use for ripple
+            detection
         electrode_list : list
             list of electrodes from LFPBandSelection.LFPBandElectrode
             to be used as the ripple LFP during detection
@@ -267,7 +269,7 @@ class RippleTimes(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def get_Kay_ripple_consensus_trace(
-        ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004
+        ripple_filtered_lfps, sampling_frequency, smoothing_sigma: float = 0.004
     ):
         ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
         not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
@@ -289,10 +291,10 @@ class RippleTimes(SpyglassMixin, dj.Computed):
     def plot_ripple_consensus_trace(
         ripple_consensus_trace,
         ripple_times,
-        ripple_label=1,
-        offset=0.100,
-        relative=True,
-        ax=None,
+        ripple_label: int = 1,
+        offset: float = 0.100,
+        relative: bool = True,
+        ax: Axes = None,
     ):
         ripple_start = ripple_times.loc[ripple_label].start_time
         ripple_end = ripple_times.loc[ripple_label].end_time
@@ -319,7 +321,12 @@ class RippleTimes(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def plot_ripple(
-        lfps, ripple_times, ripple_label=1, offset=0.100, relative=True, ax=None
+        lfps,
+        ripple_times,
+        ripple_label: int = 1,
+        offset: float = 0.100,
+        relative: bool = True,
+        ax: Axes = None,
     ):
         lfp_labels = lfps.columns
         n_lfps = len(lfp_labels)
