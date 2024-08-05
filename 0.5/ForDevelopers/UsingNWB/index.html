@@ -1,0 +1,6032 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Spyglass Documentation">
+      
+      
+        <meta name="author" content="CBroz1">
+      
+      
+        <link rel="canonical" href="https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/UsingNWB/">
+      
+      
+        <link rel="prev" href="../Schema/">
+      
+      
+        <link rel="next" href="../../api/">
+      
+      
+      <link rel="icon" href="../../images/Spyglass.svg">
+      <meta name="generator" content="mkdocs-1.6.0, mkdocs-material-9.5.31">
+    
+    
+      
+        <title>Using NWB - Spyglass</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.3cba04c6.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce((e,_)=>(e<<5)-e+_.charCodeAt(0),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="auto" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#using-nwb" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Spyglass" class="md-header__button md-logo" aria-label="Spyglass" data-md-component="logo">
+      
+  <img src="../../images/FrankLab.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2Z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Spyglass
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Using NWB
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="auto" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: slate)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12c0-2.42-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69Z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var media,input,key,value,palette=__md_get("__palette");if(palette&&palette.color){"(prefers-color-scheme)"===palette.color.media&&(media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']"),palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent"));for([key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5Z"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7 0-.24-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91 1.61 0 2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08Z"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41Z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/LorenFrankLab/spyglass" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Spyglass" class="md-nav__button md-logo" aria-label="Spyglass" data-md-component="logo">
+      
+  <img src="../../images/FrankLab.png" alt="logo">
+
+    </a>
+    Spyglass
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/LorenFrankLab/spyglass" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81z"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Tutorials
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Tutorials
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_2" id="__nav_2_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Intro
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_2">
+            <span class="md-nav__icon md-icon"></span>
+            Intro
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/00_Setup/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Setup
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/01_Concepts/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/02_Insert_Data/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Insert Data
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/03_Data_Sync/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Data Sync
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/04_Merge_Tables/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Merge Tables
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/05_Export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_3" id="__nav_2_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Spikes
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_3">
+            <span class="md-nav__icon md-icon"></span>
+            Spikes
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/10_Spike_SortingV0/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Spike Sorting V0
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/10_Spike_SortingV1/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Spike Sorting V1
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/11_Spike_Sorting_Analysis/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Spike Sorting Analysis
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Position
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_4">
+            <span class="md-nav__icon md-icon"></span>
+            Position
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/20_Position_Trodes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Position Trodes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/21_DLC/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    DLC Models
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/22_DLC_Loop/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Looping DLC
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/24_Linearization/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Linearization
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    LFP
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_5">
+            <span class="md-nav__icon md-icon"></span>
+            LFP
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/30_LFP/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    LFP
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/31_Theta/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Theta
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/32_Ripple_Detection/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Ripple Detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_2_6" id="__nav_2_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Decoding
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_2_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2_6">
+            <span class="md-nav__icon md-icon"></span>
+            Decoding
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/40_Extracting_Clusterless_Waveform_Features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Extracting Waveforms
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/41_Decoding_Clusterless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Decoding Clusterless
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/42_Decoding_SortedSpikes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Decoding Sorted Spikes
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../notebooks/50_MUA_Detection/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    MUA Detection
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Features
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/FigURL/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    FigURL
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/Merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Merge Tables
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/Export/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Export
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/SessionGroups/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Session Groups
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../Features/Mixin/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Centralized Code
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    For Developers
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            For Developers
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Contribute/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    How to Contribute
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Management/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Database Management
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Reuse/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Code Reuse
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../TableTypes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Table Types
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../Schema/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Understanding a Schema
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Using NWB
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Using NWB
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#nwb-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      NWB files
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analysis-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      Analysis files
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-and-writing-recordings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading and writing recordings
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      Naming convention
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#time" class="md-nav__link">
+    <span class="md-ellipsis">
+      Time
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-table-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Object-Table mappings
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    cli
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            cli
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/cli/cli/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    cli.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    common
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            common
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_behav/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_behav.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_dandi/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_dandi.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_device/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_device.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_dio/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_dio.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_ephys/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_ephys.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_filter/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_filter.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_interval/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_interval.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_lab/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_lab.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_nwbfile/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_nwbfile.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_position/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_position.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_region/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_region.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_ripple/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_ripple.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_sensors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_sensors.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_session/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_session.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_subject/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_subject.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_task/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_task.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/common_usage/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    common_usage.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/errors/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    errors.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/populate_all_common/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    populate_all_common.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_3_20" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_3_20" id="__nav_5_3_20_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    prepopulate
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_3_20_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_3_20">
+            <span class="md-nav__icon md-icon"></span>
+            prepopulate
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/prepopulate/prepopulate/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    prepopulate.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/common/signal_processing/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    signal_processing.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    data_import
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            data_import
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/data_import/insert_sessions/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    insert_sessions.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    decoding
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5">
+            <span class="md-nav__icon md-icon"></span>
+            decoding
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/decoding_merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    decoding_merge.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5_3" id="__nav_5_5_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v0
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_5_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5_3">
+            <span class="md-nav__icon md-icon"></span>
+            v0
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/clusterless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    clusterless.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    core.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/dj_decoder_conversion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_decoder_conversion.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/sorted_spikes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sorted_spikes.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/visualization/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    visualization.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/visualization_1D_view/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    visualization_1D_view.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v0/visualization_2D_view/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    visualization_2D_view.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_5_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_5_4" id="__nav_5_5_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_5_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_5_4">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v1/clusterless/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    clusterless.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v1/core/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    core.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v1/dj_decoder_conversion/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_decoder_conversion.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v1/sorted_spikes/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sorted_spikes.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/decoding/v1/waveform_features/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    waveform_features.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_6" id="__nav_5_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    lfp
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6">
+            <span class="md-nav__icon md-icon"></span>
+            lfp
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_6_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_6_1" id="__nav_5_6_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    analysis
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6_1">
+            <span class="md-nav__icon md-icon"></span>
+            analysis
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_6_1_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_6_1_1" id="__nav_5_6_1_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_6_1_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6_1_1">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/analysis/v1/lfp_band/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_band.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/lfp_electrode/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_electrode.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/lfp_imported/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_imported.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/lfp_merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_merge.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_6_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_6_5" id="__nav_5_6_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_6_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_6_5">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/v1/lfp/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/v1/lfp_artifact/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_artifact.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/v1/lfp_artifact_MAD_detection/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_artifact_MAD_detection.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lfp/v1/lfp_artifact_difference_detection/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    lfp_artifact_difference_detection.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_7" id="__nav_5_7_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    linearization
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_7">
+            <span class="md-nav__icon md-icon"></span>
+            linearization
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/linearization/merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    merge.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/linearization/utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_7_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_7_3" id="__nav_5_7_3_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v0
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_7_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_7_3">
+            <span class="md-nav__icon md-icon"></span>
+            v0
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/linearization/v0/main/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    main.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_7_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_7_4" id="__nav_5_7_4_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_7_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_7_4">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/linearization/v1/main/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    main.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_8" id="__nav_5_8_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    lock
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_8">
+            <span class="md-nav__icon md-icon"></span>
+            lock
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/lock/file_lock/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    file_lock.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_9" id="__nav_5_9_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    mua
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_9">
+            <span class="md-nav__icon md-icon"></span>
+            mua
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_9_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_9_1" id="__nav_5_9_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_9_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_9_1">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/mua/v1/mua/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    mua.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_10" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_10" id="__nav_5_10_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    position
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_10_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_10">
+            <span class="md-nav__icon md-icon"></span>
+            position
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/position_merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_merge.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_10_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_10_2" id="__nav_5_10_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_10_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_10_2">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/dlc_reader/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dlc_reader.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/dlc_utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dlc_utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/dlc_utils_makevid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dlc_utils_makevid.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_centroid/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_centroid.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_cohort/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_cohort.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_model/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_model.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_orient/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_orient.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_pose_estimation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_pose_estimation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_position/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_position.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_project/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_project.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_selection/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_selection.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_dlc_training/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_dlc_training.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/position/v1/position_trodes_position/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position_trodes_position.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_11" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_11" id="__nav_5_11_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    ripple
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_11">
+            <span class="md-nav__icon md-icon"></span>
+            ripple
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_11_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_11_1" id="__nav_5_11_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_11_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_11_1">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ripple/v1/ripple/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ripple.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    settings.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_13" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_13" id="__nav_5_13_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    sharing
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_13_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_13">
+            <span class="md-nav__icon md-icon"></span>
+            sharing
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/sharing/sharing_kachery/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sharing_kachery.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14" id="__nav_5_14_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    spikesorting
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_14_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14">
+            <span class="md-nav__icon md-icon"></span>
+            spikesorting
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14_1" id="__nav_5_14_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    analysis
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_14_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14_1">
+            <span class="md-nav__icon md-icon"></span>
+            analysis
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14_1_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14_1_1" id="__nav_5_14_1_1_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_14_1_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14_1_1">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/analysis/v1/group/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    group.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/analysis/v1/unit_annotation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    unit_annotation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/imported/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    imported.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/spikesorting_merge/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_merge.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14_5" id="__nav_5_14_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v0
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_14_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14_5">
+            <span class="md-nav__icon md-icon"></span>
+            v0
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/curation_figurl/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    curation_figurl.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14_5_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14_5_2" id="__nav_5_14_5_2_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    figurl_views
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="4" aria-labelledby="__nav_5_14_5_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14_5_2">
+            <span class="md-nav__icon md-icon"></span>
+            figurl_views
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/figurl_views/SpikeSortingRecordingView/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SpikeSortingRecordingView.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/figurl_views/SpikeSortingView/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    SpikeSortingView.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/figurl_views/prepare_spikesortingview_data/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    prepare_spikesortingview_data.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/merged_sorting_extractor/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    merged_sorting_extractor.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/sortingview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sortingview.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/sortingview_helper_fn/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sortingview_helper_fn.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/spikesorting_artifact/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_artifact.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/spikesorting_curation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_curation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/spikesorting_populator/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_populator.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/spikesorting_recording/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_recording.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v0/spikesorting_sorting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    spikesorting_sorting.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_14_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_14_6" id="__nav_5_14_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    v1
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_5_14_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_14_6">
+            <span class="md-nav__icon md-icon"></span>
+            v1
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/artifact/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    artifact.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/curation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    curation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/figurl_curation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    figurl_curation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/metric_curation/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    metric_curation.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/metric_utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    metric_utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/recording/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    recording.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/sorting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    sorting.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/spikesorting/v1/utils/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    utils.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5_15" >
+        
+          
+          <label class="md-nav__link" for="__nav_5_15" id="__nav_5_15_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    utils
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_5_15_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5_15">
+            <span class="md-nav__icon md-icon"></span>
+            utils
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/database_settings/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    database_settings.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/dj_graph/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_graph.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/dj_helper_fn/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_helper_fn.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/dj_merge_tables/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_merge_tables.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/dj_mixin/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    dj_mixin.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/logging/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    logging.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/nwb_helper_fn/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    nwb_helper_fn.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/utils/position/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    position.py
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Change Log
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../LICENSE/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Copyright
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#nwb-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      NWB files
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analysis-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      Analysis files
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reading-and-writing-recordings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Reading and writing recordings
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#naming-convention" class="md-nav__link">
+    <span class="md-ellipsis">
+      Naming convention
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#time" class="md-nav__link">
+    <span class="md-ellipsis">
+      Time
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-table-mappings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Object-Table mappings
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="using-nwb">Using NWB<a class="headerlink" href="#using-nwb" title="Permanent link">&para;</a></h1>
+<p>This article explains how to use the NWB format in Spyglass. It covers the
+naming conventions, storage locations, and the relationships between NWB files
+and other tables in the database.</p>
+<h2 id="nwb-files">NWB files<a class="headerlink" href="#nwb-files" title="Permanent link">&para;</a></h2>
+<p>NWB files contain everything about the experiment and form the starting point of
+all analyses.</p>
+<ul>
+<li>Naming: <code>{animal name}YYYYMMDD.nwb</code></li>
+<li>Storage:<ul>
+<li>On disk, directory identified by <code>settings.py</code> as <code>raw_dir</code> (e.g.,
+    <code>/stelmo/nwb/raw</code>)</li>
+<li>In database, in the <code>Nwbfile</code> table</li>
+</ul>
+</li>
+<li>Copies:<ul>
+<li>made with an underscore <code>{animal name}YYYYMMDD_.nwb</code></li>
+<li>stored in the same <code>raw_dir</code></li>
+<li>contain pointers to objects in original file</li>
+<li>permit adding new parts to the NWB file without risk of corrupting the
+    original data</li>
+</ul>
+</li>
+</ul>
+<h2 id="analysis-files">Analysis files<a class="headerlink" href="#analysis-files" title="Permanent link">&para;</a></h2>
+<p>Hold the results of intermediate steps in the analysis.</p>
+<ul>
+<li>Naming: <code>{animal name}YYYYMMDD_{10-character random string}.nwb</code></li>
+<li>Storage:<ul>
+<li>On disk, directory identified by <code>settings.py</code> as <code>analysis_dir</code> (e.g.,
+    <code>/stelmo/nwb/analysis</code>). Items are further sorted into folders matching
+    original NWB file name</li>
+<li>In database, in the <code>AnalysisNwbfile</code> table.</li>
+</ul>
+</li>
+<li>Examples: filtered recordings, spike times of putative units after sorting, or
+    waveform snippets.</li>
+</ul>
+<p><em>Note</em>: Because NWB files and analysis files exist both on disk and listed in
+tables, these can become out of sync. You can 'equalize' the database table
+lists and the set of files on disk by running <code>cleanup</code> method, which deletes
+any files not listed in the table from disk.</p>
+<h2 id="reading-and-writing-recordings">Reading and writing recordings<a class="headerlink" href="#reading-and-writing-recordings" title="Permanent link">&para;</a></h2>
+<p>Recordings start out as an NWB file, which is opened as a
+<code>NwbRecordingExtractor</code>, a class in <code>spikeinterface</code>. When using <code>sortingview</code>
+for visualizing the results of spike sorting, this recording is saved again in
+HDF5 format. This duplication should be resolved in the future.</p>
+<h2 id="naming-convention">Naming convention<a class="headerlink" href="#naming-convention" title="Permanent link">&para;</a></h2>
+<p>The following objects should be uniquely named.</p>
+<ul>
+<li><em>Recordings</em>: Underscore-separated concatenations of uniquely defining
+    features,
+    <code>NWBFileName_IntervalName_ElectrodeGroupName_PreprocessingParamsName</code>.</li>
+<li><em>SpikeSorting</em>: Adds <code>SpikeSorter_SorterParamName</code> to the name of the
+    recording.</li>
+<li><em>Waveforms</em>: Adds <code>_WaveformParamName</code> to the name of the sorting.</li>
+<li><em>Quality metrics</em>: Adds <code>_MetricParamName</code> to the name of the waveform.</li>
+<li><em>Analysis NWB files</em>:
+    <code>NWBFileName_IntervalName_ElectrodeGroupName_PreprocessingParamsName.nwb</code></li>
+<li>Each recording and sorting is given truncated UUID strings as part of
+    concatenations.</li>
+</ul>
+<p>Following broader Python conventions, methods a method that will not be
+explicitly called by the user should start with <code>_</code></p>
+<h2 id="time">Time<a class="headerlink" href="#time" title="Permanent link">&para;</a></h2>
+<p>The <code>IntervalList</code> table stores all time intervals in the following format:
+<code>[start_time, stop_time]</code>, which represents a contiguous time of valid data.
+These are used to exclude any invalid timepoints, such as missing data from a
+faulty connection.</p>
+<ul>
+<li>Intervals can be nested for a set of disjoint intervals.</li>
+<li>Some recordings have explicit
+    <a href="https://en.wikipedia.org/wiki/Precision_Time_Protocol">PTP timestamps</a>
+    associated with each sample. Some older recordings are missing PTP times,
+    and times must be inferred from the TTL pulses from the camera.</li>
+</ul>
+<h2 id="object-table-mappings">Object-Table mappings<a class="headerlink" href="#object-table-mappings" title="Permanent link">&para;</a></h2>
+<p>The following tables highlight the correspondence between NWB objects and
+Spyglass tables/fields and should be a useful reference for developers looking
+to adapt existing NWB files for Spyglass injestion.</p>
+<p>Please contact the developers if you have any questions or need help with
+adapting your NWB files for use with Spyglass, especially items marked with
+'TODO' in the tables below.</p>
+<p><b> NWBfile Location: nwbf <br/> Object type: pynwb.file.NWBFile </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Institution</td>
+<td style="text-align: center;">institution_name</td>
+<td style="text-align: right;">nwbf.institution</td>
+<td style="text-align: right;">config["Institution"]["institution_name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">institution_name</td>
+<td style="text-align: right;">nwbf.institution</td>
+<td style="text-align: right;">config["Institution"]["institution_name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Lab</td>
+<td style="text-align: center;">lab_name</td>
+<td style="text-align: right;">nwbf.lab</td>
+<td style="text-align: right;">config["Lab"]["lab_name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">lab_name</td>
+<td style="text-align: right;">nwbf.lab</td>
+<td style="text-align: right;">config["Lab"]["lab_name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">LabMember</td>
+<td style="text-align: center;">lab_member_name</td>
+<td style="text-align: right;">nwbf.experimenter</td>
+<td style="text-align: right;">config["LabMember"]["lab_member_name"]</td>
+<td style="text-align: right;">str("last_name, first_name")</td>
+</tr>
+<tr>
+<td style="text-align: left;">Session.Experimenter</td>
+<td style="text-align: center;">lab_member_name</td>
+<td style="text-align: right;">nwbf.experimenter</td>
+<td style="text-align: right;">config["LabMember"]["lab_member_name"]</td>
+<td style="text-align: right;">str("last_name, first_name")</td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">session_id</td>
+<td style="text-align: right;">nwbf.session_id</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">session_description</td>
+<td style="text-align: right;">nwbf.session_description</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">session_start_time</td>
+<td style="text-align: right;">nwbf.session_start_time</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">timestamps_reference_time</td>
+<td style="text-align: right;">nwbf.timestamps_reference_time</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">experiment_description</td>
+<td style="text-align: right;">nwbf.experiment_description</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.subject <br/> Object type: pynwb.file.Subject </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">subject_id</td>
+<td style="text-align: right;">nwbf.subject.subject_id</td>
+<td style="text-align: right;">config["Subject"]["subject_id"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">age</td>
+<td style="text-align: right;">nwbf.subject.age</td>
+<td style="text-align: right;">config["Subject"]["age"]</td>
+<td style="text-align: right;">Dandi requires age must be in ISO 8601 format, e.g. "P70D" for 70 days, or, if it is a range, must be "[lower]/[upper]", e.g. "P10W/P12W", which means "between 10 and 12 weeks"</td>
+</tr>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">description</td>
+<td style="text-align: right;">nwbf.subject.description</td>
+<td style="text-align: right;">config["Subject"]["description"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">genotype</td>
+<td style="text-align: right;">nwbf.subject.genotype</td>
+<td style="text-align: right;">config["Subject"]["genotype"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">species</td>
+<td style="text-align: right;">nwbf.subject.species</td>
+<td style="text-align: right;">config["Subject"]["species"]</td>
+<td style="text-align: right;">Dandi upload requires species either be in Latin binomial form (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI taxonomy link</td>
+</tr>
+<tr>
+<td style="text-align: left;">Subject</td>
+<td style="text-align: center;">sex</td>
+<td style="text-align: right;">nwbf.subject.sex</td>
+<td style="text-align: right;">config["Subject"]["sex"]</td>
+<td style="text-align: right;">single character identifier (e.g. "F", "M", "U","O")</td>
+</tr>
+<tr>
+<td style="text-align: left;">Session</td>
+<td style="text-align: center;">subject_id</td>
+<td style="text-align: right;">nwbf.subject.subject_id</td>
+<td style="text-align: right;">config["Subject"]["subject_id"]</td>
+<td style="text-align: right;">str("animal_name")</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.devices <br/> Object type:
+ndx_franklab_novela.DataAcqDevice </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">DataAcquisitionDevice</td>
+<td style="text-align: center;">data_acquisition_device_name</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*DataAcqDevice&gt;.name</td>
+<td style="text-align: right;">config["DataAcquisitionDevice"]["data_acquisition_device_name"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">DataAcquisitionDevice</td>
+<td style="text-align: center;">adc_circuit</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*DataAcqDevice&gt;.name</td>
+<td style="text-align: right;">config["DataAcquisitionDevice"]["data_acquisition_device_name"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">DataAcquisitionDeviceSystem</td>
+<td style="text-align: center;">data_acquisition_device_system</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*DataAcqDevice&gt;.system</td>
+<td style="text-align: right;">config["DataAcquisitionDevice"]["data_acquisition_device_system"]</td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">DataAcquisitionDeviceAmplifier</td>
+<td style="text-align: center;">data_acquisition_device_amplifier</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*DataAcqDevice&gt;.system</td>
+<td style="text-align: right;">config["DataAcquisitionDevice"]["data_acquisition_device_amplifier"]</td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.devices <br/> Object type:
+ndx_franklab_novela.CameraDevice </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">camera_id</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.camera_id</td>
+<td style="text-align: right;">config["CameraDevice"][index]["camera_id"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">camera_name</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.camera_name</td>
+<td style="text-align: right;">config["CameraDevice"][index]["camera_name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">camera_manufacturer</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.manufacturer</td>
+<td style="text-align: right;">config["CameraDevice"][index]["manufacturer"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">model</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.model</td>
+<td style="text-align: right;">config["CameraDevice"][index]["model"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">lens</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.lens</td>
+<td style="text-align: right;">config["CameraDevice"][index]["lens"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">CameraDevice</td>
+<td style="text-align: center;">meters_per_pixel</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*CameraDevice&gt;.meters_per_pixel</td>
+<td style="text-align: right;">config["CameraDevice"][index]["meters_per_pixel"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.devices <br/> Object type: ndx_franklab_novela.Probe
+</b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Probe</td>
+<td style="text-align: center;">probe_type</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.probe_type</td>
+<td style="text-align: right;">config["Probe"][index]["probe_type"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe</td>
+<td style="text-align: center;">probe_id</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.probe_type</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe</td>
+<td style="text-align: center;">manufacturer</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.manufacturer</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe</td>
+<td style="text-align: center;">probe_description</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.probe_description</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe</td>
+<td style="text-align: center;">num_shanks</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.num_shanks</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">int</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt; <br/> Object type:
+ndx_franklab_novela.Shank </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Probe.Shank</td>
+<td style="text-align: center;">probe_shank</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt;.probe_shank</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">int</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt;.\&lt;*Electrode&gt; <br/>
+Object type: ndx_franklab_novela.Electrode </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Probe.Electrode</td>
+<td style="text-align: center;">probe_shank</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt;.probe_shank</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe.Electrode</td>
+<td style="text-align: center;">contact_size</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt;.\&lt;*Electrode&gt;.contact_size</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">float</td>
+</tr>
+<tr>
+<td style="text-align: left;">Probe.Electrode</td>
+<td style="text-align: center;">rel_x</td>
+<td style="text-align: right;">nwbf.devices.\&lt;*Probe&gt;.\&lt;*Shank&gt;.\&lt;*Electrode&gt;.rel_x</td>
+<td style="text-align: right;">XXX</td>
+<td style="text-align: right;">float</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.epochs <br/> Object type: pynwb.epoch.TimeIntervals
+</b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">IntervalList (epochs)</td>
+<td style="text-align: center;">interval_list_name</td>
+<td style="text-align: right;">nwbf.epochs.[index].tags[0]</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">IntervalList (epochs)</td>
+<td style="text-align: center;">valid_times</td>
+<td style="text-align: right;">[nwbf.epoch.[index].start_time, nwbf.epoch.[index].stop_time]</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">float</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.electrode_groups </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">BrainRegion</td>
+<td style="text-align: center;">region_name</td>
+<td style="text-align: right;">nwbf.electrode_groups.[index].location</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">ElectrodeGroup</td>
+<td style="text-align: center;">description</td>
+<td style="text-align: right;">nwbf.electrode_groups.[index].description</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">ElectrodeGroup</td>
+<td style="text-align: center;">probe_id</td>
+<td style="text-align: right;">nwbf.electrode_groups.[index].device.probe_type</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">+ device must be of type ndx_franklab_novela.Probe</td>
+</tr>
+<tr>
+<td style="text-align: left;">ElectrodeGroup</td>
+<td style="text-align: center;">target_hemisphere</td>
+<td style="text-align: right;">nwbf.electrode_groups.[index].targeted_x</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">+ electrode group must be of type ndx_franklab_novela.NwbElectrodeGroup. target_hemisphere = "Right" if targeted_x &gt;= 0 else "Left"</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.acquisition </br> Object type:
+pynwb.ecephys.ElectricalSeries </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Raw</td>
+<td style="text-align: center;">sampling_rate</td>
+<td style="text-align: right;">eseries.rate else, estimated from eseries.timestamps</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">float</td>
+</tr>
+<tr>
+<td style="text-align: left;">IntervalList (raw)</td>
+<td style="text-align: center;">interval_list_name</td>
+<td style="text-align: right;">"raw data valid times"</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">IntervalList (raw)</td>
+<td style="text-align: center;">valid_times</td>
+<td style="text-align: right;">get_valid_intervals(eseries.timestamps, ...)</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.sample_count </br> Object type:
+pynwb.base.TimeSeries </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">SampleCount</td>
+<td style="text-align: center;">sample_count_obj_id</td>
+<td style="text-align: right;">nwbf.processing.sample_count</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.behavior.behavioralEvents </br> Object
+type: pynwb.base.TimeSeries </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">DIOEvents</td>
+<td style="text-align: center;">dio_event_name</td>
+<td style="text-align: right;">nwbf.processing.behavior.behavioralEvents.name</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">DIOEvents</td>
+<td style="text-align: center;">dio_obj_id</td>
+<td style="text-align: right;">nwbf.processing.behavior.behavioralEvents.object_id</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.tasks </br> Object type:
+hdmf.common.table.DynamicTable </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Task</td>
+<td style="text-align: center;">task_name</td>
+<td style="text-align: right;">nwbf.processing.tasks.[index].name</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">Task</td>
+<td style="text-align: center;">task_description</td>
+<td style="text-align: right;">nwbf.processing.[index].tasks.description</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">TaskEpoch</td>
+<td style="text-align: center;">task_name</td>
+<td style="text-align: right;">nwbf.processing.[index].tasks.name</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">TaskEpoch</td>
+<td style="text-align: center;">camera_names</td>
+<td style="text-align: right;">nwbf.processing.[index].tasks.camera_id</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">TaskEpoch</td>
+<td style="text-align: center;">task_environment</td>
+<td style="text-align: right;">nwbf.processing.[index].tasks.task_environment</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.units </br> Object type: pynwb.misc.Units </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">ImportedSpikeSorting</td>
+<td style="text-align: center;">object_id</td>
+<td style="text-align: right;">nwbf.units.object_id</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.electrodes <br/> Object type:
+hdmf.common.table.DynamicTable </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">electrode_id</td>
+<td style="text-align: right;">nwbf.electrodes.[index] (the enumerated index number)</td>
+<td style="text-align: right;">config["Electrode"][index]["electrode_id"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">name</td>
+<td style="text-align: right;">str(nwbf.electrodes.[index]) nwbf.electrodes.[index] (the enumerated index number)</td>
+<td style="text-align: right;">config["Electrode"][index]["name"]</td>
+<td style="text-align: right;">str</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">group_name</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group_name</td>
+<td style="text-align: right;">config["Electrode"][index]["group_name"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">x</td>
+<td style="text-align: right;">nwbf.electrodes.[index].x</td>
+<td style="text-align: right;">config["Electrode"][index]["x"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">y</td>
+<td style="text-align: right;">nwbf.electrodes.[index].y</td>
+<td style="text-align: right;">config["Electrode"][index]["y"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">z</td>
+<td style="text-align: right;">nwbf.electrodes.[index].z</td>
+<td style="text-align: right;">config["Electrode"][index]["z"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">filtering</td>
+<td style="text-align: right;">nwbf.electrodes.[index].filtering</td>
+<td style="text-align: right;">config["Electrode"][index]["filtering"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">impedance</td>
+<td style="text-align: right;">nwbf.electrodes.[index].impedance</td>
+<td style="text-align: right;">config["Electrode"][index]["impedance"]</td>
+<td style="text-align: right;">int</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">probe_id</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group.device.probe_type</td>
+<td style="text-align: right;">config["Electrode"][index]["probe_id"]</td>
+<td style="text-align: right;">if type(nwbf.electrodes.[index].group.device) is ndx_franklab_novela.Probe</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">probe_shank</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group.device.probe_shank</td>
+<td style="text-align: right;">config["Electrode"][index]["probe_shank"]</td>
+<td style="text-align: right;">if type(nwbf.electrodes.[index].group.device) is ndx_franklab_novela.Probe</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">probe_electrode</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group.device.probe_electrode</td>
+<td style="text-align: right;">config["Electrode"][index]["probe_electrode"]</td>
+<td style="text-align: right;">if type(nwbf.electrodes.[index].group.device) is ndx_franklab_novela.Probe</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">bad_channel</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group.device.bad_channel</td>
+<td style="text-align: right;">config["Electrode"][index]["bad_channel"]</td>
+<td style="text-align: right;">if type(nwbf.electrodes.[index].group.device) is ndx_franklab_novela.Probe</td>
+</tr>
+<tr>
+<td style="text-align: left;">Electrode</td>
+<td style="text-align: center;">original_reference_electrode</td>
+<td style="text-align: right;">nwbf.electrodes.[index].group.device.ref_elect_id</td>
+<td style="text-align: right;">config["Electrode"][index]["original_reference_electrode"]</td>
+<td style="text-align: right;">if type(nwbf.electrodes.[index].group.device) is ndx_franklab_novela.Probe</td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.behavior.position </br> Object type:
+(pynwb.behavior.Position).(pynwb.behavior.SpatialSeries) </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">IntervalList (position)</td>
+<td style="text-align: center;">interval_list_name</td>
+<td style="text-align: right;">"pos {index} valid times"</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">IntervalList (position)</td>
+<td style="text-align: center;">valid_times</td>
+<td style="text-align: right;">get_valid_intervals(nwbf.processing.behavior.position.[index].timestamps, ...)</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">PositionSource</td>
+<td style="text-align: center;">source</td>
+<td style="text-align: right;">"trodes"</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">TODO: infer from file</td>
+</tr>
+<tr>
+<td style="text-align: left;">PositionSource</td>
+<td style="text-align: center;">interval_list_name</td>
+<td style="text-align: right;">See: IntervalList (position)</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">PositionSource.SpatialSeries</td>
+<td style="text-align: center;">id</td>
+<td style="text-align: right;">int(nwbf.processing.behavior.position.[index]) (the enumerated index number)</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td style="text-align: left;">RawPosition.PosObject</td>
+<td style="text-align: center;">raw_position_object_id</td>
+<td style="text-align: right;">nwbf.processing.behavior.position.[index].object_id</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.video_files.video </br> Object type:
+pynwb.image.ImageSeries </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">VideoFile</td>
+<td style="text-align: center;">camera_name</td>
+<td style="text-align: right;">nwbf.processing.video_files.video.[index].camera_name</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p><b> NWBfile Location: nwbf.processing.associated_files <br/> Object type:
+ndx_franklab_novela.AssociatedFiles </b></p>
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Spyglass Table</th>
+<th style="text-align: center;">Key</th>
+<th style="text-align: right;">NWBfile Location</th>
+<th style="text-align: right;">Config option</th>
+<th style="text-align: right;">Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">StateScriptFile</td>
+<td style="text-align: center;">epoch</td>
+<td style="text-align: right;">nwbf.processing.associated_files.[index].task_epochs</td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;">type(nwbf.processing.associated_files.[index]) == ndx_franklab_novela.AssociatedFiles</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8v12Z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../Schema/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Understanding a Schema">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12Z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Understanding a Schema
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../api/" class="md-footer__link md-footer__link--next" aria-label="Next: Overview">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4Z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright (c) 2020-present Loren Frank
+    </div>
+  
+  
+</div>
+      
+        <div class="md-social">
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://github.com/LorenFrankLab/spyglass" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 496 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M165.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6zm-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3zm44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9zM244.8 8C106.1 8 0 113.3 0 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C428.2 457.8 496 362.9 496 252 496 113.3 383.5 8 244.8 8zM97.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1zm-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7zm32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1zm-11.4-14.7c-1.6 1-1.6 3.6 0 5.9 1.6 2.3 4.3 3.3 5.6 2.3 1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2z"/></svg>
+    </a>
+  
+    
+    
+    
+    
+      
+      
+    
+    <a href="https://pypi.org/project/spyglass-neuro/" target="_blank" rel="noopener" title="pypi.org" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.8 200.5c-7.7-30.9-22.3-54.2-53.4-54.2h-40.1v47.4c0 36.8-31.2 67.8-66.8 67.8H172.7c-29.2 0-53.4 25-53.4 54.3v101.8c0 29 25.2 46 53.4 54.3 33.8 9.9 66.3 11.7 106.8 0 26.9-7.8 53.4-23.5 53.4-54.3v-40.7H226.2v-13.6h160.2c31.1 0 42.6-21.7 53.4-54.2 11.2-33.5 10.7-65.7 0-108.6zM286.2 404c11.1 0 20.1 9.1 20.1 20.3 0 11.3-9 20.4-20.1 20.4-11 0-20.1-9.2-20.1-20.4.1-11.3 9.1-20.3 20.1-20.3zM167.8 248.1h106.8c29.7 0 53.4-24.5 53.4-54.3V91.9c0-29-24.4-50.7-53.4-55.6-35.8-5.9-74.7-5.6-106.8.1-45.2 8-53.4 24.7-53.4 55.6v40.7h106.9v13.6h-147c-31.1 0-58.3 18.7-66.8 54.2-9.8 40.7-10.2 66.1 0 108.6 7.6 31.6 25.7 54.2 56.8 54.2H101v-48.8c0-35.3 30.5-66.4 66.8-66.4zm-6.7-142.6c-11.1 0-20.1-9.1-20.1-20.3.1-11.3 9-20.4 20.1-20.4 11 0 20.1 9.2 20.1 20.4s-9 20.3-20.1 20.3z"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": ["toc.follow", "navigation.top", "navigation.instant", "navigation.tracking", "navigation.top", "search.suggest", "search.share", "navigation.footer", "content.code.copy"], "search": "../../assets/javascripts/workers/search.b8dbb3d2.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.fe8b6f2b.min.js"></script>
+      
+    
+  </body>
+</html>
