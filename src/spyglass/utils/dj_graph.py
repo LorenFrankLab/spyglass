@@ -11,7 +11,7 @@ from itertools import chain as iter_chain
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 from datajoint import FreeTable, Table
-from datajoint.condition import make_condition
+from datajoint.condition import AndList, make_condition
 from datajoint.dependencies import unite_master_parts
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
@@ -393,7 +393,7 @@ class AbstractGraph(ABC):
     def cascade1(
         self,
         table: str,
-        restriction: str,
+        restriction: str = None,
         direction: Direction = Direction.UP,
         replace=False,
         count=0,
@@ -406,7 +406,7 @@ class AbstractGraph(ABC):
         table : str
             Table name
         restriction : str
-            Restriction to apply
+            Restriction to apply, optional. Default fetch existing restriction.
         direction : Direction, optional
             Direction to cascade. Default 'up'
         replace : bool, optional
@@ -414,6 +414,8 @@ class AbstractGraph(ABC):
         """
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
+        if restriction is None:
+            restriction = self._get_restr(table)
 
         self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
@@ -659,7 +661,7 @@ class RestrGraph(AbstractGraph):
         Accepts ...
         - [str]: table names, use default_restriction
         - [{'table_name': str, 'restriction': str}]: used for export
-        - [{table_name: restriction}]: userd for distance restriction
+        - [{table_name: restriction}]: used for distance restriction
         """
         if not leaves:
             return []
@@ -670,24 +672,24 @@ class RestrGraph(AbstractGraph):
                 {"table_name": leaf, "restriction": default_restriction}
                 for leaf in leaves
             ]
-        hashable = True
         if all(isinstance(leaf, dict) for leaf in leaves):
             new_leaves = []
             for leaf in leaves:
                 if "table_name" in leaf and "restriction" in leaf:
                     new_leaves.append(leaf)
-                    continue
-                for table, restr in leaf.items():
-                    if not isinstance(restr, (str, dict)):
-                        hashable = False  # likely a dj.AndList
-                    new_leaves.append(
-                        {"table_name": table, "restriction": restr}
-                    )
-            if not hashable:
-                return new_leaves
+                else:
+                    for table, restr in leaf.items():
+                        new_leaves.append(
+                            {"table_name": table, "restriction": restr}
+                        )
             leaves = new_leaves
 
-        return unique_dicts(leaves)
+        hashable = not any(
+            isinstance(leaf.get("restriction"), (dict, AndList, set))
+            for leaf in leaves
+        )
+
+        return unique_dicts(leaves) if hashable else leaves
 
     def add_leaves(
         self,
@@ -1171,6 +1173,8 @@ import importlib
 import inspect
 from pathlib import Path
 
+from datajoint.autopopulate import AutoPopulate
+
 
 class ImportedGraph(TableChain):
     def __init__(
@@ -1189,40 +1193,40 @@ class ImportedGraph(TableChain):
         self._class_map = class_map
         self.target = target
 
-        # self.cascade(
-        #     direction=Direction.DOWN, restriction=new_restr, null_on_fail=False
-        # )
+        if new_restr:
+            self.cascade(
+                direction=Direction.DOWN,
+                restriction=new_restr,
+                null_on_fail=False,
+            )
 
-    def cascade_with_target(self, limit=10):
+    def cascade1_target(self):
         if not self.target or not self.has_link or not self.target.has_link:
             self._log_truncate("No target or no link")
             return
 
-        while self.find_cascade_stop() and limit > 0:
-            next_tbl = self.find_cascade_stop()
-            limit -= 1
-            next_class = self._get_class(next_tbl)
+        next_tbl = self.find_cascade_stop()
+        next_parents = set(self._get_ft(next_tbl).parents()) - self.visited
 
-            next_parents = set(next_class.parents()) - self.visited
-            self._log_truncate(f"Next: {next_tbl}, {next_parents}")
+        self._log_truncate(f"Next: {next_tbl}, {next_parents}")
 
-            self.target.no_visit -= next_parents
-            self.target.visited -= next_parents
-            self.target.cascade(next_tbl, direction=Direction.UP)
+        self.target.no_visit -= next_parents
+        self.target.visited -= next_parents
+        self.target.cascade1(next_tbl, direction=Direction.UP)
 
-            this_parent = [p for p in next_class.parents() if p in self.visited]
-            if len(this_parent) != 1:
-                raise ValueError("Invalid parent count")
-            this_parent_class_key = self._get_class(this_parent[0]).fetch1(
-                "KEY"
-            )
-            for ancestor in next_parents:
-                anc_class = self._get_class(ancestor)
-                this_parent_class_key.update(
-                    (anc_class & self.target._get_restr(ancestor)).fetch1("KEY")
-                )
-            self._log_truncate(f"Ins: {next_tbl}, {this_parent_class_key}")
-            next_class.insert1(this_parent_class_key)
+        # this_parent = [p for p in next_class.parents() if p in self.visited]
+        # if len(this_parent) != 1:
+        #     raise ValueError("Invalid parent count")
+        # this_parent_class_keys = self._get_ft(this_parent[0]).fetch(
+        #     "KEY", as_dict=True
+        # )
+        # for ancestor in next_parents:
+        #     anc_class = self._get_class(ancestor)
+        #     this_parent_class_keys.update(
+        #         (anc_class & self.target._get_restr(ancestor)).fetch1("KEY")
+        #     )
+        # self._log_truncate(f"Ins: {next_tbl}, {this_parent_class_keys}")
+        # next_class.insert1(this_parent_class_keys)
 
     def find_cascade_stop(self):
         """Find the first table in the chain without a restriction."""
