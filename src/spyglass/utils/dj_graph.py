@@ -243,6 +243,7 @@ class AbstractGraph(ABC):
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
 
+        # self._log_truncate(f"Set restr: {self._camel(table)}: {restriction}")
         self._set_node(table, "restr", restriction)
 
     def _get_ft(self, table, with_restr=False, warn=True):
@@ -338,7 +339,7 @@ class AbstractGraph(ABC):
                 else "FULL" if len(ft2) == len(ret) else "partial"
             )
             path = f"{self._camel(table1)} -> {self._camel(table2)}"
-            self._log_truncate(f"Bridge Link: {path}: result {result}")
+            self._log_truncate(f"Bridge Link: {result} {path}: {ret}")
 
         return ret
 
@@ -502,6 +503,12 @@ class AbstractGraph(ABC):
             self._get_ft(table, with_restr=True, warn=False)
             for table in self._topo_sort(nodes, subgraph=True, reverse=False)
         ]
+
+    def print_restr(self):
+        """Print restrictions for all visited nodes."""
+        self.cascade(warn=False)
+        for table in self._topo_sort(self.visited):
+            logger.info(f"{self._camel(table)}: {self._get_restr(table)}")
 
     @property
     def restr_ft(self):
@@ -1120,7 +1127,7 @@ class TableChain(RestrGraph):
         null_on_fail: bool = True,
         **kwargs,
     ):
-        if not self.has_link:
+        if not self.has_link or self.cascaded:
             return
 
         _ = self.path
@@ -1151,6 +1158,8 @@ class TableChain(RestrGraph):
                 for table in non_numeric:
                     self._set_restr(table, False, replace=True)
 
+        self.cascaded = True
+
         return self._get_ft(end, with_restr=True)
 
     def restrict_by(self, *args, **kwargs) -> None:
@@ -1164,9 +1173,64 @@ from pathlib import Path
 
 
 class ImportedGraph(TableChain):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._class_map = None
+    def __init__(
+        self,
+        target: TableChain = None,
+        class_map: dict = None,
+        new_restr: str = None,
+        banned_tables: list = None,
+        *args,
+        **kwargs,
+    ):
+        banned_tables = banned_tables or []
+        banned_tables.extend(list(getattr(target, "no_visit", [])))
+
+        super().__init__(banned_tables=banned_tables, *args, **kwargs)
+        self._class_map = class_map
+        self.target = target
+
+        # self.cascade(
+        #     direction=Direction.DOWN, restriction=new_restr, null_on_fail=False
+        # )
+
+    def cascade_with_target(self, limit=10):
+        if not self.target or not self.has_link or not self.target.has_link:
+            self._log_truncate("No target or no link")
+            return
+
+        while self.find_cascade_stop() and limit > 0:
+            next_tbl = self.find_cascade_stop()
+            limit -= 1
+            next_class = self._get_class(next_tbl)
+
+            next_parents = set(next_class.parents()) - self.visited
+            self._log_truncate(f"Next: {next_tbl}, {next_parents}")
+
+            self.target.no_visit -= next_parents
+            self.target.visited -= next_parents
+            self.target.cascade(next_tbl, direction=Direction.UP)
+
+            this_parent = [p for p in next_class.parents() if p in self.visited]
+            if len(this_parent) != 1:
+                raise ValueError("Invalid parent count")
+            this_parent_class_key = self._get_class(this_parent[0]).fetch1(
+                "KEY"
+            )
+            for ancestor in next_parents:
+                anc_class = self._get_class(ancestor)
+                this_parent_class_key.update(
+                    (anc_class & self.target._get_restr(ancestor)).fetch1("KEY")
+                )
+            self._log_truncate(f"Ins: {next_tbl}, {this_parent_class_key}")
+            next_class.insert1(this_parent_class_key)
+
+    def find_cascade_stop(self):
+        """Find the first table in the chain without a restriction."""
+        path = [t for t in self.path if not t.isnumeric()]  # should be prop
+        for table in path:
+            if self._get_restr(table) is False:
+                return table
+        return None
 
     @property
     def class_map(self):
@@ -1178,12 +1242,14 @@ class ImportedGraph(TableChain):
         """Set class object for table name."""
         self._set_node(table_name, "class", class_obj)
 
-    def _get_class(self, table_name: str) -> Any:
+    def _get_class(self, table_name: str, with_restr=True) -> Any:
         """Get class object for table name."""
         class_obj = self._get_node(table_name).get("class")
         if not class_obj:
             class_obj = self._import_class(table_name)
-        return class_obj
+        if not with_restr:
+            return class_obj
+        return class_obj & self._get_restr(table_name)
 
     def _map_package(self) -> dict:
         package_name = "spyglass"
