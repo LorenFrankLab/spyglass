@@ -2,7 +2,7 @@ name: Publish docs
 on:
   push:
     tags: # See PEP 440 for valid version format
-      - "*.*.*" # For docs bump, use X.X.XaX
+      - "*.*.*" # For docs bump, use workflow_dispatch
     branches:
       - test_branch
   workflow_dispatch: # Manually trigger with 'Run workflow' button
@@ -23,13 +23,17 @@ jobs:
       issues: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
+      - name: Git describe # Get tags
+        id: ghd # see Deploy below. Will fail if no tags on branch
+        uses: proudust/gh-describe@v2
+
       - name: Set up Python runtime
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: 3.9
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -40,8 +44,8 @@ jobs:
           git config user.name 'github-actions[bot]' && git config user.email 'github-actions[bot]@users.noreply.github.com'
 
       - name: Deploy
-        run: |
-          FULL_VERSION=${{ github.ref_name }}
+        run: | # github.ref_name is branch name if dispatch
+          FULL_VERSION=${{ steps.ghd.outputs.tag }}
           export MAJOR_VERSION=${FULL_VERSION:0:3}
           echo "OWNER: ${REPO_OWNER}. BUILD: ${MAJOR_VERSION}"
           bash ./docs/build-docs.sh push $REPO_OWNER
