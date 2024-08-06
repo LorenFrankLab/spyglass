@@ -8,7 +8,10 @@ import h5py
 import pynwb
 from fsspec.implementations.cached import CachingFileSystem
 
-from spyglass.utils import logger
+from spyglass.common.common_usage import Export, ExportSelection
+from spyglass.settings import export_dir
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 try:
     import dandi.download
@@ -23,22 +26,15 @@ try:
 
 except (ImportError, ModuleNotFoundError) as e:
     (
-        dandi.download,
-        dandi.organize,
-        dandi.upload,
-        dandi.validate,
+        dandi,
         known_instances,
         DandiAPIClient,
         get_metadata,
         OrganizeInvalid,
         Severity,
-    ) = [None] * 9
+    ) = [None] * 6
     logger.warning(e)
 
-
-from spyglass.common.common_usage import Export
-from spyglass.settings import export_dir
-from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_dandi")
 
@@ -101,7 +97,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
         dandi_api_key : str, optional
             API key for the dandi server. Optional if the environment variable
             DANDI_API_KEY is set.
-        dandi_instance : dandiset's Dandi instance. Defaults to the dev server
+        dandi_instance : str, optional
+            What instance of Dandi the dandiset is on. Defaults to dev server.
         """
         key = (Export & key).fetch1("KEY")
         paper_id = (Export & key).fetch1("paper_id")
@@ -122,10 +119,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
         # Remove if so to continue
         for dandi_dir in destination_dir, dandiset_dir:
             if os.path.exists(dandi_dir):
-                from datajoint.utils import user_choice
-
                 if (
-                    user_choice(
+                    dj.utils.user_choice(
                         "Pre-existing dandi export dir exist."
                         + f"Delete existing export folder: {dandi_dir}",
                         default="no",
@@ -185,6 +180,26 @@ class DandiPath(SpyglassMixin, dj.Manual):
             for t in translations
         ]
         self.insert(translations, ignore_extra_fields=True)
+
+    def write_mysqldump(self, export_key: dict):
+        """Write a MySQL dump script to the paper directory for DandiPath."""
+        key = (Export & export_key).fetch1("KEY")
+        paper_id = (Export & key).fetch1("paper_id")
+        spyglass_version = (ExportSelection & key).fetch(
+            "spyglass_version", limit=1
+        )[0]
+
+        self.compare_versions(
+            spyglass_version,
+            msg="Must use same Spyglass version for export and Dandi",
+        )
+
+        sql_dump = SQLDumpHelper(
+            paper_id=paper_id,
+            docker_id=None,
+            spyglass_version=spyglass_version,
+        )
+        sql_dump.write_mysqldump(self & key, file_suffix="_dandi")
 
 
 def _get_metadata(path):

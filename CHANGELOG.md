@@ -39,6 +39,7 @@ PositionGroup.alter()
 - Revise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 
 ### Pipelines
 
@@ -60,6 +61,7 @@ PositionGroup.alter()
 
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
+    - Avoid interpolating over large `nan` intervals in position #1033
 
 - Position
 

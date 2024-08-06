@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -38,6 +38,41 @@
 # - Inherit `SpyglassMixin` for all custom tables.
 # - Run only one export at a time.
 # - Start and stop each export logging process.
+# - Do not update Spyglass until the export is complete.
+#
+# <details><summary>How to inherit <code>SpyglassMixin</code></summary>
+#
+# DataJoint tables all inherit from one of the built-in table types.
+#
+# ```python
+# class MyTable(dj.Manual):
+#     ...
+# ```
+#
+# To inherit the mixin, simply add it to the `()` of the class before the
+# DataJoint class. This can be done for existing tables without dropping them,
+# so long as the change has been made prior to export logging.
+#
+# ```python
+# from spyglass.utils import SpyglassMixin
+# class MyTable(SpyglassMixin, dj.Manual):
+#     ...
+# ```
+#
+# </details>
+#
+# <details><summary>Why these limitations?</summary>
+#
+# `SpyglassMixin` is what makes this process possible. It uses an environmental
+# variable to make sure all tables are on the same page about the export ID.
+# We get this feature by inheriting, but cannot set more that one value for the
+# environmental variable.
+#
+# The export process was designed with reproducibility in mind, and will export
+# your conda environment to match. We want to be sure that the analysis you run
+# is replicable using the same conda environment.
+#
+# </details>
 #
 # **NOTE:** For demonstration purposes, this notebook relies on a more populated
 # database to highlight restriction merging capabilities of the export process.
@@ -91,29 +126,8 @@ ExportSelection.File()
 #
 # There are a few restrictions to keep in mind when export logging:
 #
-# - You can only run _ONE_ export at a time.
-# - All tables must inherit `SpyglassMixin`
-#
-# <details><summary>How to inherit <code>SpyglassMixin</code></summary>
-#
-# DataJoint tables all inherit from one of the built-in table types.
-#
-# ```python
-# class MyTable(dj.Manual):
-#     ...
-# ```
-#
-# To inherit the mixin, simply add it to the `()` of the class before the
-# DataJoint class. This can be done for existing tables without dropping them,
-# so long as the change has been made prior to export logging.
-#
-# ```python
-# from spyglass.utils import SpyglassMixin
-# class MyTable(SpyglassMixin, dj.Manual):
-#     ...
-# ```
-#
-# </details>
+# - _ONE_ export at a time.
+# - All tables must inherit `SpyglassMixin`.
 #
 # Let's start logging for 'paper1'.
 #
@@ -188,22 +202,29 @@ Export().populate_paper(**paper_key)
 # By default the export script will be located in an `export` folder within your
 # `SPYGLASS_BASE_DIR`. This default can be changed by adjusting your `dj.config`.
 #
-# Frank Lab members will need the help of a database admin (e.g., Chris) to
-# run the resulting bash script. The result will be a `.sql` file that anyone
-# can use to replicate the database entries you used in your analysis.
+# Depending on your database's configuration, you may need an admin on your team
+# to run the resulting bash script. This is true of the Frank Lab. Doing so will
+# result will be a `.sql` file that anyone can use to replicate the database
+# entries you used in your analysis.
 #
 
-# # Dandiset Upload
+# ## Dandi
 
-# One benefit of the `Export` table is it provides a list of all raw data, intermediate analysis files,
-# and final analysis files needed to generate a set of figures in a work. To aid in data-sharing standards,
-# we have implemented tools to compile and upload this set of files as a Dandi dataset, which can then be used
-# by spyglass to directly read the data from the Dandi database if not available locally.
+# One benefit of the `Export` table is it provides a list of all raw data,
+# intermediate analysis files, and final analysis files needed to generate a set
+# of figures in a work. To aid in data-sharing standards, we have implemented
+# an optional additional export step with
+# tools to compile and upload this set of files as a Dandi dataset, which can then
+# be used by Spyglass to directly read the data from the Dandi database if not
+# available locally.
 #
 # We will walk through the steps to do so here:
+# 1. Upload the data
+# 2. Export this table alongside the previous export
+# 3. Generate a sharable docker container (Coming soon!)
 
 # <details>
-#    <summary style="font-size:1.5em"> Dandi data compliance (admins)</summary>
+#    <summary> Dandi data compliance (admins)</summary>
 #
 #    >__WARNING__: The following describes spyglass utilities that require database admin privileges to run. It involves altering database values to correct for metadata format errors generated prior to spyglass insert. As such it has the potential to violate data integrity and should be used with caution.
 #    >
@@ -219,6 +240,8 @@ Export().populate_paper(**paper_key)
 #
 #
 #
+
+# ### Dandiset Upload
 
 # The first step you will need to do is to [create a Dandi account](https://www.dandiarchive.org/handbook/16_account/).
 # With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata.
@@ -249,9 +272,46 @@ DandiPath().compile_dandiset(
 
 DandiPath() & {"export_id": 14}
 
-# When fetching data with spyglass, if a file is not available locally, syglass will automatically use
-# this information to stream the file from Dandi's server if available, providing an additional method
-#  for sharing data with collaborators post-publication.
+# When fetching data with Spyglass, if a file is not available locally, Syglass
+# will automatically use this information to stream the file from Dandi's server
+#  if available, providing an additional method for sharing data with
+#  collaborators post-publication.
+
+# ### Export Dandi Table
+#
+# Because we generated new entries in this process we may want to share alongside
+# our export, we'll run the additional step of exporting this table as well.
+#
+
+DandiPath().write_mysqldump(paper_key)
+
+# ## Sharing the export
+#
+# The steps above will generate several files in this paper's export directory.
+# By default, this is relative to your Spyglass base directory:
+# `{BASE_DIR}/export/{PAPER_ID}`.
+#
+# The `.sh` files should be run by a database administrator who is familiar with
+# running `mysqldump` commands.
+#
+# <details><summary>Note to administrators</summary>
+#
+# The dump process saves the exporter's credentials as a `.my.cnf` file
+# ([about these files](https://dev.mysql.com/doc/refman/8.4/en/option-files.html))
+# to allow running `mysqldump` without additional flags for user, password, etc.
+#
+# If database permissions permit running exports from the instance that runs the
+# exports, you can esure you have a similar `.my.cnf` config in place and run the
+# export shell scripts as-is. Some databases, like the one used by the Frank Lab
+# have protections in place that would require these script(s) to be run from the
+# database instance. Resulting `.sql` files should be placed in the same export
+# directory mentioned above.
+#
+# </details>
+#
+# Then, visit the dockerization repository
+# [here](https://github.com/LorenFrankLab/spyglass-export-docker)
+# and follow the instructions in 'Quick Start'.
 
 # ## Up Next
 #
