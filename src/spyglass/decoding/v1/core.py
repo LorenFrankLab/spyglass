@@ -176,6 +176,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
                             PositionOutput & {"merge_id": pos_merge_id}
                         ).fetch1_dataframe(),
                         upsampling_sampling_rate=upsample_rate,
+                        position_variable_names=position_variable_names,
                     )
                 )
             else:
@@ -198,6 +199,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_df: pd.DataFrame,
         upsampling_sampling_rate: float,
         upsampling_interpolation_method: str = "linear",
+        position_variable_names: list[str] = None,
     ) -> pd.DataFrame:
         """upsample position data to a fixed sampling rate
 
@@ -238,7 +240,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
 
         # Find NaN intervals
         nan_intervals = {}
-        for column in position_df.columns:
+        if position_variable_names is None:
+            position_variable_names = position_df.columns
+        for column in position_variable_names:
             is_nan = position_df[column].isna().values.astype(int)
             st = np.where(np.diff(is_nan) == 1)[0] + 1
             en = np.where(np.diff(is_nan) == -1)[0]
