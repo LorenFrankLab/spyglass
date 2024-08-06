@@ -39,6 +39,8 @@ PositionGroup.alter()
 - Revise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
+- Use peripheral tables as fallback in `TableChains` #1035
+- Ignore non-Spyglass tables during descendant check for `part_masters` #1035
 
 ### Pipelines
 
@@ -88,6 +90,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
