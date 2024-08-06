@@ -281,7 +281,6 @@ class AbstractGraph(ABC):
         restr: str,
         direction: Direction = None,
         attr_map: dict = None,
-        aliased: bool = None,
         **kwargs,
     ):
         """Given two tables and a restriction, return restriction for table2.
@@ -513,11 +512,17 @@ class AbstractGraph(ABC):
         for table in self._topo_sort(self.visited):
             logger.info(f"{self._camel(table)}: {self._get_restr(table)}")
 
-    def _get_key(self, table: str, as_dict: bool = True) -> dict:
+    def _get_key(
+        self, table: str, attr_map: dict = None, as_dict: bool = True
+    ) -> dict:
         if not self._get_restr(table):
             raise ValueError(f"Table has no restriction: {table}")
-        return self._get_ft(table, with_restr=True).fetch(
-            "KEY", as_dict=as_dict
+        attr_map = attr_map or {}
+        return (
+            self._get_ft(table, with_restr=True)
+            .proj(**attr_map)
+            .proj()
+            .fetch(as_dict=as_dict)
         )
 
     @property
@@ -1256,11 +1261,14 @@ class ImportedGraph(TableChain):
         # Parent keys.
         # Use all combinations, assume want all given self.parent restriction
         # List[List[Dict[str, str]]] N_parents[N_keys] # Parent keys
-        filled_keys = [self._get_key(p) for p in filled_parents]
-        next_keys = [target._get_key(p) for p in next_parents]
-        next_inserts = self.merged_list_of_dicts(*filled_keys, *next_keys)
-
-        # TODO: HANDLE ALIAS NODES. Insert error if key is aliased.
+        parent_keys = []
+        for parent in filled_parents:
+            attr_map = self._get_edge(parent, next_tbl)[1]["attr_map"]
+            parent_keys.append(self._get_key(parent, attr_map=attr_map))
+        for parent in next_parents:
+            attr_map = target._get_edge(parent, next_tbl)[1]["attr_map"]
+            parent_keys.append(target._get_key(parent, attr_map=attr_map))
+        next_inserts = self.merged_list_of_dicts(*parent_keys)
 
         # Populate or insert next table
         if isinstance(next_class, (dj.Imported, dj.Computed)):
@@ -1272,6 +1280,8 @@ class ImportedGraph(TableChain):
 
         # Cascade to next table
         self.cascade1(next(iter(filled_parents)), direction=Direction.DOWN)
+
+        # TODO: gets hung up on selection table before a merge
 
     def cascade_target(self, limit=20):
         while limit > 0 and self.find_cascade_stop():
