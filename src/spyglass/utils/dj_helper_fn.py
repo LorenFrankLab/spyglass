@@ -487,7 +487,7 @@ def populate_pass_function(value):
     Parameters
     ----------
     value : (table, key, kwargs)
-       Class of table to populate, key to populate, and kwargs for populate
+        Class of table to populate, key to populate, and kwargs for populate
     """
     table, key, kwargs = value
     return table.populate(key, **kwargs)

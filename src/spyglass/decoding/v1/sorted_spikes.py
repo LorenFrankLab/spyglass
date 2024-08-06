@@ -118,7 +118,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-
             # if estimating parameters, then we need to treat times outside
             # decoding interval as missing this means that times outside the
             # decoding interval will not use the spiking data a better approach

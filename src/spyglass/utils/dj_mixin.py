@@ -4,6 +4,7 @@ from contextlib import nullcontext
 from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
+from re import match as re_match
 from time import time
 from typing import Dict, List, Union
 
@@ -708,6 +709,7 @@ class SpyglassMixin:
         # Pass through to super if not parallel in the make function or only a single process
         processes = kwargs.pop("processes", 1)
         if processes == 1 or not self._parallel_make:
+            kwargs["processes"] = processes
             return super().populate(*restrictions, **kwargs)
 
         # If parallel in both make and populate, use non-daemon processes
@@ -735,7 +737,18 @@ class SpyglassMixin:
         """Get Spyglass version."""
         from spyglass import __version__ as sg_version
 
-        return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch
+        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
+
+        if self._test_mode:
+            return ret[:16] if len(ret) > 16 else ret
+
+        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
+            raise ValueError(
+                f"Spyglass version issues. Expected #.#.#, Got {ret}."
+                + "Please try running `hatch build` from your spyglass dir."
+            )
+
+        return ret
 
     @cached_property
     def _export_table(self):

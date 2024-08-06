@@ -16,11 +16,9 @@ The remainder of `mkdocs.yml` specifies the site's
 ## GitHub
 
 Whenever a new tag is pushed, GitHub actions will run
-`.github/workflows/publish-docs.yml`. Progress can be monitored in the 'Actions'
-tab within the repo.
-
-Releases should be tagged with `X.Y.Z`. A tag to redeploy docs should use the
-current version, with an alpha release suffix, e.g. `X.Y.Za1`.
+`.github/workflows/publish-docs.yml`. From the repository, select the Actions
+tab, and then the 'Publish Docs' workflow on the left to monitor progress. The
+process can also be manually triggered by selecting 'Run workflow' on the right.
 
 To deploy on your own fork without a tag, follow turn on github pages in
 settings, following a `documentation` branch, and then push to `test_branch`.
@@ -47,7 +45,7 @@ the root notebooks directory may not be reflected when rebuilding.
 Use a browser to navigate to `localhost:8000/` to inspect the site. For
 auto-reload of markdown files during development, use
 `mkdocs serve -f ./docs/mkdosc.yaml`. The `mike` package used in the build
-script manages versioning, but does not support dynamic versioning.
+script manages versioning, but does not support dynamic reloading.
 
 The following items can be commented out in `mkdocs.yml` to reduce build time:
 
