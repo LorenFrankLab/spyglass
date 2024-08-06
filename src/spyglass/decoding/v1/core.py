@@ -211,6 +211,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             sampling rate to upsample to
         upsampling_interpolation_method : str, optional
             pandas method for interpolation, by default "linear"
+        position_variable_names : list[str], optional
+            names of position variables of focus, for which nan values will not be
+            interpolated, by default None includes all columns
 
         Returns
         -------
