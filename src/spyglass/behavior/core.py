@@ -5,7 +5,7 @@ import datajoint as dj
 import numpy as np
 import pandas as pd
 
-from spyglass.position.position_merge import PoseOutput
+from spyglass.position.position_merge import PositionOutput
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
 schema = dj.schema("behavior_core_v1")
@@ -22,7 +22,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
     class Pose(SpyglassMixinPart):
         definition = """
         -> PoseGroup
-        -> PoseOutput.proj(pose_merge_id='merge_id')
+        -> PositionOutput.proj(pose_merge_id='merge_id')
         """
 
     def create_group(
@@ -85,9 +85,10 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         datasets = {}
         for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id"):
             video_name = (
-                Path((PoseOutput & merge_key).fetch_video_name()).stem + ".mp4"
+                Path((PositionOutput & merge_key).fetch_video_name()).stem
+                + ".mp4"
             )
-            bodyparts_df = (PoseOutput & merge_key).fetch_dataframe()
+            bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
             if bodyparts is None:
                 bodyparts = (
                     bodyparts_df.keys().get_level_values(0).unique().values
@@ -114,7 +115,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         if key is None:
             key = {}
         video_paths = [
-            Path((PoseOutput & merge_key).fetch_video_name())
+            Path((PositionOutput & merge_key).fetch_video_name())
             for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id")
         ]
         return video_paths
