@@ -119,7 +119,7 @@ class VideoMaker:
 
     def _init_video(self):
         logger.info(f"Making video: {self.output_video_filename}")
-        self.video = cv2.VideoCapture(self.video_filename)
+        self.video = cv2.VideoCapture(str(self.video_filename))
         self.frame_size = (
             (int(self.video.get(3)), int(self.video.get(4)))
             if not self.crop

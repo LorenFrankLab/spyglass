@@ -147,7 +147,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = ClusterlessDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-
             # if estimating parameters, then we need to treat times outside
             # decoding interval as missing this means that times outside the
             # decoding interval will not use the spiking data a better approach
@@ -447,8 +446,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         filter_by_interval : bool, optional
             Whether to filter for spike times in the model interval.
             Default True
-        time_slice : Slice, optional
-            User provided slice of time to restrict spikes to. Default None
 
         Returns
         -------

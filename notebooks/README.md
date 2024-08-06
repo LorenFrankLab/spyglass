@@ -1,21 +1,25 @@
 # Tutorial Notebooks
 
 There are several paths one can take to these notebooks. The notebooks have
-two-digits in their names, the first of which indicates it's 'batch', as
+two-digits in their names, the first of which indicates its 'batch', as
 described in the categories below.
 
 ## 0. Intro
 
 Everyone should complete the [Setup](./00_Setup.ipynb) and
-[Insert Data](./01_Insert_Data.ipynb) notebooks.
+[Insert Data](./02_Insert_Data.ipynb) notebooks. The
+[Concepts](./01_Concepts.ipynb) notebook offers additional information that will
+help users understand the data structure and how to interact with it.
 
-[Data Sync](./02_Data_Sync.ipynb) is an optional additional tool for
+[Data Sync](./03_Data_Sync.ipynb) is an optional additional tool for
 collaborators that want to share analysis files.
 
-The [Merge Tables notebook](./03_Merge_Tables.ipynb) explains details on a new
-table tier unique to Spyglass that allows the user to use different versions of
-pipelines on the same data. This is important for understanding the later
-notebooks.
+The [Merge Tables notebook](./04_Merge_Tables.ipynb) explains details on a
+pipeline versioning technique unique to Spyglass. This is important for
+understanding the later notebooks.
+
+The [Export notebook](./05_Export.ipynb) shows how to export data from the
+database.
 
 ## 1. Spike Sorting Pipeline
 
@@ -24,14 +28,14 @@ spike sorting to optional manual curation of the output of the automated
 sorting.
 
 Spikesorting results from any pipeline can then be organized and tracked using
-tools in [Spikesorting Analysis](./11_Spike_Sorting_Agit analysis.ipynb)
+tools in [Spikesorting Analysis](./11_Spikesorting_Analysis.ipynb).
 
 ## 2. Position Pipeline
 
 This series of notebooks covers tracking the position(s) of the animal. The user
 can employ two different methods:
 
-1. the simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on the
+1. The simple [Trodes](20_Position_Trodes.ipynb) methods of tracking LEDs on the
     animal's headstage
 2. [DLC (DeepLabCut)](./21_DLC.ipynb) which uses a neural network to track the
     animal's body parts.

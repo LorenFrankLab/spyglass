@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -185,6 +185,31 @@ sgc.LabTeam().create_new_team(
 #
 
 sgc.LabTeam.LabTeamMember()
+
+# In general, we can insert into any table in this say, by supplying
+# a dictionary (or list of dictionaries) with all the fields mentioned in
+# `Table.heading.names` so long as the data types match what is described in
+# `Table.heading`
+#
+# ```python
+# Table.insert1({'a': 1, 'b': 'other'}) # only one entry
+# Table.insert([{'a':1, 'b': 'other'}, {'a':1, 'b': 'next'}]) # multiple
+# ```
+#
+# For example ...
+
+sgc.ProbeType.insert1(
+    {
+        "probe_type": "128c-4s6mm6cm-15um-26um-sl",
+        "probe_description": "A Livermore flexible probe with 128 channels ...",
+        "manufacturer": "Lawrence Livermore National Lab",
+        "num_shanks": 4,
+    },
+    skip_duplicates=True,
+)
+
+# The `skip_duplicates` flag tells DataJoint not to raise an error if the data
+# is already in the table. This should only be used in special cases.
 
 # ## Inserting from NWB
 #
@@ -469,6 +494,92 @@ sgc.IntervalList & {"nwb_file_name": nwb_copy_file_name}
 sgc.Nwbfile().cleanup(delete_files=True)
 
 # !ls $SPYGLASS_BASE_DIR/raw
+
+# ## YAML Inserts
+#
+# The following step is an optional feature, and not required for the remaining
+# notebooks.
+#
+# Not every NWB file has all the information required by Spyglass. For example,
+# many NWB files do not contain any information about the `DataAcquisitionDevice`
+# or `Probe` because NWB does not yet have an official standard for specifying
+# them. Or, information in the NWB file may need correcting.
+#
+# Manual inserts can either be done on tables directly (e.g.,
+# `Table.insert1(my_dict)`), or done in batch with `yaml` files. This is done in
+# two steps:
+#
+# 1. Generate data to be entered.
+# 2. Associate data with one or more NWB files.
+#
+
+# ### Batch Insert
+#
+# First, Spyglass will check for an `entries.yaml` file at the base directory
+# (see [Setup](./00_Setup.ipynb)) and run all corresponding inserts.
+# This is a great place to define entries that the database should auto-insert
+# prior to ingesting any NWB files. An example can be found in
+# `examples/config_yaml/entries.yaml`. It has the following structure:
+#
+# ```yaml
+# TableName:
+#     - TableEntry1Field1: Value
+#
+# TableEntry1Field2:
+#     - TableEntry2Field1: Value
+#
+# TableEntry2Field2: Value
+# ```
+#
+# For example,
+#
+# ```yaml
+# ProbeType:
+#     - probe_type: 128c-4s6mm6cm-15um-26um-sl
+#     probe_description: A Livermore flexible probe with 128 channels, 4 shanks,
+#         6 mm shank length, 6 cm ribbon length. 15 um contact diameter, 26 um
+#         center-to-center distance (pitch), single-line configuration.
+#     manufacturer: Lawrence Livermore National Lab
+#     num_shanks: 4
+# ```
+#
+# Using a YAML file over data stored in Python scripts helps maintain records
+# of data entries in a human-readable file. For ways to share a state of the
+# database, see our [export tutorial](./05_Export.ipynb).
+#
+
+# ### Pairing with NWBs
+#
+# Next, we'll need to create a _configuration file_ to associate the above entries
+# with session(s). This must be done in the same directory as the NWB file that it
+# configures and have the following naming convention:
+# `<name_of_nwb_file>_spyglass_config.yaml`. This file is then read by Spyglass
+# when calling `insert_session` on the associated NWB file.
+#
+# An example of this can be found at
+# `examples/config_yaml/​​sub-AppleBottom_ses-AppleBottom-DY20-g3_behavior+ecephys_spyglass_config.yaml`.
+#
+# This file is associated with the NWB file
+# `sub-AppleBottom_ses-AppleBottom-DY20-g3_behavior+ecephys.nwb`.
+#
+# This is the general format for the config entry:
+#
+# ```yaml
+# TableName:
+#   - primary_key1: value1
+# ```
+#
+# For example:
+#
+# ```yaml
+# DataAcquisitionDevice:
+#   - data_acquisition_device_name: Neuropixels Recording Device
+# ```
+#
+# In this example, the NWB file that corresponds to this config YAML will become
+# associated with the DataAcquisitionDevice with primary key
+# data_acquisition_device_name: Neuropixels Recording Device. This entry must
+# already exist.
 
 # ## Up Next
 #

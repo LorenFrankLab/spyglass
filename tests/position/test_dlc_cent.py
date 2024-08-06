@@ -59,8 +59,9 @@ def test_centroid_calcs(key, sgp):
         df, max_LED_separation=100, points={p: p for p in points}
     ).centroid
 
-    assert np.all(ret[:-1] == 1), f"Centroid calculation failed for {key}"
-    assert np.all(np.isnan(ret[-1])), f"Centroid calculation failed for {key}"
+    fail_msg = f"Centroid calculation failed for {key}"
+    assert np.all(ret[:-1] == 1), fail_msg
+    assert np.all(np.isnan(ret[-1])), fail_msg
 
 
 def test_centroid_error(sgp):

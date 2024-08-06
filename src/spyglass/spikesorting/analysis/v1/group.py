@@ -289,7 +289,6 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         )
 
 
-@staticmethod
 def _get_spike_obj_name(nwb_file, allow_empty=False):
     nwb_field_name = (
         "object_id"

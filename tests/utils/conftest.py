@@ -233,7 +233,6 @@ def graph_schema(SpyglassMixin, _Merge):
 
 @pytest.fixture(scope="module")
 def graph_tables(dj_conn, graph_schema):
-
     schema = dj.Schema(context=graph_schema)
 
     for table in graph_schema.values():

@@ -242,6 +242,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
+            sparse=waveform_params.get("sparse", False),
             folder=waveforms_dir,
             overwrite=True,
             **waveform_params,
