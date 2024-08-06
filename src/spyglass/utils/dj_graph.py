@@ -416,8 +416,9 @@ class AbstractGraph(ABC):
             raise RecursionError("Cascade1: Recursion limit reached.")
         if restriction is None:
             restriction = self._get_restr(table)
+        else:
+            self._set_restr(table, restriction, replace=replace)
 
-        self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
         next_tables, next_func = self._get_next_tables(table, direction)
@@ -512,6 +513,13 @@ class AbstractGraph(ABC):
         for table in self._topo_sort(self.visited):
             logger.info(f"{self._camel(table)}: {self._get_restr(table)}")
 
+    def _get_key(self, table: str, as_dict: bool = True) -> dict:
+        if not self._get_restr(table):
+            raise ValueError(f"Table has no restriction: {table}")
+        return self._get_ft(table, with_restr=True).fetch(
+            "KEY", as_dict=as_dict
+        )
+
     @property
     def restr_ft(self):
         """Get non-empty restricted FreeTables from all visited nodes."""
@@ -556,6 +564,17 @@ class AbstractGraph(ABC):
             for table in self.visited
             if self._get_restr(table)
         ]
+
+    def non_alias(self, original_list: list = None) -> List[str]:
+        """Return list of non-alias nodes.
+
+        Parameters
+        ----------
+        original_list : list, optional
+            List of table names. Default None, use visited nodes.
+        """
+        original_list = original_list or self.visited
+        return [n for n in original_list if not n.isnumeric()]
 
 
 class RestrGraph(AbstractGraph):
@@ -1171,8 +1190,10 @@ class TableChain(RestrGraph):
 
 import importlib
 import inspect
+from itertools import product as iter_product
 from pathlib import Path
 
+import datajoint as dj
 from datajoint.autopopulate import AutoPopulate
 
 
@@ -1200,43 +1221,76 @@ class ImportedGraph(TableChain):
                 null_on_fail=False,
             )
 
-    def cascade1_target(self):
-        if not self.target or not self.has_link or not self.target.has_link:
+    def merged_list_of_dicts(self, *args):
+        # TODO: accept list from multi-table fetches
+        merged = []
+        # merged = [{**a, **b} for a, b in iter_product(list1, list2)]
+        for combo in iter_product(*args):
+            new = dict()
+            for this_dict in combo:
+                new.update(this_dict)
+            merged.append(new)
+        return merged
+
+    def cascade1_target(self, next_tbl: str = None):
+        target = self.target
+        if (
+            not self.target  # Missing target
+            or not self.has_link  # Cannot find path
+            or not target._get_restr(self.child)  # Target not at end of chain
+        ):
             self._log_truncate("No target or no link")
             return
 
-        next_tbl = self.find_cascade_stop()
-        next_parents = set(self._get_ft(next_tbl).parents()) - self.visited
+        # Find next table to cascade to
+        next_tbl = next_tbl or self.find_cascade_stop()
+        next_class = self._get_class(next_tbl, with_restr=False)
 
-        self._log_truncate(f"Next: {next_tbl}, {next_parents}")
+        # Find that table's parents
+        all_parents = set(self._get_ft(next_tbl).parents())
+        filled_parents = all_parents & self.visited  # Already visited
+        next_parents = all_parents - self.visited  # Need to check target
 
-        self.target.no_visit -= next_parents
-        self.target.visited -= next_parents
-        self.target.cascade1(next_tbl, direction=Direction.UP)
+        self._log_truncate(f"Next   : {next_tbl}, {next_parents}")
 
-        # this_parent = [p for p in next_class.parents() if p in self.visited]
-        # if len(this_parent) != 1:
-        #     raise ValueError("Invalid parent count")
-        # this_parent_class_keys = self._get_ft(this_parent[0]).fetch(
-        #     "KEY", as_dict=True
-        # )
-        # for ancestor in next_parents:
-        #     anc_class = self._get_class(ancestor)
-        #     this_parent_class_keys.update(
-        #         (anc_class & self.target._get_restr(ancestor)).fetch1("KEY")
-        #     )
-        # self._log_truncate(f"Ins: {next_tbl}, {this_parent_class_keys}")
-        # next_class.insert1(this_parent_class_keys)
+        # Parent keys.
+        # Use all combinations, assume want all given self.parent restriction
+        # List[List[Dict[str, str]]] N_parents[N_keys] # Parent keys
+        filled_keys = [self._get_key(p) for p in filled_parents]
+        next_keys = [target._get_key(p) for p in next_parents]
+        next_inserts = self.merged_list_of_dicts(*filled_keys, *next_keys)
+
+        # TODO: HANDLE ALIAS NODES. Insert error if key is aliased.
+
+        # Populate or insert next table
+        if isinstance(next_class, (dj.Imported, dj.Computed)):
+            self._log_truncate(f"AutoPop: {next_tbl}")
+            next_class.populate(next_inserts)
+        else:  # Insert directly
+            self._log_truncate(f"Insert : {next_tbl}")
+            next_class.insert(next_inserts, skip_duplicates=True)
+
+        # Cascade to next table
+        self.cascade1(next(iter(filled_parents)), direction=Direction.DOWN)
+
+    def cascade_target(self, limit=20):
+        while limit > 0 and self.find_cascade_stop():
+            self.cascade1_target()
+            limit -= 1
 
     def find_cascade_stop(self):
         """Find the first table in the chain without a restriction."""
-        path = [t for t in self.path if not t.isnumeric()]  # should be prop
-        for table in path:
+        for table in self.non_alias(self.path):
             if self._get_restr(table) is False:
                 return table
         return None
 
-    @property
+    # -------------------- Map Package for Importing Class --------------------
+    # This is needed to run populate on tables directly.
+    # Dict[Class, Dict[Schema, Module]
+    # TODO: use datajoint regex to only import Imported/Computed tables
+
+    @cached_property
     def class_map(self):
         if not self._class_map:
             self._class_map = self._map_package()
@@ -1251,6 +1305,8 @@ class ImportedGraph(TableChain):
         class_obj = self._get_node(table_name).get("class")
         if not class_obj:
             class_obj = self._import_class(table_name)
+        if isinstance(class_obj, dj.user_tables.TableMeta):
+            class_obj = class_obj()
         if not with_restr:
             return class_obj
         return class_obj & self._get_restr(table_name)
@@ -1302,7 +1358,7 @@ class ImportedGraph(TableChain):
 
         return dict(class_map)
 
-    def _decompose_name(self, name: str) -> Tuple[str, str]:
+    def _decompose_name(self, name: str) -> Tuple[str, str, str]:
         """Decompose table name into schema and table name."""
         schema, table = self._ensure_names(name).strip("`").split(".")
         part = None
@@ -1323,6 +1379,3 @@ class ImportedGraph(TableChain):
         if part_name:
             table_class = getattr(table_class, part_name)
         return table_class
-
-    def get_classes(self, names: List[str] = None) -> None:
-        return [self._get_class(name) for name in self._ensure_names(names)]
