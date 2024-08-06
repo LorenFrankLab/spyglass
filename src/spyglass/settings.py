@@ -232,6 +232,7 @@ class SpyglassConfig:
     def _set_env_with_dict(self, env_dict) -> None:
         # NOTE: Kept for backwards compatibility. Should be removed in future
         # for custom paths. Keep self.env_defaults.
+        # SPYGLASS_BASE_DIR may be used for docker assembly of export
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 

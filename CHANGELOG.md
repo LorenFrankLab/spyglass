@@ -39,6 +39,7 @@ PositionGroup.alter()
 - Revise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 
 ### Pipelines
 
@@ -89,6 +90,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
