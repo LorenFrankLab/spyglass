@@ -97,13 +97,17 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         ) as logger:
             logger.logger.info("-----------------------")
             logger.logger.info("Bodypart Cohort")
-            # from Jen Guidera
             self.insert1(key)
             cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
             table_entries = []
             bodyparts_params_dict = cohort_selection.pop(
                 "bodyparts_params_dict"
             )
+            if len(bodyparts_params_dict) == 0:
+                logger.logger.warn(
+                    "No bodyparts specified in bodyparts_params_dict"
+                )
+                return
             temp_key = cohort_selection.copy()
             for bodypart, params in bodyparts_params_dict.items():
                 temp_key["bodypart"] = bodypart

@@ -89,16 +89,21 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         # Get labels to smooth from Parameters table
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
-        pos_df = pd.concat(
-            {
-                bodypart: (
-                    DLCSmoothInterpCohort.BodyPart
-                    & {**key, **{"bodypart": bodypart}}
-                ).fetch1_dataframe()
-                for bodypart in cohort_entries.fetch("bodypart")
-            },
-            axis=1,
+        pos_df = (
+            pd.concat(
+                {
+                    bodypart: (
+                        DLCSmoothInterpCohort.BodyPart
+                        & {**key, **{"bodypart": bodypart}}
+                    ).fetch1_dataframe()
+                    for bodypart in cohort_entries.fetch("bodypart")
+                },
+                axis=1,
+            )
+            if cohort_entries
+            else pd.DataFrame()
         )
+
         params = (DLCOrientationParams() & key).fetch1("params")
         orientation_smoothing_std_dev = params.pop(
             "orientation_smoothing_std_dev", None

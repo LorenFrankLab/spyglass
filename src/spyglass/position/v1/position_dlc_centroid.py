@@ -152,12 +152,31 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             cohort_entries = DLCSmoothInterpCohort.BodyPart & key
             params = (DLCCentroidParams() & key).fetch1("params")
             centroid_method = params.pop("centroid_method")
-            bodyparts_avail = cohort_entries.fetch("bodypart")
-            speed_smoothing_std_dev = params.pop("speed_smoothing_std_dev")
-
             if not centroid_method:
                 raise ValueError("Please specify a centroid method to use.")
             validate_option(option=centroid_method, options=_key_to_func_dict)
+            # Handle the null centroid case
+            if centroid_method == "null":
+                logger.logger.warning("Null centroid method selected")
+                null_obj_id = AnalysisNwbfile().add_nwb_object(
+                    analysis_file_name, pd.DataFrame()
+                )
+                key.update(
+                    {
+                        "analysis_file_name": analysis_file_name,
+                        "dlc_position_object_id": null_obj_id,
+                        "dlc_velocity_object_id": null_obj_id,
+                    }
+                )
+                AnalysisNwbfile().add(
+                    nwb_file_name=key["nwb_file_name"],
+                    analysis_file_name=key["analysis_file_name"],
+                )
+                self.insert1(key)
+                return
+
+            bodyparts_avail = cohort_entries.fetch("bodypart")
+            speed_smoothing_std_dev = params.pop("speed_smoothing_std_dev")
 
             points = params.get("points")
             required_points = _key_to_points.get(centroid_method)
@@ -816,9 +835,11 @@ _key_to_func_dict = {
     "four_led_centroid": four_led_centroid,
     "two_pt_centroid": two_pt_centroid,
     "one_pt_centroid": one_pt_centroid,
+    "null": None,
 }
 _key_to_points = {
     "four_led_centroid": ["greenLED", "redLED_L", "redLED_C", "redLED_R"],
     "two_pt_centroid": ["point1", "point2"],
     "one_pt_centroid": ["point1"],
+    "null": [],
 }
