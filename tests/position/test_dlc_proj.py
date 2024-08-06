@@ -57,7 +57,10 @@ def test_failed_name_insert(
     ), "Project re-insert did not return expected key"
 
 
-def test_failed_group_insert(dlc_project_tbl, new_project_key):
+@pytest.mark.usefixtures("skipif_no_dlc")
+def test_failed_group_insert(no_dlc, dlc_project_tbl, new_project_key):
+    if no_dlc:  # Decorator wasn't working here, so duplicate skipif
+        pytest.skip(reason="Skipping DLC-dependent tests.")
     with pytest.raises(ValueError):
         dlc_project_tbl.insert_new_project(**new_project_key)
 
