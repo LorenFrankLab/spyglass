@@ -246,15 +246,15 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         if position_variable_names is None:
             position_variable_names = position_df.columns
         for column in position_variable_names:
-            is_nan = position_df[column].isna().values.astype(int)
+            is_nan = position_df[column].isna().to_numpy().astype(int)
             st = np.where(np.diff(is_nan) == 1)[0] + 1
             en = np.where(np.diff(is_nan) == -1)[0]
             if is_nan[0]:
                 st = np.insert(st, 0, 0)
             if is_nan[-1]:
                 en = np.append(en, len(is_nan) - 1)
-            st = position_df.index[st].values
-            en = position_df.index[en].values
+            st = position_df.index[st].to_numpy()
+            en = position_df.index[en].to_numpy()
             nan_intervals[column] = list(zip(st, en))
 
         # upsample and interpolate
