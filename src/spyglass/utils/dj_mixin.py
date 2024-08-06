@@ -652,6 +652,11 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         start = time()
+
+        if len(self) == 0:
+            logger.warning(f"Table is empty. No need to delete.\n{self}")
+            return
+
         external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 
         if not force_permission or dry_run:
