@@ -386,7 +386,6 @@ def populate_exception():
 @pytest.fixture(scope="session")
 def frequent_imports():
     """Often needed for graph cascade."""
-    from spyglass.common.common_ripple import RippleLFPSelection
     from spyglass.decoding.v0.clusterless import UnitMarksIndicatorSelection
     from spyglass.decoding.v0.sorted_spikes import (
         SortedSpikesIndicatorSelection,
@@ -401,7 +400,6 @@ def frequent_imports():
         LFPBandSelection,
         MuaEventsV1,
         PositionGroup,
-        RippleLFPSelection,
         RippleTimesV1,
         SortedSpikesIndicatorSelection,
         SpikeSortingRecordingView,
