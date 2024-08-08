@@ -19,8 +19,9 @@ from networkx import NetworkXError
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (  # NonDaemonPool,
+from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    ensure_names,
     fetch_nwb,
     get_nwb_table,
     populate_pass_function,
@@ -888,20 +889,13 @@ class SpyglassMixin:
         """
         return self.restrict_by(restriction, direction="down")
 
-    def _ensure_names(self, tables) -> List[str]:
-        """Ensure table is a string in a list."""
-        if not isinstance(tables, (list, tuple, set)):
-            tables = [tables]
-        for table in tables:
-            return [getattr(table, "full_table_name", table) for t in tables]
-
     def ban_search_table(self, table):
         """Ban table from search in restrict_by."""
-        self._banned_search_tables.update(self._ensure_names(table))
+        self._banned_search_tables.update(ensure_names(table))
 
     def unban_search_table(self, table):
         """Unban table from search in restrict_by."""
-        self._banned_search_tables.difference_update(self._ensure_names(table))
+        self._banned_search_tables.difference_update(ensure_names(table))
 
     def see_banned_tables(self):
         """Print banned tables."""

@@ -1,4 +1,5 @@
 import warnings
+from typing import Dict, List
 
 import numpy as np
 import scipy.stats as stats
@@ -250,3 +251,40 @@ def _check_artifact_thresholds(
         )
         proportion_above_thresh = 1
     return amplitude_thresh, zscore_thresh, proportion_above_thresh
+
+
+def _get_recording_timestamps(recording):
+    num_segments = recording.get_num_segments()
+
+    if num_segments <= 1:
+        return recording.get_times()
+
+    frames_per_segment = [0] + [
+        recording.get_num_frames(segment_index=i) for i in range(num_segments)
+    ]
+
+    cumsum_frames = np.cumsum(frames_per_segment)
+    total_frames = np.sum(frames_per_segment)
+
+    timestamps = np.zeros((total_frames,))
+    for i in range(num_segments):
+        start_index = cumsum_frames[i]
+        end_index = cumsum_frames[i + 1]
+        timestamps[start_index:end_index] = recording.get_times(segment_index=i)
+
+    return timestamps
+
+
+def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
+    return [
+        {
+            "name": metric_name,
+            "label": metric_name,
+            "tooltip": metric_name,
+            "data": {
+                str(unit_id): metric_value
+                for unit_id, metric_value in metric.items()
+            },
+        }
+        for metric_name, metric in metrics.items()
+    ]

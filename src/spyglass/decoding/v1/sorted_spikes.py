@@ -25,6 +25,7 @@ from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
+from spyglass.decoding.v1.utils import _get_interval_range
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
@@ -293,47 +294,6 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return classifier.environments
 
     @staticmethod
-    def _get_interval_range(key):
-        """Return maximum range of model times in encoding/decoding intervals
-
-        Parameters
-        ----------
-        key : dict
-            The decoding selection key
-
-        Returns
-        -------
-        Tuple[float, float]
-            The minimum and maximum times for the model
-        """
-        encoding_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["encoding_interval"],
-            }
-        ).fetch1("valid_times")
-
-        decoding_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["decoding_interval"],
-            }
-        ).fetch1("valid_times")
-
-        return (
-            min(
-                np.asarray(encoding_interval).min(),
-                np.asarray(decoding_interval).min(),
-            ),
-            max(
-                np.asarray(encoding_interval).max(),
-                np.asarray(decoding_interval).max(),
-            ),
-        )
-
-    @staticmethod
     def fetch_position_info(key):
         """Fetch the position information for the decoding model
 
@@ -351,7 +311,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
         }
-        min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+        min_time, max_time = _get_interval_range(key)
         position_info, position_variable_names = (
             PositionGroup & position_group_key
         ).fetch_position_info(min_time=min_time, max_time=max_time)
@@ -386,7 +346,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             edge_order=environment.edge_order,
             edge_spacing=environment.edge_spacing,
         )
-        min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+        min_time, max_time = _get_interval_range(key)
 
         return (
             pd.concat(
@@ -429,7 +389,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             return spike_times
 
         if time_slice is None:
-            min_time, max_time = SortedSpikesDecodingV1._get_interval_range(key)
+            min_time, max_time = _get_interval_range(key)
         else:
             min_time, max_time = time_slice.start, time_slice.stop
 

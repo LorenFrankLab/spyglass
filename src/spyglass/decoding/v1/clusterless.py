@@ -19,19 +19,20 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import ClusterlessDetector
-from ripple_detection import get_multiunit_population_firing_rate
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
+from spyglass.decoding.v1.utils import _get_interval_range
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("decoding_clusterless_v1")
 
@@ -329,47 +330,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return classifier.environments
 
     @staticmethod
-    def _get_interval_range(key):
-        """Return max range of model times in the encoding/decoding intervals
-
-        Parameters
-        ----------
-        key : dict
-            The decoding selection key
-
-        Returns
-        -------
-        Tuple[float, float]
-            The minimum and maximum times for the model
-        """
-        encoding_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["encoding_interval"],
-            }
-        ).fetch1("valid_times")
-
-        decoding_interval = (
-            IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["decoding_interval"],
-            }
-        ).fetch1("valid_times")
-
-        return (
-            min(
-                np.asarray(encoding_interval).min(),
-                np.asarray(decoding_interval).min(),
-            ),
-            max(
-                np.asarray(encoding_interval).max(),
-                np.asarray(decoding_interval).max(),
-            ),
-        )
-
-    @staticmethod
     def fetch_position_info(key):
         """Fetch the position information for the decoding model
 
@@ -388,7 +348,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             "nwb_file_name": key["nwb_file_name"],
         }
 
-        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
+        min_time, max_time = _get_interval_range(key)
         position_info, position_variable_names = (
             PositionGroup & position_group_key
         ).fetch_position_info(min_time=min_time, max_time=max_time)
@@ -424,7 +384,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             edge_spacing=environment.edge_spacing,
         )
 
-        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
+        min_time, max_time = _get_interval_range(key)
 
         return (
             pd.concat(
@@ -470,7 +430,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         if not filter_by_interval:
             return spike_times, spike_waveform_features
 
-        min_time, max_time = ClusterlessDecodingV1._get_interval_range(key)
+        min_time, max_time = _get_interval_range(key)
 
         new_spike_times = []
         new_waveform_features = []
@@ -523,7 +483,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         multiunit: bool = False,
         smoothing_sigma: float = 0.015,
     ) -> np.ndarray:
-        """get time-dependent firing rate for units in the group
+        """Get time-dependent firing rate for units in the group
+
 
         Parameters
         ----------
@@ -543,24 +504,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         np.ndarray
             time-dependent firing rate with shape (len(time), n_units)
         """
-        spike_indicator = cls.get_spike_indicator(key, time)
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
-
-        sampling_frequency = 1 / np.median(np.diff(time))
-
-        if multiunit:
-            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-        return np.stack(
-            [
-                get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis],
-                    sampling_frequency,
-                    smoothing_sigma,
-                )
-                for indicator in spike_indicator.T
-            ],
-            axis=1,
+        # CB: This is not used in the codebase. Remove?
+        return firing_rate_from_spike_indicator(
+            spike_indicator=cls.get_spike_indicator(key, time),
+            time=time,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )
 
     def get_orientation_col(self, df):
