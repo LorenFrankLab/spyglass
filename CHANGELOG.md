@@ -7,9 +7,11 @@
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
+import datajoint as dj
 from spyglass.common.common_behav import PositionIntervalMap
 from spyglass.decoding.v1.core import PositionGroup
 
+dj.schema("common_ripple").drop()
 PositionIntervalMap.alter()
 PositionGroup.alter()
 ```
@@ -58,6 +60,7 @@ PositionGroup.alter()
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
     - `AnalysisFileLog` now truncates table names that exceed field length #1021
     - Disable logging with `AnalysisFileLog` #1024
+    - Remove `common_ripple` schema #1061
 
 - Decoding:
 

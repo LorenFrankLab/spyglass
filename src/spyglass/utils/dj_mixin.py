@@ -261,9 +261,6 @@ class SpyglassMixin:
 
     def _import_part_masters(self):
         """Import tables that may constrain a RestrGraph. See #1002"""
-        from spyglass.common.common_ripple import (
-            RippleLFPSelection,
-        )  # noqa F401
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
         from spyglass.decoding.v0.clusterless import (  # noqa F401
             UnitMarksIndicatorSelection,
@@ -300,7 +297,6 @@ class SpyglassMixin:
             MuaEventsV1(),
             PositionGroup(),
             PositionOutput(),
-            RippleLFPSelection(),
             RippleTimesV1(),
             SortedSpikesGroup(),
             SortedSpikesIndicatorSelection(),
