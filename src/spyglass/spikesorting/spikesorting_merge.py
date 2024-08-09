@@ -17,6 +17,7 @@ from spyglass.spikesorting.v1 import (
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
+from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("spikesorting_merge")
 
@@ -209,7 +210,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.fetch_spike_data(key)
+        spike_times = cls.fetch_spike_data(key)  # CB: This is undefined.
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
@@ -232,22 +233,31 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         multiunit: bool = False,
         smoothing_sigma: float = 0.015,
     ):
-        spike_indicator = cls.get_spike_indicator(key, time)
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
+        """Get time-dependent firing rate for units in the group
 
-        sampling_frequency = 1 / np.median(np.diff(time))
 
-        if multiunit:
-            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-        return np.stack(
-            [
-                get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis],
-                    sampling_frequency,
-                    smoothing_sigma,
-                )
-                for indicator in spike_indicator.T
-            ],
-            axis=1,
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the firing rate
+        multiunit : bool, optional
+            if True, return the multiunit firing rate for units in the group.
+            Default False
+        smoothing_sigma : float, optional
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds. Default 0.015
+
+        Returns
+        -------
+        np.ndarray
+            time-dependent firing rate with shape (len(time), n_units)
+        """
+        # CB: This is not used in the codebase. Remove?
+        return firing_rate_from_spike_indicator(
+            spike_indicator=cls.get_spike_indicator(key, time),
+            time=time,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )

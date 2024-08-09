@@ -8,6 +8,7 @@ from ripple_detection import get_multiunit_population_firing_rate
 from spyglass.common import Session  # noqa: F401
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("spikesorting_group_v1")
 
@@ -250,7 +251,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         multiunit: bool = False,
         smoothing_sigma: float = 0.015,
     ) -> np.ndarray:
-        """get time-dependent firing rate for units in the group
+        """Get time-dependent firing rate for units in the group
 
         Parameters
         ----------
@@ -259,33 +260,22 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         time : np.ndarray
             time vector for which to calculate the firing rate
         multiunit : bool, optional
-            if True, return the multiunit firing rate for units in the group, by default False
+            if True, return the multiunit firing rate for units in the group,
+            by default False
         smoothing_sigma : float, optional
-            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds, by default 0.015
 
         Returns
         -------
         np.ndarray
             time-dependent firing rate with shape (len(time), n_units)
         """
-        spike_indicator = cls.get_spike_indicator(key, time)
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
-
-        sampling_frequency = 1 / np.median(np.diff(time))
-
-        if multiunit:
-            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-        return np.stack(
-            [
-                get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis],
-                    sampling_frequency,
-                    smoothing_sigma,
-                )
-                for indicator in spike_indicator.T
-            ],
-            axis=1,
+        return firing_rate_from_spike_indicator(
+            spike_indicator=cls.get_spike_indicator(key, time),
+            time=time,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )
 
 

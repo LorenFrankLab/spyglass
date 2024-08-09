@@ -19,7 +19,10 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.spikesorting.utils import get_group_by_shank
+from spyglass.spikesorting.utils import (
+    _get_recording_timestamps,
+    get_group_by_shank,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -223,28 +226,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        num_segments = recording.get_num_segments()
-
-        if num_segments <= 1:
-            return recording.get_times()
-
-        frames_per_segment = [0] + [
-            recording.get_num_frames(segment_index=i)
-            for i in range(num_segments)
-        ]
-
-        cumsum_frames = np.cumsum(frames_per_segment)
-        total_frames = np.sum(frames_per_segment)
-
-        timestamps = np.zeros((total_frames,))
-        for i in range(num_segments):
-            start_index = cumsum_frames[i]
-            end_index = cumsum_frames[i + 1]
-            timestamps[start_index:end_index] = recording.get_times(
-                segment_index=i
-            )
-
-        return timestamps
+        # CB: Not used. Remove?
+        return _get_recording_timestamps(recording)
 
     def _get_sort_interval_valid_times(self, key: dict):
         """Identifies the intersection between sort interval specified by the user
