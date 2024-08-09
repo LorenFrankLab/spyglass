@@ -133,6 +133,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                     position_info.index <= interval_end,
                 )
             ] = True
+        is_training[
+            position_info[position_variable_names].isna().values.max(axis=1)
+        ] = False
         if "is_training" not in decoding_kwargs:
             decoding_kwargs["is_training"] = is_training
 
@@ -386,14 +389,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         min_time, max_time = _get_interval_range(key)
 
-        return (
-            pd.concat(
-                [linear_position_df.set_index(position_df.index), position_df],
-                axis=1,
-            )
-            .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
-        )
+        return pd.concat(
+            [linear_position_df.set_index(position_df.index), position_df],
+            axis=1,
+        ).loc[min_time:max_time]
 
     @staticmethod
     def fetch_spike_data(key, filter_by_interval=True):

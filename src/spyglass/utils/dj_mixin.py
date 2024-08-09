@@ -16,6 +16,7 @@ from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, to_camel_case, user_choice
 from networkx import NetworkXError
+from packaging.version import parse as version_parse
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
@@ -261,9 +262,6 @@ class SpyglassMixin:
 
     def _import_part_masters(self):
         """Import tables that may constrain a RestrGraph. See #1002"""
-        from spyglass.common.common_ripple import (
-            RippleLFPSelection,
-        )  # noqa F401
         from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
         from spyglass.decoding.v0.clusterless import (  # noqa F401
             UnitMarksIndicatorSelection,
@@ -300,7 +298,6 @@ class SpyglassMixin:
             MuaEventsV1(),
             PositionGroup(),
             PositionOutput(),
-            RippleLFPSelection(),
             RippleTimesV1(),
             SortedSpikesGroup(),
             SortedSpikesIndicatorSelection(),
@@ -652,6 +649,11 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         start = time()
+
+        if len(self) == 0:
+            logger.warning(f"Table is empty. No need to delete.\n{self}")
+            return
+
         external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 
         if not force_permission or dry_run:
@@ -750,6 +752,30 @@ class SpyglassMixin:
             )
 
         return ret
+
+    def compare_versions(
+        self, version: str, other: str = None, msg: str = None
+    ) -> None:
+        """Compare two versions. Raise error if not equal.
+
+        Parameters
+        ----------
+        version : str
+            Version to compare.
+        other : str, optional
+            Other version to compare. Default None. Use self._spyglass_version.
+        msg : str, optional
+            Additional error message info. Default None.
+        """
+        if self._test_mode:
+            return
+
+        other = other or self._spyglass_version
+
+        if version_parse(version) != version_parse(other):
+            raise RuntimeError(
+                f"Found mismatched versions: {version} vs {other}\n{msg}"
+            )
 
     @cached_property
     def _export_table(self):

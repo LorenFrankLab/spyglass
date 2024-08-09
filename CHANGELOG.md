@@ -7,9 +7,11 @@
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
+import datajoint as dj
 from spyglass.common.common_behav import PositionIntervalMap
 from spyglass.decoding.v1.core import PositionGroup
 
+dj.schema("common_ripple").drop()
 PositionIntervalMap.alter()
 PositionGroup.alter()
 ```
@@ -28,17 +30,20 @@ PositionGroup.alter()
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
 - Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
-- `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- `cautious_delete` now ...
+    - Checks `IntervalList` and externals tables. #1002
+    - Ends early if called on empty table. #1055
 - Allow mixin tables with parallelization in `make` to run populate with
     `processes > 1` #1001, #1052
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
-- Merge duplicate functions in decoding and spikesorting #1050
+- Merge duplicate functions in decoding and spikesorting #1050, #1052
 - Revise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 
 ### Pipelines
 
@@ -55,11 +60,13 @@ PositionGroup.alter()
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
     - `AnalysisFileLog` now truncates table names that exceed field length #1021
     - Disable logging with `AnalysisFileLog` #1024
+    - Remove `common_ripple` schema #1061
 
 - Decoding:
 
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
+    - Avoid interpolating over large `nan` intervals in position #1033
 
 - Position
 
@@ -88,6 +95,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
