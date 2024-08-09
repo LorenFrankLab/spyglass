@@ -169,7 +169,6 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
     @file_log(logger, console=False)
     def _logged_make(self, key):
-
         METERS_PER_CM = 0.01
 
         logger.info("-----------------------")

@@ -43,14 +43,16 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     definition = """
     track_graph_name : varchar(80)
     ----
-    environment : varchar(80)    # Type of Environment
-    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
-    edges: blob                  # shape (n_edges, 2)
-    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    environment : varchar(80)  # Type of Environment
+    node_positions : blob      # 2D position of nodes, (n_nodes, 2)
+    edges: blob                # shape (n_edges, 2)
+    linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
+    linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
+        # CB: Does this need to be a public method? Can other methods inherit
+        # the logic? It's a pretty simple wrapper around make_track_graph.
         if track_graph_parameters is None:
             track_graph_parameters = self.fetch1()
         return make_track_graph(
@@ -60,7 +62,9 @@ class TrackGraph(SpyglassMixin, dj.Manual):
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
         """Plot the track graph in 2D position space."""
-        track_graph = self.get_networkx_track_graph()
+        track_graph = self.get_networkx_track_graph(
+            track_graph_parameters=self.fetch1()
+        )
         plot_track_graph(
             track_graph, ax=ax, draw_edge_labels=draw_edge_labels, **kwds
         )

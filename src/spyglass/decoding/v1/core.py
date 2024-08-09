@@ -22,7 +22,7 @@ schema = dj.schema("decoding_core_v1")
 
 @schema
 class DecodingParameters(SpyglassMixin, dj.Lookup):
-    """Parameters for decoding the animal's mental position and some category of interest"""
+    """Params for decoding mental position and some category of interest"""
 
     definition = """
     decoding_param_name : varchar(80)  # a name for this set of parameters
@@ -31,22 +31,25 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     decoding_kwargs = NULL : BLOB      # additional keyword arguments
     """
 
+    pk = "decoding_param_name"
+    sk = "decoding_params"
+
     contents = [
         {
-            "decoding_param_name": f"contfrag_clusterless_{non_local_detector_version}",
-            "decoding_params": ContFragClusterlessClassifier(),
+            pk: f"contfrag_clusterless_{non_local_detector_version}",
+            sk: ContFragClusterlessClassifier(),
         },
         {
-            "decoding_param_name": f"nonlocal_clusterless_{non_local_detector_version}",
-            "decoding_params": NonLocalClusterlessDetector(),
+            pk: f"nonlocal_clusterless_{non_local_detector_version}",
+            sk: NonLocalClusterlessDetector(),
         },
         {
-            "decoding_param_name": f"contfrag_sorted_{non_local_detector_version}",
-            "decoding_params": ContFragSortedSpikesClassifier(),
+            pk: f"contfrag_sorted_{non_local_detector_version}",
+            sk: ContFragSortedSpikesClassifier(),
         },
         {
-            "decoding_param_name": f"nonlocal_sorted_{non_local_detector_version}",
-            "decoding_params": NonLocalSortedSpikesDetector(),
+            pk: f"nonlocal_sorted_{non_local_detector_version}",
+            sk: NonLocalSortedSpikesDetector(),
         },
     ]
 
@@ -117,7 +120,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         }
         if self & group_key:
             raise ValueError(
-                f"Group {nwb_file_name}: {position_group_name} already exists",
+                f"Group {nwb_file_name}: {group_name} already exists",
                 "please delete the group before creating a new one",
             )
         self.insert1(
@@ -147,9 +150,11 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         key : dict, optional
             restriction to a single entry in PositionGroup, by default None
         min_time : float, optional
-            restrict position information to times greater than min_time, by default None
+            restrict position information to times greater than min_time,
+            by default None
         max_time : float, optional
-            restrict position information to times less than max_time, by default None
+            restrict position information to times less than max_time,
+            by default None
 
         Returns
         -------
@@ -171,6 +176,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
                             PositionOutput & {"merge_id": pos_merge_id}
                         ).fetch1_dataframe(),
                         upsampling_sampling_rate=upsample_rate,
+                        position_variable_names=position_variable_names,
                     )
                 )
             else:
@@ -184,11 +190,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             min_time = min([df.index.min() for df in position_info])
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
-        position_info = (
-            pd.concat(position_info, axis=0)
-            .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
-        )
+        position_info = pd.concat(position_info, axis=0).loc[min_time:max_time]
 
         return position_info, position_variable_names
 
@@ -197,6 +199,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_df: pd.DataFrame,
         upsampling_sampling_rate: float,
         upsampling_interpolation_method: str = "linear",
+        position_variable_names: list[str] = None,
     ) -> pd.DataFrame:
         """upsample position data to a fixed sampling rate
 
@@ -208,6 +211,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             sampling rate to upsample to
         upsampling_interpolation_method : str, optional
             pandas method for interpolation, by default "linear"
+        position_variable_names : list[str], optional
+            names of position variables of focus, for which nan values will not be
+            interpolated, by default None includes all columns
 
         Returns
         -------
@@ -234,10 +240,33 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             np.unique(np.concatenate((position_df.index, new_time))),
             name="time",
         )
+
+        # Find NaN intervals
+        nan_intervals = {}
+        if position_variable_names is None:
+            position_variable_names = position_df.columns
+        for column in position_variable_names:
+            is_nan = position_df[column].isna().to_numpy().astype(int)
+            st = np.where(np.diff(is_nan) == 1)[0] + 1
+            en = np.where(np.diff(is_nan) == -1)[0]
+            if is_nan[0]:
+                st = np.insert(st, 0, 0)
+            if is_nan[-1]:
+                en = np.append(en, len(is_nan) - 1)
+            st = position_df.index[st].to_numpy()
+            en = position_df.index[en].to_numpy()
+            nan_intervals[column] = list(zip(st, en))
+
+        # upsample and interpolate
         position_df = (
             position_df.reindex(index=new_index)
             .interpolate(method=upsampling_interpolation_method)
             .reindex(index=new_time)
         )
+
+        # Fill NaN intervals
+        for column, intervals in nan_intervals.items():
+            for st, en in intervals:
+                position_df[column][st:en] = np.nan
 
         return position_df

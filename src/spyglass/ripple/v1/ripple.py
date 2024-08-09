@@ -29,20 +29,6 @@ RIPPLE_DETECTION_ALGORITHMS = {
 UPSTREAM_ACCEPTED_VERSIONS = ["LFPBandV1"]
 
 
-def interpolate_to_new_time(
-    df, new_time, upsampling_interpolation_method="linear"
-):
-    old_time = df.index
-    new_index = pd.Index(
-        np.unique(np.concatenate((old_time, new_time))), name="time"
-    )
-    return (
-        df.reindex(index=new_index)
-        .interpolate(method=upsampling_interpolation_method)
-        .reindex(index=new_time)
-    )
-
-
 @schema
 class RippleLFPSelection(SpyglassMixin, dj.Manual):
     definition = """
@@ -294,7 +280,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def get_Kay_ripple_consensus_trace(
-        ripple_filtered_lfps, sampling_frequency, smoothing_sigma=0.004
+        ripple_filtered_lfps, sampling_frequency, smoothing_sigma: float = 0.004
     ):
         ripple_consensus_trace = np.full_like(ripple_filtered_lfps, np.nan)
         not_null = np.all(pd.notnull(ripple_filtered_lfps), axis=1)
@@ -505,3 +491,17 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         )
 
         return view.url(label="Ripple Detection")
+
+
+def interpolate_to_new_time(
+    df, new_time, upsampling_interpolation_method="linear"
+):
+    old_time = df.index
+    new_index = pd.Index(
+        np.unique(np.concatenate((old_time, new_time))), name="time"
+    )
+    return (
+        df.reindex(index=new_index)
+        .interpolate(method=upsampling_interpolation_method)
+        .reindex(index=new_time)
+    )

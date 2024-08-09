@@ -85,7 +85,6 @@ class CurationV1(SpyglassMixin, dj.Manual):
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
         if parent_curation_id == -1:
-            parent_curation_id = -1
             # check to see if this sorting with a parent of -1
             # has already been inserted and if so, warn the user
             query = sort_query & {"parent_curation_id": -1}
@@ -124,10 +123,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
             "merges_applied": apply_merge,
             "description": description,
         }
-        cls.insert1(
-            key,
-            skip_duplicates=True,
-        )
+        cls.insert1(key, skip_duplicates=True)
         AnalysisNwbfile().log(analysis_file_name, table=cls.full_table_name)
 
         return key

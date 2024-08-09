@@ -8,9 +8,9 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
-from spyglass.position.v1.dlc_utils import convert_to_pixels as _to_px
-from spyglass.position.v1.dlc_utils import fill_nan
 from spyglass.utils import logger
+from spyglass.utils.position import convert_to_pixels as _to_px
+from spyglass.utils.position import fill_nan
 
 RGB_PINK = (234, 82, 111)
 RGB_YELLOW = (253, 231, 76)
@@ -119,7 +119,7 @@ class VideoMaker:
 
     def _init_video(self):
         logger.info(f"Making video: {self.output_video_filename}")
-        self.video = cv2.VideoCapture(self.video_filename)
+        self.video = cv2.VideoCapture(str(self.video_filename))
         self.frame_size = (
             (int(self.video.get(3)), int(self.video.get(4)))
             if not self.crop

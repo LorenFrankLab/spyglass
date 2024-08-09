@@ -6,7 +6,7 @@ functionalities that have been added to DataJoint tables. This includes...
 - Fetching NWB files
 - Long-distance restrictions.
 - Delete functionality, including permission checks and part/master pairs
-- Export logging. See [export doc](export.md) for more information.
+- Export logging. See [export doc](./Export.md) for more information.
 
 To add this functionality to your own tables, simply inherit from the mixin:
 
@@ -53,8 +53,8 @@ to a `_nwb_table` attribute.
 In complicated pipelines like Spyglass, there are often tables that 'bury' their
 foreign keys as secondary keys. This is done to avoid having to pass a long list
 of foreign keys through the pipeline, potentially hitting SQL limits (see also
-[Merge Tables](./merge_tables.md)). This burrying makes it difficult to restrict
-a given table by familiar attributes.
+[Merge Tables](./Merge.md)). This burrying makes it difficult to restrict a
+given table by familiar attributes.
 
 Spyglass provides a function, `restrict_by`, to handle this. The function takes
 your restriction and checks parents/children until the restriction can be
@@ -122,7 +122,7 @@ If the user shares a lab team with the session experimenter, the deletion is
 permitted.
 
 This is not secure system and is not a replacement for database backups (see
-[database management](./database_management.md)). A user could readily
+[database management](../ForDevelopers/Management.md)). A user could readily
 curcumvent the default permission checks by adding themselves to the relevant
 team or removing the mixin from the class declaration. However, it provides a
 reasonable level of security for the average user.
@@ -134,11 +134,11 @@ entry without deleting the corresponding master. This is useful for enforcing
 the custom of adding/removing all parts of a master at once and avoids orphaned
 masters, or null entry masters without matching data.
 
-For [Merge tables](./merge_tables.md), this is a significant problem. If a user
-wants to delete all entries associated with a given session, she must find all
-part table entries, including Merge tables, and delete them in the correct
-order. The mixin provides a function, `delete_downstream_parts`, to handle this,
-which is run by default when calling `delete`.
+For [Merge tables](./Merge.md), this is a significant problem. If a user wants
+to delete all entries associated with a given session, she must find all part
+table entries, including Merge tables, and delete them in the correct order. The
+mixin provides a function, `delete_downstream_parts`, to handle this, which is
+run by default when calling `delete`.
 
 `delete_downstream_parts`, also aliased as `ddp`, identifies all part tables
 with foreign key references downstream of where it is called. If `dry_run=True`,

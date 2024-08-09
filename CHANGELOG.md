@@ -2,14 +2,16 @@
 
 ## [0.5.3] (Unreleased)
 
-### Release Notes
+## Release Notes
 
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
+import datajoint as dj
 from spyglass.common.common_behav import PositionIntervalMap
 from spyglass.decoding.v1.core import PositionGroup
 
+dj.schema("common_ripple").drop()
 PositionIntervalMap.alter()
 PositionGroup.alter()
 ```
@@ -28,16 +30,25 @@ PositionGroup.alter()
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
 - Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
-- `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- `cautious_delete` now ...
+    - Checks `IntervalList` and externals tables. #1002
+    - Ends early if called on empty table. #1055
 - Allow mixin tables with parallelization in `make` to run populate with
-    `processes > 1` #1001
+    `processes > 1` #1001, #1052
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
+- Convert list of LFP artifact removed interval list to array #1046
+- Merge duplicate functions in decoding and spikesorting #1050, #1052
+- Revise docs organization.
+    - Misc -> Features/ForDevelopers. #1029
+    - Installation instructions -> Setup notebook. #1029
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 
 ### Pipelines
 
 - Common
+
     - `PositionVideo` table now inserts into self after `make` #966
     - Don't insert lab member when creating lab team #983
     - Files created by `AnalysisNwbfile.create()` receive new object_id #999
@@ -49,10 +60,16 @@ PositionGroup.alter()
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
     - `AnalysisFileLog` now truncates table names that exceed field length #1021
     - Disable logging with `AnalysisFileLog` #1024
+    - Remove `common_ripple` schema #1061
+
 - Decoding:
+
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
+    - Avoid interpolating over large `nan` intervals in position #1033
+
 - Position
+
     - Allow dlc without pre-existing tracking data #973, #975
     - Raise `KeyError` for missing input parameters across helper funcs #966
     - `DLCPosVideo` table now inserts into self after `make` #966
@@ -65,7 +82,9 @@ PositionGroup.alter()
         `get_video_info` to reflect actual use #870
     - Fix `red_led_bisector` `np.nan` handling issue from #870. Fixed in #1034
     - Fix `one_pt_centoid` `np.nan` handling issue from #870. Fixed in #1034
+
 - Spikesorting
+
     - Allow user to set smoothing timescale in `SortedSpikesGroup.get_firing_rate`
         #994
     - Update docstrings #996
@@ -73,6 +92,9 @@ PositionGroup.alter()
     - Fix bug in identification of artifact samples to be zeroed out in
         `spikesorting.v1.SpikeSorting` #1009
     - Remove deprecated dependencies on kachery_client #1014
+    - Add `UnitAnnotation` table and naming convention for units #1027, #1052
+    - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
+        #1039
 
 ## [0.5.2] (April 22, 2024)
 

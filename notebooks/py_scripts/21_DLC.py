@@ -756,6 +756,35 @@ sgp.DLCPosVideoSelection.insert1(
 
 sgp.DLCPosVideo().populate(dlc_key)
 
+# <details><summary>On editing parameters</summary>
+#
+# The presence of existing parameters in many tables makes it easy to tweak them
+# for your needs. You can fetch, edit, and re-insert new params - but the process
+# will look a little different if the table has a `=BLOB=` field.
+#
+# (These example assumes only one primary key. If multiple, `{'primary_key': 'x'}`
+# and `['primary_key']` will need to be adjusted accordingly.)
+#
+# No blob means that all parameters are fields in the table.
+#
+# ```python
+# existing_params = (MyParamsTable & {'primary_key':'x'}).fetch1()
+# new_params = {**existing_params, 'primary_key': 'y', 'my_variable': 'a', 'other_variable':'b'}
+# MyParamsTable.insert1(new_params)
+# ```
+#
+# A blob means that the params are stored as an embedded dictionary. We'll assume
+# this column is called `params`
+#
+# ```python
+# existing_params = (MyParamsTable & {'primary_key':'x'}).fetch1()
+# new_params = {**existing_params, 'primary_key': 'y'}
+# print(existing_params['params']) # check existing values
+# new_params['params'] = {**existing_params['params'], 'my_variable': 'a', 'other_variable':'b'}
+# ```
+#
+# </details>
+
 # #### [PositionOutput](#TableOfContents) <a id='PositionOutput1'></a>
 #
 

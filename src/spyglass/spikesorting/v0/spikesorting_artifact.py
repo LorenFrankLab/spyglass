@@ -164,10 +164,12 @@ def _get_artifact_times(
     **job_kwargs,
 ):
     """Detects times during which artifacts do and do not occur.
-    Artifacts are defined as periods where the absolute value of the recording signal exceeds one
-    or both specified amplitude or zscore thresholds on the proportion of channels specified,
-    with the period extended by the removal_window_ms/2 on each side. Z-score and amplitude
-    threshold values of None are ignored.
+
+    Artifacts are defined as periods where the absolute value of the recording
+    signal exceeds one or both specified amplitude or z-score thresholds on the
+    proportion of channels specified, with the period extended by the
+    removal_window_ms/2 on each side. Z-score and amplitude threshold values of
+    None are ignored.
 
     Parameters
     ----------
@@ -224,8 +226,6 @@ def _get_artifact_times(
     n_jobs = ensure_n_jobs(recording, n_jobs=job_kwargs.get("n_jobs", 1))
     logger.info(f"using {n_jobs} jobs...")
 
-    func = _compute_artifact_chunk
-    init_func = _init_artifact_worker
     if n_jobs == 1:
         init_args = (
             recording,
@@ -242,10 +242,10 @@ def _get_artifact_times(
         )
 
     executor = ChunkRecordingExecutor(
-        recording,
-        func,
-        init_func,
-        init_args,
+        recording=recording,
+        func=_compute_artifact_chunk,
+        init_func=_init_artifact_worker,
+        init_args=init_args,
         verbose=verbose,
         handle_returns=True,
         job_name="detect_artifact_frames",

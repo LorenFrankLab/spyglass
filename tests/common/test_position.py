@@ -159,11 +159,12 @@ def test_position_video(position_video, upsample_position):
     assert len(position_video) == 1, "Failed to populate PositionVideo table."
 
 
-def test_convert_to_pixels(position_video):
+def test_convert_to_pixels():
+    from spyglass.utils.position import convert_to_pixels
 
     data = np.array([[2, 4], [6, 8]])
     expect = np.array([[1, 2], [3, 4]])
-    output = position_video.convert_to_pixels(data, "junk", 2)
+    output = convert_to_pixels(data, "junk", 2)
 
     assert np.array_equal(output, expect), "Failed to convert to pixels."
 
@@ -182,7 +183,6 @@ def rename_default_cols(common_position):
     ],
 )
 def test_rename_columns(rename_default_cols, col_type, cols):
-
     _fix_col_names, defaults = rename_default_cols
     df = pd.DataFrame([range(len(cols) + 1)], columns=["junk"] + cols)
     result = _fix_col_names(df).columns.tolist()

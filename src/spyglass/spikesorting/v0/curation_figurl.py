@@ -194,18 +194,15 @@ def _generate_the_figurl(
 
 
 def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
-    for metric_name in metrics:
-        metrics[metric_name] = {
-            str(unit_id): metric_value
-            for unit_id, metric_value in metrics[metric_name].items()
-        }
-    new_external_metrics = [
+    return [
         {
             "name": metric_name,
             "label": metric_name,
             "tooltip": metric_name,
-            "data": metric,
+            "data": {
+                str(unit_id): metric_value
+                for unit_id, metric_value in metric.items()
+            },
         }
         for metric_name, metric in metrics.items()
     ]
-    return new_external_metrics
