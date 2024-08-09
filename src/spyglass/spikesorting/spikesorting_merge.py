@@ -254,7 +254,6 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         np.ndarray
             time-dependent firing rate with shape (len(time), n_units)
         """
-        # CB: This is not used in the codebase. Remove?
         return firing_rate_from_spike_indicator(
             spike_indicator=cls.get_spike_indicator(key, time),
             time=time,

@@ -344,7 +344,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        # CB: Not used. Remove?
         return _get_recording_timestamps(recording)
 
     def _get_sort_interval_valid_times(self, key):
