@@ -35,7 +35,7 @@ PERIPHERAL_TABLES = [
 
 
 def ensure_names(
-    self, table: Union[str, Table, Iterable] = None
+    table: Union[str, Table, Iterable] = None
 ) -> Union[str, List[str], None]:
     """Ensure table is a string."""
     if table is None:
