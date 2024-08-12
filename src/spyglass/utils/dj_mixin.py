@@ -280,15 +280,15 @@ class SpyglassMixin:
         from spyglass.mua.v1.mua import MuaEventsV1  # noqa F401
         from spyglass.position.position_merge import PositionOutput  # noqa F401
         from spyglass.ripple.v1.ripple import RippleTimesV1  # noqa F401
-        from spyglass.spikesorting.analysis.v1.group import (  # noqa F401
+        from spyglass.spikesorting.analysis.v1.group import (
             SortedSpikesGroup,
-        )
-        from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
+        )  # noqa F401
+        from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
-        )
-        from spyglass.spikesorting.v0.figurl_views import (  # noqa F401
+        )  # noqa F401
+        from spyglass.spikesorting.v0.figurl_views import (
             SpikeSortingRecordingView,
-        )
+        )  # noqa F401
 
         _ = (
             DecodingOutput(),
@@ -476,12 +476,8 @@ class SpyglassMixin:
         Used to delay import of tables until needed, avoiding circular imports.
         Each of these tables inheits SpyglassMixin.
         """
-        from spyglass.common import (  # noqa F401
-            IntervalList,
-            LabMember,
-            LabTeam,
-            Session,
-        )
+        from spyglass.common import LabMember  # noqa F401
+        from spyglass.common import IntervalList, LabTeam, Session
         from spyglass.common.common_nwbfile import schema  # noqa F401
 
         self._session_pk = Session.primary_key[0]
@@ -1034,8 +1030,12 @@ class SpyglassMixin:
         results = dj.conn().query(query).fetchall()
         return results  # Check if performance schema is enabled
 
+    @classmethod
     def check_threads(self, detailed=False, all_threads=False) -> DataFrame:
         """Check for locked threads in the database.
+
+        Set as classmethod to avoid calling table data when checking status.
+        Use MyTable.check_threads() to check the status of MyTable.
 
         Parameters
         ----------
