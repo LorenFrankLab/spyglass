@@ -44,6 +44,7 @@ PositionGroup.alter()
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
+- Add tool for checking threads for metadata locks on a table #1051
 
 ### Pipelines
 
