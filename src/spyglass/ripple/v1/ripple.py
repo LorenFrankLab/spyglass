@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import sortingview.views as vv
+from matplotlib.axes import Axes
 from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 from scipy.stats import zscore
@@ -332,7 +333,12 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def plot_ripple(
-        lfps, ripple_times, ripple_label=1, offset=0.100, relative=True, ax=None
+        lfps,
+        ripple_times,
+        ripple_label: int = 1,
+        offset: float = 0.100,
+        relative: bool = True,
+        ax: Axes = None,
     ):
         lfp_labels = lfps.columns
         n_lfps = len(lfp_labels)

@@ -4,13 +4,14 @@ import inspect
 import multiprocessing.pool
 import os
 from pathlib import Path
-from typing import List, Type, Union
+from typing import Iterable, List, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
 import h5py
 import numpy as np
-from datajoint.user_tables import UserTable
+from datajoint.table import Table
+from datajoint.user_tables import TableMeta, UserTable
 
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
@@ -31,6 +32,21 @@ PERIPHERAL_TABLES = [
     "`common_nwbfile`.`nwbfile_kachery`",
     "`common_nwbfile`.`nwbfile`",
 ]
+
+
+def ensure_names(
+    table: Union[str, Table, Iterable] = None
+) -> Union[str, List[str], None]:
+    """Ensure table is a string."""
+    if table is None:
+        return None
+    if isinstance(table, str):
+        return table
+    if isinstance(table, Iterable) and not isinstance(
+        table, (Table, TableMeta)
+    ):
+        return [ensure_names(t) for t in table]
+    return getattr(table, "full_table_name", None)
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):

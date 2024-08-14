@@ -9,6 +9,7 @@ import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.spikesorting.utils import _reformat_metrics
 from spyglass.spikesorting.v1.curation import CurationV1, _merge_dict_to_list
 from spyglass.spikesorting.v1.sorting import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin, logger
@@ -270,18 +271,3 @@ def _generate_figurl(
             "sortingCuration": initial_curation_uri,
         },
     )
-
-
-def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
-    return [
-        {
-            "name": metric_name,
-            "label": metric_name,
-            "tooltip": metric_name,
-            "data": {
-                str(unit_id): metric_value
-                for unit_id, metric_value in metric.items()
-            },
-        }
-        for metric_name, metric in metrics.items()
-    ]
