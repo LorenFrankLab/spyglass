@@ -1030,12 +1030,8 @@ class SpyglassMixin:
         results = dj.conn().query(query).fetchall()
         return results  # Check if performance schema is enabled
 
-    @classmethod
     def check_threads(self, detailed=False, all_threads=False) -> DataFrame:
         """Check for locked threads in the database.
-
-        Set as classmethod to avoid calling table data when checking status.
-        Use MyTable.check_threads() to check the status of MyTable.
 
         Parameters
         ----------
