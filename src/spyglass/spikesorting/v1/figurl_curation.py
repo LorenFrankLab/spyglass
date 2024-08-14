@@ -117,6 +117,8 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     url: varchar(1000)
     """
 
+    _use_transaction = False
+
     def make(self, key: dict):
         # FETCH
         query = (

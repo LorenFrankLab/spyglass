@@ -80,6 +80,8 @@ class SpyglassMixin:
     _banned_search_tables = set()  # Tables to avoid in restrict_by
     _parallel_make = False  # Tables that use parallel processing in make
 
+    _use_transaction = True  # Use transaction in populate.
+
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
 
@@ -703,17 +705,38 @@ class SpyglassMixin:
 
     # -------------------------- non-daemon populate --------------------------
     def populate(self, *restrictions, **kwargs):
-        """Populate table in parallel.
+        """Populate table in parallel, with or without transaction protection.
 
         Supersedes datajoint.table.Table.populate for classes with that
-        spawn processes in their make function
+        spawn processes in their make function and always use transactions.
         """
-
-        # Pass through to super if not parallel in the make function or only a single process
         processes = kwargs.pop("processes", 1)
+
+        # Decide if using transaction protection
+        use_transact = kwargs.pop("use_transation", None)
+        if use_transact is None:  # if user does not specify, use class default
+            use_transact = self._use_transaction
+            if self._use_transaction is False:  # If class default is off, warn
+                logger.warning(
+                    "Turning off transaction protection this table by default. "
+                    + "Use use_transation=True to re-enable.\n"
+                    + "Read more about transactions:\n"
+                    + "https://docs.datajoint.io/python/definition/05-Transactions.html"
+                    + "https://github.com/LorenFrankLab/spyglass/issues/1030"
+                )
+        if use_transact is False and processes > 1:
+            raise RuntimeError(
+                "Must use transaction protection with parallel processing.\n"
+                + "Call with use_transation=True.\n"
+                + f"Table default transaction: {self._use_transaction}"
+            )
+
+        # Pass through to super if not parallel in the make function or only a
+        # single process
         if processes == 1 or not self._parallel_make:
             kwargs["processes"] = processes
-            return super().populate(*restrictions, **kwargs)
+            pop_func = super().populate if use_transact else super().make
+            return pop_func(*restrictions, **kwargs)
 
         # If parallel in both make and populate, use non-daemon processes
         # Get keys to populate
