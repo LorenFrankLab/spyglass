@@ -708,22 +708,20 @@ class SpyglassMixin:
 
     # -------------------------------- populate --------------------------------
 
-    def _hash_upstream(self, key=None):
+    def _hash_upstream(self, keys):
         """Hash upstream table keys for no transaction populate."""
         RestrGraph = self._graph_deps[1]
 
-        if not (parents := self.parents(as_objects=True)):
+        if not (parents := self.parents(as_objects=True, primary=True)):
             raise RuntimeError("No upstream tables found for upstream hash.")
 
-        if key is None:
-            leaves = {p.full_table_name: True for p in parents}
-        else:
-            leaves = {
-                p.full_table_name: {
-                    k: v for k, v in key.items() if k in p.heading.names
-                }
-                for p in parents
-            }
+        leaves = {  # Restriction on each primary parent
+            p.full_table_name: [
+                {k: v for k, v in key.items() if k in p.heading.names}
+                for key in keys
+            ]
+            for p in parents
+        }
 
         return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
 
@@ -753,30 +751,34 @@ class SpyglassMixin:
                 + "Call with use_transation=True.\n"
                 + f"Table default transaction: {self._use_transaction}"
             )
-        keys = self & restrictions if restrictions else True
+
+        keys = [True]  # Get keys to populate
+        if use_transact is False or processes > 1 or self._parallel_make:
+            keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+                "KEY", limit=kwargs.get("limit", None)
+            )
+
         if use_transact is False:
             upstream_hash_before = self._hash_upstream(keys)
 
         # Pass through to super if not parallel in the make function or only a
         # single process
-        if processes == 1 or not self._parallel_make:
-            kwargs["processes"] = processes
-            pop_func = super().populate if use_transact else super().make
-            ret = pop_func(*restrictions, **kwargs)
-            if use_transact is False:
+        if processes == 1 or not self._parallel_make and use_transact:
+            if use_transact:
+                kwargs["processes"] = processes
+                return super().populate(*restrictions, **kwargs)
+            else:
+                for key in keys:
+                    self.make(key, **kwargs)  # need to purge populate kwargs
                 upstream_hash_after = self._hash_upstream(keys)
                 if upstream_hash_before != upstream_hash_after:
                     raise RuntimeError(
                         "Upstream tables have changed during populate."
                         "PLEASE DELETE AND REPOPULATE."
                     )
-            return ret
+                return
 
         # If parallel in both make and populate, use non-daemon processes
-        # Get keys to populate
-        keys = (self._jobs_to_do(restrictions) - self.target).fetch(
-            "KEY", limit=kwargs.get("limit", None)
-        )
         # package the call list
         call_list = [(type(self), key, kwargs) for key in keys]
 
