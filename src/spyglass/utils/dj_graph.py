@@ -615,7 +615,7 @@ class RestrGraph(AbstractGraph):
         """Return hash of all visited nodes."""
         initial = hash_md5(b"")
         for table in self.all_ft:
-            initial.update(table.fetch().tobytes())
+            initial.update(table.fetch())
         return initial.hexdigest()
 
     # ------------------------------- Add Nodes -------------------------------

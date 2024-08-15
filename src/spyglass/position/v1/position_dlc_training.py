@@ -104,7 +104,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
     """
 
     log_path = None
-    _use_transaction = False
+    _use_transaction, _allow_insert = False, True
 
     # To continue from previous training snapshot,
     # devs suggest editing pose_cfg.yml

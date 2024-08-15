@@ -709,7 +709,22 @@ class SpyglassMixin:
     # -------------------------------- populate --------------------------------
 
     def _hash_upstream(self, keys):
-        """Hash upstream table keys for no transaction populate."""
+        """Hash upstream table keys for no transaction populate.
+
+        Uses a RestrGraph to capture all upstream tables, restrict them to
+        relevant entries, and hash the results. This is used to check if
+        upstream tables have changed during a no-transaction populate and avoid
+        the following data-integrity error:
+
+        1. User A starts no-transaction populate.
+        2. User B deletes and repopulates an upstream table, changing contents.
+        3. User A finishes populate, inserting data that is now invalid.
+
+        Parameters
+        ----------
+        keys : list
+            List of keys for populating table.
+        """
         RestrGraph = self._graph_deps[1]
 
         if not (parents := self.parents(as_objects=True, primary=True)):
@@ -730,6 +745,13 @@ class SpyglassMixin:
 
         Supersedes datajoint.table.Table.populate for classes with that
         spawn processes in their make function and always use transactions.
+
+        `_use_transaction` class attribute can be set to False to disable
+        transaction protection for a table. This is not recommended for tables
+        with short processing times. A before-and-after hash check is performed
+        to ensure upstream tables have not changed during populate, and may
+        be a more time-consuming process. To permit the `make` to insert without
+        populate, set `_allow_insert` to True.
         """
         processes = kwargs.pop("processes", 1)
 
@@ -742,39 +764,40 @@ class SpyglassMixin:
                     "Turning off transaction protection this table by default. "
                     + "Use use_transation=True to re-enable.\n"
                     + "Read more about transactions:\n"
-                    + "https://docs.datajoint.io/python/definition/05-Transactions.html"
+                    + "https://docs.datajoint.io/python/definition/05-Transactions.html\n"
                     + "https://github.com/LorenFrankLab/spyglass/issues/1030"
                 )
         if use_transact is False and processes > 1:
             raise RuntimeError(
                 "Must use transaction protection with parallel processing.\n"
                 + "Call with use_transation=True.\n"
-                + f"Table default transaction: {self._use_transaction}"
+                + f"Table default transaction use: {self._use_transaction}"
             )
 
-        keys = [True]  # Get keys to populate
+        keys = [True]  # Get keys to pop, needed for no-transact or parallel
         if use_transact is False or processes > 1 or self._parallel_make:
             keys = (self._jobs_to_do(restrictions) - self.target).fetch(
                 "KEY", limit=kwargs.get("limit", None)
             )
 
         if use_transact is False:
-            upstream_hash_before = self._hash_upstream(keys)
+            upstream_hash = self._hash_upstream(keys)
+            if kwargs:  # Warn of ignoring populate kwargs, bc using `make`
+                logger.warning(
+                    "Ignoring kwargs when not using transaction protection."
+                )
 
-        # Pass through to super if not parallel in the make function or only a
-        # single process
-        if processes == 1 or not self._parallel_make and use_transact:
-            if use_transact:
+        if processes == 1 or not self._parallel_make:
+            if use_transact:  # Pass single-process populate to super
                 kwargs["processes"] = processes
                 return super().populate(*restrictions, **kwargs)
-            else:
+            else:  # No transaction protection, use bare make
                 for key in keys:
-                    self.make(key, **kwargs)  # need to purge populate kwargs
-                upstream_hash_after = self._hash_upstream(keys)
-                if upstream_hash_before != upstream_hash_after:
+                    self.make(key)
+                if upstream_hash != self._hash_upstream(keys):
                     raise RuntimeError(
-                        "Upstream tables have changed during populate."
-                        "PLEASE DELETE AND REPOPULATE."
+                        "Upstream tables have changed during populate. "
+                        + "PLEASE DELETE AND REPOPULATE."
                     )
                 return
 
