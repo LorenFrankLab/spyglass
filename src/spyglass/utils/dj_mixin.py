@@ -420,7 +420,7 @@ class SpyglassMixin:
         **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
-        from spyglass.utils.dj_graph import RestrGraph  # noqa F401
+        RestrGraph = self._graph_deps[1]
 
         start = time()
 
@@ -477,17 +477,20 @@ class SpyglassMixin:
         Used to delay import of tables until needed, avoiding circular imports.
         Each of these tables inheits SpyglassMixin.
         """
-        from spyglass.common import (  # noqa F401
-            IntervalList,
-            LabMember,
-            LabTeam,
-            Session,
-        )
+        from spyglass.common import LabMember  # noqa F401
+        from spyglass.common import IntervalList, LabTeam, Session
         from spyglass.common.common_nwbfile import schema  # noqa F401
 
         self._session_pk = Session.primary_key[0]
         self._member_pk = LabMember.primary_key[0]
         return [LabMember, LabTeam, Session, schema.external, IntervalList]
+
+    @cached_property
+    def _graph_deps(self) -> list:
+        from spyglass.utils.dj_graph import RestrGraph  # noqa #F401
+        from spyglass.utils.dj_graph import TableChain
+
+        return [TableChain, RestrGraph]
 
     def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
@@ -524,7 +527,7 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
-        from spyglass.utils.dj_graph import TableChain  # noqa F401
+        TableChain = self._graph_deps[0]
 
         connection = TableChain(parent=self._delete_deps[2], child=self)
         return connection if connection.has_link else False
@@ -703,7 +706,27 @@ class SpyglassMixin:
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
-    # -------------------------- non-daemon populate --------------------------
+    # -------------------------------- populate --------------------------------
+
+    def _hash_upstream(self, key=None):
+        """Hash upstream table keys for no transaction populate."""
+        RestrGraph = self._graph_deps[1]
+
+        if not (parents := self.parents(as_objects=True)):
+            raise RuntimeError("No upstream tables found for upstream hash.")
+
+        if key is None:
+            leaves = {p.full_table_name: True for p in parents}
+        else:
+            leaves = {
+                p.full_table_name: {
+                    k: v for k, v in key.items() if k in p.heading.names
+                }
+                for p in parents
+            }
+
+        return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
+
     def populate(self, *restrictions, **kwargs):
         """Populate table in parallel, with or without transaction protection.
 
@@ -730,13 +753,24 @@ class SpyglassMixin:
                 + "Call with use_transation=True.\n"
                 + f"Table default transaction: {self._use_transaction}"
             )
+        keys = self & restrictions if restrictions else True
+        if use_transact is False:
+            upstream_hash_before = self._hash_upstream(keys)
 
         # Pass through to super if not parallel in the make function or only a
         # single process
         if processes == 1 or not self._parallel_make:
             kwargs["processes"] = processes
             pop_func = super().populate if use_transact else super().make
-            return pop_func(*restrictions, **kwargs)
+            ret = pop_func(*restrictions, **kwargs)
+            if use_transact is False:
+                upstream_hash_after = self._hash_upstream(keys)
+                if upstream_hash_before != upstream_hash_after:
+                    raise RuntimeError(
+                        "Upstream tables have changed during populate."
+                        "PLEASE DELETE AND REPOPULATE."
+                    )
+            return ret
 
         # If parallel in both make and populate, use non-daemon processes
         # Get keys to populate
@@ -989,7 +1023,7 @@ class SpyglassMixin:
             Restricted version of present table or TableChain object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+        TableChain = self._graph_deps[0]
 
         if restriction is True:
             return self
