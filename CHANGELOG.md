@@ -34,7 +34,7 @@ PositionGroup.alter()
     - Checks `IntervalList` and externals tables. #1002
     - Ends early if called on empty table. #1055
 - Allow mixin tables with parallelization in `make` to run populate with
-    `processes > 1` #1001, #1052
+    `processes > 1` #1001, #1052, #1068
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
