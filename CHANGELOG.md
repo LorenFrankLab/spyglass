@@ -39,11 +39,12 @@ PositionGroup.alter()
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
-- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1058, #1069
+- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062, #1069
 - Revise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
+- Add tool for checking threads for metadata locks on a table #1063
 
 ### Pipelines
 
