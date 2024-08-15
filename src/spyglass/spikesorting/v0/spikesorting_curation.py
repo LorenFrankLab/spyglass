@@ -145,7 +145,7 @@ class Curation(SpyglassMixin, dj.Manual):
         Curation.insert1(sorting_key, skip_duplicates=True)
 
         # get the primary key for this curation
-        c_key = Curation.fetch("KEY")[0]
+        c_key = (Curation & sorting_key).fetch1("KEY")
         curation_key = {item: sorting_key[item] for item in c_key}
 
         return curation_key
