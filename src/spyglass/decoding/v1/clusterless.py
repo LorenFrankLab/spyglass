@@ -57,6 +57,11 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
         }
+        if self & group_key:
+            raise ValueError(
+                f"Group {nwb_file_name}: {group_name} already exists",
+                "please delete the group before creating a new one",
+            )
         self.insert1(
             group_key,
             skip_duplicates=True,
