@@ -96,6 +96,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+    - Efficiency improvement to `v0.Curation.insert_curation` #1072
 
 ## [0.5.2] (April 22, 2024)
 
