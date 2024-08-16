@@ -533,7 +533,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = self.fetch_model()
         posterior = (
             self.fetch_results()
-            .acausal_posterior(time=time_slice)
+            .acausal_posterior.sel(time=time_slice)
             .squeeze()
             .unstack("state_bins")
             .sum("state")
