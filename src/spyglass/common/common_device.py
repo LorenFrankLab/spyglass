@@ -405,8 +405,6 @@ class Probe(SpyglassMixin, dj.Manual):
 
             # if probe id already exists, do not overwrite anything or create
             # new Shanks and Electrodes
-            # TODO: test whether the Shanks and Electrodes in the NWB file match
-            # the ones in the database
             query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
                 logger.info(
@@ -414,6 +412,27 @@ class Probe(SpyglassMixin, dj.Manual):
                     " the database. Spyglass will use that and not create a new"
                     " Probe, Shanks, or Electrodes."
                 )
+                # Test whether the Shanks and Electrodes in the NWB file match
+                # the existing database entries
+                bad_shanks = []
+                for shank_dict in shank_dict.values():
+                    if not len(cls.Shank() & shank_dict) == 1:
+                        bad_shanks.append(shank_dict)
+                if bad_shanks:
+                    raise ValueError(
+                        "Mismatch between nwb file and existing database "
+                        + f"entry for shanks: {bad_shanks}"
+                    )
+
+                bad_electrodes = []
+                for e_dict in elect_dict.values():
+                    if not len(cls.Electrode() & e_dict) == 1:
+                        bad_electrodes.append(e_dict)
+                if bad_electrodes:
+                    raise ValueError(
+                        f"Mismatch between nwb file and existing database "
+                        f"entry for electrodes: {bad_electrodes}"
+                    )
                 continue
 
             cls.insert1(new_probe_dict, skip_duplicates=True)
