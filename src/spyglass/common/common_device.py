@@ -376,7 +376,9 @@ class Probe(SpyglassMixin, dj.Manual):
             List of probe device types found in the NWB file.
         """
         config = config or dict()
-        all_probes_types, ndx_probes, _ = cls.get_all_probe_names(nwbf, config)
+        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
+            nwbf, config
+        )
 
         for probe_type in all_probes_types:
             new_probe_type_dict = dict()
@@ -396,6 +398,24 @@ class Probe(SpyglassMixin, dj.Manual):
                     shank_dict,
                     elect_dict,
                 )
+
+            elif probe_type in config_probes:
+                shank_dict = config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("Shank", {})
+                elect_dict = config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("Electrode", {})
+                new_probe_type_dict = {
+                    "probe_type": probe_type,
+                    "probe_id": probe_type,
+                    "data_acquisition_device": config["Probe"][
+                        config_probes.index(probe_type)
+                    ].get("data_acquisition_device", None),
+                    "contact_side_numbering": config["Probe"][
+                        config_probes.index(probe_type)
+                    ].get("contact_side_numbering"),
+                }
 
             # check that number of shanks is consistent
             num_shanks = new_probe_type_dict["num_shanks"]
