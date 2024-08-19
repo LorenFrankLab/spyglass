@@ -400,12 +400,19 @@ class Probe(SpyglassMixin, dj.Manual):
                 )
 
             elif probe_type in config_probes:
-                shank_dict = config["Probe"][
+                shank_list = config["Probe"][
                     config_probes.index(probe_type)
                 ].get("Shank", {})
-                elect_dict = config["Probe"][
+                shank_dict = [
+                    {"probe_id": probe_type, "probe_shank": int(i)}
+                    for i in shank_list
+                ]
+                elect_dict_list = config["Probe"][
                     config_probes.index(probe_type)
                 ].get("Electrode", {})
+                elect_dict = [
+                    {"probe_id": probe_type, **e} for e in elect_dict_list
+                ]
                 new_probe_type_dict = {
                     "probe_type": probe_type,
                     "probe_id": probe_type,
