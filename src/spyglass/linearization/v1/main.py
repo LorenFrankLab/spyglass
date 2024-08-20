@@ -3,6 +3,7 @@ import copy
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
+from pandas import DataFrame
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -51,6 +52,7 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
+        """Get the track graph as a networkx graph."""
         if track_graph_parameters is None:
             track_graph_parameters = self.fetch1()
         return make_track_graph(
@@ -116,6 +118,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LinearizedPositionV1 table with the linearized position."""
         orig_key = copy.deepcopy(key)
         logger.info(f"Computing linear position for: {key}")
 
@@ -185,5 +188,6 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> DataFrame:
+        """Fetch a single dataframe."""
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

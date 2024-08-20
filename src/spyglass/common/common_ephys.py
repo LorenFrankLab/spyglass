@@ -98,6 +98,7 @@ class Electrode(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
+        """Populate the Electrode table with data from the NWB file."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -339,6 +340,7 @@ class Raw(SpyglassMixin, dj.Imported):
         )
 
     def nwb_object(self, key):
+        """Return the NWB object in the raw NWB file."""
         # TODO return the nwb_object; FIX: this should be replaced with a fetch
         # call. Note that we're using the raw file so we can modify the other
         # one.
@@ -438,6 +440,7 @@ class LFP(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
+        """Populate the LFP table with data from the NWB file."""
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
@@ -534,7 +537,7 @@ class LFP(SpyglassMixin, dj.Imported):
         self.insert1(key)
 
     def nwb_object(self, key):
-        # return the NWB object in the raw NWB file
+        """Return the NWB object in the raw NWB file."""
         lfp_file_name = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch1("analysis_file_name")
@@ -546,7 +549,8 @@ class LFP(SpyglassMixin, dj.Imported):
         )
         return lfp_nwbf.objects[nwb_object_id]
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch the LFP data as a pandas DataFrame."""
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
@@ -713,6 +717,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the LFPBand table."""
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -915,7 +920,8 @@ class LFPBand(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch the LFP band data as a pandas DataFrame."""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,

@@ -55,9 +55,11 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default decoding parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
+        """Override insert to convert classes to dict before inserting"""
         for row in rows:
             row["decoding_params"] = convert_classes_to_dict(
                 vars(row["decoding_params"])
@@ -65,6 +67,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         super().insert(rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
+        """Return decoding parameters as a list of classes."""
         rows = super().fetch(*args, **kwargs)
         if len(rows) > 0 and len(rows[0]) > 1:
             content = []
@@ -85,6 +88,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         return content
 
     def fetch1(self, *args, **kwargs):
+        """Return one decoding paramset as a class."""
         row = super().fetch1(*args, **kwargs)
         row["decoding_params"] = restore_classes(row["decoding_params"])
         return row
@@ -114,6 +118,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_variables: list[str] = ["position_x", "position_y"],
         upsample_rate: float = np.nan,
     ):
+        """Create a new position group."""
         group_key = {
             "nwb_file_name": nwb_file_name,
             "position_group_name": group_name,

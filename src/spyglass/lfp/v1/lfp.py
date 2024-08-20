@@ -59,6 +59,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LFPV1 table with the filtered LFP data"""
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
@@ -196,7 +197,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
         LFPOutput.insert1(orig_key)
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,

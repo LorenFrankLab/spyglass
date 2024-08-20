@@ -69,6 +69,7 @@ class ActivityLog(dj.Manual):
 
     @classmethod
     def deprecate_log(cls, name, warning=True) -> None:
+        """Log a deprecation warning for a feature."""
         if warning:
             logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
         cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
@@ -96,10 +97,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """
 
         def insert1(self, key, **kwargs):
+            """Override insert1 to auto-increment table_id."""
             key = self._auto_increment(key, pk="table_id")
             super().insert1(key, **kwargs)
 
         def insert(self, keys: List[dict], **kwargs):
+            """Override insert to auto-increment table_id."""
             if not isinstance(keys[0], dict):
                 raise TypeError("Pass Table Keys as list of dict")
             keys = [self._auto_increment(k, pk="table_id") for k in keys]
@@ -232,11 +235,13 @@ class Export(SpyglassMixin, dj.Computed):
         """
 
     def populate_paper(self, paper_id: Union[str, dict]):
+        """Populate Export for a given paper_id."""
         if isinstance(paper_id, dict):
             paper_id = paper_id.get("paper_id")
         self.populate(ExportSelection().paper_export_id(paper_id))
 
     def make(self, key):
+        """Populate Export table with the latest export for a given paper."""
         paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
         query = ExportSelection & paper_key
 

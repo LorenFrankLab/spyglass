@@ -44,6 +44,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         """
 
     def populate(self, *args, **kwargs):
+        """Method for populate_all_common."""
         logger.warning(
             "PositionSource is a manual table with a custom `make`."
             + " Use `make` instead."
@@ -192,6 +193,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
         _nwb_table = Nwbfile
 
         def fetch1_dataframe(self):
+            """Return a dataframe with all RawPosition.PosObject items."""
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
@@ -375,6 +377,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        """Make without transaction"""
         self._no_transaction_make(key)
 
     def _no_transaction_make(self, key, verbose=True, skip_duplicates=False):
@@ -454,6 +457,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     @classmethod
     def update_entries(cls, restrict=True):
+        """Update the camera_name field for all entries in the table."""
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_name"):
@@ -511,6 +515,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     # #849 - Insert null to avoid rerun
 
     def make(self, key):
+        """Make without transaction"""
         self._no_transaction_make(key)
 
     def _no_transaction_make(self, key):
@@ -593,6 +598,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
 
 def get_pos_interval_list_names(nwb_file_name) -> list:
+    """Return a list of position interval list names for a given NWB file."""
     return [
         interval_list_name
         for interval_list_name in (
@@ -679,6 +685,7 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
 
 
 def populate_position_interval_map_session(nwb_file_name: str):
+    """Populate PositionIntervalMap for all epochs in a given NWB file."""
     # 1. remove redundancy in interval names
     # 2. let PositionIntervalMap handle transaction context
     nwb_dict = dict(nwb_file_name=nwb_file_name)

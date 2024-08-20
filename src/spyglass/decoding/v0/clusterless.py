@@ -149,6 +149,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarks table"""
         # create a new AnalysisNwbfile and a timeseries for the marks and save
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -245,6 +246,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the marks as a list of pandas dataframes"""
         return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
 
     @staticmethod
@@ -324,6 +326,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarksIndicator table"""
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 

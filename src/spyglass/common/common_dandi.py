@@ -51,6 +51,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
     """
 
     def fetch_file_from_dandi(self, key: dict):
+        """Fetch the file from Dandi and return the NWB file object."""
         dandiset_id, dandi_path, dandi_instance = (self & key).fetch1(
             "dandiset_id", "dandi_path", "dandi_instance"
         )

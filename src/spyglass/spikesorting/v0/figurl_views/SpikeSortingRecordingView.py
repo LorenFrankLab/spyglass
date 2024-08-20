@@ -1,4 +1,3 @@
-import os
 from typing import List, Union
 
 import datajoint as dj
@@ -66,6 +65,7 @@ class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
 
 
 def create_electrode_geometry(recording: si.BaseRecording):
+    """Create a figure for the electrode geometry of a recording."""
     channel_locations = {
         str(channel_id): location.astype(np.float32)
         for location, channel_id in zip(
@@ -81,6 +81,7 @@ def create_mountain_layout(
     label: Union[str, None] = None,
     sorting_curation_uri: Union[str, None] = None,
 ) -> Figure:
+    """Create a figure for a mountain layout of multiple figures"""
     if label is None:
         label = "SpikeSortingView"
 

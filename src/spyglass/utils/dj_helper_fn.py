@@ -318,6 +318,7 @@ def _get_nwb_object(objects, object_id):
 
 
 def get_child_tables(table):
+    """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table
     return [
         dj.FreeTable(

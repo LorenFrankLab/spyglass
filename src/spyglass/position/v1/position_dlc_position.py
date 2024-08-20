@@ -53,6 +53,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_params(cls, params_name: str, params: dict, **kwargs):
+        """Insert parameters for smoothing and interpolation."""
         cls.insert1(
             {"dlc_si_params_name": params_name, "params": params},
             **kwargs,
@@ -60,6 +61,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls, **kwargs):
+        """Insert the default set of parameters."""
+
         default_params = {
             "smooth": True,
             "smoothing_params": {
@@ -80,7 +83,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def insert_nan_params(cls, **kwargs):
+    def insert_nan_params(cls, **kwargs) -> None:
+        """Insert parameters that only NaN the data."""
         nan_params = {
             "smooth": False,
             "interpolate": False,
@@ -93,7 +97,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Return the default set of parameters for smoothing calculation."""
         query = cls & {"dlc_si_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -103,7 +108,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         return default
 
     @classmethod
-    def get_nan_params(cls):
+    def get_nan_params(cls) -> dict:
+        """Return the parameters that NaN the data."""
         query = cls & {"dlc_si_params_name": "just_nan"}
         if not len(query) > 0:
             cls().insert_nan_params(skip_duplicates=True)
@@ -114,9 +120,11 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def get_available_methods():
+        """Return the available smoothing methods."""
         return _key_to_smooth_func_dict.keys()
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to validate params."""
         params = key.get("params")
         if not isinstance(params, dict):
             raise KeyError("'params' must be a dict in key")
@@ -161,6 +169,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     log_path = None
 
     def make(self, key):
+        """Populate the DLCSmoothInterp table."""
         self.log_path = (
             Path(infer_output_dir(key=key, makedir=False)) / "log.log"
         )
@@ -270,7 +279,8 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         self.insert1(key)
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(
@@ -313,6 +323,7 @@ def nan_inds(
     likelihood_thresh: float,
     inds_to_span: int,
 ):
+    """Replace low likelihood points with NaNs and interpolate over them."""
     idx = pd.IndexSlice
 
     # Could either NaN sub-likelihood threshold inds here and then not consider
@@ -462,10 +473,12 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
 
 
 def span_length(x):
+    """Return the length of a span."""
     return x[-1] - x[0]
 
 
 def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
+    """Return indices of subthresh points."""
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(
         ~np.isnan(dlc_df["likelihood"].where(df_filter))

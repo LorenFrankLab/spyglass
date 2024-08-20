@@ -57,6 +57,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the table with the combined position information."""
         orig_key = copy.deepcopy(key)
         # Add to Analysis NWB file
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
@@ -149,7 +150,8 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         )
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Return the position data as a DataFrame."""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
@@ -188,11 +190,13 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         )
 
     def fetch_nwb(self, **kwargs):
+        """Fetch the NWB file."""
         attrs = [a for a in self.heading.names if not a == "pose_eval_result"]
         return super().fetch_nwb(*attrs, **kwargs)
 
     @classmethod
     def evaluate_pose_estimation(cls, key):
+        """Evaluate the pose estimation."""
         likelihood_thresh = []
 
         valid_fields = DLCSmoothInterpCohort.BodyPart().heading.names
@@ -272,6 +276,7 @@ class DLCPosVideoParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls):
+        """Insert the default parameters."""
         params = {
             "percent_frames": 1,
             "incl_likelihood": True,
@@ -287,6 +292,7 @@ class DLCPosVideoParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_default(cls):
+        """Return the default parameters."""
         query = cls & {"dlc_pos_video_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default()
@@ -318,6 +324,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the DLCPosVideo table."""
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")

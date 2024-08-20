@@ -29,11 +29,13 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
 
     @property
-    def default_pk(self):
+    def default_pk(self) -> dict:
+        """Return the default primary key for this table."""
         return {"trodes_pos_params_name": "default"}
 
     @property
-    def default_params(self):
+    def default_params(self) -> dict:
+        """Return the default parameters for this table."""
         return {
             "max_LED_separation": 9.0,
             "max_plausible_speed": 300.0,
@@ -47,7 +49,7 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         }
 
     @classmethod
-    def insert_default(cls, **kwargs):
+    def insert_default(cls, **kwargs) -> None:
         """
         Insert default parameter set for position determination
         """
@@ -57,7 +59,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Return the default set of parameters for position calculation"""
         query = cls & cls().default_pk
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -66,7 +69,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         return query.fetch1()
 
     @classmethod
-    def get_accepted_params(cls):
+    def get_accepted_params(cls) -> list:
+        """Return a list of accepted parameters for position calculation"""
         return [k for k in cls().default_params.keys()]
 
 
@@ -157,6 +161,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the table with position data."""
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
@@ -207,6 +212,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
+        """Generate position components from 2D spatial series."""
         return IntervalPositionInfo().generate_pos_components(*args, **kwargs)
 
     @staticmethod

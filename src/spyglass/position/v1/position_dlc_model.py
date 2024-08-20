@@ -27,6 +27,7 @@ class DLCModelInput(SpyglassMixin, dj.Manual):
     """
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to add dlc_model_name from project_path"""
         # expects key from DLCProject with config_path
         project_path = Path(key["config_path"]).parent
         if not project_path.exists():
@@ -82,6 +83,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         key: dict = None,
         **kwargs,
     ):
+        """Insert entry into DLCModelSource and corresponding Part table"""
         cls.insert1(
             {
                 "dlc_model_name": dlc_model_name,
@@ -116,6 +118,7 @@ class DLCModelParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls, **kwargs):
+        """Insert the default parameter set"""
         params = {
             "params": {},
             "shuffle": 1,
@@ -128,6 +131,7 @@ class DLCModelParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_default(cls):
+        """Return the default parameter set. If it doesn't exist, insert it."""
         query = cls & {"dlc_model_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -172,6 +176,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        """Populate DLCModel table with model information."""
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()

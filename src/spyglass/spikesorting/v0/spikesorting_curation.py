@@ -44,6 +44,7 @@ valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 def apply_merge_groups_to_sorting(
     sorting: si.BaseSorting, merge_groups: List[List[int]]
 ):
+    """Apply merge groups to a sorting extractor."""
     # return a new sorting where the units are merged according to merge_groups
     # merge_groups is a list of lists of unit_ids.
     # for example: merge_groups = [[1, 2], [5, 8, 4]]]

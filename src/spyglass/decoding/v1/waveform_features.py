@@ -62,6 +62,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default waveform features parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
     @staticmethod
@@ -106,6 +107,7 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make(self, key):
+        """Populate UnitWaveformFeatures table."""
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")

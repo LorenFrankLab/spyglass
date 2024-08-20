@@ -163,7 +163,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         _nwb_table = AnalysisNwbfile
         log_path = None
 
-        def fetch1_dataframe(self):
+        def fetch1_dataframe(self) -> pd.DataFrame:
+            """Fetch a single bodypart dataframe."""
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -348,7 +349,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             self.BodyPart.insert1(key)
             AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch_dataframe(self, *attrs, **kwargs):
+    def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch a concatenated dataframe of all bodyparts."""
         entries = (self.BodyPart & self).fetch("KEY")
         nwb_data_dict = {
             entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
@@ -405,6 +407,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
 
 def convert_to_cm(df, meters_to_pixels):
+    """Converts x and y columns from pixels to cm"""
     CM_TO_METERS = 100
     idx = pd.IndexSlice
     df.loc[:, idx[("x", "y")]] *= meters_to_pixels * CM_TO_METERS

@@ -25,6 +25,7 @@ class SensorData(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
+        """Populate the SensorData table."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)

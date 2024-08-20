@@ -60,6 +60,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the decoding model."""
         orig_key = copy.deepcopy(key)
 
         # Get model parameters
@@ -256,6 +257,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
+        """Retrieve the decoding model"""
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
     @staticmethod

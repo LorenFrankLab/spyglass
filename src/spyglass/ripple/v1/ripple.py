@@ -502,6 +502,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
 def interpolate_to_new_time(
     df, new_time, upsampling_interpolation_method="linear"
 ):
+    """Upsample a dataframe to a new time index"""
     old_time = df.index
     new_index = pd.Index(
         np.unique(np.concatenate((old_time, new_time))), name="time"

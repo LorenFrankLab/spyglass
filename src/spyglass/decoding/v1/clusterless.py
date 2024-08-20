@@ -53,6 +53,7 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
     def create_group(
         self, nwb_file_name: str, group_name: str, keys: list[dict]
     ):
+        """Create a group of waveform features for a given session"""
         group_key = {
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
@@ -95,6 +96,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the ClusterlessDecoding table"""
         orig_key = copy.deepcopy(key)
 
         # Get model parameters
@@ -296,6 +298,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
+        """Retrieve the decoding model"""
         return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
 
     @staticmethod

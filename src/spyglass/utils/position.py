@@ -17,6 +17,7 @@ def convert_to_pixels(data, frame_size=None, cm_to_pixels=1.0):
 
 
 def fill_nan(variable, video_time, variable_time):
+    """Fill in missing values in variable with nans at video_time points."""
     video_ind = np.digitize(variable_time, video_time[1:])
 
     n_video_time = len(video_time)
