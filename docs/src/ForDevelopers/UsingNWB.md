@@ -215,9 +215,9 @@ hdmf.common.table.DynamicTable </b>
 | :------------- | :--------------: | -----------------------------------------------: | ------------: | ----: |
 | Task           |    task_name     |             nwbf.processing.tasks.\[index\].name |               |       |
 | Task           | task_description |      nwbf.processing.\[index\].tasks.description |               |       |
-| TaskEpoch      |    task_name     |             nwbf.processing.\[index\].tasks.name |               |       |
-| TaskEpoch      |   camera_names   |        nwbf.processing.\[index\].tasks.camera_id |               |       |
-| TaskEpoch      | task_environment | nwbf.processing.\[index\].tasks.task_environment |               |       |
+| TaskEpoch      |    task_name     |             nwbf.processing.\[index\].tasks.name | config\["Tasks"\]\[index\]\["task_name"\]|       |
+| TaskEpoch      |   camera_names   |        nwbf.processing.\[index\].tasks.camera_id | config\["Tasks"\]\[index\]\["camera_id"\] |       |
+| TaskEpoch      | task_environment | nwbf.processing.\[index\].tasks.task_environment | config\["Tasks"\]\[index\]\["task_environment"\] |       |
 
 <b> NWBfile Location: nwbf.units </br> Object type: pynwb.misc.Units </b>
 
