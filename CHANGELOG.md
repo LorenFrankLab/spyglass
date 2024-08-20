@@ -34,7 +34,7 @@ PositionGroup.alter()
     - Checks `IntervalList` and externals tables. #1002
     - Ends early if called on empty table. #1055
 - Allow mixin tables with parallelization in `make` to run populate with
-    `processes > 1` #1001, #1052
+    `processes > 1` #1001, #1052, #1068
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
@@ -45,6 +45,7 @@ PositionGroup.alter()
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
+- Add tool for checking threads for metadata locks on a table #1063
 
 ### Pipelines
 
@@ -68,6 +69,7 @@ PositionGroup.alter()
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
     - Avoid interpolating over large `nan` intervals in position #1033
+    - Minor code calling corrections #1073
 
 - Position
 
@@ -96,6 +98,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+    - Efficiency improvement to `v0.Curation.insert_curation` #1072
 
 ## [0.5.2] (April 22, 2024)
 
