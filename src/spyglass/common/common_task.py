@@ -178,13 +178,20 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
                     key["epoch"] = epoch
                     target_interval = str(epoch).zfill(2)
+                    target_interval_name = None
                     for interval in session_intervals:
                         if (
                             target_interval in interval
                         ):  # TODO this is not true for the beans file
+                            target_interval_name = interval
                             break
+                    if target_interval_name is None:
+                        logger.warn(
+                            f"Interval not found for epoch {epoch} in {nwb_file_name}"
+                        )
+                        continue
                     # TODO case when interval is not found is not handled
-                    key["interval_list_name"] = interval
+                    key["interval_list_name"] = target_interval_name
                     task_inserts.append(key.copy())
 
         # Add tasks from config
@@ -214,12 +221,18 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             for epoch in task.get("task_epochs", []):
                 new_key["epoch"] = epoch
                 target_interval = str(epoch).zfill(2)
+                target_interval_name = None
                 for interval in session_intervals:
                     if (
                         target_interval in interval
                     ):  # TODO this is not true for the beans file
+                        target_interval_name = interval
                         break
-                # TODO case when interval is not found is not handled
+                if target_interval_name is None:
+                    logger.warn(
+                        f"Interval not found for epoch {epoch} in {nwb_file_name}"
+                    )
+                    continue
                 new_key["interval_list_name"] = interval
                 task_inserts.append(new_key.copy())
 
