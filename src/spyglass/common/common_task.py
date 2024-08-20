@@ -7,7 +7,7 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.nwb_helper_fn import get_nwb_file
+from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
 schema = dj.schema("common_task")
 
@@ -105,6 +105,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
         camera_names = dict()
 
         # the tasks refer to the camera_id which is unique for the NWB file but
@@ -116,13 +117,22 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 # get the camera ID
                 camera_id = int(str.split(device.name)[1])
                 camera_names[camera_id] = device.camera_name
+        if device_list := config.get("CameraDevice"):
+            for device in device_list:
+                camera_id = device.get("camera_id", -1)
+                camera_names[camera_id] = device.get("camera_name")
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
 
         tasks_mod = nwbf.processing.get("tasks")
-        if tasks_mod is None:
-            logger.warn(f"No tasks processing module found in {nwbf}\n")
+        if (
+            tasks_mod is None
+            and (config_tasks := config.get("Tasks", None)) is None
+        ):
+            logger.warn(
+                f"No tasks processing module found in {nwbf} or config\n"
+            )
             return
 
         task_inserts = []
@@ -176,6 +186,43 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     # TODO case when interval is not found is not handled
                     key["interval_list_name"] = interval
                     task_inserts.append(key.copy())
+
+        # Add tasks from config
+        for task in config_tasks:
+            new_key = key.copy()
+            new_key["task_name"] = task.get("task_name")
+            camera_ids = task.get("camera_id", [])
+            valid_camera_ids = [
+                camera_id
+                for camera_id in camera_ids
+                if camera_id in camera_names.keys()
+            ]
+            if valid_camera_ids:
+                key["camera_names"] = [
+                    {"camera_name": camera_names[camera_id]}
+                    for camera_id in valid_camera_ids
+                ]
+            else:
+                logger.warn(
+                    f"No camera device found with ID {camera_ids} in NWB "
+                    + f"file {nwbf}\n"
+                )
+            key["task_environment"] = task.get("task_environment", None)
+            session_intervals = (
+                IntervalList() & {"nwb_file_name": nwb_file_name}
+            ).fetch("interval_list_name")
+            for epoch in task.get("task_epochs", []):
+                new_key["epoch"] = epoch
+                target_interval = str(epoch).zfill(2)
+                for interval in session_intervals:
+                    if (
+                        target_interval in interval
+                    ):  # TODO this is not true for the beans file
+                        break
+                # TODO case when interval is not found is not handled
+                new_key["interval_list_name"] = interval
+                task_inserts.append(new_key.copy())
+
         self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
