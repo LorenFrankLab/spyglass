@@ -57,6 +57,11 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "waveform_features_group_name": group_name,
         }
+        if self & group_key:
+            raise ValueError(
+                f"Group {nwb_file_name}: {group_name} already exists",
+                "please delete the group before creating a new one",
+            )
         self.insert1(
             group_key,
             skip_duplicates=True,
@@ -533,7 +538,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         classifier = self.fetch_model()
         posterior = (
             self.fetch_results()
-            .acausal_posterior(time=time_slice)
+            .acausal_posterior.sel(time=time_slice)
             .squeeze()
             .unstack("state_bins")
             .sum("state")

@@ -68,6 +68,7 @@ PositionGroup.alter()
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
     - Avoid interpolating over large `nan` intervals in position #1033
+    - Minor code calling corrections #1073
 
 - Position
 
