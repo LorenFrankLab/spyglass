@@ -40,8 +40,8 @@ PositionGroup.alter()
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
 - Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062,
-    #1069
-- Revise docs organization.
+    #1066, #1069
+- Reivise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
@@ -70,6 +70,7 @@ PositionGroup.alter()
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
     - Avoid interpolating over large `nan` intervals in position #1033
+    - Minor code calling corrections #1073
 
 - Position
 
@@ -98,6 +99,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+    - Efficiency improvement to `v0.Curation.insert_curation` #1072
 
 ## [0.5.2] (April 22, 2024)
 
