@@ -159,20 +159,6 @@ class AbstractGraph(ABC):
 
     # ------------------------------ Graph Nodes ------------------------------
 
-    def _ensure_names(
-        self, table: Union[str, Table] = None
-    ) -> Union[str, List[str]]:
-        """Ensure table is a string."""
-        if table is None:
-            return None
-        if isinstance(table, str):
-            return table
-        if isinstance(table, Iterable) and not isinstance(
-            table, (Table, TableMeta)
-        ):
-            return [ensure_names(t) for t in table]
-        return getattr(table, "full_table_name", None)
-
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph."""
         table = ensure_names(table)
