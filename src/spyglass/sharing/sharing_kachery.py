@@ -102,6 +102,7 @@ class KacheryZone(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def reset_resource_url():
+        """Resets the KACHERY_RESOURCE_URL to the default value."""
         KacheryZone.reset_zone()
         if default_kachery_resource_url is not None:
             os.environ[kachery_resource_url_envar] = (

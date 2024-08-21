@@ -245,8 +245,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     def fetch_nwb(self, *attrs, **kwargs):
+        """Placeholder to override mixin method"""
         raise NotImplementedError
-        return None
 
     def nightly_cleanup(self):
         """Clean up spike sorting directories that are not in the SpikeSorting table.

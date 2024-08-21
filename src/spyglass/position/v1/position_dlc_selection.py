@@ -57,7 +57,14 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populate the table with the combined position information."""
+        """Populate the table with the combined position information.
+
+        1. Fetches position and orientation data from the DLCCentroid and
+        DLCOrientation tables.
+        2. Creates NWB objects for position, orientation, and velocity.
+        3. Generates an AnalysisNwbfile and adds the NWB objects to it.
+        4. Inserts the key into the table, and the PositionOutput Merge table.
+        """
         orig_key = copy.deepcopy(key)
         # Add to Analysis NWB file
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
@@ -324,7 +331,14 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populate the DLCPosVideo table."""
+        """Populate the DLCPosVideo table.
+
+        1. Fetches parameters from the DLCPosVideoParams table.
+        2. Fetches position interval name from epoch name.
+        3. Fetches pose estimation data and video information.
+        4. Fetches centroid and likelihood data for each bodypart.
+        5. Calls make_video to create the video with the above data.
+        """
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")

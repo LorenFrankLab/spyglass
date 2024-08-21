@@ -52,7 +52,18 @@ class Session(SpyglassMixin, dj.Imported):
         """
 
     def make(self, key):
-        """Populate the Session table."""
+        """Populate the Session table and others from an nwb file.
+
+        Calls the insert_from_nwbfile method for each of the following tables:
+            - Institution
+            - Lab
+            - LabMember
+            - Subject
+            - DataAcquisitionDevice
+            - CameraDevice
+            - Probe
+            - IntervalList
+        """
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList

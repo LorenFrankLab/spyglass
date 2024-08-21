@@ -185,6 +185,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return part_table * sort_group_info  # join the info with merge id's
 
     def get_spike_times(self, key):
+        """Get spike times for the group"""
         spike_times = []
         for nwb_file in self.fetch_nwb(key):
             # V1 uses 'object_id', V0 uses 'units'

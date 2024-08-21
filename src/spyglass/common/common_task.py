@@ -102,7 +102,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      """
 
     def make(self, key):
-        """Populate the TaskEpoch table."""
+        """Populate TaskEpoch from the processing module in the NWB file."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)

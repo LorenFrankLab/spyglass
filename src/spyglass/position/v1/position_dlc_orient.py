@@ -114,7 +114,14 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         return pos_df
 
     def make(self, key):
-        """Populate the DLCOrientation table."""
+        """Populate the DLCOrientation table.
+
+        1. Fetch parameters and position data from DLCOrientationParams and
+            DLCSmoothInterpCohort.BodyPart tables, respectively.
+        2. Apply chosen orientation method to position data.
+        3. Generate a CompassDirection object and add it to the AnalysisNwbfile.
+        4. Insert the key into the DLCOrientation table.
+        """
         # Get labels to smooth from Parameters table
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         pos_df = self._get_pos_df(key)
@@ -127,6 +134,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         orient_func = _key_to_func_dict[params["orient_method"]]
         orientation = orient_func(pos_df, **params)
 
+        # TODO: Absorb this into the `no_orientation` function
         if not params["orient_method"] == "none":
             # Smooth orientation
             is_nan = np.isnan(orientation)

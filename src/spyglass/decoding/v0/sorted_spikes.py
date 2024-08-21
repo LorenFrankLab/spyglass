@@ -65,6 +65,7 @@ schema = dj.schema("decoding_sortedspikes")
 @schema
 class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins spike times into regular intervals given by the sampling rate.
+
     Start and stop time of the interval are defined by the interval list.
     """
 
@@ -79,8 +80,8 @@ class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
 @schema
 class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """Bins spike times into regular intervals given by the sampling rate.
-    Useful for GLMs and for decoding.
 
+    Useful for GLMs and for decoding.
     """
 
     definition = """
@@ -91,7 +92,12 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populate the SortedSpikesIndicator table."""
+        """Populate the SortedSpikesIndicator table.
+
+        Fetches the spike times from the CuratedSpikeSorting table and bins
+        them into regular intervals given by the sampling rate. The spike
+        indicator is stored in an AnalysisNwbfile.
+        """
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")

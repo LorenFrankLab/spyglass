@@ -56,6 +56,16 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populates the MuaEventsV1 table.
+
+        Fetches...
+            - Speed from PositionOutput
+            - Spike indicator from SortedSpikesGroup
+            - Valid times from IntervalList
+            - Parameters from MuaEventsParameters
+        Uses multiunit_HSE_detector from ripple_detection package to detect
+        multiunit activity.
+        """
         speed = self.get_speed(key)
         time = speed.index.to_numpy()
         speed = speed.to_numpy()

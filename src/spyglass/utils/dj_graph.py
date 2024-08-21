@@ -927,6 +927,7 @@ class TableChain(RestrGraph):
 
     @property
     def path_str(self) -> str:
+        """Return string representation of path: parent -> {links} -> child."""
         if not self.path:
             return "No link"
         return self._link_symbol.join([self._camel(t) for t in self.path])
@@ -969,6 +970,7 @@ class TableChain(RestrGraph):
     # ---------------------------- Graph Traversal ----------------------------
 
     def cascade_search(self) -> None:
+        """Cascade restriction through graph to search for applicable table."""
         if self.cascaded:
             return
         restriction, restr_attrs = self._get_find_restr(self.leaf)
@@ -1021,6 +1023,7 @@ class TableChain(RestrGraph):
         limit: int = 100,
         **kwargs,
     ):
+        """Search parents/children for a match of the provided restriction."""
         if (
             self.found_restr
             or not table
@@ -1117,6 +1120,7 @@ class TableChain(RestrGraph):
     def cascade(
         self, restriction: str = None, direction: Direction = None, **kwargs
     ):
+        """Cascade restriction up or down the chain."""
         if not self.has_link:
             return
 

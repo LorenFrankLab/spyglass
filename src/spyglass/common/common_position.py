@@ -521,7 +521,11 @@ class PositionVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populates the PositionVideo table."""
+        """Populates the PositionVideo table.
+
+        The video is created by overlaying the head position and orientation
+        on the video of the animal.
+        """
         M_TO_CM = 100
 
         logger.info("Loading position data...")

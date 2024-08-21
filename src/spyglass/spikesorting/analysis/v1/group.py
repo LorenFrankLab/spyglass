@@ -42,6 +42,7 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls):
+        """Insert default unit selection parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
@@ -66,6 +67,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         unit_filter_params_name: str = "all_units",
         keys: list[dict] = [],
     ):
+        """Create a new group of sorted spikes"""
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,

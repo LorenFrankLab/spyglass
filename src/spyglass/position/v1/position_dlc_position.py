@@ -169,7 +169,17 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     log_path = None
 
     def make(self, key):
-        """Populate the DLCSmoothInterp table."""
+        """Populate the DLCSmoothInterp table.
+
+        Uses a decorator to log the output to a file.
+
+        1. Fetches the DLC output dataframe from DLCPoseEstimation
+        2. NaNs low likelihood points and interpolates across them
+        3. Optionally smooths and interpolates the data
+        4. Create position and video frame index NWB objects
+        5. Add NWB objects to AnalysisNwbfile
+        6. Insert the key into DLCSmoothInterp.
+        """
         self.log_path = (
             Path(infer_output_dir(key=key, makedir=False)) / "log.log"
         )

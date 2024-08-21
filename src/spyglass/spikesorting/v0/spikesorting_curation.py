@@ -285,6 +285,7 @@ class WaveformParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
+        """Inserts default waveform parameters"""
         waveform_params_name = "default_not_whitened"
         waveform_params = {
             "ms_before": 0.5,
@@ -331,6 +332,15 @@ class Waveforms(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate Waveforms table with waveform extraction results
+
+        1. Fetches ...
+            - Recording and sorting from Curation table
+            - Parameters from WaveformParameters table
+        2. Uses spikeinterface to extract waveforms
+        3. Generates an analysis NWB file with the waveforms
+        4. Inserts the key into Waveforms table
+        """
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
@@ -386,6 +396,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         return we
 
     def fetch_nwb(self, key):
+        """Fetches the NWB file path for the waveforms. NOT YET IMPLEMENTED."""
         # TODO: implement fetching waveforms from NWB
         return NotImplementedError
 
@@ -455,13 +466,15 @@ class MetricParameters(SpyglassMixin, dj.Manual):
         "Returns default params for the given metric"
         return self.metric_default_params(metric)
 
-    def insert_default(self):
+    def insert_default(self) -> None:
+        """Inserts default metric parameters"""
         self.insert1(
             ["franklab_default3", self.metric_default_params],
             skip_duplicates=True,
         )
 
     def get_available_metrics(self):
+        """Log available metrics and their descriptions"""
         for metric in _metric_name_to_func:
             if metric in self.available_metrics:
                 metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
@@ -472,7 +485,7 @@ class MetricParameters(SpyglassMixin, dj.Manual):
 
     # TODO
     def _validate_metrics_list(self, key):
-        """Checks whether a row to be inserted contains only the available metrics"""
+        """Checks whether a row to be inserted contains only available metrics"""
         # get available metrics list
         # get metric list from key
         # compare
@@ -484,10 +497,10 @@ class MetricSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Waveforms
     -> MetricParameters
-    ---
     """
 
     def insert1(self, key, **kwargs):
+        """Overriding insert1 to add warnings for peak_offset and peak_channel"""
         waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         metric_params = (MetricParameters & key).fetch1("metric_params")
         if "peak_offset" in metric_params:
@@ -518,6 +531,16 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate QualityMetrics table with quality metric results.
+
+        1. Fetches ...
+            - Waveform extractor from Waveforms table
+            - Parameters from MetricParameters table
+        2. Computes metrics, including SNR, ISI violation, NN isolation,
+            NN noise overlap, peak offset, peak channel, and number of spikes.
+        3. Generates an analysis NWB file with the metrics.
+        4. Inserts the key into QualityMetrics table
+        """
         analysis_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
@@ -694,6 +717,7 @@ class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
     # NOTE: No existing entries impacted by this change
 
     def insert1(self, key, **kwargs):
+        """Overriding insert1 to validats label_params and merge_params"""
         # validate the labels and then insert
         # TODO: add validation for merge_params
         for metric in key["label_params"]:
@@ -719,6 +743,7 @@ class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
         super().insert1(key, **kwargs)
 
     def insert_default(self):
+        """Inserts default automatic curation parameters"""
         # label_params parsing: Each key is the name of a metric,
         # the contents are a three value list with the comparison, a value,
         # and a list of labels to apply if the comparison is true
@@ -767,6 +792,15 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate AutomaticCuration table with automatic curation results.
+
+        1. Fetches ...
+            - Quality metrics from QualityMetrics table
+            - Parameters from AutomaticCurationParameters table
+            - Parent curation/sorting from Curation table
+        2. Curates the sorting based on provided merge and label parameters
+        3. Inserts IDs into  AutomaticCuration and Curation tables
+        """
         metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
         with open(metrics_path) as f:
             quality_metrics = json.load(f)
@@ -940,6 +974,12 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        """Populate CuratedSpikeSorting table with curated sorting results.
+
+        1. Fetches metrics and sorting from the Curation table
+        2. Saves the sorting in an analysis NWB file
+        3. Inserts key into CuratedSpikeSorting table and units into part table.
+        """
         AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
         unit_labels_to_remove = ["reject"]
         # check that the Curation has metrics
@@ -1029,7 +1069,8 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
                     key[field] = final_metrics[field][unit_id]
                 else:
                     Warning(
-                        f"No metric named {field} in computed unit quality metrics; skipping"
+                        f"No metric named {field} in computed unit quality "
+                        + "metrics; skipping"
                     )
             CuratedSpikeSorting.Unit.insert1(key)
 

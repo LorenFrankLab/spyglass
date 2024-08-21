@@ -96,7 +96,21 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populate the ClusterlessDecoding table"""
+        """Populate the ClusterlessDecoding table.
+
+        1. Fetches...
+            position data from PositionGroup table
+            waveform features and spike times from UnitWaveformFeatures table
+            decoding parameters from DecodingParameters table
+            encoding/decoding intervals from IntervalList table
+        2. Decodes via ClusterlessDetector from non_local_detector package
+        3. Optionally estimates decoding parameters
+        4. Saves the decoding results (initial conditions, discrete state
+            transitions) and classifier to disk. May include discrete transition
+            coefficients if available.
+        5. Inserts into ClusterlessDecodingV1 table and DecodingOutput merge
+            table.
+        """
         orig_key = copy.deepcopy(key)
 
         # Get model parameters

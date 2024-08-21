@@ -118,7 +118,16 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """Populate LinearizedPositionV1 table with the linearized position."""
+        """Populate LinearizedPositionV1 table with the linearized position.
+
+        The linearized position is computed from the position data in the
+        PositionOutput table. Parameters for linearization are specified in
+        LinearizationParameters and the track graph is specified in TrackGraph.
+        The linearization function is defined by the track_linearization
+        package. The resulting linearized position is stored in an
+        AnalysisNwbfile and added as an entry in the LinearizedPositionV1 and
+        LinearizedPositionOutput (Merge) tables.
+        """
         orig_key = copy.deepcopy(key)
         logger.info(f"Computing linear position for: {key}")
 

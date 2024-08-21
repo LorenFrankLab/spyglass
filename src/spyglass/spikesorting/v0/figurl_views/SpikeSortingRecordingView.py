@@ -25,6 +25,11 @@ class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populates SpikeSortingRecordingView.
+
+        Fetches the recording from SpikeSortingRecording and extracts traces
+        and electrode geometry.
+        """
         # Get the SpikeSortingRecording row
         rec = (SpikeSortingRecording & key).fetch1()
         nwb_file_name = rec["nwb_file_name"]

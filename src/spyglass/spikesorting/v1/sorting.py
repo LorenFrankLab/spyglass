@@ -96,13 +96,14 @@ class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default sorter parameters into SpikeSorterParameters table."""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
 class SpikeSortingSelection(SpyglassMixin, dj.Manual):
     definition = """
-    # Processed recording and spike sorting parameters. Use `insert_selection` method to insert rows.
+    # Processed recording and spike sorting parameters. See `insert_selection`.
     sorting_id: uuid
     ---
     -> SpikeSortingRecording
