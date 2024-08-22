@@ -19,6 +19,7 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.settings import test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
@@ -76,8 +77,12 @@ class SortGroup(SpyglassMixin, dj.Manual):
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
-        # delete any current groups
-        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
+        existing_entries = SortGroup & {"nwb_file_name": nwb_file_name}
+        if existing_entries and test_mode:
+            return
+        elif existing_entries:
+            # delete any current groups
+            (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
 
         sg_keys, sge_keys = get_group_by_shank(
             nwb_file_name=nwb_file_name,
