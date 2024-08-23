@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from datajoint.hash import key_hash
 
@@ -78,7 +80,8 @@ def pop_curation(spike_v1, pop_sort):
 
 
 @pytest.fixture(scope="session")
-def pop_metric(spike_v1, pop_sort):
+def pop_metric(spike_v1, pop_sort, pop_curation):
+    _ = pop_curation  # make sure this happens first
     key = {
         "sorting_id": pop_sort["sorting_id"],
         "curation_id": 0,
@@ -186,10 +189,74 @@ def pop_merge(
     yield spike_merge.fetch("KEY", as_dict=True)[0]
 
 
+def is_uuid(text):
+    uuid_pattern = re.compile(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
+    )
+    return uuid_pattern.fullmatch(str(text)) is not None
+
+
 def hash_sort_info(sort_info):
-    """Hashes attributes of a dj.Table object that are not uuids."""
-    non_uuid = [  # uuid randomly assigned, do not hash
-        k for k, v in sort_info.heading.attributes.items() if v.type != "uuid"
-    ]
-    info_dict = sort_info.fetch(*non_uuid, as_dict=True)[0]
-    return key_hash(info_dict)
+    """Hashes attributes of a dj.Table object that are not randomly assigned."""
+    no_str_uuid = {
+        k: v
+        for k, v in sort_info.fetch(as_dict=True)[0].items()
+        if not is_uuid(v) and k != "analysis_file_name"
+    }
+    return key_hash(no_str_uuid)
+
+
+@pytest.fixture(scope="session")
+def spike_v1_group():
+    from spyglass.spikesorting.analysis.v1 import group
+
+    yield group
+
+
+@pytest.fixture(scope="session")
+def pop_group(spike_v1_group, spike_merge, mini_dict, pop_merge):
+
+    _ = pop_merge  # make sure this happens first
+
+    spike_v1_group.UnitSelectionParams().insert_default()
+    spike_v1_group.SortedSpikesGroup().create_group(
+        **mini_dict,
+        group_name="demo_group",
+        keys=spike_merge.proj(spikesorting_merge_id="merge_id").fetch("KEY"),
+        unit_filter_params_name="default_exclusion",
+    )
+    yield spike_v1_group.SortedSpikesGroup().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def spike_v1_ua():
+    from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+
+    yield UnitAnnotation()
+
+
+@pytest.fixture(scope="session")
+def pop_annotations(spike_v1_group, spike_v1_ua, pop_group):
+    spike_times, unit_ids = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+        pop_group, return_unit_ids=True
+    )
+    for spikes, unit_key in zip(spike_times, unit_ids):
+        quant_key = {
+            **unit_key,
+            "annotation": "spike_count",
+            "quantification": len(spikes),
+        }
+        label_key = {
+            **unit_key,
+            "annotation": "cell_type",
+            "label": "pyridimal" if len(spikes) < 1000 else "interneuron",
+        }
+
+        spike_v1_ua.add_annotation(quant_key, skip_duplicates=True)
+        spike_v1_ua.add_annotation(label_key, skip_duplicates=True)
+
+    yield (
+        spike_v1_ua.Annotation
+        # * (spike_v1_group.SortedSpikesGroup.Units & pop_group)
+        & {"annotation": "spike_count"}
+    )

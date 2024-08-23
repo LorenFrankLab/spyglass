@@ -83,6 +83,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         merge_ids : list
             list of merge ids from the restricted sources
         """
+        # TODO: replace with long-distance restrictions
+
         merge_ids = []
 
         if "v1" in sources:

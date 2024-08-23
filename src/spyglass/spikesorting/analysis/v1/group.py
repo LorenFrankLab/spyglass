@@ -6,6 +6,7 @@ import numpy as np
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
@@ -72,6 +73,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             "unit_filter_params_name": unit_filter_params_name,
         }
         if self & group_key:
+            if test_mode:
+                return
             raise ValueError(
                 f"Group {nwb_file_name}: {group_name} already exists",
                 "please delete the group before creating a new one",

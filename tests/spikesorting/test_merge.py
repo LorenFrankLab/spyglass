@@ -13,6 +13,11 @@ def test_merge_get_restr(spike_merge, pop_merge, pop_curation_metric):
         restr_id == pop_merge["merge_id"]
     ), "SpikeSortingOutput merge_id mismatch"
 
+    non_artifact = spike_merge.get_restricted_merge_ids(
+        pop_curation_metric, sources=["v1"], restrict_by_artifact=False
+    )[0]
+    assert restr_id == non_artifact, "SpikeSortingOutput merge_id mismatch"
+
 
 def test_merge_get_recording(spike_merge, pop_merge):
     rec = spike_merge.get_recording(pop_merge)
@@ -31,7 +36,7 @@ def test_merge_get_sorting(spike_merge, pop_merge):
 def test_merge_get_sort_group_info(spike_merge, pop_merge):
     hash = hash_sort_info(spike_merge.get_sort_group_info(pop_merge))
     assert (
-        hash == "e25b3197589103c0296efa69eba3b3ee"
+        hash == "48e437bc116900fe64e492d74595b56d"
     ), "SpikeSortingOutput.get_sort_group_info unexpected value"
 
 
