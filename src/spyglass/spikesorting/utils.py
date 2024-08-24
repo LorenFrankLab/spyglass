@@ -152,7 +152,7 @@ def _init_artifact_worker(
     return {
         "recording": recording,
         "zscore_thresh": zscore_thresh,
-        "amplitude_thresh_uV": amplitude_thresh_uV,
+        "amplitude_thresh": amplitude_thresh_uV,
         "proportion_above_thresh": proportion_above_thresh,
     }
 

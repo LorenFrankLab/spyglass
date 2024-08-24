@@ -73,6 +73,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     artifact_removed_interval_list_name: varchar(200) # name of the array of no-artifact valid time intervals
     """
 
+    _parallel_make = True
+
     def make(self, key):
         if not (ArtifactDetectionSelection & key).fetch1(
             "custom_artifact_detection"
