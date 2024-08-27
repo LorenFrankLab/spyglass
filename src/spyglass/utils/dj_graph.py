@@ -28,6 +28,7 @@ from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     PERIPHERAL_TABLES,
+    ensure_names,
     fuzzy_get,
     unique_dicts,
 )
@@ -148,7 +149,7 @@ class AbstractGraph(ABC):
 
     def _camel(self, table):
         """Convert table name(s) to camel case."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if isinstance(table, str):
             return to_camel_case(table.split(".")[-1].strip("`"))
         if isinstance(table, Iterable) and not isinstance(
@@ -158,23 +159,9 @@ class AbstractGraph(ABC):
 
     # ------------------------------ Graph Nodes ------------------------------
 
-    def _ensure_names(
-        self, table: Union[str, Table] = None
-    ) -> Union[str, List[str]]:
-        """Ensure table is a string."""
-        if table is None:
-            return None
-        if isinstance(table, str):
-            return table
-        if isinstance(table, Iterable) and not isinstance(
-            table, (Table, TableMeta)
-        ):
-            return [self._ensure_names(t) for t in table]
-        return getattr(table, "full_table_name", None)
-
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
@@ -184,7 +171,7 @@ class AbstractGraph(ABC):
 
     def _set_node(self, table, attr: str = "ft", value: Any = None):
         """Set attribute on node. General helper for various attributes."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         _ = self._get_node(table)  # Ensure node exists
         self.graph.nodes[table][attr] = value
 
@@ -200,8 +187,8 @@ class AbstractGraph(ABC):
             Tuple of boolean indicating direction and edge data. True if child
             is child of parent.
         """
-        child = self._ensure_names(child)
-        parent = self._ensure_names(parent)
+        child = ensure_names(child)
+        parent = ensure_names(parent)
 
         if edge := self.graph.get_edge_data(parent, child):
             return False, edge
@@ -221,7 +208,7 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        return self._get_node(self._ensure_names(table)).get("restr")
+        return self._get_node(ensure_names(table)).get("restr")
 
     def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
@@ -247,7 +234,7 @@ class AbstractGraph(ABC):
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if with_restr:
             if not (restr := self._get_restr(table) or False):
                 if warn:
@@ -263,9 +250,7 @@ class AbstractGraph(ABC):
 
     def _is_out(self, table, warn=True, keep_alias=False):
         """Check if table is outside of spyglass."""
-        table = self._ensure_names(table)
-        if table.isnumeric() and keep_alias:
-            return False
+        table = ensure_names(table)
         if self.graph.nodes.get(table):
             return False
         ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
@@ -483,7 +468,7 @@ class AbstractGraph(ABC):
             return nodes
         nodes = [
             node
-            for node in self._ensure_names(nodes)
+            for node in ensure_names(nodes)
             if not self._is_out(node, warn=False)
         ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
@@ -841,8 +826,8 @@ class TableChain(RestrGraph):
         banned_tables: List[str] = None,
         **kwargs,
     ):
-        self.parent = self._ensure_names(parent)
-        self.child = self._ensure_names(child)
+        self.parent = ensure_names(parent)
+        self.child = ensure_names(child)
 
         if not self.parent and not self.child:
             raise ValueError("Parent or child table required.")
@@ -852,7 +837,9 @@ class TableChain(RestrGraph):
 
         self._ignore_peripheral(except_tables=[self.parent, self.child])
         self._ignore_outside_spy(except_tables=[self.parent, self.child])
-        self.no_visit.update(self._ensure_names(banned_tables) or [])
+
+        self.no_visit.update(ensure_names(banned_tables) or [])
+
         self.no_visit.difference_update(set([self.parent, self.child]))
 
         self.searched_tables = set()
@@ -887,7 +874,7 @@ class TableChain(RestrGraph):
 
     def _ignore_peripheral(self, except_tables: List[str] = None):
         """Ignore peripheral tables in graph traversal."""
-        except_tables = self._ensure_names(except_tables)
+        except_tables = ensure_names(except_tables)
         ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
         self.no_visit.update(ignore_tables)
 

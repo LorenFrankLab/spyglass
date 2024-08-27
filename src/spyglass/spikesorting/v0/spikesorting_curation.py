@@ -145,7 +145,7 @@ class Curation(SpyglassMixin, dj.Manual):
         Curation.insert1(sorting_key, skip_duplicates=True)
 
         # get the primary key for this curation
-        c_key = Curation.fetch("KEY")[0]
+        c_key = (Curation & sorting_key).fetch1("KEY")
         curation_key = {item: sorting_key[item] for item in c_key}
 
         return curation_key
@@ -553,46 +553,48 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         return qm_name
 
     def _compute_metric(self, waveform_extractor, metric_name, **metric_params):
-        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         metric_func = _metric_name_to_func[metric_name]
-        # TODO clean up code below
+
+        peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         if metric_name == "isi_violation":
             metric = metric_func(waveform_extractor, **metric_params)
         elif metric_name in peak_sign_metrics:
-            if "peak_sign" in metric_params:
-                metric = metric_func(
-                    waveform_extractor,
-                    peak_sign=metric_params.pop("peak_sign"),
-                    **metric_params,
-                )
-            else:
+            if "peak_sign" not in metric_params:
                 raise Exception(
                     f"{peak_sign_metrics} metrics require peak_sign",
                     "to be defined in the metric parameters",
                 )
-        else:
-            metric = {}
-            num_spikes = sq.compute_num_spikes(waveform_extractor)
-            for unit_id in waveform_extractor.sorting.get_unit_ids():
-                # checks to avoid bug in spikeinterface 0.98.2
-                if metric_name == "nn_isolation" and num_spikes[
-                    unit_id
-                ] < metric_params.get("min_spikes", 10):
+            return metric_func(
+                waveform_extractor,
+                peak_sign=metric_params.pop("peak_sign"),
+                **metric_params,
+            )
+
+        metric = {}
+        num_spikes = sq.compute_num_spikes(waveform_extractor)
+
+        is_nn_iso = metric_name == "nn_isolation"
+        is_nn_overlap = metric_name == "nn_noise_overlap"
+        min_spikes = metric_params.get("min_spikes", 10)
+
+        for unit_id in waveform_extractor.sorting.get_unit_ids():
+            # checks to avoid bug in spikeinterface 0.98.2
+            if num_spikes[unit_id] < min_spikes:
+                if is_nn_iso:
                     metric[str(unit_id)] = (np.nan, np.nan)
-                elif metric_name == "nn_noise_overlap" and num_spikes[
-                    unit_id
-                ] < metric_params.get("min_spikes", 10):
+                elif is_nn_overlap:
                     metric[str(unit_id)] = np.nan
 
-                else:
-                    metric[str(unit_id)] = metric_func(
-                        waveform_extractor,
-                        this_unit_id=int(unit_id),
-                        **metric_params,
-                    )
-                # nn_isolation returns tuple with isolation and unit number. We only want isolation.
-                if metric_name == "nn_isolation":
-                    metric[str(unit_id)] = metric[str(unit_id)][0]
+            else:
+                metric[str(unit_id)] = metric_func(
+                    waveform_extractor,
+                    this_unit_id=int(unit_id),
+                    **metric_params,
+                )
+            # nn_isolation returns tuple with isolation and unit number.
+            # We only want isolation.
+            if is_nn_iso:
+                metric[str(unit_id)] = metric[str(unit_id)][0]
         return metric
 
     def _dump_to_json(self, qm_dict, save_path):

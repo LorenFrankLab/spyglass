@@ -16,11 +16,14 @@ from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
 from datajoint.utils import get_master, to_camel_case, user_choice
 from networkx import NetworkXError
+from packaging.version import parse as version_parse
+from pandas import DataFrame
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (  # NonDaemonPool,
+from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    ensure_names,
     fetch_nwb,
     get_nwb_table,
     populate_pass_function,
@@ -156,10 +159,10 @@ class SpyglassMixin:
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -455,12 +458,8 @@ class SpyglassMixin:
         Used to delay import of tables until needed, avoiding circular imports.
         Each of these tables inheits SpyglassMixin.
         """
-        from spyglass.common import (  # noqa F401
-            IntervalList,
-            LabMember,
-            LabTeam,
-            Session,
-        )
+        from spyglass.common import LabMember  # noqa F401
+        from spyglass.common import IntervalList, LabTeam, Session
         from spyglass.common.common_nwbfile import schema  # noqa F401
 
         self._session_pk = Session.primary_key[0]
@@ -637,6 +636,11 @@ class SpyglassMixin:
             Passed to datajoint.table.Table.delete.
         """
         start = time()
+
+        if len(self) == 0:
+            logger.warning(f"Table is empty. No need to delete.\n{self}")
+            return
+
         external, IntervalList = self._delete_deps[3], self._delete_deps[4]
 
         if not force_permission or dry_run:
@@ -735,6 +739,30 @@ class SpyglassMixin:
             )
 
         return ret
+
+    def compare_versions(
+        self, version: str, other: str = None, msg: str = None
+    ) -> None:
+        """Compare two versions. Raise error if not equal.
+
+        Parameters
+        ----------
+        version : str
+            Version to compare.
+        other : str, optional
+            Other version to compare. Default None. Use self._spyglass_version.
+        msg : str, optional
+            Additional error message info. Default None.
+        """
+        if self._test_mode:
+            return
+
+        other = other or self._spyglass_version
+
+        if version_parse(version) != version_parse(other):
+            raise RuntimeError(
+                f"Found mismatched versions: {version} vs {other}\n{msg}"
+            )
 
     @cached_property
     def _export_table(self):
@@ -874,20 +902,15 @@ class SpyglassMixin:
         """
         return self.restrict_by(restriction, direction="down")
 
-    def _ensure_names(self, tables) -> List[str]:
-        """Ensure table is a string in a list."""
-        if not isinstance(tables, (list, tuple, set)):
-            tables = [tables]
-        for table in tables:
-            return [getattr(table, "full_table_name", table) for t in tables]
-
     def ban_search_table(self, table):
         """Ban table from search in restrict_by."""
-        self._banned_search_tables.update(self._ensure_names(table))
+        self._banned_search_tables.update(ensure_names(table, force_list=True))
 
     def unban_search_table(self, table):
         """Unban table from search in restrict_by."""
-        self._banned_search_tables.difference_update(self._ensure_names(table))
+        self._banned_search_tables.difference_update(
+            ensure_names(table, force_list=True)
+        )
 
     def see_banned_tables(self):
         """Print banned tables."""
@@ -983,6 +1006,109 @@ class SpyglassMixin:
             logger.warning("No entries" + warn_text)
 
         return ret
+
+    # ------------------------------ Check locks ------------------------------
+
+    def exec_sql_fetchall(self, query):
+        """
+        Execute the given query and fetch the results.    Parameters
+        ----------
+        query : str
+            The SQL query to execute.    Returns
+        -------
+        list of tuples
+            The results of the query.
+        """
+        results = dj.conn().query(query).fetchall()
+        return results  # Check if performance schema is enabled
+
+    def check_threads(self, detailed=False, all_threads=False) -> DataFrame:
+        """Check for locked threads in the database.
+
+        Parameters
+        ----------
+        detailed : bool, optional
+            Show all columns in the metadata_locks table. Default False, show
+            summary.
+        all_threads : bool, optional
+            Show all threads, not just those related to this table.
+            Default False.
+
+
+        Returns
+        -------
+        DataFrame
+            A DataFrame containing the metadata locks.
+        """
+        performance__status = self.exec_sql_fetchall(
+            "SHOW VARIABLES LIKE 'performance_schema';"
+        )
+        if performance__status[0][1] == "OFF":
+            raise RuntimeError(
+                "Database does not monitor threads. "
+                + "Please ask you administrator to enable performance schema."
+            )
+
+        metadata_locks_query = """
+        SELECT
+            ml.OBJECT_SCHEMA, -- Table schema
+            ml.OBJECT_NAME, -- Table name
+            ml.OBJECT_TYPE, -- What is locked
+            ml.LOCK_TYPE, -- Type of lock
+            ml.LOCK_STATUS, -- Lock status
+            ml.OWNER_THREAD_ID, -- Thread ID of the lock owner
+            t.PROCESSLIST_ID, -- User connection ID
+            t.PROCESSLIST_USER, -- User
+            t.PROCESSLIST_HOST, -- User machine
+            t.PROCESSLIST_TIME, -- Time in seconds
+            t.PROCESSLIST_DB, -- Thread database
+            t.PROCESSLIST_COMMAND, -- Likely Query
+            t.PROCESSLIST_STATE, -- Waiting for lock, sending data, or locked
+            t.PROCESSLIST_INFO -- Actual query
+        FROM performance_schema.metadata_locks AS ml
+        JOIN performance_schema.threads AS t
+        ON ml.OWNER_THREAD_ID = t.THREAD_ID
+        """
+
+        where_clause = (
+            f"WHERE ml.OBJECT_SCHEMA = '{self.database}' "
+            + f"AND ml.OBJECT_NAME = '{self.table_name}'"
+        )
+        metadata_locks_query += ";" if all_threads else where_clause
+
+        df = DataFrame(
+            self.exec_sql_fetchall(metadata_locks_query),
+            columns=[
+                "Schema",  # ml.OBJECT_SCHEMA -- Table schema
+                "Table Name",  # ml.OBJECT_NAME -- Table name
+                "Locked",  # ml.OBJECT_TYPE -- What is locked
+                "Lock Type",  # ml.LOCK_TYPE -- Type of lock
+                "Lock Status",  # ml.LOCK_STATUS -- Lock status
+                "Thread ID",  # ml.OWNER_THREAD_ID -- Thread ID of the lock owner
+                "Connection ID",  # t.PROCESSLIST_ID -- User connection ID
+                "User",  # t.PROCESSLIST_USER -- User
+                "Host",  # t.PROCESSLIST_HOST -- User machine
+                "Process Database",  # t.PROCESSLIST_DB -- Thread database
+                "Time (s)",  # t.PROCESSLIST_TIME -- Time in seconds
+                "Process",  # t.PROCESSLIST_COMMAND -- Likely Query
+                "State",  # t.PROCESSLIST_STATE
+                "Query",  # t.PROCESSLIST_INFO -- Actual query
+            ],
+        )
+
+        df["Name"] = df["User"].apply(self._delete_deps[0]().get_djuser_name)
+
+        keep_cols = []
+        if all_threads:
+            keep_cols.append("Table")
+            df["Table"] = df["Schema"] + "." + df["Table Name"]
+        df = df.drop(columns=["Schema", "Table Name"])
+
+        if not detailed:
+            keep_cols.extend(["Locked", "Name", "Time (s)", "Process", "State"])
+            df = df[keep_cols]
+
+        return df
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):

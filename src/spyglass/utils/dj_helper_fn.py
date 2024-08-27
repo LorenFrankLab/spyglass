@@ -4,13 +4,14 @@ import inspect
 import multiprocessing.pool
 import os
 from pathlib import Path
-from typing import List, Type, Union
+from typing import Iterable, List, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
 import h5py
 import numpy as np
-from datajoint.user_tables import UserTable
+from datajoint.table import Table
+from datajoint.user_tables import TableMeta, UserTable
 
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
@@ -31,6 +32,40 @@ PERIPHERAL_TABLES = [
     "`common_nwbfile`.`nwbfile_kachery`",
     "`common_nwbfile`.`nwbfile`",
 ]
+
+
+def ensure_names(
+    table: Union[str, Table, Iterable] = None, force_list: bool = False
+) -> Union[str, List[str], None]:
+    """Ensure table is a string.
+
+    Parameters
+    ----------
+    table : Union[str, Table, Iterable], optional
+        Table to ensure is a string, by default None. If passed as iterable,
+        will ensure all elements are strings.
+    force_list : bool, optional
+        Force the return to be a list, by default False, only used if input is
+        iterable.
+
+    Returns
+    -------
+    Union[str, List[str], None]
+        Table as a string or list of strings.
+    """
+    # is iterable (list, set, set) but not a table/string
+    is_collection = isinstance(table, Iterable) and not isinstance(
+        table, (Table, TableMeta, str)
+    )
+    if force_list and not is_collection:
+        return [ensure_names(table)]
+    if table is None:
+        return None
+    if isinstance(table, str):
+        return table
+    if is_collection:
+        return [ensure_names(t) for t in table]
+    return getattr(table, "full_table_name", None)
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
