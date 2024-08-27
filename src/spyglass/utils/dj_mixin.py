@@ -261,14 +261,23 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_parts ------------------------
 
-    def _load_shared_schemas(self):
-        """Load shared schemas. See #1002"""
+    def load_shared_schemas(self, additional_prefixes: list = None) -> None:
+        """Load shared schemas to include in graph traversal.
+
+        Parameters
+        ----------
+        additional_prefixes : list, optional
+            Additional prefixes to load. Default None.
+        """
         all_shared = [
             *SHARED_MODULES,
             dj.config["database.user"],
             "file",
             "sharing",
         ]
+
+        if additional_prefixes:
+            all_shared.extend(additional_prefixes)
 
         # Get a list of all shared schemas in spyglass
         schemas = dj.conn().query(
@@ -315,8 +324,8 @@ class SpyglassMixin:
         try:
             _ = search_descendants(self)
         except NetworkXError:
-            try:  # Attempt to import missing table
-                self._load_shared_schemas()
+            try:  # Attempt to import failing schema
+                self.load_shared_schemas()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
