@@ -249,7 +249,7 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    def _is_out(self, table, warn=True):
+    def _is_out(self, table, warn=True, keep_alias=False):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
         if self.graph.nodes.get(table):
@@ -814,7 +814,8 @@ class TableChain(RestrGraph):
         Returns path OrderedDict of full table names in chain. If directed is
         True, uses directed graph. If False, uses undirected graph. Undirected
         excludes PERIPHERAL_TABLES like interval_list, nwbfile, etc. to maintain
-        valid joins.
+        valid joins by default. If no path is found, another search is attempted
+        with PERIPHERAL_TABLES included.
     cascade(restriction: str = None, direction: str = "up")
         Given a restriction at the beginning, return a restricted FreeTable
         object at the end of the chain. If direction is 'up', start at the child
@@ -844,8 +845,12 @@ class TableChain(RestrGraph):
         super().__init__(seed_table=seed_table, verbose=verbose)
 
         self._ignore_peripheral(except_tables=[self.parent, self.child])
+        self._ignore_outside_spy(except_tables=[self.parent, self.child])
+
         self.no_visit.update(ensure_names(banned_tables) or [])
+
         self.no_visit.difference_update(set([self.parent, self.child]))
+
         self.searched_tables = set()
         self.found_restr = False
         self.link_type = None
@@ -881,7 +886,19 @@ class TableChain(RestrGraph):
         except_tables = ensure_names(except_tables)
         ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
         self.no_visit.update(ignore_tables)
-        self.undirect_graph.remove_nodes_from(ignore_tables)
+
+    def _ignore_outside_spy(self, except_tables: List[str] = None):
+        """Ignore tables not shared on shared prefixes."""
+        except_tables = ensure_names(except_tables)
+        ignore_tables = set(  # Ignore tables not in shared modules
+            [
+                t
+                for t in self.undirect_graph.nodes
+                if t not in except_tables
+                and self._is_out(t, warn=False, keep_alias=True)
+            ]
+        )
+        self.no_visit.update(ignore_tables)
 
     # --------------------------- Dunder Properties ---------------------------
 
@@ -1075,9 +1092,9 @@ class TableChain(RestrGraph):
             List of names in the path.
         """
         source, target = self.parent, self.child
-        search_graph = self.graph if directed else self.undirect_graph
-
-        search_graph.remove_nodes_from(self.no_visit)
+        search_graph = (  # Copy to ensure orig not modified by no_visit
+            self.graph.copy() if directed else self.undirect_graph.copy()
+        )
 
         try:
             path = shortest_path(search_graph, source, target)
@@ -1105,6 +1122,12 @@ class TableChain(RestrGraph):
             self.link_type = "directed"
         elif path := self.find_path(directed=False):
             self.link_type = "undirected"
+        else:  # Search with peripheral
+            self.no_visit.difference_update(PERIPHERAL_TABLES)
+            if path := self.find_path(directed=True):
+                self.link_type = "directed with peripheral"
+            elif path := self.find_path(directed=False):
+                self.link_type = "undirected with peripheral"
         self.searched_path = True
 
         return path
@@ -1135,9 +1158,11 @@ class TableChain(RestrGraph):
         # Cascade will stop if any restriction is empty, so set rest to None
         # This would cause issues if we want a table partway through the chain
         # but that's not a typical use case, were the start and end are desired
-        non_numeric = [t for t in self.path if not t.isnumeric()]
-        if any(self._get_restr(t) is None for t in non_numeric):
-            for table in non_numeric:
+        safe_tbls = [
+            t for t in self.path if not t.isnumeric() and not self._is_out(t)
+        ]
+        if any(self._get_restr(t) is None for t in safe_tbls):
+            for table in safe_tbls:
                 if table is not start:
                     self._set_restr(table, False, replace=True)
 

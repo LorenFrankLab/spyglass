@@ -263,51 +263,40 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_parts ------------------------
 
-    def _import_part_masters(self):
-        """Import tables that may constrain a RestrGraph. See #1002"""
-        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
-        from spyglass.decoding.v0.clusterless import (
-            UnitMarksIndicatorSelection,
-        )  # noqa F401
-        from spyglass.decoding.v0.sorted_spikes import (
-            SortedSpikesIndicatorSelection,
-        )  # noqa F401
-        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
-        from spyglass.lfp.analysis.v1 import LFPBandSelection  # noqa F401
-        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import (  # noqa F401
-            LinearizedPositionOutput,
-            LinearizedPositionV1,
-        )
-        from spyglass.mua.v1.mua import MuaEventsV1  # noqa F401
-        from spyglass.position.position_merge import PositionOutput  # noqa F401
-        from spyglass.ripple.v1.ripple import RippleTimesV1  # noqa F401
-        from spyglass.spikesorting.analysis.v1.group import (
-            SortedSpikesGroup,
-        )  # noqa F401
-        from spyglass.spikesorting.spikesorting_merge import (
-            SpikeSortingOutput,
-        )  # noqa F401
-        from spyglass.spikesorting.v0.figurl_views import (
-            SpikeSortingRecordingView,
-        )  # noqa F401
+    def load_shared_schemas(self, additional_prefixes: list = None) -> None:
+        """Load shared schemas to include in graph traversal.
 
-        _ = (
-            DecodingOutput(),
-            LFPBandSelection(),
-            LFPOutput(),
-            LinearizedPositionOutput(),
-            LinearizedPositionV1(),
-            MuaEventsV1(),
-            PositionGroup(),
-            PositionOutput(),
-            RippleTimesV1(),
-            SortedSpikesGroup(),
-            SortedSpikesIndicatorSelection(),
-            SpikeSortingOutput(),
-            SpikeSortingRecordingView(),
-            UnitMarksIndicatorSelection(),
+        Parameters
+        ----------
+        additional_prefixes : list, optional
+            Additional prefixes to load. Default None.
+        """
+        all_shared = [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "file",
+            "sharing",
+        ]
+
+        if additional_prefixes:
+            all_shared.extend(additional_prefixes)
+
+        # Get a list of all shared schemas in spyglass
+        schemas = dj.conn().query(
+            "SELECT DISTINCT table_schema "  # Unique schemas
+            + "FROM information_schema.key_column_usage "
+            + "WHERE"
+            + '    table_name not LIKE "~%%"'  # Exclude hidden
+            + "    AND constraint_name='PRIMARY'"  # Only primary keys
+            + "AND ("  # Only shared schemas
+            + " OR ".join([f"table_schema LIKE '{s}_%%'" for s in all_shared])
+            + ") "
+            + "ORDER BY table_schema;"
         )
+
+        # Load the dependencies for all shared schemas
+        for schema in schemas:
+            dj.schema(schema[0]).connection.dependencies.load()
 
     @cached_property
     def _part_masters(self) -> set:
@@ -320,23 +309,25 @@ class SpyglassMixin:
         part_masters = set()
 
         def search_descendants(parent):
-            for desc in parent.descendants(as_objects=True):
+            for desc_name in parent.descendants():
                 if (  # Check if has master, is part
-                    not (master := get_master(desc.full_table_name))
-                    # has other non-master parent
-                    or not set(desc.parents()) - set([master])
+                    not (master := get_master(desc_name))
                     or master in part_masters  # already in cache
+                    or desc_name.replace("`", "").split("_")[0]
+                    not in SHARED_MODULES
                 ):
                     continue
-                if master not in part_masters:
-                    part_masters.add(master)
-                    search_descendants(dj.FreeTable(self.connection, master))
+                desc = dj.FreeTable(self.connection, desc_name)
+                if not set(desc.parents()) - set([master]):  # no other parent
+                    continue
+                part_masters.add(master)
+                search_descendants(dj.FreeTable(self.connection, master))
 
         try:
             _ = search_descendants(self)
         except NetworkXError:
-            try:  # Attempt to import missing table
-                self._import_part_masters()
+            try:  # Attempt to import failing schema
+                self.load_shared_schemas()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
@@ -503,9 +494,12 @@ class SpyglassMixin:
 
         Returns
         -------
-        str
-            Summary of experimenters for session(s).
+        Union[QueryExpression, None]
+            dj.Union object Summary of experimenters for session(s). If no link
+            to Session, return None.
         """
+        if not self._session_connection.has_link:
+            return None
 
         Session = self._delete_deps[2]
         SesExp = Session.Experimenter
@@ -530,8 +524,7 @@ class SpyglassMixin:
         """Path from Session table to self. False if no connection found."""
         TableChain = self._graph_deps[0]
 
-        connection = TableChain(parent=self._delete_deps[2], child=self)
-        return connection if connection.has_link else False
+        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
 
     @cached_property
     def _test_mode(self) -> bool:
@@ -573,7 +566,13 @@ class SpyglassMixin:
             )
             return
 
-        sess_summary = self._get_exp_summary()
+        if not (sess_summary := self._get_exp_summary()):
+            logger.warn(
+                f"Could not find a connection from {self.camel_name} "
+                + "to Session.\n Be careful not to delete others' data."
+            )
+            return
+
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
             raise PermissionError(

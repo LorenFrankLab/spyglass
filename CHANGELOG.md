@@ -1,20 +1,16 @@
 # Change Log
 
-## [0.5.3] (Unreleased)
+## [0.5.4] (Unreleased)
 
-## Release Notes
+### Release Notes
 
 <!-- Running draft to be removed immediately prior to release. -->
 
-```python
-import datajoint as dj
-from spyglass.common.common_behav import PositionIntervalMap
-from spyglass.decoding.v1.core import PositionGroup
+### Infrastructure
 
-dj.schema("common_ripple").drop()
-PositionIntervalMap.alter()
-PositionGroup.alter()
-```
+- Disable populate transaction protection for long-populating tables #1066
+
+## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
 
@@ -46,7 +42,8 @@ PositionGroup.alter()
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 - Add tool for checking threads for metadata locks on a table #1063
-- Disable populate transaction protection for long-populating tables #1066
+- Use peripheral tables as fallback in `TableChains` #1035
+- Ignore non-Spyglass tables during descendant check for `part_masters` #1035
 
 ### Pipelines
 
@@ -333,3 +330,4 @@ PositionGroup.alter()
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
+[0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
