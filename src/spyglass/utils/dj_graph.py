@@ -880,7 +880,7 @@ class TableChain(RestrGraph):
 
     def _ignore_outside_spy(self, except_tables: List[str] = None):
         """Ignore tables not shared on shared prefixes."""
-        except_tables = self._ensure_names(except_tables)
+        except_tables = ensure_names(except_tables)
         ignore_tables = set(  # Ignore tables not in shared modules
             [
                 t
