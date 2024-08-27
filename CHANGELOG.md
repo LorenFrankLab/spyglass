@@ -1,20 +1,6 @@
 # Change Log
 
-## [0.5.3] (Unreleased)
-
-## Release Notes
-
-<!-- Running draft to be removed immediately prior to release. -->
-
-```python
-import datajoint as dj
-from spyglass.common.common_behav import PositionIntervalMap
-from spyglass.decoding.v1.core import PositionGroup
-
-dj.schema("common_ripple").drop()
-PositionIntervalMap.alter()
-PositionGroup.alter()
-```
+## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
 
