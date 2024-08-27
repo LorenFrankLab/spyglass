@@ -5,8 +5,9 @@ functionalities that have been added to DataJoint tables. This includes...
 
 - Fetching NWB files
 - Long-distance restrictions.
-- Delete functionality, including permission checks and part/master pairs
+- Permission checks on delete
 - Export logging. See [export doc](./Export.md) for more information.
+- Miscellaneous helper functions
 
 To add this functionality to your own tables, simply inherit from the mixin:
 
@@ -102,12 +103,7 @@ my_table << upstream_restriction >> downstream_restriction
 When providing a restriction of the parent, use 'up' direction. When providing a
 restriction of the child, use 'down' direction.
 
-## Delete Functionality
-
-The mixin overrides the default `delete` function to provide two additional
-features.
-
-### Permission Checks
+## Delete Permission Checks
 
 By default, DataJoint is unable to set delete permissions on a per-table basis.
 If a user is able to delete entries in a given table, she can delete entries in
@@ -127,64 +123,74 @@ curcumvent the default permission checks by adding themselves to the relevant
 team or removing the mixin from the class declaration. However, it provides a
 reasonable level of security for the average user.
 
-### Master/Part Pairs
-
-By default, DataJoint has protections in place to prevent deletion of a part
-entry without deleting the corresponding master. This is useful for enforcing
-the custom of adding/removing all parts of a master at once and avoids orphaned
-masters, or null entry masters without matching data.
-
-For [Merge tables](./Merge.md), this is a significant problem. If a user wants
-to delete all entries associated with a given session, she must find all part
-table entries, including Merge tables, and delete them in the correct order. The
-mixin provides a function, `delete_downstream_parts`, to handle this, which is
-run by default when calling `delete`.
-
-`delete_downstream_parts`, also aliased as `ddp`, identifies all part tables
-with foreign key references downstream of where it is called. If `dry_run=True`,
-it will return a list of entries that would be deleted, otherwise it will delete
-them.
-
-Importantly, `delete_downstream_parts` cannot properly interact with tables that
-have not been imported into the current namespace. If you are having trouble
-with part deletion errors, import the offending table and rerun the function
-with `reload_cache=True`.
+Because parts of this process rely on caching, this process will be faster if
+you assign the instanced table to a variable.
 
 ```python
-import datajoint as dj
-from spyglass.common import Nwbfile
-
-restricted_nwbfile = Nwbfile() & "nwb_file_name LIKE 'Name%'"
-
-vanilla_dj_table = dj.FreeTable(dj.conn(), Nwbfile.full_table_name)
-vanilla_dj_table.delete()
-# DataJointError("Attempt to delete part table MyMerge.Part before ... ")
-
-restricted_nwbfile.delete()
-# [WARNING] Spyglass: No part deletes found w/ Nwbfile ...
-# OR
-# ValueError("Please import MyMerge and try again.")
-
-from spyglass.example import MyMerge
-
-restricted_nwbfile.delete_downstream_parts(reload_cache=True, dry_run=False)
-```
-
-Because each table keeps a cache of downstream merge tables, it is important to
-reload the cache if the table has been imported after the cache was created.
-Speed gains can also be achieved by avoiding re-instancing the table each time.
-
-```python
-# Slow
-from spyglass.common import Nwbfile
-
-(Nwbfile() & "nwb_file_name LIKE 'Name%'").ddp(dry_run=False)
-(Nwbfile() & "nwb_file_name LIKE 'Other%'").ddp(dry_run=False)
+# Slower
+YourTable().delete()
+YourTable().delete()
 
 # Faster
-from spyglass.common import Nwbfile
+nwbfile = YourTable()
+nwbfile.delete()
+nwbfile.delete()
+```
 
-nwbfile = Nwbfile()
-(nwbfile & "nwb_file_name LIKE 'Name%'").ddp(dry_run=False)
-(nwbfile & "nwb_file_name LIKE 'Other%'").ddp(dry_run=False)
+<details><summary>Deprecated delete feature</summary>
+
+Previous versions of Spyglass also deleted masters of parts with foreign key
+references. This functionality has been migrated to DataJoint in version 0.14.2
+via the `force_masters` delete argument. This argument is `True` by default in
+Spyglass tables.
+
+</details>
+
+## Populate Calls
+
+The mixin also overrides the default `populate` function to provide additional
+functionality for non-daemon process pools and disabling transaction protection.
+
+### Non-Daemon Process Pools
+
+To allow the `make` function to spawn a new process pool, the mixin overrides
+the default `populate` function for tables with `_parallel_make` set to `True`.
+See [issue #1000](https://github.com/LorenFrankLab/spyglass/issues/1000) and
+[PR #1001](https://github.com/LorenFrankLab/spyglass/pull/1001) for more
+information.
+
+### Disable Transaction Protection
+
+By default, DataJoint wraps the `populate` function in a transaction to ensure
+data integrity (see
+[Transactions](https://docs.datajoint.io/python/definition/05-Transactions.html)).
+
+This can cause issues when populating large tables if another user attempts to
+declare/modify a table while the transaction is open (see
+[issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
+[DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
+
+Tables with `_use_transaction` set to `False` will not be wrapped in a
+transaction when calling `populate`. Transaction protection is replaced by a
+hash of upstream data to ensure no changes are made to the table during the
+unprotected populate. The additional time required to hash the data is a
+trade-off for already time-consuming populates, but avoids blocking other users.
+
+## Miscellaneous Helper functions
+
+`file_like` allows you to restrict a table using a substring of a file name.
+This is equivalent to the following:
+
+```python
+MyTable().file_like("eg")
+MyTable() & ('nwb_file_name LIKE "%eg%" OR analysis_file_name LIKE "%eg%"')
+```
+
+`find_insert_fail` is a helper function to find the cause of an `IntegrityError`
+when inserting into a table. This checks parent tables for required keys.
+
+```python
+my_key = {"key": "value"}
+MyTable().insert1(my_key)  # Raises IntegrityError
+MyTable().find_insert_fail(my_key)  # Shows the parent(s) missing the key
 ```

@@ -49,9 +49,9 @@ def NonMerge():
     yield NonMerge
 
 
-def test_non_merge(NonMerge):
-    with pytest.raises(AttributeError):
-        NonMerge()
+def test_non_merge(schema_test, NonMerge):
+    with pytest.raises(TypeError):
+        schema_test(NonMerge)
 
 
 def test_part_camel(merge_table):

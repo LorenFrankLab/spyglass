@@ -29,7 +29,7 @@ def is_merge_table(table):
     def trim_def(definition):
         return re_sub(
             r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        )
+        ).replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
