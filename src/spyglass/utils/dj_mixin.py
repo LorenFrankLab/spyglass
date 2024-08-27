@@ -258,55 +258,31 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_parts ------------------------
 
-    def _import_part_masters(self):
-        """Import tables that may constrain a RestrGraph. See #1002"""
-        from spyglass.common.common_ripple import (
-            RippleLFPSelection,
-        )  # noqa F401
-        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
-        from spyglass.decoding.v0.clusterless import (  # noqa F401
-            UnitMarksIndicatorSelection,
-        )
-        from spyglass.decoding.v0.sorted_spikes import (  # noqa F401
-            SortedSpikesIndicatorSelection,
-        )
-        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
-        from spyglass.lfp.analysis.v1 import LFPBandSelection  # noqa F401
-        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import (  # noqa F401
-            LinearizedPositionOutput,
-            LinearizedPositionV1,
-        )
-        from spyglass.mua.v1.mua import MuaEventsV1  # noqa F401
-        from spyglass.position.position_merge import PositionOutput  # noqa F401
-        from spyglass.ripple.v1.ripple import RippleTimesV1  # noqa F401
-        from spyglass.spikesorting.analysis.v1.group import (  # noqa F401
-            SortedSpikesGroup,
-        )
-        from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
-            SpikeSortingOutput,
-        )
-        from spyglass.spikesorting.v0.figurl_views import (  # noqa F401
-            SpikeSortingRecordingView,
+    def _load_shared_schemas(self):
+        """Load shared schemas. See #1002"""
+        all_shared = [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "file",
+            "sharing",
+        ]
+
+        # Get a list of all shared schemas in spyglass
+        schemas = dj.conn().query(
+            "SELECT DISTINCT table_schema "  # Unique schemas
+            + "FROM information_schema.key_column_usage "
+            + "WHERE"
+            + '    table_name not LIKE "~%%"'  # Exclude hidden
+            + "    AND constraint_name='PRIMARY'"  # Only primary keys
+            + "AND ("  # Only shared schemas
+            + " OR ".join([f"table_schema LIKE '{s}_%%'" for s in all_shared])
+            + ") "
+            + "ORDER BY table_schema;"
         )
 
-        _ = (
-            DecodingOutput(),
-            LFPBandSelection(),
-            LFPOutput(),
-            LinearizedPositionOutput(),
-            LinearizedPositionV1(),
-            MuaEventsV1(),
-            PositionGroup(),
-            PositionOutput(),
-            RippleLFPSelection(),
-            RippleTimesV1(),
-            SortedSpikesGroup(),
-            SortedSpikesIndicatorSelection(),
-            SpikeSortingOutput(),
-            SpikeSortingRecordingView(),
-            UnitMarksIndicatorSelection(),
-        )
+        # Load the dependencies for all shared schemas
+        for schema in schemas:
+            dj.schema(schema[0]).connection.dependencies.load()
 
     @cached_property
     def _part_masters(self) -> set:
@@ -337,7 +313,7 @@ class SpyglassMixin:
             _ = search_descendants(self)
         except NetworkXError:
             try:  # Attempt to import missing table
-                self._import_part_masters()
+                self._load_shared_schemas()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
