@@ -774,8 +774,9 @@ class SpyglassMixin:
                 + f"Table default transaction use: {self._use_transaction}"
             )
 
-        keys = [True]  # Get keys to pop, needed for no-transact or parallel
-        if use_transact is False or processes > 1 or self._parallel_make:
+        # Get keys, needed for no-transact or multi-process w/_parallel_make
+        keys = [True]
+        if use_transact is False or (processes > 1 and self._parallel_make):
             keys = (self._jobs_to_do(restrictions) - self.target).fetch(
                 "KEY", limit=kwargs.get("limit", None)
             )
