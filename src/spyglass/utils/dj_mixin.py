@@ -795,9 +795,10 @@ class SpyglassMixin:
                 for key in keys:
                     self.make(key)
                 if upstream_hash != self._hash_upstream(keys):
-                    raise RuntimeError(
-                        "Upstream tables have changed during populate. "
-                        + "PLEASE DELETE AND REPOPULATE."
+                    (self & keys).delete(force=True)
+                    logger.error(
+                        "Upstream tables changed during non-transaction "
+                        + "populate. Please try again."
                     )
                 return
 
