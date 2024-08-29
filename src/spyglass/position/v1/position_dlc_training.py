@@ -102,7 +102,9 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
     latest_snapshot: int unsigned # latest exact snapshot index (i.e., never -1)
     config_template: longblob     # stored full config file
     """
+
     log_path = None
+    _use_transaction, _allow_insert = False, True
 
     # To continue from previous training snapshot,
     # devs suggest editing pose_cfg.yml
