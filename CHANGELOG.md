@@ -1,5 +1,18 @@
 # Change Log
 
+## [0.5.4] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+### Infrastructure
+
+### Pipelines
+
+- Decoding
+    - Fix edge case errors in spike time loading #1083
+
 ## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
