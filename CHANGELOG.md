@@ -10,6 +10,11 @@
 
 - Disable populate transaction protection for long-populating tables #1066
 
+### Pipelines
+
+- Decoding
+    - Fix edge case errors in spike time loading #1083
+
 ## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
