@@ -144,6 +144,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int               # in Unix time, to the nearest second
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
@@ -240,7 +242,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             detected_spikes = detect_peaks(recording, **sorter_params)
             sorting = si.NumpySorting.from_times_labels(
                 times_list=detected_spikes["sample_index"],
-                labels_list=np.zeros(len(detected_spikes), dtype=np.int),
+                labels_list=np.zeros(len(detected_spikes), dtype=np.int32),
                 sampling_frequency=recording.get_sampling_frequency(),
             )
         else:

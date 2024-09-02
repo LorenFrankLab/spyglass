@@ -35,16 +35,35 @@ PERIPHERAL_TABLES = [
 
 
 def ensure_names(
-    table: Union[str, Table, Iterable] = None
+    table: Union[str, Table, Iterable] = None, force_list: bool = False
 ) -> Union[str, List[str], None]:
-    """Ensure table is a string."""
+    """Ensure table is a string.
+
+    Parameters
+    ----------
+    table : Union[str, Table, Iterable], optional
+        Table to ensure is a string, by default None. If passed as iterable,
+        will ensure all elements are strings.
+    force_list : bool, optional
+        Force the return to be a list, by default False, only used if input is
+        iterable.
+
+    Returns
+    -------
+    Union[str, List[str], None]
+        Table as a string or list of strings.
+    """
+    # is iterable (list, set, set) but not a table/string
+    is_collection = isinstance(table, Iterable) and not isinstance(
+        table, (Table, TableMeta, str)
+    )
+    if force_list and not is_collection:
+        return [ensure_names(table)]
     if table is None:
         return None
     if isinstance(table, str):
         return table
-    if isinstance(table, Iterable) and not isinstance(
-        table, (Table, TableMeta)
-    ):
+    if is_collection:
         return [ensure_names(t) for t in table]
     return getattr(table, "full_table_name", None)
 
@@ -497,7 +516,8 @@ def make_file_obj_id_unique(nwb_path: str):
 def populate_pass_function(value):
     """Pass function for parallel populate.
 
-    Note: To avoid pickling errors, the table must be passed by class, NOT by instance.
+    Note: To avoid pickling errors, the table must be passed by class,
+        NOT by instance.
     Note: This function must be defined in the global namespace.
 
     Parameters

@@ -1,20 +1,21 @@
 # Change Log
 
-## [0.5.3] (Unreleased)
+## [0.5.4] (Unreleased)
 
-## Release Notes
+### Release Notes
 
 <!-- Running draft to be removed immediately prior to release. -->
 
-```python
-import datajoint as dj
-from spyglass.common.common_behav import PositionIntervalMap
-from spyglass.decoding.v1.core import PositionGroup
+### Infrastructure
 
-dj.schema("common_ripple").drop()
-PositionIntervalMap.alter()
-PositionGroup.alter()
-```
+- Disable populate transaction protection for long-populating tables #1066
+
+### Pipelines
+
+- Decoding
+    - Fix edge case errors in spike time loading #1083
+
+## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
 
@@ -39,12 +40,15 @@ PositionGroup.alter()
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
-- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062, #1069
-- Revise docs organization.
+- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062,
+    #1066, #1069
+- Reivise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
 - Add tool for checking threads for metadata locks on a table #1063
+- Use peripheral tables as fallback in `TableChains` #1035
+- Ignore non-Spyglass tables during descendant check for `part_masters` #1035
 
 ### Pipelines
 
@@ -68,6 +72,7 @@ PositionGroup.alter()
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
     - Avoid interpolating over large `nan` intervals in position #1033
+    - Minor code calling corrections #1073
 
 - Position
 
@@ -96,6 +101,7 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+    - Efficiency improvement to `v0.Curation.insert_curation` #1072
 
 ## [0.5.2] (April 22, 2024)
 
@@ -329,3 +335,4 @@ PositionGroup.alter()
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
+[0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4

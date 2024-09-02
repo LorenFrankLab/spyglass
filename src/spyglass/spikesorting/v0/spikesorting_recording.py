@@ -366,7 +366,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             & key
         ).fetch1(
             "nwb_file_name",
-            "sort_interval",
+            "sort_interval_name",
             "preproc_params",
             "interval_list_name",
         )
