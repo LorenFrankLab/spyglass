@@ -194,3 +194,33 @@ my_key = {"key": "value"}
 MyTable().insert1(my_key)  # Raises IntegrityError
 MyTable().find_insert_fail(my_key)  # Shows the parent(s) missing the key
 ```
+
+## Populate Calls
+
+The mixin also overrides the default `populate` function to provide additional
+functionality for non-daemon process pools and disabling transaction protection.
+
+### Non-Daemon Process Pools
+
+To allow the `make` function to spawn a new process pool, the mixin overrides
+the default `populate` function for tables with `_parallel_make` set to `True`.
+See [issue #1000](https://github.com/LorenFrankLab/spyglass/issues/1000) and
+[PR #1001](https://github.com/LorenFrankLab/spyglass/pull/1001) for more
+information.
+
+### Disable Transaction Protection
+
+By default, DataJoint wraps the `populate` function in a transaction to ensure
+data integrity (see
+[Transactions](https://docs.datajoint.io/python/definition/05-Transactions.html)).
+
+This can cause issues when populating large tables if another user attempts to
+declare/modify a table while the transaction is open (see
+[issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
+[DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
+
+Tables with `_use_transaction` set to `False` will not be wrapped in a
+transaction when calling `populate`. Transaction protection is replaced by a
+hash of upstream data to ensure no changes are made to the table during the
+unprotected populate. The additional time required to hash the data is a
+trade-off for already time-consuming populates, but avoids blocking other users.

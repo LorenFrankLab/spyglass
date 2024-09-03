@@ -152,9 +152,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
-        spike_times = SpikeSortingOutput().fetch_nwb(merge_key)[0][
-            analysis_nwb_key
-        ]["spike_times"]
+        nwb = SpikeSortingOutput().fetch_nwb(merge_key)[0]
+        spike_times = (
+            nwb[analysis_nwb_key]["spike_times"]
+            if analysis_nwb_key in nwb
+            else pd.DataFrame()
+        )
 
         (
             key["analysis_file_name"],
@@ -349,6 +352,8 @@ def _write_waveform_features_to_nwb(
                     metric_dict[unit_id] if unit_id in metric_dict else []
                     for unit_id in unit_ids
                 ]
+                if not metric_values:
+                    metric_values = np.array([]).astype(np.float32)
                 nwbf.add_unit_column(
                     name=metric,
                     description=metric,

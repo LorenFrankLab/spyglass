@@ -6,7 +6,7 @@ from inspect import stack as inspect_stack
 from os import environ
 from re import match as re_match
 from time import time
-from typing import List, Union
+from typing import List
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -68,6 +68,8 @@ class SpyglassMixin:
 
     _banned_search_tables = set()  # Tables to avoid in restrict_by
     _parallel_make = False  # Tables that use parallel processing in make
+
+    _use_transaction = True  # Use transaction in populate.
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
@@ -308,7 +310,14 @@ class SpyglassMixin:
         self._member_pk = LabMember.primary_key[0]
         return [LabMember, LabTeam, Session, schema.external, IntervalList]
 
-    def _get_exp_summary(self) -> Union[QueryExpression, None]:
+    @cached_property
+    def _graph_deps(self) -> list:
+        from spyglass.utils.dj_graph import RestrGraph  # noqa #F401
+        from spyglass.utils.dj_graph import TableChain
+
+        return [TableChain, RestrGraph]
+
+    def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
 
         Parameters
@@ -346,7 +355,7 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
-        from spyglass.utils.dj_graph import TableChain  # noqa F401
+        TableChain = self._graph_deps[0]
 
         return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
 
@@ -550,23 +559,69 @@ class SpyglassMixin:
         return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
 
     def populate(self, *restrictions, **kwargs):
-        """Populate table in parallel.
+        """Populate table in parallel, with or without transaction protection.
 
         Supersedes datajoint.table.Table.populate for classes with that
-        spawn processes in their make function
-        """
+        spawn processes in their make function and always use transactions.
 
-        # Pass through to super if not parallel in the make function or only a single process
+        `_use_transaction` class attribute can be set to False to disable
+        transaction protection for a table. This is not recommended for tables
+        with short processing times. A before-and-after hash check is performed
+        to ensure upstream tables have not changed during populate, and may
+        be a more time-consuming process. To permit the `make` to insert without
+        populate, set `_allow_insert` to True.
+        """
         processes = kwargs.pop("processes", 1)
+
+        # Decide if using transaction protection
+        use_transact = kwargs.pop("use_transation", None)
+        if use_transact is None:  # if user does not specify, use class default
+            use_transact = self._use_transaction
+            if self._use_transaction is False:  # If class default is off, warn
+                logger.warning(
+                    "Turning off transaction protection this table by default. "
+                    + "Use use_transation=True to re-enable.\n"
+                    + "Read more about transactions:\n"
+                    + "https://docs.datajoint.io/python/definition/05-Transactions.html\n"
+                    + "https://github.com/LorenFrankLab/spyglass/issues/1030"
+                )
+        if use_transact is False and processes > 1:
+            raise RuntimeError(
+                "Must use transaction protection with parallel processing.\n"
+                + "Call with use_transation=True.\n"
+                + f"Table default transaction use: {self._use_transaction}"
+            )
+
+        # Get keys, needed for no-transact or multi-process w/_parallel_make
+        keys = [True]
+        if use_transact is False or (processes > 1 and self._parallel_make):
+            keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+                "KEY", limit=kwargs.get("limit", None)
+            )
+
+        if use_transact is False:
+            upstream_hash = self._hash_upstream(keys)
+            if kwargs:  # Warn of ignoring populate kwargs, bc using `make`
+                logger.warning(
+                    "Ignoring kwargs when not using transaction protection."
+                )
+
         if processes == 1 or not self._parallel_make:
-            kwargs["processes"] = processes
-            return super().populate(*restrictions, **kwargs)
+            if use_transact:  # Pass single-process populate to super
+                kwargs["processes"] = processes
+                return super().populate(*restrictions, **kwargs)
+            else:  # No transaction protection, use bare make
+                for key in keys:
+                    self.make(key)
+                if upstream_hash != self._hash_upstream(keys):
+                    (self & keys).delete(force=True)
+                    logger.error(
+                        "Upstream tables changed during non-transaction "
+                        + "populate. Please try again."
+                    )
+                return
 
         # If parallel in both make and populate, use non-daemon processes
-        # Get keys to populate
-        keys = (self._jobs_to_do(restrictions) - self.target).fetch(
-            "KEY", limit=kwargs.get("limit", None)
-        )
         # package the call list
         call_list = [(type(self), key, kwargs) for key in keys]
 
@@ -815,7 +870,7 @@ class SpyglassMixin:
             Restricted version of present table or TableChain object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+        TableChain = self._graph_deps[0]
 
         if restriction is True:
             return self

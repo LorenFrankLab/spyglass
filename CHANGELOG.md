@@ -1,5 +1,20 @@
 # Change Log
 
+## [0.5.4] (Unreleased)
+
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+### Infrastructure
+
+- Disable populate transaction protection for long-populating tables #1066
+
+### Pipelines
+
+- Decoding
+    - Fix edge case errors in spike time loading #1083
+
 ## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
@@ -25,9 +40,9 @@
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
-- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1058,
-    #1066
-- Revise docs organization.
+- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062,
+    #1066, #1069
+- Reivise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
 - Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
@@ -320,3 +335,4 @@
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
+[0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
