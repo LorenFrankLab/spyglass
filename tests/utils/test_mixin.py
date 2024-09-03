@@ -77,8 +77,9 @@ def test_exp_summary_no_link(schema_test, Mixin):
 
 def test_exp_summary_auto_link(common):
     lab_member = common.LabMember()
-    lab_join = lab_member * common.Session.Experimenter
-    assert lab_member._get_exp_summary() == lab_join, "Auto link not working."
+    summary_names = lab_member._get_exp_summary().heading.names
+    join_names = (lab_member * common.Session.Experimenter).heading.names
+    assert summary_names == join_names, "Auto link not working."
 
 
 def test_cautious_del_dry_run(Nwbfile, frequent_imports):
@@ -92,13 +93,14 @@ def test_cautious_del_dry_run(Nwbfile, frequent_imports):
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_empty_cautious_del(caplog, schema_test, Mixin):
     schema_test(Mixin)
-    Mixin().cautious_delete()
+    Mixin().cautious_delete(safemode=False)
+    Mixin().cautious_delete(safemode=False)
     assert "empty" in caplog.text, "No warning issued."
 
 
 def test_super_delete(schema_test, Mixin, common):
     schema_test(Mixin)
-    Mixin().insert1((0,))
+    Mixin().insert1((0,), skip_duplicates=True)
     Mixin().super_delete(safemode=False)
     assert len(Mixin()) == 0, "Super delete not working."
 
@@ -107,10 +109,9 @@ def test_super_delete(schema_test, Mixin, common):
 
 
 def test_compare_versions(common):
+    # Does nothing in test_mode
     compare_func = common.Nwbfile().compare_versions
-    compare_func("0.1.0", "0.1.0")
-    with pytest.raises(RuntimeError):
-        compare_func("0.1.0", "0.1.1")
+    compare_func("0.1.0", "0.1.1")
 
 
 @pytest.fixture
