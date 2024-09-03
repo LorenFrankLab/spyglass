@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
+- Update DataJoint to 0.14.2 #1081
 
 ### Pipelines
 
