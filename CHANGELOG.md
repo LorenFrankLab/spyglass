@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
 
 ### Pipelines
 
