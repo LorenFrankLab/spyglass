@@ -426,7 +426,8 @@ def update_analysis_for_dandi_standard(
             file["/general/experimenter"][:] = new_experimenter_value
 
     # update the datajoint external store table to reflect the changes
-    _resolve_external_table(filepath, file_name)
+    location = "raw" if filepath.endswith("_.nwb") else "analysis"
+    _resolve_external_table(filepath, file_name, location)
 
 
 def dandi_format_names(experimenter: List) -> List:
@@ -509,7 +510,10 @@ def make_file_obj_id_unique(nwb_path: str):
     new_id = str(uuid4())
     with h5py.File(nwb_path, "a") as f:
         f.attrs["object_id"] = new_id
-    _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
+    location = "raw" if nwb_path.endswith("_.nwb") else "analysis"
+    _resolve_external_table(
+        nwb_path, nwb_path.split("/")[-1], location=location
+    )
     return new_id
 
 
