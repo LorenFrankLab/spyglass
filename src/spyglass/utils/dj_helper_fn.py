@@ -517,7 +517,8 @@ def make_file_obj_id_unique(nwb_path: str):
 def populate_pass_function(value):
     """Pass function for parallel populate.
 
-    Note: To avoid pickling errors, the table must be passed by class, NOT by instance.
+    Note: To avoid pickling errors, the table must be passed by class,
+        NOT by instance.
     Note: This function must be defined in the global namespace.
 
     Parameters

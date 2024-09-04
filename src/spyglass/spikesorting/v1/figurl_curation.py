@@ -117,6 +117,8 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     url: varchar(1000)
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key: dict):
         """Generate a FigURL for manual curation of a spike sorting."""
         # FETCH

@@ -207,6 +207,8 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key):
         """Populate MetricCuration table.
 

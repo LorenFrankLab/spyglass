@@ -81,6 +81,8 @@ class SpyglassMixin:
     _banned_search_tables = set()  # Tables to avoid in restrict_by
     _parallel_make = False  # Tables that use parallel processing in make
 
+    _use_transaction = True  # Use transaction in populate.
+
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
 
@@ -261,51 +263,40 @@ class SpyglassMixin:
 
     # ------------------------ delete_downstream_parts ------------------------
 
-    def _import_part_masters(self):
-        """Import tables that may constrain a RestrGraph. See #1002"""
-        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
-        from spyglass.decoding.v0.clusterless import (
-            UnitMarksIndicatorSelection,
-        )  # noqa F401
-        from spyglass.decoding.v0.sorted_spikes import (
-            SortedSpikesIndicatorSelection,
-        )  # noqa F401
-        from spyglass.decoding.v1.core import PositionGroup  # noqa F401
-        from spyglass.lfp.analysis.v1 import LFPBandSelection  # noqa F401
-        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import (  # noqa F401
-            LinearizedPositionOutput,
-            LinearizedPositionV1,
-        )
-        from spyglass.mua.v1.mua import MuaEventsV1  # noqa F401
-        from spyglass.position.position_merge import PositionOutput  # noqa F401
-        from spyglass.ripple.v1.ripple import RippleTimesV1  # noqa F401
-        from spyglass.spikesorting.analysis.v1.group import (
-            SortedSpikesGroup,
-        )  # noqa F401
-        from spyglass.spikesorting.spikesorting_merge import (
-            SpikeSortingOutput,
-        )  # noqa F401
-        from spyglass.spikesorting.v0.figurl_views import (
-            SpikeSortingRecordingView,
-        )  # noqa F401
+    def load_shared_schemas(self, additional_prefixes: list = None) -> None:
+        """Load shared schemas to include in graph traversal.
 
-        _ = (
-            DecodingOutput(),
-            LFPBandSelection(),
-            LFPOutput(),
-            LinearizedPositionOutput(),
-            LinearizedPositionV1(),
-            MuaEventsV1(),
-            PositionGroup(),
-            PositionOutput(),
-            RippleTimesV1(),
-            SortedSpikesGroup(),
-            SortedSpikesIndicatorSelection(),
-            SpikeSortingOutput(),
-            SpikeSortingRecordingView(),
-            UnitMarksIndicatorSelection(),
+        Parameters
+        ----------
+        additional_prefixes : list, optional
+            Additional prefixes to load. Default None.
+        """
+        all_shared = [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "file",
+            "sharing",
+        ]
+
+        if additional_prefixes:
+            all_shared.extend(additional_prefixes)
+
+        # Get a list of all shared schemas in spyglass
+        schemas = dj.conn().query(
+            "SELECT DISTINCT table_schema "  # Unique schemas
+            + "FROM information_schema.key_column_usage "
+            + "WHERE"
+            + '    table_name not LIKE "~%%"'  # Exclude hidden
+            + "    AND constraint_name='PRIMARY'"  # Only primary keys
+            + "AND ("  # Only shared schemas
+            + " OR ".join([f"table_schema LIKE '{s}_%%'" for s in all_shared])
+            + ") "
+            + "ORDER BY table_schema;"
         )
+
+        # Load the dependencies for all shared schemas
+        for schema in schemas:
+            dj.schema(schema[0]).connection.dependencies.load()
 
     @cached_property
     def _part_masters(self) -> set:
@@ -318,23 +309,25 @@ class SpyglassMixin:
         part_masters = set()
 
         def search_descendants(parent):
-            for desc in parent.descendants(as_objects=True):
+            for desc_name in parent.descendants():
                 if (  # Check if has master, is part
-                    not (master := get_master(desc.full_table_name))
-                    # has other non-master parent
-                    or not set(desc.parents()) - set([master])
+                    not (master := get_master(desc_name))
                     or master in part_masters  # already in cache
+                    or desc_name.replace("`", "").split("_")[0]
+                    not in SHARED_MODULES
                 ):
                     continue
-                if master not in part_masters:
-                    part_masters.add(master)
-                    search_descendants(dj.FreeTable(self.connection, master))
+                desc = dj.FreeTable(self.connection, desc_name)
+                if not set(desc.parents()) - set([master]):  # no other parent
+                    continue
+                part_masters.add(master)
+                search_descendants(dj.FreeTable(self.connection, master))
 
         try:
             _ = search_descendants(self)
         except NetworkXError:
-            try:  # Attempt to import missing table
-                self._import_part_masters()
+            try:  # Attempt to import failing schema
+                self.load_shared_schemas()
                 _ = search_descendants(self)
             except NetworkXError as e:
                 table_name = "".join(e.args[0].split("`")[1:4])
@@ -419,7 +412,7 @@ class SpyglassMixin:
         **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
-        from spyglass.utils.dj_graph import RestrGraph  # noqa F401
+        RestrGraph = self._graph_deps[1]
 
         start = time()
 
@@ -484,6 +477,13 @@ class SpyglassMixin:
         self._member_pk = LabMember.primary_key[0]
         return [LabMember, LabTeam, Session, schema.external, IntervalList]
 
+    @cached_property
+    def _graph_deps(self) -> list:
+        from spyglass.utils.dj_graph import RestrGraph  # noqa #F401
+        from spyglass.utils.dj_graph import TableChain
+
+        return [TableChain, RestrGraph]
+
     def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
 
@@ -494,9 +494,12 @@ class SpyglassMixin:
 
         Returns
         -------
-        str
-            Summary of experimenters for session(s).
+        Union[QueryExpression, None]
+            dj.Union object Summary of experimenters for session(s). If no link
+            to Session, return None.
         """
+        if not self._session_connection.has_link:
+            return None
 
         Session = self._delete_deps[2]
         SesExp = Session.Experimenter
@@ -519,10 +522,9 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
-        from spyglass.utils.dj_graph import TableChain  # noqa F401
+        TableChain = self._graph_deps[0]
 
-        connection = TableChain(parent=self._delete_deps[2], child=self)
-        return connection if connection.has_link else False
+        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
 
     @cached_property
     def _test_mode(self) -> bool:
@@ -564,7 +566,13 @@ class SpyglassMixin:
             )
             return
 
-        sess_summary = self._get_exp_summary()
+        if not (sess_summary := self._get_exp_summary()):
+            logger.warn(
+                f"Could not find a connection from {self.camel_name} "
+                + "to Session.\n Be careful not to delete others' data."
+            )
+            return
+
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
             raise PermissionError(
@@ -698,25 +706,104 @@ class SpyglassMixin:
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
-    # -------------------------- non-daemon populate --------------------------
+    # -------------------------------- populate --------------------------------
+
+    def _hash_upstream(self, keys):
+        """Hash upstream table keys for no transaction populate.
+
+        Uses a RestrGraph to capture all upstream tables, restrict them to
+        relevant entries, and hash the results. This is used to check if
+        upstream tables have changed during a no-transaction populate and avoid
+        the following data-integrity error:
+
+        1. User A starts no-transaction populate.
+        2. User B deletes and repopulates an upstream table, changing contents.
+        3. User A finishes populate, inserting data that is now invalid.
+
+        Parameters
+        ----------
+        keys : list
+            List of keys for populating table.
+        """
+        RestrGraph = self._graph_deps[1]
+
+        if not (parents := self.parents(as_objects=True, primary=True)):
+            raise RuntimeError("No upstream tables found for upstream hash.")
+
+        leaves = {  # Restriction on each primary parent
+            p.full_table_name: [
+                {k: v for k, v in key.items() if k in p.heading.names}
+                for key in keys
+            ]
+            for p in parents
+        }
+
+        return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
+
     def populate(self, *restrictions, **kwargs):
-        """Populate table in parallel.
+        """Populate table in parallel, with or without transaction protection.
 
         Supersedes datajoint.table.Table.populate for classes with that
-        spawn processes in their make function
-        """
+        spawn processes in their make function and always use transactions.
 
-        # Pass through to super if not parallel in the make function or only a single process
+        `_use_transaction` class attribute can be set to False to disable
+        transaction protection for a table. This is not recommended for tables
+        with short processing times. A before-and-after hash check is performed
+        to ensure upstream tables have not changed during populate, and may
+        be a more time-consuming process. To permit the `make` to insert without
+        populate, set `_allow_insert` to True.
+        """
         processes = kwargs.pop("processes", 1)
+
+        # Decide if using transaction protection
+        use_transact = kwargs.pop("use_transation", None)
+        if use_transact is None:  # if user does not specify, use class default
+            use_transact = self._use_transaction
+            if self._use_transaction is False:  # If class default is off, warn
+                logger.warning(
+                    "Turning off transaction protection this table by default. "
+                    + "Use use_transation=True to re-enable.\n"
+                    + "Read more about transactions:\n"
+                    + "https://docs.datajoint.io/python/definition/05-Transactions.html\n"
+                    + "https://github.com/LorenFrankLab/spyglass/issues/1030"
+                )
+        if use_transact is False and processes > 1:
+            raise RuntimeError(
+                "Must use transaction protection with parallel processing.\n"
+                + "Call with use_transation=True.\n"
+                + f"Table default transaction use: {self._use_transaction}"
+            )
+
+        # Get keys, needed for no-transact or multi-process w/_parallel_make
+        keys = [True]
+        if use_transact is False or (processes > 1 and self._parallel_make):
+            keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+                "KEY", limit=kwargs.get("limit", None)
+            )
+
+        if use_transact is False:
+            upstream_hash = self._hash_upstream(keys)
+            if kwargs:  # Warn of ignoring populate kwargs, bc using `make`
+                logger.warning(
+                    "Ignoring kwargs when not using transaction protection."
+                )
+
         if processes == 1 or not self._parallel_make:
-            kwargs["processes"] = processes
-            return super().populate(*restrictions, **kwargs)
+            if use_transact:  # Pass single-process populate to super
+                kwargs["processes"] = processes
+                return super().populate(*restrictions, **kwargs)
+            else:  # No transaction protection, use bare make
+                for key in keys:
+                    self.make(key)
+                if upstream_hash != self._hash_upstream(keys):
+                    (self & keys).delete(force=True)
+                    logger.error(
+                        "Upstream tables changed during non-transaction "
+                        + "populate. Please try again."
+                    )
+                return
 
         # If parallel in both make and populate, use non-daemon processes
-        # Get keys to populate
-        keys = (self._jobs_to_do(restrictions) - self.target).fetch(
-            "KEY", limit=kwargs.get("limit", None)
-        )
         # package the call list
         call_list = [(type(self), key, kwargs) for key in keys]
 
@@ -965,7 +1052,7 @@ class SpyglassMixin:
             Restricted version of present table or TableChain object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+        TableChain = self._graph_deps[0]
 
         if restriction is True:
             return self
