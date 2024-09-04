@@ -393,7 +393,7 @@ def update_analysis_for_dandi_standard(
             )
             file["/general/subject/species"][()] = new_species_value
 
-        if not (
+        elif not (
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
