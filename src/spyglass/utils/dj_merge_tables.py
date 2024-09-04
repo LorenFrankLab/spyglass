@@ -540,9 +540,9 @@ class Merge(dj.Manual):
                 self & {self._reserved_sk: source} & restriction
             ).fetch("KEY")
             nwb_list.extend(
-                (self & source_restr).merge_restrict_class(
-                    restriction, permit_multiple_rows=True
-                ).fetch_nwb()
+                (self & source_restr)
+                .merge_restrict_class(restriction, permit_multiple_rows=True)
+                .fetch_nwb()
             )
             if return_merge_ids:
                 merge_ids.extend([k[self._reserved_pk] for k in source_restr])
