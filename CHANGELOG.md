@@ -7,8 +7,8 @@
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
-from spyglass.example import Table
-Table.alter() # Comment regarding the change
+from spyglass.linearization.v1.main import TrackGraph
+TrackGraph.alter() # Comment regarding the change
 ```
 
 ### Infrastructure
