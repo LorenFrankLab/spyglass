@@ -816,6 +816,13 @@ def dlc_project_name():
 
 
 @pytest.fixture(scope="session")
+def team_name(common):
+    team_name = "sc_eb"
+    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    yield team_name
+
+
+@pytest.fixture(scope="session")
 def insert_project(
     verbose_context,
     teardown,
@@ -823,6 +830,7 @@ def insert_project(
     dlc_project_name,
     dlc_project_tbl,
     common,
+    team_name,
     bodyparts,
     mini_copy_name,
 ):
@@ -845,8 +853,6 @@ def insert_project(
         RippleTimesV1,
     )
 
-    team_name = "sc_eb"
-    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     video_list = common.VideoFile().fetch(
         "nwb_file_name", "epoch", as_dict=True
     )[:2]

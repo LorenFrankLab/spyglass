@@ -330,6 +330,8 @@ def merge_intervals(intervals):
     _type_
         _description_
     """
+    # TODO: Migrate to common_interval.py
+
     if len(intervals) == 0:
         return []
 
