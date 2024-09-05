@@ -44,7 +44,7 @@ from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
     AnalysisNwbfileKachery,
     Nwbfile,
-    NwbfileKachery,
+    #NwbfileKachery,
 )
 from spyglass.common.common_position import (
     IntervalLinearizationSelection,

@@ -6,20 +6,22 @@ def interpolate_to_new_time(df, new_time, upsampling_interpolation_method='linea
     old_time = df.index
     new_index = pd.Index(np.unique(np.concatenate(
         (old_time, new_time))), name='time')
-    return (df
-            .reindex(index=new_index)
-            .interpolate(method=upsampling_interpolation_method)
-            .reindex(index=new_time))
+    tmp = df.reindex(index=
+                     new_index
+                     ).interpolate(
+                         method=upsampling_interpolation_method).reindex(index=new_time)
+    tmp.index.name = df.index.name
+    return tmp
 
 def interval_union(interval_list1,interval_list2):
     '''
     interval_list1 : np.array, (N,2) where N = number of intervals
     interval_list2 : np.array, (N,2) where N = number of intervals
-    
+
     e.g.
     interval_list1 = np.array([[1,11],[6,8],[12,20],[25,30]])
     interval_list2 = np.array([[1,10]])
-    
+
     Returns
     -------
     interval_list: np.array, (N,2)
@@ -27,7 +29,7 @@ def interval_union(interval_list1,interval_list2):
     '''
     interval_list1=interval_list1.tolist()
     interval_list2=interval_list2.tolist()
-    
+
     # find all pairwise intersections
     intersect_tally=np.zeros((len(interval_list1),len(interval_list2)))
     for i in range(len(interval_list1)):
@@ -39,32 +41,32 @@ def interval_union(interval_list1,interval_list2):
     union_list2_ind=np.argwhere(np.sum(intersect_tally,axis=0)==0).ravel()
     union_list1_ind=np.argwhere(np.sum(intersect_tally,axis=1)==0).ravel()
 
-    # for those in set 1 or set 2 that has no intersections, append zero row sum or column sum 
+    # for those in set 1 or set 2 that has no intersections, append zero row sum or column sum
     for i in union_list1_ind:
         union_set.append(interval_list1[i])
     for i in union_list2_ind:
         union_set.append(interval_list2[i])
-    
+
     # for those that has intersections, find mutually intersecting interva;s
     for i in np.argwhere(np.sum(intersect_tally,axis=1)!=0).ravel():
         intvl_1=np.array([interval_list1[i]])
-        
+
         intvl_1s=[]
         # first, find the intersecting one in set 2
         j_all=np.argwhere(intersect_tally[i,:]).ravel()
         intvl_2s=np.array([interval_list2[j] for j in j_all])
-        
+
         # then track back in set 1, to find all the ones in set 1 intersecting this one in set 2
         for j in j_all:
             i_all=np.argwhere(intersect_tally[:,j]).ravel()
             for i in i_all:
                 intvl_1s.append(interval_list1[i])
-        
+
         # put all the related/intersecting intervals together, find union
         union_tmp=np.concatenate([np.array(intvl_1s),intvl_2s],axis=0)
-        
+
         union_set.append([np.min(union_tmp[:,0]),np.max(union_tmp[:,1])])
-    union_set=np.unique(union_set,axis=0)   
+    union_set=np.unique(union_set,axis=0)
     return union_set
 
 
@@ -81,18 +83,18 @@ def mergeIntervals(intervals):
             stack[-1][-1] = max(stack[-1][-1], i[-1])
         else:
             stack.append(i)
- 
+
     return stack
 
 def find_trial_id(c_end,log_df):
     '''
     find the trial in which an event time c_end occurs
-    
+
     c_end is a float or np array
     log_df is pd datafrmae
     '''
     trial_id = None
-    
+
     # if it is between outerwell (trial t) and home poke (trial t+1)
     tmp=c_end>log_df.timestamp_O
     trial_id_min=tmp[::-1].idxmax()

@@ -15,7 +15,7 @@ import spikeinterface.qualitymetrics as sq
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.settings import waveform_dir
+from spyglass.settings import waveforms_dir
 from spyglass.spikesorting.v0.merged_sorting_extractor import (
     MergedSortingExtractor,
 )
@@ -331,7 +331,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
 
         waveform_extractor_name = self._get_waveform_extractor_name(key)
         key["waveform_extractor_path"] = str(
-            Path(waveform_dir) / Path(waveform_extractor_name)
+            Path(waveforms_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(key["waveform_extractor_path"]):
             shutil.rmtree(key["waveform_extractor_path"])

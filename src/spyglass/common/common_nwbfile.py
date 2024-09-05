@@ -642,22 +642,22 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # also check to see whether there are directories in the spikesorting folder with this
 
 
-@schema
-class NwbfileKachery(SpyglassMixin, dj.Computed):
-    definition = """
-    -> Nwbfile
-    ---
-    nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
-    """
+# @schema
+# class NwbfileKachery(SpyglassMixin, dj.Computed):
+#     definition = """
+#     -> Nwbfile
+#     ---
+#     nwb_file_uri: varchar(200)  # the uri the NWB file for kachery
+#     """
 
-    def make(self, key):
-        import kachery_client as kc
+#     def make(self, key):
+#         import kachery_client as kc
 
-        logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
-        key["nwb_file_uri"] = kc.link_file(
-            Nwbfile().get_abs_path(key["nwb_file_name"])
-        )
-        self.insert1(key)
+#         logger.info(f'Linking {key["nwb_file_name"]} and storing in kachery...')
+#         key["nwb_file_uri"] = kc.link_file(
+#             Nwbfile().get_abs_path(key["nwb_file_name"])
+#         )
+#         self.insert1(key)
 
 
 @schema

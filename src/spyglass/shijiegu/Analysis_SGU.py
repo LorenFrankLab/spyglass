@@ -6,7 +6,6 @@ import pynwb
 import numpy as np
 import spikeinterface as si
 import xarray as xr
-import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 
 
@@ -19,9 +18,10 @@ from spyglass.common.common_position import TrackGraph
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_position import IntervalPositionInfo,IntervalLinearizedPosition
 from spyglass.common import LFPBand
-from spyglass.spikesorting import (SpikeSortingRecording)
+from spyglass.spikesorting.v0 import (SpikeSortingRecording)
+from spyglass.decoding.v0.clusterless import ClusterlessClassifierParameters
 
-from spyglass.spikesorting.spikesorting_curation import Waveforms
+from spyglass.spikesorting.v0.spikesorting_curation import Waveforms
 
 
 from ripple_detection import Kay_ripple_detector
@@ -46,14 +46,40 @@ class EpochPos(dj.Manual):
     def make(self,key,replace=False):
 
         # add in epoch name
-        nwb_file_name = key['nwb_file_name']
-        epoch=key['epoch']
-        epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
+        nwb_copy_file_name = key['nwb_file_name']
+        # select position timestamps, only maze sessions are selected
+        IntervalList_pd=pd.DataFrame(IntervalList & {'nwb_file_name': nwb_copy_file_name})
+        position_interval=[]
+        session_interval=[]
+        for i in IntervalList_pd.index:
+            interval=IntervalList_pd['interval_list_name'][i]
+            if 'Session' in interval[-9:-1] or 'Sleep' in interval[-7:-1]:
+                session_interval.append(interval)
+            if interval[:3]=='pos':
+                #pos_interval='pos '+str(i)+' valid times'
+                position_interval.append(interval)
+
+        # sort them respectively in order
+        session_ids = [int(s.split("_")[0]) for s in session_interval]
+        session_interval = list(np.array(session_interval)[np.argsort(session_ids)])
+
+        position_ids = [int(p.split(" ")[1]) for p in position_interval]
+        position_interval = list(np.array(position_interval)[np.argsort(position_ids)])
+
+        session_pos_map = {}
+        for i in range(len(session_interval)):
+            session_pos_map[session_interval[i]] = position_interval[i]
+
+        #for epoch in (TaskEpoch & {'nwb_file_name':nwb_copy_file_name}).fetch('epoch'):
+
+        epoch = key['epoch']
+        epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_copy_file_name, 'epoch':epoch}).fetch1('interval_list_name')
         key['epoch_name']=epoch_name
+        key['position_interval'] = session_pos_map[epoch_name]
 
 
         self.insert1(key,replace=replace)
-    
+
 @schema
 class TrialChoice(dj.Manual):
     definition = """
@@ -78,6 +104,38 @@ class TrialChoice(dj.Manual):
         self.insert1(key,replace=replace)
 
 @schema
+class TetrodeNumber(dj.Manual):
+    definition = """
+    # tetrode CHANNEL number for plotting data from various brain regions
+    -> TaskEpoch
+    ---
+    epoch_name: varchar(200)  # session name, get from IntervalList
+    ca1_tetrode_ind = NULL: blob  # 0-based indices of CA1 tetrodes channels. These can be used for plotting
+    cc_tetrode_ind = NULL: blob  # 0-based indices of Corpus Collosum tetrodes channels. These can be used for plotting
+    """
+
+@schema
+class HSETimes(dj.Manual):
+    definition = """
+    # MUA times
+    -> IntervalList
+    ---
+    hse_times: varchar(200)  # file name for hse_times table
+    """
+
+
+@schema
+class MUA(dj.Manual):
+    definition = """
+    # MUA trace
+    -> IntervalList
+    ---
+    mua_trace: varchar(200)  # file name for MUA trace
+    mean = 0: double  # mean
+    sd = 0: double #sd
+    """
+
+@schema
 class Footprint(dj.Manual):
     definition = """
     -> Waveforms
@@ -85,7 +143,7 @@ class Footprint(dj.Manual):
     foot_print = NULL: blob  # dict
     matfile_path: varchar(1000) #same info as Footprint but .mat location for MATLAB
     """
-    
+
 @schema
 class Tracking(dj.Manual):
     """For 2 sessioms, produce a tracking.
@@ -98,8 +156,8 @@ class Tracking(dj.Manual):
     ---
     matfile_path: varchar(1000) #tracking result from MATLAB
     """
-    
-    
+
+
 def get_trial_tags(log):
     '''
     This function adds current, past, etc categories to behavior parsing.
@@ -135,21 +193,120 @@ def get_trial_tags(log):
     return log_df_tagged
 
 @schema
+class ExtendedRippleTimes(dj.Manual):
+    definition = """
+    # ripple times
+    -> IntervalList
+    ---
+    ripple_times = NULL: blob   # ripple times within that interval
+    ripple_times_1sd = NULL: blob   # MUA threshold is 1SD
+    """
+
+@schema
+class ThetaIntervals(dj.Manual):
+    definition = """
+    # theta intervals during mobility (>4cm/s)
+    -> IntervalList
+    ---
+    theta_times = NULL: blob   # ripple times within that interval
+    """
+
+@schema
+class DecodeIngredients(dj.Manual):
+    definition = """
+    # ingredients to do decoded replay content
+    -> IntervalList
+    ---
+    marks = NULL: blob   # valid marks within that interval
+    position_1d = NULL: blob   # valid position within that interval (1D), inluding all rat-on-track time
+    position_2d = NULL: blob   # valid position within that interval (2D), inluding all rat-on-track time
+    """
+
+@schema
+class DecodeResultsLinear(dj.Manual):
+    definition = """
+    # decoded 1D replay content results
+    -> IntervalList
+    -> ClusterlessClassifierParameters
+    encoding_set : varchar(32) # a name for this set of encoding
+    ---
+    posterior = NULL: blob   # posterior within that interval (1D)
+    """
+
+@schema
+class ExtendedRippleTimesWithDecode(dj.Manual):
+    definition = """
+    # ripple times with decode
+    -> DecodeResultsLinear
+    decode_threshold_method: varchar(64) # a name for this thresholding method
+    ---
+    ripple_times = NULL: blob   # ripple times within that interval
+    """
+
+@schema
+class RippleTimesWithDecode(dj.Manual):
+    definition = """
+    # ripple times with decode
+    -> DecodeResultsLinear
+    decode_threshold_method: varchar(64) # a name for this thresholding method
+    ---
+    ripple_times = NULL: blob   # ripple times within that interval
+    """
+
+@schema
 class TrialChoiceReplay(dj.Manual):
     definition = """
     # trial by trial information of choice NOTE: ripple based
-    -> StateScriptFile
+    -> DecodeResultsLinear
     ---
-    epoch_name: varchar(200)  # session name, get from IntervalList
     choice_reward_replay = NULL: blob  # pandas dataframe, choice, reward, ripple time, replays
     """
     def make(self,key,replace=False):
 
         # add in epoch name
-        nwb_file_name = key['nwb_file_name']
-        epoch=key['epoch']
-        epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
-        key['epoch_name']=epoch_name
+        #nwb_file_name = key['nwb_file_name']
+        #epoch=key['epoch']
+        #epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
+        #key['epoch_name']=epoch_name
+
+        self.insert1(key,replace=replace)
+
+@schema
+class ExtendedTrialChoiceReplay(dj.Manual):
+    definition = """
+    # trial by trial information of choice and ripple based replay
+    -> DecodeResultsLinear
+    decode_threshold_method: varchar(64) # a name for this thresholding method
+    ---
+    choice_reward_replay = NULL: blob  # pandas dataframe, choice, reward, ripple time, replays
+    """
+    def make(self,key,replace=False):
+
+        # add in epoch name
+        # nwb_file_name = key['nwb_file_name']
+        # epoch=key['epoch']
+        # epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
+        # key['epoch_name']=epoch_name
+
+        self.insert1(key,replace=replace)
+
+@schema
+class NotExtendedTrialChoiceReplay(dj.Manual):
+    definition = """
+    # trial by trial information of choice and ripple based replay
+    # 2024 August onwards, to distinguish from TrialChoiceReplay
+    -> DecodeResultsLinear
+    decode_threshold_method: varchar(64) # a name for this thresholding method
+    ---
+    choice_reward_replay = NULL: blob  # pandas dataframe, choice, reward, ripple time, replays
+    """
+    def make(self,key,replace=False):
+
+        # add in epoch name
+        # nwb_file_name = key['nwb_file_name']
+        # epoch=key['epoch']
+        # epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
+        # key['epoch_name']=epoch_name
 
         self.insert1(key,replace=replace)
 
@@ -182,7 +339,7 @@ class TrialChoiceDispersedReplay(dj.Manual):
     choice_reward_dispersed_replay = NULL: blob  # pandas dataframe, choice, reward, remote time, replays
     coactivation_matrix = NULL: blob # per matrix per epoch, row i col j: one occurance of arm j representation while the animal is at i
     """
-    
+
     def make(self,key,replace=False):
 
         # add in epoch name
@@ -192,24 +349,23 @@ class TrialChoiceDispersedReplay(dj.Manual):
         key['epoch_name']=epoch_name
 
         self.insert1(key,replace=replace)
-    
+
 @schema
 class TrialChoiceReplayTransition(dj.Manual):
     definition = """
     # trial by trial information of choice
-    -> StateScriptFile
+    -> DecodeResultsLinear
     ---
-    epoch_name: varchar(200)  # session name, get from IntervalList
     transitions = NULL: blob   # ndarray, for all replayed arm transitions
     choice_reward_replay_transition = NULL: blob  # pandas dataframe, choice, reward, replayed arm transitions, ripple time, replays
     """
     def make(self,key,replace=False):
 
         # add in epoch name
-        nwb_file_name = key['nwb_file_name']
-        epoch=key['epoch']
-        epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
-        key['epoch_name']=epoch_name
+        # nwb_file_name = key['nwb_file_name']
+        # epoch=key['epoch']
+        # epoch_name=(TaskEpoch() & {'nwb_file_name':nwb_file_name, 'epoch':epoch}).fetch1('interval_list_name')
+        # key['epoch_name']=epoch_name
 
         self.insert1(key,replace=replace)
 
@@ -226,15 +382,16 @@ class RippleTimes(dj.Manual):
     """
 
 
+
 @schema
 class Decode(dj.Manual):
     definition = """
     # decoded replay content
     -> IntervalList
     ---
-    posterior = NULL: blob   # posterior within that interval
+    posterior = NULL: blob   # posterior within that interval (1D)
+    posterior2D = NULL: blob   # posterior within that interval (2D)
     """
-
 
 
 def get_linearization_map(track_graph_name='4 arm lumped'):
@@ -278,6 +435,13 @@ def get_linearization_map(track_graph_name='4 arm lumped'):
 
     return linear_map,welllocations
 
+def segment_to_linear_range(linear_map,segment_id):
+    """takes an int segment_id and return the range of linearization of the 4-arm track """
+    #linear_map, welllocations = get_linearization_map()
+    arm = int(segment_id-5)
+    ind = int(2*(arm) + 1)
+    return linear_map[ind], arm
+
 def mua_thresholder(ripple_H_,mua,mua_time,mua_threshold):
     ripple_H=[]
     for i in range(np.shape(ripple_H_)[0]):
@@ -291,21 +455,21 @@ def find_remote_times(decode,arm_start,arm_end,mask_time,delta_t):
     '''
     find remote (not on the same arm) replay times from mask
     delta_t: if adjacent intervals are within delta_t of each other, they are merged
-    
+
     RETURN: numpy array, n x 2
     '''
     delta_t=delta_t/2
     acausal_posterior=decode.isel(time=mask_time).acausal_posterior
     time=np.array(acausal_posterior.time)
     positions=np.array(acausal_posterior.position)
-    
+
     # IF USING MEAN
     # mean_location=np.matmul(np.array(acausal_posterior.sum(dim='state')),np.arange(acausal_posterior.position.size))
     # mask_remote = np.logical_or(mean_location > arm_end,mean_location < arm_start)
-    
+
     max_location=positions[acausal_posterior.sum(dim='state').argmax(dim='position')]
     mask_remote = np.logical_or(max_location > arm_end,max_location < arm_start)
-    
+
     remote_segments=np.array(segment_boolean_series(pd.Series(mask_remote,index=time), minimum_duration=0.005))
     if len(remote_segments)>0:
         remote_segments[:,0]=remote_segments[:,0]-delta_t
@@ -348,37 +512,9 @@ def find_ripple_times(ripple_times,t0,t1):
 
     return np.array(selected)
 
-def find_start_end(binary_timebins):
-    binary_timebins=np.concatenate(([0],binary_timebins,[0]))
-    start=np.argwhere(np.diff(binary_timebins)==1).ravel()
-    end=np.argwhere(np.diff(binary_timebins)==-1).ravel()-1
-    start_end=np.concatenate((start.reshape((-1,1)),end.reshape((-1,1))),axis=1)
-    return start_end
 
-def segment_ripples(decode,ripple_t0t1):
-    continuous_all=[]
-    frag_all=[]
 
-    for i in range(np.shape(ripple_t0t1)[0]):
-        t0=ripple_t0t1[i,0]
-        t1=ripple_t0t1[i,1]
 
-        mask_time = ((decode.time >= t0) & (decode.time < t1))
-        acausal_posterior=decode.isel(time=mask_time).acausal_posterior
-        time=np.array(acausal_posterior.time)
-
-        state_posterior=np.array(acausal_posterior.sum('position'))
-
-        snippets_conti=find_start_end(state_posterior[:,0]>=0.8) #continuous
-        snippets_frag=find_start_end(state_posterior[:,1]>=0.5)  #fragment
-
-        snippets=[time[s] for s in snippets_conti if np.diff(time[s])[0]>0.02]
-        continuous_all.append(snippets)
-
-        snippets=[time[s] for s in snippets_frag if np.diff(time[s])[0]>0.02]
-        frag_all.append(snippets)
-
-    return continuous_all,frag_all
 
 def classify_ripples(decode,ripple_times):
     # ripple_times is a list of lists of (2,)'s
@@ -398,6 +534,7 @@ def classify_ripples(decode,ripple_times):
         decoded_arms.append(decoded_arms_i)
 
     return decoded_arms
+
 
 
 def classify_ripple_content(decode,t0,t1):
@@ -502,7 +639,7 @@ def find_max(ripple_time,ripple_consensus_trace,t0,t1):
     consensus_middle=ripple_consensus_trace[time_ind]
 
     return time_middle[np.argmax(consensus_middle)],np.max(consensus_middle)
-    
+
 def find_ripple_peaks(ripple_time,ripple_consensus_trace,t0,t1):
     # ripple time is the time for the consensus_trace
     # returns peak time in seconds
@@ -526,164 +663,11 @@ def find_ripple_peaks(ripple_time,ripple_consensus_trace,t0,t1):
 #                     title='',
 #                     savefolder=[],savename=[],simple=False):
 
-def select_subset(plottimes,linear_position_xr,results,theta_xr,
-                  neural_xr,mua_xr,ripple_xr,head_speed,head_orientation,likelihood=False):
-    
-    time_slice = slice(plottimes[0], plottimes[1])
-    if likelihood:
-        posterior_position_subset=results.sel(time=time_slice).likelihood.sum(
-            dim='state')
-        posterior_position_subset = posterior_position_subset/posterior_position_subset.sum(dim='position')
-        posterior_state_subset=results.sel(time=time_slice).likelihood.sum('position')
-    else:
-        posterior_position_subset=results.sel(time=time_slice).acausal_posterior.sum(
-            dim='state')
-        posterior_state_subset=results.sel(time=time_slice).acausal_posterior.sum('position')
-    
-    linear_position_subset=linear_position_xr.sel(time=slice(plottimes[0],plottimes[1]))
-    
-    theta_subset=theta_xr.sel(time=slice(plottimes[0],plottimes[1]))
-    ripple_subset=ripple_xr.sel(time=slice(plottimes[0],plottimes[1]))
-    
-    neural_subset=neural_xr.sel(
-        time=neural_xr.time[
-            np.logical_and(neural_xr.time>=plottimes[0],neural_xr.time<=plottimes[1])])
-    
-    mua_subset=mua_xr.sel(
-        time=mua_xr.time[
-            np.logical_and(mua_xr.time>=plottimes[0],mua_xr.time<=plottimes[1])])
-    
-    head_orientation_subset=head_orientation.sel(
-        time=head_orientation.time[
-            np.logical_and(head_orientation.time>=plottimes[0],head_orientation.time<=plottimes[1])])
-            
-    head_speed_subset=head_speed.sel(
-        time=head_speed.time[
-            np.logical_and(head_speed.time>=plottimes[0],head_speed.time<=plottimes[1])])
-    
-    #head_speed_subset=head_speed.sel(time=slice(plottimes[0],plottimes[1]))
-    
-    return posterior_position_subset,posterior_state_subset,linear_position_subset,theta_subset,ripple_subset,neural_subset,mua_subset,head_orientation_subset,head_speed_subset
-    
-    
-    
-def plot_decode_spiking(plottimes,t0t1,linear_position_xr,results,theta_xr,
-          neural_xr,mua_xr,ripple_xr,head_speed,head_orientation,
-          ripple_consensus_trace=None,
-          title='',savefolder=[],savename=[],
-          simple=False,likelihood=False):
-    '''
-    plotting submodule for plot_decode_spiking()
-    plottimes: list of 2 numbers
-    t0t1: numpy array of x x 2 numbers, shading region start and end times
-    '''
-    
-    fig, axes = plt.subplots(8, 1, figsize=(30, 20), sharex=True,
-                             constrained_layout=True, gridspec_kw={"height_ratios": [3,1,1,3,1,1,1,1]},)
-    time_slice = slice(plottimes[0], plottimes[1])
-    
-    (posterior_position_subset,posterior_state_subset,
-     linear_position_subset,
-     theta_subset,ripple_subset,
-     neural_subset,mua_subset,
-     head_orientation_subset,head_speed_subset)=select_subset(plottimes,linear_position_xr,
-                                                              results,
-                                                              theta_xr,
-                                                              neural_xr,mua_xr,ripple_xr,
-                                                              head_speed,head_orientation,likelihood)
-    
-    '''Decode and Position data'''
-    
-    x_axis=np.arange(plottimes[0],plottimes[1],100)
-    if likelihood:
-        axes[0].imshow(posterior_position_subset.T,extent=(
-            plottimes[0],plottimes[1],0,np.array(results.acausal_posterior.position)[-1]),vmax=0.02,cmap='bone_r',origin='lower')
-    else:
-        axes[0].imshow(posterior_position_subset.T,extent=(
-            plottimes[0],plottimes[1],0,np.array(results.acausal_posterior.position)[-1]),vmax=0.02,cmap='bone_r',origin='lower')
-    axes[0].set_xticks(x_axis, x_axis)
-    axes[0].set_aspect('auto')
-    # results.sel(time=time_slice).acausal_posterior.sum('state').plot(x='time', y='position',
-    #                                                                  ax=axes[0], robust=True, cmap='bone_r')
-    axes[0].scatter(linear_position_subset.time,
-                    np.array(linear_position_subset.linear_position),
-                    s=1, color='magenta', zorder=10)
-    
-    t0t1_ = t0t1.ravel()
-    axes[0].set_title(title+'\n'+'first shade start time (s):'+str(t0t1_[0])+'\n'+'last shade end time (s):'+str(t0t1_[1]),size=15)
-
-    '''decode state data'''
-    posterior_state_subset.plot(x='time',hue='state',ax=axes[1])
-    
-    # add 50 ms scale bar
-    ymin,ymax = axes[0].get_ylim()
-    axes[0].plot([plottimes[0]+0.01,plottimes[0]+0.01+0.05],[ymax-20,ymax-20],linewidth=10,color='firebrick',alpha=0.5)
-    axes[0].text(plottimes[0]+0.01,ymax,'50 ms',fontsize=20)
-    
-    '''theta band LFP'''
-    # t_ind = np.argwhere(np.logical_and(theta_timestamps >= plottimes[0],
-    #                                theta_timestamps < plottimes[1])).ravel()
-    # theta_d = theta_data[t_ind,:].astype('int32')
-    # theta_t = theta_timestamps[t_ind]
-    theta_d=np.array(theta_subset.to_array()).astype('int32').T
-    theta_t=np.array(theta_subset.time)
-
-    axes[2].plot(theta_t,np.mean(theta_d,axis=1))
-    axes[2].plot(theta_t,np.mean(get_envelope(theta_d),axis=1))
-    axes[2].set_title('theta LFP')
-    
-    '''spike data'''
-    spike_d=np.array(neural_subset.to_array()).astype('int32').T
-    spike_t=np.array(neural_subset.time)
-    numtrodes=np.shape(spike_d)[1]
-    if not simple: #plot all channel's spiking data
-        for i in range(numtrodes):
-            axes[3].plot(spike_t, spike_d[:,i]+i*300,linewidth=0.3,rasterized=True)
-        axes[3].set_title('spiking, each row is a tetrode channel',size=10)
-    
-    '''mua'''
-    mua_d=np.array(mua_subset.to_array()).astype('int32').T
-    mua_t=np.array(mua_subset.time)
-    axes[4].plot(mua_t,mua_d)
-    axes[4].set_ylim([0, 150])
-    ymin,ymax = axes[3].get_ylim()
-    # add 50 ms scale bar
-    axes[4].axhline(y=ymax,xmin=t0t1_[0],xmax=t0t1_[0]+0.05,linewidth=10,color='firebrick',alpha=0.5)
-    
-    '''ripple band LFP consensus'''
-    ripple_d=np.array(ripple_subset.to_array()).astype('int32').T
-    ripple_t=np.array(ripple_subset.time)
-
-    # '''Consensus'''
-    if ripple_consensus_trace is None:
-        ripple_consensus_trace = get_Kay_ripple_consensus_trace(
-            ripple_d, sampling_frequency=1000,smoothing_sigma=0.004)
-
-    axes[5].plot(ripple_t,ripple_consensus_trace)
-    axes[5].set_title('ripple LFP')
-    
-    '''speed information'''
-    axes[6].plot(np.array(head_speed_subset.time),np.array(head_speed_subset.to_array()).ravel())
-    axes[6].set_title('animal head speed')
-
-    phi=head_orientation_subset.diff("head_orientation")
-
-    axes[7].plot(np.array(phi.time),np.array(phi.head_orientation))
-    axes[7].set_title('animal head angular speed')
-    
-
-    for i in range(1,8):
-        for j in range(np.shape(t0t1)[0]):
-            axes[i].axvspan(t0t1[j,0],t0t1[j,1], zorder=-1, alpha=0.5, color='paleturquoise')
-
-
-    if len(savefolder)>0:
-        plt.savefig(os.path.join(savefolder,savename+'.pdf'),format="pdf",bbox_inches='tight',dpi=200)
-        #plt.savefig(os.path.join(exampledir,'ripple_'+str(ripple_num)+'.png'),bbox_inches='tight',dpi=300)  
 
 
 
-    
+
+
 def load_everything(nwb_copy_file_name,interval_list_name,pos_interval_list_name):
     # position
     linear_position_df = (IntervalLinearizedPosition() &
@@ -694,13 +678,13 @@ def load_everything(nwb_copy_file_name,interval_list_name,pos_interval_list_name
 
     # load decode
     decode=load_decode(nwb_copy_file_name,interval_list_name)
-    
+
     # MUA
     neural_data,neural_ts,mua_time,mua,recordings=load_spike(nwb_copy_file_name,interval_list_name)
 
     # ripple
     ripple_data,ripple_timestamps=load_ripple(nwb_copy_file_name,interval_list_name)
-    
+
 #     ripple_nwb_file_path = (LFPBand & {'nwb_file_name': nwb_copy_file_name,
 #                              'target_interval_list_name': interval_list_name,
 #                              'filter_name': 'Ripple 150-250 Hz'}).fetch1('analysis_file_name')
@@ -716,8 +700,8 @@ def load_everything(nwb_copy_file_name,interval_list_name,pos_interval_list_name
 #                                             }).fetch1('ripple_times_04sd')) #1sd
 
     ripple_times=[]
-    
 
-    
+
+
 
     return linear_position_df,decode,ripple_data,ripple_timestamps,ripple_times,recordings,neural_ts,mua,mua_time

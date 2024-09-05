@@ -20,7 +20,7 @@ import pynwb
 import spikeinterface as si
 import xarray as xr
 
-from spyglass.settings import waveform_dir
+from spyglass.settings import waveforms_dir
 from spyglass.utils import logger
 
 try:
@@ -153,7 +153,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             f'{key["curation_id"]}_clusterless_waveforms'
         )
         waveform_extractor_path = str(
-            Path(waveform_dir) / Path(waveform_extractor_name)
+            Path(waveforms_dir) / Path(waveform_extractor_name)
         )
         if os.path.exists(waveform_extractor_path):
             shutil.rmtree(waveform_extractor_path)
