@@ -812,6 +812,10 @@ class LFPBand(SpyglassMixin, dj.Computed):
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
 
+        # leave nan timestamps out. Raw nwb files can have small amount (a couple samples) of nan.
+        notnan_mask = ~np.isnan(timestamps)
+        timestamps = timestamps[notnan_mask]
+
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
         included_indices = interval_list_contains_ind(
@@ -826,8 +830,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 
         # load all the data to speed filtering
+        lfp_object_data = lfp_object.data[notnan_mask,:]
         lfp_data = np.asarray(
-            lfp_object.data[included_indices[0] : included_indices[-1], :],
+            lfp_object_data[included_indices[0] : included_indices[-1], :],
             dtype=type(lfp_object.data[0][0]),
         )
 
