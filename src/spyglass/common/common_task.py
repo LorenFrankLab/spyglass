@@ -102,6 +102,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      """
 
     def make(self, key):
+        """Populate TaskEpoch from the processing module in the NWB file."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -180,6 +181,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
     @classmethod
     def update_entries(cls, restrict=True):
+        """Update entries in the TaskEpoch table based on a restriction."""
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_names"):

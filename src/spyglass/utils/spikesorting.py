@@ -8,6 +8,7 @@ def firing_rate_from_spike_indicator(
     multiunit: bool = False,
     smoothing_sigma: float = 0.015,
 ):
+    """Calculate firing rate from spike indicator."""
     if spike_indicator.ndim == 1:
         spike_indicator = spike_indicator[:, np.newaxis]
 

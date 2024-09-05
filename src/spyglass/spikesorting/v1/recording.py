@@ -118,6 +118,7 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default parameters."""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
@@ -171,6 +172,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate SpikeSortingRecording.
+
+        1. Get valid times for sort interval from IntervalList
+        2. Use spikeinterface to preprocess recording
+        3. Write processed recording to NWB file
+        4. Insert resulting ...
+            - Interval to IntervalList
+            - NWB file to AnalysisNwbfile
+            - Recording ids to SpikeSortingRecording
+        """
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # DO:
         # - get valid times for sort interval
@@ -675,6 +686,7 @@ class TimestampsSegment(si.BaseRecordingSegment):
         self._timeseries = timestamps
 
     def get_num_samples(self) -> int:
+        """Return the number of samples in the segment."""
         return self._timeseries.shape[0]
 
     def get_traces(
@@ -683,6 +695,7 @@ class TimestampsSegment(si.BaseRecordingSegment):
         end_frame: Union[int, None] = None,
         channel_indices: Union[List, None] = None,
     ) -> np.ndarray:
+        """Return the traces for the segment for given start/end frames."""
         return np.squeeze(self._timeseries[start_frame:end_frame])
 
 

@@ -22,6 +22,7 @@ logger.handlers = [stream_handler]
 
 
 def excepthook(exc_type, exc_value, exc_traceback):
+    """Accommodate KeyboardInterrupt exception."""
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return

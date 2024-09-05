@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
+- Add docstrings to all public methods #1076
 
 ### Pipelines
 

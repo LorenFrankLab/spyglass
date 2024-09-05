@@ -1,5 +1,6 @@
 import datajoint as dj
 from datajoint.utils import to_camel_case
+from pandas import DataFrame
 
 from spyglass.common.common_position import IntervalPositionInfo as CommonPos
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
@@ -62,7 +63,8 @@ class PositionOutput(_Merge, SpyglassMixin):
         -> CommonPos
         """
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> DataFrame:
+        """Fetch a single dataframe from the merged table."""
         # proj replaces operator restriction to enable
         # (TableName & restriction).fetch1_dataframe()
         key = self.merge_restrict(self.proj()).proj()

@@ -208,6 +208,7 @@ def file_log(logger, console=False):
 
 
 def get_dlc_root_data_dir():
+    """Returns list of potential root directories for DLC data"""
     ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
         if "dlc_root_data_dir" in dj.config["custom"]:
@@ -574,8 +575,8 @@ def get_gpu_memory():
 
 
 def get_span_start_stop(indices):
+    """Get start and stop indices of spans of consecutive indices"""
     span_inds = []
-    # Get start and stop index of spans of consecutive indices
     for k, g in groupby(enumerate(indices), lambda x: x[1] - x[0]):
         group = list(map(itemgetter(1), g))
         span_inds.append((group[0], group[-1]))
@@ -583,6 +584,7 @@ def get_span_start_stop(indices):
 
 
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
+    """Interpolate x and y positions in DLC dataframe"""
     idx = pd.IndexSlice
 
     no_x_msg = "Index {ind} has no {coord}point with which to interpolate"
@@ -633,6 +635,7 @@ def interp_pos(dlc_df, spans_to_interp, **kwargs):
 
 
 def interp_orientation(df, spans_to_interp, **kwargs):
+    """Interpolate orientation in DLC dataframe"""
     idx = pd.IndexSlice
     no_x_msg = "Index {ind} has no {x}point with which to interpolate"
     df_orient = df["orientation"]
@@ -664,6 +667,7 @@ def interp_orientation(df, spans_to_interp, **kwargs):
 def smooth_moving_avg(
     interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
 ):
+    """Smooths x and y positions in DLC dataframe"""
     import bottleneck as bn
 
     idx = pd.IndexSlice
@@ -696,6 +700,7 @@ def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
 
 
 def no_orientation(pos_df: pd.DataFrame, **params):
+    """Returns an array of NaNs for orientation"""
     fill_value = params.pop("fill_with", np.nan)
     n_frames = len(pos_df)
     orientation = np.full(
@@ -837,6 +842,7 @@ class Centroid:
         self.centroid[~mask] = np.nan  # For bad points, centroid is NaN
 
     def get_2pt_centroid(self):
+        """Calculate centroid for two points"""
         self.calc_centroid(  # Good points
             points=self.point_names,
             mask=(~self.nans[p] for p in self.point_names),
@@ -852,6 +858,13 @@ class Centroid:
             )
 
     def get_4pt_centroid(self):
+        """Calculate centroid for four points.
+
+        If green and center are good, then centroid is average.
+        If green and left/right are good, then centroid is average.
+        If only left/right are good, then centroid is the average of left/right.
+        If only the center is good, then centroid is the center.
+        """
         green = self.points_dict.get("greenLED", None)
         red_C = self.points_dict.get("redLED_C", None)
         red_L = self.points_dict.get("redLED_L", None)

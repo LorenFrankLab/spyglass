@@ -52,6 +52,18 @@ class Session(SpyglassMixin, dj.Imported):
         """
 
     def make(self, key):
+        """Populate the Session table and others from an nwb file.
+
+        Calls the insert_from_nwbfile method for each of the following tables:
+            - Institution
+            - Lab
+            - LabMember
+            - Subject
+            - DataAcquisitionDevice
+            - CameraDevice
+            - Probe
+            - IntervalList
+        """
         # These imports must go here to avoid cyclic dependencies
         # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
@@ -195,6 +207,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         *,
         skip_duplicates: bool = False,
     ):
+        """Add a new session group."""
         SessionGroup.insert1(
             {
                 "session_group_name": session_group_name,
@@ -207,6 +220,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     def update_session_group_description(
         session_group_name: str, session_group_description
     ):
+        """Update the description of a session group."""
         SessionGroup.update1(
             {
                 "session_group_name": session_group_name,
@@ -221,6 +235,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         *,
         skip_duplicates: bool = False,
     ):
+        """Add a session to an existing session group."""
         if test_mode:
             skip_duplicates = True
         SessionGroupSession.insert1(
@@ -235,6 +250,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
     def remove_session_from_group(
         nwb_file_name: str, session_group_name: str, *args, **kwargs
     ):
+        """Remove a session from a session group."""
         query = {
             "session_group_name": session_group_name,
             "nwb_file_name": nwb_file_name,
@@ -245,6 +261,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def delete_group(session_group_name: str, *args, **kwargs):
+        """Delete a session group."""
         query = {"session_group_name": session_group_name}
         (SessionGroup & query).delete(
             force_permission=test_mode, *args, **kwargs
@@ -252,6 +269,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def get_group_sessions(session_group_name: str):
+        """Get the NWB file names of all sessions in a session group."""
         results = (
             SessionGroupSession & {"session_group_name": session_group_name}
         ).fetch(as_dict=True)
@@ -261,6 +279,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def create_spyglass_view(session_group_name: str):
+        """Create a FigURL view for a session group."""
         import figurl as fig
 
         FIGURL_CHANNEL = config.get("FIGURL_CHANNEL")

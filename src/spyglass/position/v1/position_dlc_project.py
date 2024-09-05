@@ -87,6 +87,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         """
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to check types of key values."""
         if not isinstance(key["project_name"], str):
             raise ValueError("project_name must be a string")
         if not isinstance(key["frames_per_video"], int):
@@ -339,6 +340,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         add_to_files=True,
         **kwargs,
     ):
+        """Add videos to existing project or create new project"""
         has_config_or_key = bool(config_path) or bool(key)
         if add_new and not has_config_or_key:
             raise ValueError("If add_new, must provide key or config_path")
