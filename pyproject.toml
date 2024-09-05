@@ -165,7 +165,8 @@ omit = [ # which submodules have no tests
     # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
-    "*/spikesorting/*",
+    "*/spikesorting/v0/*",
+    # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",
 ]

@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
+- Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 
 ### Pipelines
@@ -103,6 +104,7 @@
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
     - Efficiency improvement to `v0.Curation.insert_curation` #1072
+    - Add pytests for `spikesorting.v1` #1078
 
 ## [0.5.2] (April 22, 2024)
 

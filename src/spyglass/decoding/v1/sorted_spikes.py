@@ -60,6 +60,22 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the decoding model.
+
+        1. Fetches parameters and position data from DecodingParameters and
+            PositionGroup tables.
+        2. Decomposes instervals into encoding and decoding.
+        3. Optionally estimates decoding parameters, otherwise uses the provided
+            parameters.
+        4. Uses SortedSpikesDetector from non_local_detector package to decode
+            the animal's mental position, including initial and discrete state
+            transition information.
+        5. Optionally includes the discrete transition coefficients.
+        6. Saves the results and model to disk in the analysis directory, under
+            the nwb file name's folder.
+        7. Inserts the results and model paths into SortedSpikesDecodingV1 and
+            DecodingOutput tables.
+        """
         orig_key = copy.deepcopy(key)
 
         # Get model parameters
@@ -256,6 +272,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         return SortedSpikesDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
+        """Retrieve the decoding model"""
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
     @staticmethod

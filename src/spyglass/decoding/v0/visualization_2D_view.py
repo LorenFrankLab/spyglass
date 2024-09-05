@@ -17,6 +17,7 @@ def create_static_track_animation(
     compute_real_time_rate: bool = False,
     head_dir=None,
 ):
+    """Create a static track animation object."""
     # float32 gives about 7 digits of decimal precision; we want 3 digits right
     # of the decimal. So need to compress-store the timestamp if the start is
     # greater than say 5000.
@@ -53,6 +54,7 @@ def create_static_track_animation(
 
 
 def get_base_track_information(base_probabilities: xr.Dataset):
+    """Get the base track information."""
     x_count = len(base_probabilities.x_position)
     y_count = len(base_probabilities.y_position)
     x_min = np.min(base_probabilities.x_position).item()
@@ -78,6 +80,7 @@ def memo_linearize(
     y_min: float,
     y_width: float,
 ):
+    """Memoized linearize function."""
     (_, y, x) = t
     my_tuple = (x, y)
     if my_tuple not in location_lookup:
@@ -96,6 +99,7 @@ def generate_linearization_function(
     y_min: float,
     y_width: float,
 ):
+    """Generate a linearization function."""
     args = {
         "location_lookup": location_lookup,
         "x_count": x_count,
@@ -114,11 +118,13 @@ def generate_linearization_function(
 def get_positions(
     i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]
 ):
+    """Get the positions from a linearization func."""
     linearizer_map = map(linearization_fn, i_trim.unified_index.values)
     return np.array(list(linearizer_map), dtype=np.uint16)
 
 
 def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
+    """Get the observations per frame."""
     (times, time_counts_np) = np.unique(i_trim.time.values, return_counts=True)
     time_counts = xr.DataArray(time_counts_np, coords={"time": times})
     raw_times = base_slice.time
@@ -132,6 +138,7 @@ def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
 def extract_slice_data(
     base_slice: xr.DataArray, location_fn: Callable[[Tuple[float, float]], int]
 ):
+    """Extract slice data from a location function."""
     i_trim = discretize_and_trim(base_slice, ndims=2)
 
     positions = get_positions(i_trim, location_fn)
@@ -140,6 +147,8 @@ def extract_slice_data(
 
 
 def process_decoded_data(posterior: xr.DataArray):
+    """Process the decoded data."""
+
     frame_step_size = 100_000
     location_lookup = {}
 
@@ -212,6 +221,7 @@ def process_decoded_data(posterior: xr.DataArray):
 
 
 def create_track_animation_object(*, static_track_animation: any):
+    """Create a track animation object."""
     if "decodedData" in static_track_animation:
         decoded_data = static_track_animation["decodedData"]
         decoded_data_obj = vvf.DecodedPositionData(
@@ -259,6 +269,7 @@ def create_track_animation_object(*, static_track_animation: any):
 
 
 def get_ul_corners(width: float, height: float, centers):
+    """Get the upper left corners."""
     ul = np.subtract(centers, (width / 2, -height / 2))
 
     # Reshape so we have an x array and a y array

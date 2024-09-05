@@ -4,6 +4,7 @@ import os
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
+from pandas import DataFrame
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -29,11 +30,13 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
 
     @property
-    def default_pk(self):
+    def default_pk(self) -> dict:
+        """Return the default primary key for this table."""
         return {"trodes_pos_params_name": "default"}
 
     @property
-    def default_params(self):
+    def default_params(self) -> dict:
+        """Return the default parameters for this table."""
         return {
             "max_LED_separation": 9.0,
             "max_plausible_speed": 300.0,
@@ -47,7 +50,7 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         }
 
     @classmethod
-    def insert_default(cls, **kwargs):
+    def insert_default(cls, **kwargs) -> None:
         """
         Insert default parameter set for position determination
         """
@@ -57,7 +60,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Return the default set of parameters for position calculation"""
         query = cls & cls().default_pk
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -66,7 +70,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         return query.fetch1()
 
     @classmethod
-    def get_accepted_params(cls):
+    def get_accepted_params(cls) -> list:
+        """Return a list of accepted parameters for position calculation"""
         return [k for k in cls().default_params.keys()]
 
 
@@ -157,6 +162,15 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the table with position data.
+
+        1. Fetch the raw position data and parameters from the RawPosition
+            table and TrodesPosParams table, respectively.
+        2. Inherit methods from IntervalPositionInfo to calculate the position
+            and generate position components (position, orientation, velocity).
+        3. Generate AnalysisNwbfile and insert the key into the table.
+        4. Insert the key into the PositionOutput Merge table.
+        """
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
@@ -197,6 +211,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
         from ..position_merge import PositionOutput
 
+        # TODO: change to mixin camelize function
         part_name = to_camel_case(self.table_name.split("__")[-1])
 
         # TODO: The next line belongs in a merge table function
@@ -207,6 +222,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
+        """Generate position components from 2D spatial series."""
         return IntervalPositionInfo().generate_pos_components(*args, **kwargs)
 
     @staticmethod
@@ -214,7 +230,8 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         """Calculate position info from 2D spatial series."""
         return IntervalPositionInfo().calculate_position_info(*args, **kwargs)
 
-    def fetch1_dataframe(self, add_frame_ind=True):
+    def fetch1_dataframe(self, add_frame_ind=True) -> DataFrame:
+        """Fetch the position data as a pandas DataFrame."""
         pos_params = self.fetch1("trodes_pos_params_name")
         if (
             add_frame_ind
@@ -237,7 +254,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 
-    Use for debugging the effect of position extraction parameters."""
+    Use for debugging the effect of position extraction parameters.
+    """
 
     definition = """
     -> TrodesPosV1
@@ -246,6 +264,14 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Generate a video with overlaid position data.
+
+        Fetches...
+            - Raw position data from the RawPosition table
+            - Position data from the TrodesPosV1 table
+            - Video data from the VideoFile table
+        Generates a video using opencv and the VideoMaker class.
+        """
         M_TO_CM = 100
 
         logger.info("Loading position data...")

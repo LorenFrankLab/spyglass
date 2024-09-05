@@ -70,8 +70,10 @@ class IntervalPositionInfoSelection(SpyglassMixin, dj.Lookup):
 
 @schema
 class IntervalPositionInfo(SpyglassMixin, dj.Computed):
-    """Computes the smoothed head position, orientation and velocity for a given
-    interval."""
+    """Computes the smoothed data for a given interval.
+
+    Data includes head position, orientation and velocity
+    """
 
     definition = """
     -> IntervalPositionInfoSelection
@@ -83,6 +85,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Insert smoothed head position, orientation and velocity."""
         logger.info(f"Computing position for: {key}")
 
         analysis_file_name = AnalysisNwbfile().create(  # logged
@@ -318,6 +321,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         max_plausible_speed=None,
         **kwargs,
     ):
+        """Calculates the smoothed position, orientation and velocity."""
         CM_TO_METERS = 100
 
         (
@@ -453,7 +457,8 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
             "speed": speed,
         }
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetches the position data as a pandas dataframe."""
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod
@@ -516,6 +521,11 @@ class PositionVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populates the PositionVideo table.
+
+        The video is created by overlaying the head position and orientation
+        on the video of the animal.
+        """
         M_TO_CM = 100
 
         logger.info("Loading position data...")
@@ -609,6 +619,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         circle_radius: int = 8,
         truncate_data: bool = False,  # reduce data to min len across all vars
     ):
+        """Generates a video with the head position and orientation overlaid."""
         import cv2  # noqa: F401
 
         RGB_PINK = (234, 82, 111)

@@ -10,6 +10,7 @@ from spyglass.decoding.v0.utils import discretize_and_trim
 def get_observations_per_time(
     trimmed_posterior: xr.DataArray, base_data: xr.Dataset
 ) -> np.ndarray:
+    """Get the number of observations per time bin."""
     times, counts = np.unique(trimmed_posterior.time.values, return_counts=True)
     indexed_counts = xr.DataArray(counts, coords={"time": times})
     _, good_counts = xr.align(
@@ -20,6 +21,7 @@ def get_observations_per_time(
 
 
 def get_sampling_freq(times: np.ndarray) -> float:
+    """Get the sampling frequency of the data."""
     round_times = np.floor(1000 * times)
     median_delta_t_ms = np.median(np.diff(round_times)).item()
     return 1000 / median_delta_t_ms  # from time-delta to Hz
@@ -28,6 +30,7 @@ def get_sampling_freq(times: np.ndarray) -> float:
 def get_trimmed_bin_center_index(
     place_bin_centers: np.ndarray, trimmed_place_bin_centers: np.ndarray
 ) -> np.ndarray:
+    """Get the index of the trimmed bin centers in the full array."""
     return np.searchsorted(
         place_bin_centers, trimmed_place_bin_centers, side="left"
     ).astype(np.uint16)
