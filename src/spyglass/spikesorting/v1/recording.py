@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -185,17 +186,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             "nwb_file_name"
         )
 
-        # DO:
-        # - get valid times for sort interval
-        # - proprocess recording
-        # - write recording to NWB file
-        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording, timestamps = self._get_preprocessed_recording(key)
-        recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
-            recording, timestamps, nwb_file_name
-        )
-        key["analysis_file_name"] = recording_nwb_file_name
-        key["object_id"] = recording_object_id
+        key.update(self._make_file(key))
 
         # INSERT:
         # - valid times into IntervalList
@@ -205,12 +196,49 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": key["recording_id"],
-                "valid_times": sort_interval_valid_times,
+                "valid_times": self._get_sort_interval_valid_times(key),
                 "pipeline": "spikesorting_recording_v1",
             }
         )
         AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
         self.insert1(key)
+
+    @classmethod
+    def _make_file(cls, key: dict = None, recompute_file_name: str = None):
+        """Preprocess recording and write to NWB file.
+
+        - Get valid times for sort interval from IntervalList
+        - Preprocess recording
+        - Write processed recording to NWB file
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecordingSelection table
+        recompute_file_name : str, Optional
+            If specified, recompute this file. Use as resulting file name.
+            If none, generate a new file name.
+        """
+        if not key and not recompute_file_name:
+            raise ValueError(
+                "Either key or recompute_file_name must be specified."
+            )
+
+        key = key or (cls & {"analysis_file_name": recompute_file_name}).fetch1(
+            "KEY"
+        )
+
+        parent = SpikeSortingRecordingSelection & key
+        recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
+            **cls()._get_preprocessed_recording(key),
+            nwb_file_name=parent.fetch1("nwb_file_name"),
+            recompute_file_name=recompute_file_name,
+        )
+
+        return dict(
+            analysis_file_name=recording_nwb_file_name,
+            object_id=recording_object_id,
+        )
 
     @classmethod
     def get_recording(cls, key: dict) -> si.BaseRecording:
@@ -221,11 +249,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         key : dict
             primary key of SpikeSorting table
         """
-
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
+
+        if not Path(analysis_file_abs_path).exists():
+            cls._make_file(key, recompute_file_name=analysis_file_name)
+
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
         )
@@ -303,6 +334,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - the reference channel
         # - probe type
         # - filter parameters
+
+        # TODO: Reduce number of fetches
         nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
             "nwb_file_name"
         )
@@ -365,7 +398,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         all_timestamps = recording.get_times()
 
-        # TODO: make sure the following works for recordings that don't have explicit timestamps
+        # TODO: verify for recordings that don't have explicit timestamps
         valid_sort_times = self._get_sort_interval_valid_times(key)
         valid_sort_times_indices = _consolidate_intervals(
             valid_sort_times, all_timestamps
@@ -451,7 +484,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             tetrode.set_device_channel_indices(np.arange(4))
             recording = recording.set_probe(tetrode, in_place=True)
 
-        return recording, np.asarray(timestamps)
+        return dict(recording=recording, timestamps=np.asarray(timestamps))
 
 
 def _consolidate_intervals(intervals, timestamps):
@@ -512,6 +545,7 @@ def _write_recording_to_nwb(
     recording: si.BaseRecording,
     timestamps: Iterable,
     nwb_file_name: str,
+    recompute_file_name: Optional[str] = None,
 ):
     """Write a recording in NWB format
 
@@ -528,7 +562,9 @@ def _write_recording_to_nwb(
         name of analysis NWB file containing the preprocessed recording
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
+    analysis_nwb_file = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name, recompute_file_name=recompute_file_name
+    )
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
 
     with pynwb.NWBHDF5IO(

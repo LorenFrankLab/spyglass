@@ -171,7 +171,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
-    def create(self, nwb_file_name: str) -> str:
+    def create(
+        self, nwb_file_name: str, recompute_file_name: str = None
+    ) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
         Note that this does NOT add the file to the schema; that needs to be
@@ -181,6 +183,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         nwb_file_name : str
             The name of an NWB file to be copied.
+        recompute_file_name : str, optional
+            The name of the file to be regenerated. Defaults to None.
 
         Returns
         -------
@@ -207,7 +211,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             else:
                 alter_source_script = True
 
-            analysis_file_name = self.__get_new_file_name(nwb_file_name)
+            analysis_file_name = (
+                recompute_file_name or self.__get_new_file_name(nwb_file_name)
+            )
 
             # write the new file
             logger.info(f"Writing new NWB file {analysis_file_name}")
