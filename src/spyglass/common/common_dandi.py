@@ -21,8 +21,9 @@ try:
     from dandi.consts import known_instances
     from dandi.dandiapi import DandiAPIClient
     from dandi.metadata.nwb import get_metadata
-    from dandi.organize import OrganizeInvalid
+    from dandi.organize import OrganizeInvalid, CopyMode
     from dandi.validate_types import Severity
+    from dandi.pynwb_utils import nwb_has_external_links
 
 except (ImportError, ModuleNotFoundError) as e:
     (
@@ -31,8 +32,10 @@ except (ImportError, ModuleNotFoundError) as e:
         DandiAPIClient,
         get_metadata,
         OrganizeInvalid,
+        CopyMode,
         Severity,
-    ) = [None] * 6
+        nwb_has_external_links,
+    ) = [None] * 8
     logger.warning(e)
 
 
@@ -139,7 +142,11 @@ class DandiPath(SpyglassMixin, dj.Manual):
             if not os.path.exists(
                 f"{destination_dir}/{os.path.basename(file)}"
             ):
-                os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
+                # copy the file if it has external links so can be safely edited
+                if nwb_has_external_links(file):
+                    os.copy(file, f"{destination_dir}/{os.path.basename(file)}")
+                else:
+                    os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
 
         # validate the dandiset
         validate_dandiset(destination_dir, ignore_external_files=True)
@@ -153,7 +160,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
 
         # organize the files in the dandiset directory
         dandi.organize.organize(
-            destination_dir, dandiset_dir, invalid=OrganizeInvalid.WARN
+            destination_dir, dandiset_dir, update_external_filepaths=True,
+            invalid=OrganizeInvalid.ERROR, media_files_mode=CopyMode.SYMLINK,
         )
 
         # get the dandi name translations
