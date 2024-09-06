@@ -3,7 +3,6 @@ import random
 import stat
 import string
 from pathlib import Path
-from time import time
 from uuid import uuid4
 
 import datajoint as dj
@@ -172,8 +171,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
-    _creation_times = {}
-
     def create(self, nwb_file_name: str) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
@@ -190,9 +187,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        # To allow some times to occur before create
-        # creation_time = self._creation_times.pop("pre_create_time", time())
-
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(
@@ -214,16 +208,19 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 alter_source_script = True
 
             analysis_file_name = self.__get_new_file_name(nwb_file_name)
+
             # write the new file
             logger.info(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
+
             # export the new NWB file
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
                 export_io.export(io, nwbf)
+
         if alter_source_script:
             self._alter_spyglass_version(analysis_file_abs_path)
 
@@ -234,8 +231,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
-
-        # self._creation_times[analysis_file_name] = creation_time
 
         return analysis_file_name
 
@@ -699,100 +694,3 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
-
-    def log(self, *args, **kwargs):
-        """Null log method. Revert to _disabled_log to turn back on."""
-        logger.debug("Logging disabled.")
-
-    def _disabled_log(self, analysis_file_name, table=None):
-        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
-        if isinstance(analysis_file_name, dict):
-            analysis_file_name = analysis_file_name["analysis_file_name"]
-        time_delta = time() - self._creation_times[analysis_file_name]
-        file_size = Path(self.get_abs_path(analysis_file_name)).stat().st_size
-
-        AnalysisNwbfileLog().log(
-            analysis_file_name=analysis_file_name,
-            time_delta=time_delta,
-            file_size=file_size,
-            table=table,
-        )
-
-    def increment_access(self, *args, **kwargs):
-        """Null method. Revert to _disabled_increment_access to turn back on."""
-        logger.debug("Incrementing access disabled.")
-
-    def _disabled_increment_access(self, keys, table=None):
-        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
-        if not isinstance(keys, list):
-            key = [keys]
-
-        for key in keys:
-            AnalysisNwbfileLog().increment_access(key, table=table)
-
-
-@schema
-class AnalysisNwbfileLog(dj.Manual):
-    definition = """
-    id: int auto_increment
-    ---
-    -> AnalysisNwbfile
-    dj_user                       : varchar(64) # user who created the file
-    timestamp = CURRENT_TIMESTAMP : timestamp   # when the file was created
-    table = null                  : varchar(64) # creating table
-    time_delta = null             : float       # how long it took to create
-    file_size = null              : float       # size of the file in bytes
-    accessed = 0                  : int         # n times accessed
-    unique index (analysis_file_name)
-    """
-
-    def log(
-        self,
-        analysis_file_name=None,
-        time_delta=None,
-        file_size=None,
-        table=None,
-    ):
-        """Log the creation of an analysis NWB file.
-
-        Parameters
-        ----------
-        analysis_file_name : str
-            The name of the analysis NWB file.
-        """
-
-        self.insert1(
-            {
-                "dj_user": dj.config["database.user"],
-                "analysis_file_name": analysis_file_name,
-                "time_delta": time_delta,
-                "file_size": file_size,
-                "table": table[:64],
-            }
-        )
-
-    def increment_access(self, key, table=None):
-        """Increment the accessed field for the given analysis file name.
-
-        Parameters
-        ----------
-        key : Union[str, dict]
-            The name of the analysis NWB file, or a key to the table.
-        table : str, optional
-            The table that created the file.
-        """
-        if isinstance(key, str):
-            key = {"analysis_file_name": key}
-
-        if not (query := self & key):
-            self.log(**key, table=table)
-        entries = query.fetch(as_dict=True)
-
-        inserts = []
-        for entry in entries:
-            entry["accessed"] += 1
-            if table and not entry.get("table"):
-                entry["table"] = table
-            inserts.append(entry)
-
-        self.insert(inserts, replace=True)

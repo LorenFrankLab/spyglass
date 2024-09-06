@@ -1,5 +1,4 @@
 import uuid
-from time import time
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
@@ -182,7 +181,10 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             - NWB file to AnalysisNwbfile
             - Recording ids to SpikeSortingRecording
         """
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
+        nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
+            "nwb_file_name"
+        )
+
         # DO:
         # - get valid times for sort interval
         # - proprocess recording
@@ -190,9 +192,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording, timestamps = self._get_preprocessed_recording(key)
         recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
-            recording,
-            timestamps,
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+            recording, timestamps, nwb_file_name
         )
         key["analysis_file_name"] = recording_nwb_file_name
         key["object_id"] = recording_object_id
@@ -203,21 +203,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - entry into SpikeSortingRecording
         IntervalList.insert1(
             {
-                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
+                "nwb_file_name": nwb_file_name,
                 "interval_list_name": key["recording_id"],
                 "valid_times": sort_interval_valid_times,
                 "pipeline": "spikesorting_recording_v1",
             }
         )
-        AnalysisNwbfile().add(
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
-            key["analysis_file_name"],
-        )
-        AnalysisNwbfile().log(
-            recording_nwb_file_name, table=self.full_table_name
-        )
+        AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
         self.insert1(key)
 
     @classmethod
@@ -538,6 +530,7 @@ def _write_recording_to_nwb(
 
     analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
+
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
         mode="a",

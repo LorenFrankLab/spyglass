@@ -6,10 +6,17 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+import datajoint as dj
+
+dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
+```
+
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
 - Add docstrings to all public methods #1076
+- Remove `AnalysisNwbfileLog` #10XX
 
 ### Pipelines
 

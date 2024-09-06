@@ -463,7 +463,7 @@ class LFP(SpyglassMixin, dj.Imported):
         """
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
@@ -553,7 +553,6 @@ class LFP(SpyglassMixin, dj.Imported):
             },
             replace=True,
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def nwb_object(self, key):
@@ -748,9 +747,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
         6. Adds resulting interval list to IntervalList table.
         """
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         # get the NWB object with the lfp data;
         # FIX: change to fetch with additional infrastructure
@@ -946,7 +943,6 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
-        AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:

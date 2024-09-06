@@ -287,7 +287,6 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe."""
