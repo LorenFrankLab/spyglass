@@ -64,7 +64,8 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Get the default centroid parameters"""
         query = cls & {"dlc_centroid_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -133,6 +134,20 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
     log_path = None
 
     def make(self, key):
+        """Populate the DLCCentroid table with the centroid of the bodyparts
+
+        Uses a decorator around the _logged_make method to log the process
+        to a file.
+
+        1. Fetch parameters and centroid method.
+        2. Fetch a concatenated dataframe of all bodyparts from
+            DLCSmoothInterpCohort.
+        3. Use the Centroid class to calculate the centroid.
+        4. Optionally, interpolate over NaNs and smooth the centroid.
+        5. Create a Position and Velocity objects for the centroid and video
+            frame indices.
+        5. Add these objects to the Analysis NWB file.
+        """
         output_dir = infer_output_dir(key=key, makedir=False)
         self.log_path = Path(output_dir, "log.log")
         self._logged_make(key)
@@ -295,7 +310,8 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             }
         )
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(

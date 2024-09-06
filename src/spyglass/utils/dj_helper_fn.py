@@ -337,6 +337,7 @@ def _get_nwb_object(objects, object_id):
 
 
 def get_child_tables(table):
+    """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table
     return [
         dj.FreeTable(
@@ -516,7 +517,8 @@ def make_file_obj_id_unique(nwb_path: str):
 def populate_pass_function(value):
     """Pass function for parallel populate.
 
-    Note: To avoid pickling errors, the table must be passed by class, NOT by instance.
+    Note: To avoid pickling errors, the table must be passed by class,
+        NOT by instance.
     Note: This function must be defined in the global namespace.
 
     Parameters
@@ -529,8 +531,10 @@ def populate_pass_function(value):
 
 
 class NonDaemonPool(multiprocessing.pool.Pool):
-    """NonDaemonPool. Used to create a pool of non-daemonized processes,
-    which are required for parallel populate operations in DataJoint.
+    """Non-daemonized pool for multiprocessing.
+
+    Used to create a pool of non-daemonized processes, which are required for
+    parallel populate operations in DataJoint.
     """
 
     # Explicitly set the start method to 'fork'
@@ -538,6 +542,7 @@ class NonDaemonPool(multiprocessing.pool.Pool):
     multiprocessing.set_start_method("fork", force=True)
 
     def Process(self, *args, **kwds):
+        """Return a non-daemonized process."""
         proc = super(NonDaemonPool, self).Process(*args, **kwds)
 
         class NonDaemonProcess(proc.__class__):

@@ -229,7 +229,8 @@ class SortGroup(SpyglassMixin, dj.Manual):
                     n_found += 1
                 else:
                     Warning(
-                        "Relative electrode locations have three coordinates; only two are currently supported"
+                        "Relative electrode locations have three coordinates; "
+                        + "only two are currently supported"
                     )
         return np.ndarray.tolist(geometry)
 
@@ -257,6 +258,7 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
     # All existing entries are below 48
 
     def insert_default(self):
+        """Inserts the default preprocessing parameters for spike sorting."""
         # set up the default filter parameters
         freq_min = 300  # high pass filter value
         freq_max = 6000  # low pass filter value
@@ -299,6 +301,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make(self, key):
+        """Populates the SpikeSortingRecording table with the recording data.
+
+        1. Fetches ...
+            - Sort interval and parameters from SpikeSortingRecordingSelection
+                and SpikeSortingPreprocessingParameters
+            - Channel IDs and reference electrode from SortGroup, filtered by
+                filtereing parameters
+        2. Saves the recording data to the recording directory
+        3. Inserts the path to the recording data into SpikeSortingRecording
+        """
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)

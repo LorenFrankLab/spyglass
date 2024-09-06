@@ -29,7 +29,7 @@ def is_merge_table(table):
     def trim_def(definition):
         return re_sub(
             r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        )
+        ).replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
@@ -684,6 +684,7 @@ class Merge(dj.Manual):
 
     @property
     def source_class_dict(self) -> dict:
+        """Dictionary of part names and their respective classes."""
         # NOTE: fails if table is aliased in dj.Part but not merge script
         # i.e., must import aliased table as part name
         if not self._source_class_dict:

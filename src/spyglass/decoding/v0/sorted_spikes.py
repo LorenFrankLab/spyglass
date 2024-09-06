@@ -65,6 +65,7 @@ schema = dj.schema("decoding_sortedspikes")
 @schema
 class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins spike times into regular intervals given by the sampling rate.
+
     Start and stop time of the interval are defined by the interval list.
     """
 
@@ -79,8 +80,8 @@ class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
 @schema
 class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """Bins spike times into regular intervals given by the sampling rate.
-    Useful for GLMs and for decoding.
 
+    Useful for GLMs and for decoding.
     """
 
     definition = """
@@ -91,6 +92,12 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the SortedSpikesIndicator table.
+
+        Fetches the spike times from the CuratedSpikeSorting table and bins
+        them into regular intervals given by the sampling rate. The spike
+        indicator is stored in an AnalysisNwbfile.
+        """
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
@@ -157,10 +164,12 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
             self.insert1(key)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Return the first spike indicator as a dataframe."""
         return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
+    def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Return all spike indicators as a list of dataframes."""
         return pd.concat(
             [
                 data["spike_indicator"].set_index("time")
@@ -183,6 +192,7 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
+        """Insert default parameters for decoding with sorted spikes"""
         self.insert(
             [
                 make_default_decoding_params(),
@@ -192,9 +202,11 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
         )
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to convert classes to dict"""
         super().insert1(convert_classes_to_dict(key), **kwargs)
 
     def fetch1(self, *args, **kwargs):
+        """Override fetch1 to restore classes"""
         return restore_classes(super().fetch1(*args, **kwargs))
 
 

@@ -60,7 +60,8 @@ from .position_trodes_position import (
 )
 
 
-def schemas():
+def schemas() -> list[str]:
+    """Return list of schemas in position/v1."""
     return _schemas
 
 

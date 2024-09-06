@@ -4,9 +4,9 @@ from datajoint.utils import to_camel_case
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
-from spyglass.spikesorting.v0.spikesorting_curation import (
+from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     CuratedSpikeSorting,
-)  # noqa: F401
+)
 from spyglass.spikesorting.v1 import ArtifactDetectionSelection  # noqa: F401
 from spyglass.spikesorting.v1 import (
     CurationV1,
@@ -83,6 +83,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         merge_ids : list
             list of merge ids from the restricted sources
         """
+        # TODO: replace with long-distance restrictions
+
         merge_ids = []
 
         if "v1" in sources:
@@ -185,6 +187,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return part_table * sort_group_info  # join the info with merge id's
 
     def get_spike_times(self, key):
+        """Get spike times for the group"""
         spike_times = []
         for nwb_file in self.fetch_nwb(key):
             # V1 uses 'object_id', V0 uses 'units'
@@ -210,7 +213,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.fetch_spike_data(key)  # CB: This is undefined.
+        spike_times = (cls & key).get_spike_times(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):

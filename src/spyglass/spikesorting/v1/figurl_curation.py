@@ -117,7 +117,10 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     url: varchar(1000)
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key: dict):
+        """Generate a FigURL for manual curation of a spike sorting."""
         # FETCH
         query = (
             FigURLCurationSelection * CurationV1 * SpikeSortingSelection & key
@@ -166,7 +169,9 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         self.insert1(key, skip_duplicates=True)
 
     @classmethod
-    def get_labels(cls, curation_json):
+    def get_labels(cls, curation_json) -> Dict[int, List[str]]:
+        """Uses kachery cloud to load curation json. Returns labelsByUnit."""
+
         labels_by_unit = kcl.load_json(curation_json).get("labelsByUnit")
         return (
             {
@@ -178,7 +183,8 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         )
 
     @classmethod
-    def get_merge_groups(cls, curation_json):
+    def get_merge_groups(cls, curation_json) -> Dict:
+        """Uses kachery cloud to load curation json. Returns mergeGroups."""
         return kcl.load_json(curation_json).get("mergeGroups", {})
 
 
