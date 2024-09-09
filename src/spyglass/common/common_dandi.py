@@ -9,7 +9,7 @@ import pynwb
 from fsspec.implementations.cached import CachingFileSystem
 
 from spyglass.common.common_usage import Export, ExportSelection
-from spyglass.settings import export_dir
+from spyglass.settings import export_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
@@ -21,9 +21,9 @@ try:
     from dandi.consts import known_instances
     from dandi.dandiapi import DandiAPIClient
     from dandi.metadata.nwb import get_metadata
-    from dandi.organize import OrganizeInvalid, CopyMode
-    from dandi.validate_types import Severity
+    from dandi.organize import CopyMode, OrganizeInvalid, FileOperationMode
     from dandi.pynwb_utils import nwb_has_external_links
+    from dandi.validate_types import Severity
 
 except (ImportError, ModuleNotFoundError) as e:
     (
@@ -33,9 +33,10 @@ except (ImportError, ModuleNotFoundError) as e:
         get_metadata,
         OrganizeInvalid,
         CopyMode,
+        FileOperationMode,
         Severity,
         nwb_has_external_links,
-    ) = [None] * 8
+    ) = [None] * 9
     logger.warning(e)
 
 
@@ -89,6 +90,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         dandiset_id: str,
         dandi_api_key: str = None,
         dandi_instance: str = "dandi",
+        skip_raw_files: bool = False,
     ):
         """Compile a Dandiset from the export.
         Parameters
@@ -102,6 +104,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
             DANDI_API_KEY is set.
         dandi_instance : str, optional
             What instance of Dandi the dandiset is on. Defaults to dev server.
+        skip_raw_files : bool, optional
+            Dev tool to skip raw files in the export. Defaults to False.
         """
         key = (Export & key).fetch1("KEY")
         paper_id = (Export & key).fetch1("paper_id")
@@ -142,11 +146,17 @@ class DandiPath(SpyglassMixin, dj.Manual):
             if not os.path.exists(
                 f"{destination_dir}/{os.path.basename(file)}"
             ):
+                if skip_raw_files and raw_dir in file:
+                    continue
                 # copy the file if it has external links so can be safely edited
                 if nwb_has_external_links(file):
-                    os.copy(file, f"{destination_dir}/{os.path.basename(file)}")
+                    shutil.copy(
+                        file, f"{destination_dir}/{os.path.basename(file)}"
+                    )
                 else:
-                    os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
+                    os.symlink(
+                        file, f"{destination_dir}/{os.path.basename(file)}"
+                    )
 
         # validate the dandiset
         validate_dandiset(destination_dir, ignore_external_files=True)
@@ -160,8 +170,12 @@ class DandiPath(SpyglassMixin, dj.Manual):
 
         # organize the files in the dandiset directory
         dandi.organize.organize(
-            destination_dir, dandiset_dir, update_external_filepaths=True,
-            invalid=OrganizeInvalid.ERROR, media_files_mode=CopyMode.SYMLINK,
+            destination_dir,
+            dandiset_dir,
+            update_external_file_paths=True,
+            invalid=OrganizeInvalid.FAIL,
+            media_files_mode=CopyMode.SYMLINK,
+            files_mode=FileOperationMode.COPY,
         )
 
         # get the dandi name translations
