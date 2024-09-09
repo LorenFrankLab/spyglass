@@ -221,7 +221,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
             docker_id=None,
             spyglass_version=spyglass_version,
         )
-        sql_dump.write_mysqldump(self & key, file_suffix="_dandi")
+        sql_dump.write_mysqldump([self & key], file_suffix="_dandi")
 
 
 def _get_metadata(path):
