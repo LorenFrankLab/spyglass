@@ -21,7 +21,7 @@ try:
     from dandi.consts import known_instances
     from dandi.dandiapi import DandiAPIClient
     from dandi.metadata.nwb import get_metadata
-    from dandi.organize import CopyMode, OrganizeInvalid, FileOperationMode
+    from dandi.organize import CopyMode, FileOperationMode, OrganizeInvalid
     from dandi.pynwb_utils import nwb_has_external_links
     from dandi.validate_types import Severity
 
@@ -235,7 +235,7 @@ def _get_metadata(path):
     return meta
 
 
-def translate_name_to_dandi(folder):
+def translate_name_to_dandi(folder, dandiset_dir: str = None):
     """Uses dandi.organize to translate filenames to dandi paths
 
     NOTE: The name for a given file depends on all files in the folder
@@ -244,12 +244,18 @@ def translate_name_to_dandi(folder):
     ----------
     folder : str
         location of files to be translated
+    danidset_dir : str
+        location of organized dandiset directory. If provided, will use this to
+        lookup the dandi_path for each file in the folder
 
     Returns
     -------
     dict
         dictionary of filename to dandi_path translations
     """
+    if dandiset_dir is not None:
+        return lookup_dandi_translation(folder, dandiset_dir)
+
     files = Path(folder).glob("*")
     metadata = list(map(_get_metadata, files))
     metadata, skip_invalid = dandi.organize.filter_invalid_metadata_rows(
@@ -262,6 +268,39 @@ def translate_name_to_dandi(folder):
         {"filename": Path(file["path"]).name, "dandi_path": file["dandi_path"]}
         for file in metadata
     ]
+
+
+def lookup_dandi_translation(source_dir: str, dandiset_dir: str):
+    """Get the dandi_path for each nwb file in the source_dir from
+    the organized dandi directory
+
+    Parameters
+    ----------
+    source_dir : str
+        location of the source files
+    dandiset_dir : str
+        location of the organized dandiset directory
+
+    Returns
+    -------
+    dict
+        dictionary of filename to dandi_path translations
+    """
+    # get the obj_id and dandipath for each nwb file in the dandiset
+    dandi_name_dict = {}
+    for dandi_file in Path(dandiset_dir).rglob("*.nwb"):
+        dandi_path = dandi_file.relative_to(dandiset_dir).as_posix()
+        with pynwb.NWBHDF5IO(dandi_file, "r") as io:
+            nwb = io.read()
+            dandi_name_dict[nwb.object_id] = dandi_path
+    # for each file in the source_dir, lookup the dandipath based on the obj_id
+    name_translation = {}
+    for file in Path(source_dir).glob("*"):
+        with pynwb.NWBHDF5IO(file, "r") as io:
+            nwb = io.read()
+            dandi_path = dandi_name_dict[nwb.object_id]
+            name_translation[file.name] = dandi_path
+    return name_translation
 
 
 def validate_dandiset(
