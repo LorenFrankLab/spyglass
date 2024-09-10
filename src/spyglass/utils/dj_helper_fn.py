@@ -354,6 +354,7 @@ def get_child_tables(table):
 def update_analysis_for_dandi_standard(
     filepath: str,
     age: str = "P4M/P8M",
+    resolve_external_table: bool = True,
 ):
     """Function to resolve common nwb file format errors within the database
 
@@ -363,6 +364,9 @@ def update_analysis_for_dandi_standard(
         abs path to the file to edit
     age : str, optional
         age to assign animal if missing, by default "P4M/P8M"
+    resolve_external_table : bool, optional
+        whether to update the external table. Set False if editing file
+        outside the database, by default True
     """
     from spyglass.common import LabMember
 
@@ -426,8 +430,9 @@ def update_analysis_for_dandi_standard(
             file["/general/experimenter"][:] = new_experimenter_value
 
     # update the datajoint external store table to reflect the changes
-    location = "raw" if filepath.endswith("_.nwb") else "analysis"
-    _resolve_external_table(filepath, file_name, location)
+    if resolve_external_table:
+        location = "raw" if filepath.endswith("_.nwb") else "analysis"
+        _resolve_external_table(filepath, file_name, location)
 
 
 def dandi_format_names(experimenter: List) -> List:
