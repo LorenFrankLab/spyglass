@@ -18,6 +18,10 @@
 
     - Fix edge case errors in spike time loading #1083
 
+- Position
+
+    - Restore #973, allow DLC without position tracking #1100
+
 - Spike Sorting
 
     - Fix bug in `get_group_by_shank` #1096
