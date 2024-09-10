@@ -581,7 +581,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
 
         peak_sign_metrics = ["snr", "peak_offset", "peak_channel"]
         if metric_name == "isi_violation":
-            metric = metric_func(waveform_extractor, **metric_params)
+            return metric_func(waveform_extractor, **metric_params)
         elif metric_name in peak_sign_metrics:
             if "peak_sign" not in metric_params:
                 raise Exception(
