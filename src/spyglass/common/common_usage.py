@@ -22,6 +22,7 @@ from spyglass.utils.dj_helper_fn import (
     unique_dicts,
     update_analysis_for_dandi_standard,
 )
+from spyglass.utils.nwb_helper_fn import get_linked_nwbs
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 schema = dj.schema("common_usage")
@@ -266,6 +267,26 @@ class Export(SpyglassMixin, dj.Computed):
         file_paths = unique_dicts(  # Original plus upstream files
             query.list_file_paths(paper_key) + restr_graph.file_paths
         )
+
+        # Check for linked nwb objects and add them to the export
+        exclude_files = []
+        for i, file in enumerate(file_paths):
+            if links := get_linked_nwbs(file["file_path"]):
+                for link in links:
+                    file_paths.append({"file_path": link})
+                logger.warning(
+                    "Dandi not yet supported for linked nwb objects"
+                    + f"excluding {file['file_path']} from export"
+                    + f" and including {links} instead"
+                )
+                exclude_files.append(i)
+        # Remove the files that contained linked nwb objects
+        file_paths = [
+            file_paths[i]
+            for i in range(len(file_paths))
+            if i not in exclude_files
+        ]
+        file_paths = unique_dicts(file_paths)
 
         table_inserts = [
             {**key, **rd, "table_id": i}

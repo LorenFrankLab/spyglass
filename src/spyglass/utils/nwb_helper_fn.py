@@ -101,6 +101,17 @@ def file_from_dandi(filepath):
     return False
 
 
+def get_linked_nwbs(path):
+    """Return a list of paths to NWB files that are linked by objects in
+    the file at the given path."""
+    with pynwb.NWBHDF5IO(path, "r") as io:
+        # open the nwb file (opens externally linked files as well)
+        nwb = io.read()
+        # get the linked files
+        linked_nwbs = [x for x in io._HDF5IO__built.keys() if (not x == path)]
+    return linked_nwbs
+
+
 def get_config(nwb_file_path, calling_table=None):
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
