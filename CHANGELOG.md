@@ -21,6 +21,7 @@
 - Spike Sorting
 
     - Fix bug in `get_group_by_shank` #1096
+    - Fix bug in `_compute_metric` #1099
 
 ## [0.5.3] (August 27, 2024)
 

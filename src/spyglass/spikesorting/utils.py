@@ -38,6 +38,7 @@ def get_group_by_shank(
     omit_unitrode : bool
         Optional. If True, no sort groups are defined for unitrodes.
     """
+    print("Run new")
     # get the electrodes from this NWB file
     electrodes = (
         Electrode()
