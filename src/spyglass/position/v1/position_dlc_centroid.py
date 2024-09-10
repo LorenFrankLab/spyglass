@@ -254,19 +254,22 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
 
         logger.info(f"total NaNs in centroid dataset: {total_nan}")
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
         position = pynwb.behavior.Position()
         velocity = pynwb.behavior.BehavioralTimeSeries()
+        if query := (RawPosition() & key):
+            spatial_series = query.fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
 
         common_attrs = {
             "conversion": METERS_PER_CM,
-            "comments": spatial_series.comments,
+            "comments": getattr(spatial_series, "comments", ""),
         }
         position.create_spatial_series(
             name="position",
             timestamps=final_df.index.to_numpy(),
             data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-            reference_frame=spatial_series.reference_frame,
+            reference_frame=getattr(spatial_series, "reference_frame", ""),
             description="x_position, y_position",
             **common_attrs,
         )
