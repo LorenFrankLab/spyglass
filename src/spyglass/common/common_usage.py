@@ -233,6 +233,7 @@ class Export(SpyglassMixin, dj.Computed):
         """
 
     def populate_paper(self, paper_id: Union[str, dict]):
+        self.load_shared_schemas()
         if isinstance(paper_id, dict):
             paper_id = paper_id.get("paper_id")
         self.populate(ExportSelection().paper_export_id(paper_id))
