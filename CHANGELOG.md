@@ -15,7 +15,12 @@
 ### Pipelines
 
 - Decoding
+
     - Fix edge case errors in spike time loading #1083
+
+- Spike Sorting
+
+    - Fix bug in `get_group_by_shank` #1096
 
 ## [0.5.3] (August 27, 2024)
 
