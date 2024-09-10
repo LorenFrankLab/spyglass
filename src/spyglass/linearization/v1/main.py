@@ -49,6 +49,7 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     edges: blob                # shape (n_edges, 2)
     linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
     linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
+    edge_map = NULL : blob     # Maps one edge to another before linearization
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
@@ -58,6 +59,7 @@ class TrackGraph(SpyglassMixin, dj.Manual):
         return make_track_graph(
             node_positions=track_graph_parameters["node_positions"],
             edges=track_graph_parameters["edges"],
+            edge_map=track_graph_parameters["edge_map"],
         )
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):

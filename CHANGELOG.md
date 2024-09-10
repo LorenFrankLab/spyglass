@@ -6,6 +6,11 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+from spyglass.linearization.v1.main import TrackGraph
+TrackGraph.alter() # Comment regarding the change
+```
+
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
@@ -17,6 +22,8 @@
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+- Linearization
+    - Add edge_map parameter to LinearizedPositionV1 #1091
 
 - Spike Sorting
 
