@@ -122,9 +122,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         if not v_path:
             raise FileNotFoundError(f"Video file not found for {key}")
         logger.info("Pose Estimation Selection")
-        v_dir = Path(v_path).parent
-        logger.info("video_dir: %s", v_dir)
-        v_path = find_mp4(video_path=v_dir, video_filename=v_fname)
+        logger.info(f"video_dir: {v_path}")
+        v_path = find_mp4(video_path=Path(v_path), video_filename=v_fname)
         if check_crop:
             params["cropping"] = self.get_video_crop(
                 video_path=v_path.as_posix()
