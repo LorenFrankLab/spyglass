@@ -25,6 +25,10 @@ TrackGraph.alter() # Comment regarding the change
 - Linearization
     - Add edge_map parameter to LinearizedPositionV1 #1091
 
+- Position
+
+    - Restore #973, allow DLC without position tracking #1100
+
 - Spike Sorting
 
     - Fix bug in `get_group_by_shank` #1096
