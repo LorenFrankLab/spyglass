@@ -223,6 +223,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(
                 "Either key or recompute_file_name must be specified."
             )
+        if recompute_file_name and not key:
+            logger.info(f"Recomputing {recompute_file_name}.")
 
         key = key or (cls & {"analysis_file_name": recompute_file_name}).fetch1(
             "KEY"

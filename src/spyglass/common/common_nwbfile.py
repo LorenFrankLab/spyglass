@@ -94,7 +94,9 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
 
     @classmethod
-    def get_abs_path(cls, nwb_file_name: str, new_file: bool = False) -> str:
+    def get_abs_path(
+        cls, nwb_file_name: str, new_file: bool = False, **kwargs
+    ) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR must be set, either as an environment or part of
@@ -216,7 +218,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             )
 
             # write the new file
-            logger.info(f"Writing new NWB file {analysis_file_name}")
+            if not recompute_file_name:
+                logger.info(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
@@ -330,7 +333,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self.insert1(key)
 
     @classmethod
-    def get_abs_path(cls, analysis_nwb_file_name: str) -> str:
+    def get_abs_path(
+        cls, analysis_nwb_file_name: str, from_schema: bool = False
+    ) -> str:
         """Return the absolute path for an analysis NWB file given the name.
 
         The spyglass config from settings.py must be set.
@@ -339,12 +344,21 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         analysis_nwb_file_name : str
             The name of the NWB file in AnalysisNwbfile.
+        from schema : bool, optional
+            If true, get the file path from the schema externals table, skipping
+            checksum and file existence checks. Defaults to False.
 
         Returns
         -------
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        if from_schema:
+            substring = analysis_nwb_file_name.split("_")[0]
+            return f"{analysis_dir}/" + (
+                schema.external["analysis"] & f'filepath LIKE "%{substring}%"'
+            ).fetch1("filepath")
+
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
         if cls & file_key:
