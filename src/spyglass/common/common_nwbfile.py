@@ -354,9 +354,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The absolute path for the given file name.
         """
         if from_schema:
-            substring = analysis_nwb_file_name.split("_")[0]
             return f"{analysis_dir}/" + (
-                schema.external["analysis"] & f'filepath LIKE "%{substring}%"'
+                schema.external["analysis"]
+                & f'filepath LIKE "%{analysis_nwb_file_name}"'
             ).fetch1("filepath")
 
         # If an entry exists in the database get the stored datajoint filepath

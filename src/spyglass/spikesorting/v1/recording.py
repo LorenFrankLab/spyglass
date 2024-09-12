@@ -225,16 +225,17 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         if recompute_file_name and not key:
             logger.info(f"Recomputing {recompute_file_name}.")
-
-        key = key or (cls & {"analysis_file_name": recompute_file_name}).fetch1(
-            "KEY"
-        )
+            query = cls & {"analysis_file_name": recompute_file_name}
+            key, recompute_object_id = query.fetch1("KEY", "object_id")
+        else:
+            recompute_object_id = None
 
         parent = SpikeSortingRecordingSelection & key
         recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
             **cls()._get_preprocessed_recording(key),
             nwb_file_name=parent.fetch1("nwb_file_name"),
             recompute_file_name=recompute_file_name,
+            recompute_object_id=recompute_object_id,
         )
 
         return dict(
@@ -548,6 +549,7 @@ def _write_recording_to_nwb(
     timestamps: Iterable,
     nwb_file_name: str,
     recompute_file_name: Optional[str] = None,
+    recompute_object_id: Optional[str] = None,
 ):
     """Write a recording in NWB format
 
@@ -567,7 +569,9 @@ def _write_recording_to_nwb(
     analysis_nwb_file = AnalysisNwbfile().create(
         nwb_file_name=nwb_file_name, recompute_file_name=recompute_file_name
     )
-    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
+    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+        analysis_nwb_file, from_schema=bool(recompute_file_name)
+    )
 
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
@@ -595,10 +599,19 @@ def _write_recording_to_nwb(
             conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
         )
         nwbfile.add_acquisition(processed_electrical_series)
-        recording_object_id = nwbfile.acquisition[
-            "ProcessedElectricalSeries"
-        ].object_id
+
+        if recompute_object_id:
+            nwbfile.acquisition["ProcessedElectricalSeries"].object_id = (
+                recompute_object_id  # AttributeError: can't set attribute
+            )
+            recompute_object_id = recompute_object_id
+        else:
+            recording_object_id = nwbfile.acquisition[
+                "ProcessedElectricalSeries"
+            ].object_id
+
         io.write(nwbfile)
+
     return analysis_nwb_file, recording_object_id
 
 
