@@ -198,7 +198,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["recording_id"],
                 "valid_times": self._get_sort_interval_valid_times(key),
                 "pipeline": "spikesorting_recording_v1",
-            }
+            },
+            skip_duplicates=True,  # for recompute
         )
         AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
         self.insert1(key)
@@ -595,22 +596,27 @@ def _write_recording_to_nwb(
             electrodes=table_region,
             timestamps=timestamps_iterator,
             filtering="Bandpass filtered for spike band",
-            description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
+            description="Referenced and filtered recording from "
+            + f"{nwb_file_name} for spike sorting",
             conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
         )
+
         nwbfile.add_acquisition(processed_electrical_series)
 
-        if recompute_object_id:
-            nwbfile.acquisition["ProcessedElectricalSeries"].object_id = (
-                recompute_object_id  # AttributeError: can't set attribute
-            )
-            recompute_object_id = recompute_object_id
-        else:
-            recording_object_id = nwbfile.acquisition[
-                "ProcessedElectricalSeries"
-            ].object_id
+        recording_object_id = nwbfile.acquisition[
+            "ProcessedElectricalSeries"
+        ].object_id
 
         io.write(nwbfile)
+
+    if recompute_object_id:
+        import h5py
+
+        with h5py.File(analysis_nwb_file_abs_path, "a") as f:
+            f["acquisition/ProcessedElectricalSeries"].attrs[
+                "object_id"
+            ] = recompute_object_id
+        recording_object_id = recompute_object_id
 
     return analysis_nwb_file, recording_object_id
 
