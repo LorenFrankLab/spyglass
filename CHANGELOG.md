@@ -8,7 +8,8 @@
 
 ```python
 from spyglass.linearization.v1.main import TrackGraph
-TrackGraph.alter() # Comment regarding the change
+
+TrackGraph.alter()  # Comment regarding the change
 ```
 
 ### Infrastructure
@@ -22,11 +23,14 @@ TrackGraph.alter() # Comment regarding the change
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+
 - Linearization
+
     - Add edge_map parameter to LinearizedPositionV1 #1091
 
 - Position
 
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
 
 - Spike Sorting
