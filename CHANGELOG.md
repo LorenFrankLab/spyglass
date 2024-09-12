@@ -8,7 +8,8 @@
 
 ```python
 from spyglass.linearization.v1.main import TrackGraph
-TrackGraph.alter() # Comment regarding the change
+
+TrackGraph.alter()  # Comment regarding the change
 ```
 
 ### Infrastructure
@@ -30,6 +31,7 @@ TrackGraph.alter() # Comment regarding the change
 - Position
 
     - Fix video directory bug in `DLCPoseEstimationSelection` #1103
+    - Restore #973, allow DLC without position tracking #1100
 
 - Spike Sorting
 

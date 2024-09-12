@@ -257,16 +257,19 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 populate_missing=False,
             )
         )
-        spatial_series = (
-            RawPosition() & {**key, "interval_list_name": interval_list_name}
-        ).fetch_nwb()[0]["raw_position"]
-        _, _, _, video_time = get_video_info(key)
-        pos_time = spatial_series.timestamps
+        if interval_list_name:
+            spatial_series = (
+                RawPosition()
+                & {**key, "interval_list_name": interval_list_name}
+            ).fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
+
+        _, _, meters_per_pixel, video_time = get_video_info(key)
+        key["meters_per_pixel"] = meters_per_pixel
 
         # TODO: should get timestamps from VideoFile, but need the
         # video_frame_ind from RawPosition, which also has timestamps
-
-        key["meters_per_pixel"] = spatial_series.conversion
 
         # Insert entry into DLCPoseEstimation
         logger.info(
@@ -295,7 +298,9 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             part_df = convert_to_cm(part_df, meters_per_pixel)
             logger.info("adding timestamps to DataFrame")
             part_df = add_timestamps(
-                part_df, pos_time=pos_time, video_time=video_time
+                part_df,
+                pos_time=getattr(spatial_series, "timestamps", video_time),
+                video_time=video_time,
             )
             key["bodypart"] = body_part
             key["analysis_file_name"] = AnalysisNwbfile().create(
@@ -308,8 +313,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 timestamps=part_df.time.to_numpy(),
                 conversion=METERS_PER_CM,
                 data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
+                reference_frame=getattr(spatial_series, "reference_frame", ""),
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_position, y_position",
             )
             likelihood.create_timeseries(
