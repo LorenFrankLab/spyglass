@@ -6,6 +6,12 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+from spyglass.linearization.v1.main import TrackGraph
+
+TrackGraph.alter()  # Comment regarding the change
+```
+
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
@@ -18,9 +24,19 @@
 
     - Fix edge case errors in spike time loading #1083
 
+- Linearization
+
+    - Add edge_map parameter to LinearizedPositionV1 #1091
+
+- Position
+
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
+    - Restore #973, allow DLC without position tracking #1100
+
 - Spike Sorting
 
     - Fix bug in `get_group_by_shank` #1096
+    - Fix bug in `_compute_metric` #1099
 
 ## [0.5.3] (August 27, 2024)
 
