@@ -604,7 +604,6 @@ class RestrGraph(AbstractGraph):
         for table in self.all_ft:
             for row in table.fetch(as_dict=True):
                 initial.update(key_hash(row).encode("utf-8"))
-            print(f"{table.full_table_name}: {initial.hexdigest()}")
         return initial.hexdigest()
 
     # ------------------------------- Add Nodes -------------------------------

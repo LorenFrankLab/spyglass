@@ -74,7 +74,6 @@ nav:
     - FigURL: Features/FigURL.md
     - Merge Tables: Features/Merge.md
     - Export: Features/Export.md
-    - Session Groups: Features/SessionGroups.md
     - Centralized Code: Features/Mixin.md
   - For Developers:
     - Overview: ForDevelopers/index.md

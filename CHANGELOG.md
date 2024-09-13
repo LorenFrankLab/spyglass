@@ -7,9 +7,11 @@
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
+import datajoint as dj
 from spyglass.linearization.v1.main import TrackGraph
 
-TrackGraph.alter()  # Comment regarding the change
+TrackGraph.alter()  # Add edge map parameter
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 ```
 
 ### Infrastructure
@@ -21,6 +23,10 @@ TrackGraph.alter()  # Comment regarding the change
 
 ### Pipelines
 
+- Common
+
+    - Drop `SessionGroup` table #1106
+
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
@@ -31,6 +37,7 @@ TrackGraph.alter()  # Comment regarding the change
 
 - Position
 
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
 
 - Spike Sorting
