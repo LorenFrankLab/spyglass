@@ -15,7 +15,7 @@ TrackGraph.alter()  # Comment regarding the change
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066,
-    #1107
+    #1108
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 
