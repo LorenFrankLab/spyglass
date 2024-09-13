@@ -96,7 +96,12 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         table_query = dj.FreeTable(
             dj.conn(), full_table_name=part_table.parents()[-1]
         ) & {"project_name": project_name}
-        project_path = table_query.fetch1("project_path")
+
+        if cls._test_mode:  # temporary fix for #1105
+            project_path = table_query.fetch(limit=1)[0]
+        else:
+            project_path = table_query.fetch1("project_path")
+
         part_table.insert1(
             {
                 "dlc_model_name": dlc_model_name,

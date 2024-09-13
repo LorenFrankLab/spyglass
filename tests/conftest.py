@@ -982,13 +982,16 @@ def populate_training(
     if len(train_tbl & model_train_key) == 0:
         _ = add_training_files
         DOWNLOADS.move_dlc_items(labeled_vid_dir)
-        sgp.v1.DLCModelTraining.populate(model_train_key)
+    sgp.v1.DLCModelTraining().populate(model_train_key)
     yield model_train_key
 
 
 @pytest.fixture(scope="session")
 def model_source_key(sgp, model_train_key, populate_training):
-    yield (sgp.v1.DLCModelSource & model_train_key).fetch1("KEY")
+
+    _ = populate_training
+
+    yield (sgp.v1.DLCModelSource & model_train_key).fetch("KEY")[0]
 
 
 @pytest.fixture(scope="session")

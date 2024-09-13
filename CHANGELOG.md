@@ -24,7 +24,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 
 - Common
 
-    - Drop `SessionGroup` table #1082
+    - Drop `SessionGroup` table #1106
 
 - Decoding
 
@@ -36,6 +36,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 
 - Position
 
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
 
 - Spike Sorting
