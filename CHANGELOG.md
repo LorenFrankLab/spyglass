@@ -8,12 +8,14 @@
 
 ```python
 from spyglass.linearization.v1.main import TrackGraph
-TrackGraph.alter() # Comment regarding the change
+
+TrackGraph.alter()  # Comment regarding the change
 ```
 
 ### Infrastructure
 
-- Disable populate transaction protection for long-populating tables #1066
+- Disable populate transaction protection for long-populating tables #1066,
+    #1107
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 
@@ -22,7 +24,9 @@ TrackGraph.alter() # Comment regarding the change
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+
 - Linearization
+
     - Add edge_map parameter to LinearizedPositionV1 #1091
 
 - Position
