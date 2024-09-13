@@ -7,9 +7,11 @@
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
+import datajoint as dj
 from spyglass.linearization.v1.main import TrackGraph
 
-TrackGraph.alter()  # Comment regarding the change
+TrackGraph.alter()  # Add edge map parameter
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 ```
 
 ### Infrastructure
@@ -19,6 +21,10 @@ TrackGraph.alter()  # Comment regarding the change
 - Update DataJoint to 0.14.2 #1081
 
 ### Pipelines
+
+- Common
+
+    - Drop `SessionGroup` table #1106
 
 - Decoding
 
