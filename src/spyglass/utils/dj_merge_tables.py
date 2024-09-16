@@ -835,8 +835,13 @@ class Merge(dj.Manual):
         super().delete(*args, **kwargs)
 
     @classmethod
-    def extract_merge_id(cls, restriction):
+    def extract_merge_id(cls, restriction) -> Union[dict, list]:
         """Utility function to extract merge_id from a restriction
+        
+        Removes all other restricted attributes, and defaults to a
+        universal set (either empty dict or True) when there is no
+        merge_id present in the input, relying on parent func to 
+        restrict on secondary or part-parent key(s).
 
         Parameters
         ----------
