@@ -276,8 +276,8 @@ class Export(SpyglassMixin, dj.Computed):
                 for link in links:
                     file_paths.append({"file_path": link})
                 logger.warning(
-                    "Dandi not yet supported for linked nwb objects"
-                    + f"excluding {file['file_path']} from export"
+                    "Dandi not yet supported for linked nwb objects "
+                    + f"excluding {file['file_path']} from export "
                     + f" and including {links} instead"
                 )
                 exclude_files.append(i)
