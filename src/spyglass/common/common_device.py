@@ -400,29 +400,14 @@ class Probe(SpyglassMixin, dj.Manual):
                 )
 
             elif probe_type in config_probes:
-                shank_list = config["Probe"][
-                    config_probes.index(probe_type)
-                ].get("Shank", {})
-                shank_dict = [
-                    {"probe_id": probe_type, "probe_shank": int(i)}
-                    for i in shank_list
-                ]
-                elect_dict_list = config["Probe"][
-                    config_probes.index(probe_type)
-                ].get("Electrode", {})
-                elect_dict = [
-                    {"probe_id": probe_type, **e} for e in elect_dict_list
-                ]
-                new_probe_type_dict = {
-                    "probe_type": probe_type,
-                    "probe_id": probe_type,
-                    "data_acquisition_device": config["Probe"][
-                        config_probes.index(probe_type)
-                    ].get("data_acquisition_device", None),
-                    "contact_side_numbering": config["Probe"][
-                        config_probes.index(probe_type)
-                    ].get("contact_side_numbering"),
-                }
+                cls._read_config_probe_data(
+                    config,
+                    probe_type,
+                    new_probe_type_dict,
+                    new_probe_dict,
+                    shank_dict,
+                    elect_dict,
+                )
 
             # check that number of shanks is consistent
             num_shanks = new_probe_type_dict["num_shanks"]
@@ -568,6 +553,66 @@ class Probe(SpyglassMixin, dj.Manual):
                     "rel_y": electrode.rel_y,
                     "rel_z": electrode.rel_z,
                 }
+
+    @classmethod
+    def _read_config_probe_data(
+        cls,
+        config,
+        probe_type,
+        new_probe_type_dict,
+        new_probe_dict,
+        shank_dict,
+        elect_dict,
+    ):
+
+        # get the list of shank keys for the probe
+        shank_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Shank", []
+        )
+        for i in shank_list:
+            shank_dict[str(i)] = {"probe_id": probe_type, "probe_shank": int(i)}
+
+        # get the list of electrode keys for the probe
+        elect_dict_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Electrode", []
+        )
+        for i, e in enumerate(elect_dict_list):
+            elect_dict[str(i)] = {
+                "probe_id": probe_type,
+                "probe_shank": e["probe_shank"],
+                "probe_electrode": e["probe_electrode"],
+                "contact_size": e.get("contact_size"),
+                "rel_x": e.get("rel_x"),
+                "rel_y": e.get("rel_y"),
+                "rel_z": e.get("rel_z"),
+            }
+
+        # make the probe type if not in database
+        new_probe_type_dict.update(
+            {
+                "manufacturer": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("manufacturer"),
+                "probe_type": probe_type,
+                "probe_description": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("probe_description"),
+                "num_shanks": len(shank_list),
+            }
+        )
+
+        cls._add_probe_type(new_probe_type_dict)
+
+        # make the probe dictionary
+        new_probe_dict.update(
+            {
+                "probe_type": probe_type,
+                "probe_id": probe_type,
+                "contact_side_numbering": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("contact_side_numbering"),
+            }
+        )
 
     @classmethod
     def _add_probe_type(cls, new_probe_type_dict):
