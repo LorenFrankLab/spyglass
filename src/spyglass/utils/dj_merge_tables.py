@@ -532,7 +532,7 @@ class Merge(dj.Manual):
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
-        merge_restriction = extract_merge_id(restriction)
+        merge_restriction = self.extract_merge_id(restriction)
         sources = set((self & merge_restriction).fetch(self._reserved_sk))
         nwb_list = []
         merge_ids = []
@@ -834,6 +834,39 @@ class Merge(dj.Manual):
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
+    @classmethod
+    def extract_merge_id(cls, restriction):
+        """Utility function to extract merge_id from a restriction
+
+        Parameters
+        ----------
+        restriction : str, dict, or dj.condition.AndList
+            A datajoint restriction
+
+        Returns
+        -------
+        restriction
+            A restriction containing only the merge_id key
+        """
+        if restriction is None:
+            return None
+        if isinstance(restriction, dict):
+            if merge_id := restriction.get("merge_id"):
+                return {"merge_id": merge_id}
+            else:
+                return {}
+        merge_restr = []
+        if isinstance(restriction, dj.condition.AndList) or isinstance(restriction, List):
+            merge_id_list = [cls.extract_merge_id(r) for r in restriction]
+            merge_restr =  [x for x in merge_id_list if x is not None]
+        elif isinstance(restriction, str):
+            parsed = [x.split(")")[0] for x in restriction.split("(") if x]
+            merge_restr =  dj.condition.AndList([x for x in parsed if "merge_id" in x])
+
+        if len(merge_restr) == 0:
+            return True
+        return merge_restr
+
 
 _Merge = Merge
 
@@ -861,35 +894,3 @@ def delete_downstream_merge(
     table = table if isinstance(table, dj.Table) else table()
 
     return table.delete_downstream_parts(**kwargs)
-
-def extract_merge_id(restriction):
-    """Utility function to extract merge_id from a restriction
-
-    Parameters
-    ----------
-    restriction : str, dict, or dj.condition.AndList
-        A datajoint restriction
-
-    Returns
-    -------
-    restriction
-        A restriction containing only the merge_id key
-    """
-    if restriction is None:
-        return None
-    if isinstance(restriction, dict):
-        if merge_id := restriction.get("merge_id"):
-            return {"merge_id": merge_id}
-        else:
-            return {}
-    merge_restr = []
-    if isinstance(restriction, dj.condition.AndList) or isinstance(restriction, List):
-        merge_id_list = [extract_merge_id(r) for r in restriction]
-        merge_restr =  [x for x in merge_id_list if x is not None]
-    elif isinstance(restriction, str):
-        parsed = [x.split(")")[0] for x in restriction.split("(") if x]
-        merge_restr =  dj.condition.AndList([x for x in parsed if "merge_id" in x])
-
-    if len(merge_restr) == 0:
-        return True
-    return merge_restr
