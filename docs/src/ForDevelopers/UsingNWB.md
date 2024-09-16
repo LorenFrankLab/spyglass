@@ -146,7 +146,7 @@ ndx_franklab_novela.CameraDevice </b>
 | Probe          |    probe_type     |        nwbf.devices.\<\*Probe>.probe_type | config\["Probe"\]\[index\]\["probe_type"\] |   str |
 | Probe          |     probe_id      |        nwbf.devices.\<\*Probe>.probe_type | config\["Probe"\]\[index\]\["probe_type"\] |   str |
 | Probe          |   manufacturer    |      nwbf.devices.\<\*Probe>.manufacturer | config\["Probe"\]\[index\]\["manufacturer"\] |   str |
-| Probe          | probe_description | nwbf.devices.\<\*Probe>.probe_description | config\["Probe"\]\[index\]\["descriuption"\] |   str |
+| Probe          | probe_description | nwbf.devices.\<\*Probe>.probe_description | config\["Probe"\]\[index\]\["description"\] |   str |
 | Probe          |    num_shanks     |        nwbf.devices.\<\*Probe>.num_shanks |                                        XXX |   int |
 
 <b> NWBfile Location: nwbf.devices.\<\*Probe>.\<\*Shank> <br/> Object type:
