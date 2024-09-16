@@ -542,7 +542,11 @@ class Merge(dj.Manual):
             ).fetch("KEY")
             nwb_list.extend(
                 (self & source_restr)
-                .merge_restrict_class(restriction, permit_multiple_rows=True, add_invalid_restrict=False)
+                .merge_restrict_class(
+                    restriction,
+                    permit_multiple_rows=True,
+                    add_invalid_restrict=False,
+                )
                 .fetch_nwb()
             )
             if return_merge_ids:
@@ -739,10 +743,15 @@ class Merge(dj.Manual):
         return ret
 
     def merge_restrict_class(
-        self, key: dict, permit_multiple_rows: bool = False, add_invalid_restrict=True
+        self,
+        key: dict,
+        permit_multiple_rows: bool = False,
+        add_invalid_restrict=True,
     ) -> dj.Table:
         """Returns native parent class, restricted with key."""
-        parent = self.merge_get_parent(key, add_invalid_restrict=add_invalid_restrict)
+        parent = self.merge_get_parent(
+            key, add_invalid_restrict=add_invalid_restrict
+        )
         parent_key = parent.fetch("KEY", as_dict=True)
 
         if not permit_multiple_rows and len(parent_key) > 1:
@@ -838,10 +847,10 @@ class Merge(dj.Manual):
     @classmethod
     def extract_merge_id(cls, restriction) -> Union[dict, list]:
         """Utility function to extract merge_id from a restriction
-        
+
         Removes all other restricted attributes, and defaults to a
         universal set (either empty dict or True) when there is no
-        merge_id present in the input, relying on parent func to 
+        merge_id present in the input, relying on parent func to
         restrict on secondary or part-parent key(s).
 
         Parameters
@@ -862,12 +871,16 @@ class Merge(dj.Manual):
             else:
                 return {}
         merge_restr = []
-        if isinstance(restriction, dj.condition.AndList) or isinstance(restriction, List):
+        if isinstance(restriction, dj.condition.AndList) or isinstance(
+            restriction, List
+        ):
             merge_id_list = [cls.extract_merge_id(r) for r in restriction]
-            merge_restr =  [x for x in merge_id_list if x is not None]
+            merge_restr = [x for x in merge_id_list if x is not None]
         elif isinstance(restriction, str):
             parsed = [x.split(")")[0] for x in restriction.split("(") if x]
-            merge_restr =  dj.condition.AndList([x for x in parsed if "merge_id" in x])
+            merge_restr = dj.condition.AndList(
+                [x for x in parsed if "merge_id" in x]
+            )
 
         if len(merge_restr) == 0:
             return True
