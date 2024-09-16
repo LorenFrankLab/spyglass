@@ -119,12 +119,15 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 camera_names[camera_id] = device.camera_name
         if device_list := config.get("CameraDevice"):
             for device in device_list:
-                camera_names.update({
-                    name: id for name, id in zip(
-                        device.get('camera_name'),
-                        device.get('camera_id',-1)
-                    )
-                })
+                camera_names.update(
+                    {
+                        name: id
+                        for name, id in zip(
+                            device.get("camera_name"),
+                            device.get("camera_id", -1),
+                        )
+                    }
+                )
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
@@ -177,29 +180,24 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
                     # so epoch would be an int
-
                     key["epoch"] = epoch
-                    target_interval = str(epoch).zfill(2)
-                    target_interval_name = None
-                    for interval in session_intervals:
-                        if (
-                            target_interval in interval
-                        ):  # TODO this is not true for the beans file
-                            target_interval_name = interval
-                            break
-                    if target_interval_name is None:
-                        logger.warn(
-                            f"Interval not found for epoch {epoch} in {nwb_file_name}"
-                        )
+                    target_interval = self.get_epoch_interval_name(
+                        epoch, session_intervals
+                    )
+                    if target_interval is None:
+                        logger.warn("Skipping epoch.")
                         continue
-                    # TODO case when interval is not found is not handled
-                    key["interval_list_name"] = target_interval_name
+                    key["interval_list_name"] = target_interval
                     task_inserts.append(key.copy())
 
         # Add tasks from config
         for task in config_tasks:
-            new_key = key.copy()
-            new_key["task_name"] = task.get("task_name")
+            new_key = {
+                **key,
+                "task_name": task.get("task_name"),
+                "task_environment": task.get("task_environment", None),
+            }
+            # add cameras
             camera_ids = task.get("camera_id", [])
             valid_camera_ids = [
                 camera_id
@@ -207,38 +205,46 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 if camera_id in camera_names.keys()
             ]
             if valid_camera_ids:
-                key["camera_names"] = [
+                new_key["camera_names"] = [
                     {"camera_name": camera_names[camera_id]}
                     for camera_id in valid_camera_ids
                 ]
-            else:
-                logger.warn(
-                    f"No camera device found with ID {camera_ids} in NWB "
-                    + f"file {nwbf}\n"
-                )
-            key["task_environment"] = task.get("task_environment", None)
             session_intervals = (
                 IntervalList() & {"nwb_file_name": nwb_file_name}
             ).fetch("interval_list_name")
             for epoch in task.get("task_epochs", []):
                 new_key["epoch"] = epoch
-                target_interval = str(epoch).zfill(2)
-                target_interval_name = None
-                for interval in session_intervals:
-                    if (
-                        target_interval in interval
-                    ):  # TODO this is not true for the beans file
-                        target_interval_name = interval
-                        break
-                if target_interval_name is None:
-                    logger.warn(
-                        f"Interval not found for epoch {epoch} in {nwb_file_name}"
-                    )
+                target_interval = self.get_epoch_interval_name(
+                    epoch, session_intervals
+                )
+                if target_interval is None:
+                    logger.warn("Skipping epoch.")
                     continue
-                new_key["interval_list_name"] = interval
-                task_inserts.append(new_key.copy())
+                new_key["interval_list_name"] = target_interval
+                task_inserts.append(key.copy())
 
         self.insert(task_inserts, allow_direct_insert=True)
+
+    @classmethod
+    def get_epoch_interval_name(cls, epoch, session_intervals):
+        """Get the interval name for a given epoch based on matching number"""
+        target_interval = str(epoch).zfill(2)
+        possible_targets = [
+            interval
+            for interval in session_intervals
+            if target_interval in interval
+        ]
+        if not possible_targets:
+            logger.warn(
+                f"Interval not found for epoch {epoch} in {nwb_file_name}."
+            )
+        elif len(possible_targets) > 1:
+            logger.warn(
+                f"Multiple intervals found for epoch {epoch} in {nwb_file_name}. "
+                + f"matches are {possible_targets}."
+            )
+        else:
+            return possible_targets[0]
 
     @classmethod
     def update_entries(cls, restrict=True):
