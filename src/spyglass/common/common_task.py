@@ -119,17 +119,19 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 camera_names[camera_id] = device.camera_name
         if device_list := config.get("CameraDevice"):
             for device in device_list:
-                camera_id = device.get("camera_id", -1)
-                camera_names[camera_id] = device.get("camera_name")
+                camera_names.update({
+                    name: id for name, id in zip(
+                        device.get('camera_name'),
+                        device.get('camera_id',-1)
+                    )
+                })
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
 
         tasks_mod = nwbf.processing.get("tasks")
-        if (
-            tasks_mod is None
-            and (config_tasks := config.get("Tasks", None)) is None
-        ):
+        config_tasks = config.get("Tasks")
+        if tasks_mod is None and config_tasks is None:
             logger.warn(
                 f"No tasks processing module found in {nwbf} or config\n"
             )
