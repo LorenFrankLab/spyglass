@@ -64,6 +64,7 @@ class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def get_accepted_params(cls):
+        """Return all accepted parameters for DLC model training."""
         from deeplabcut import create_training_dataset, train_network
 
         return set(
@@ -86,6 +87,7 @@ class DLCModelTrainingSelection(SpyglassMixin, dj.Manual):
     """
 
     def insert1(self, key, **kwargs):  # Auto-increment training_id
+        """Override insert1 to auto-increment training_id if not provided."""
         if not (training_id := key.get("training_id")):
             training_id = (
                 dj.U().aggr(self & key, n="max(training_id)").fetch1("n") or 0
@@ -231,4 +233,5 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
 
 def get_param_names(func):
+    """Get parameter names for a function signature."""
     return list(inspect.signature(func).parameters)

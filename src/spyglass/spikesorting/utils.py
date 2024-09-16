@@ -123,7 +123,7 @@ def get_group_by_shank(
                 )
                 continue
 
-            sg_keys.append(sg_key)
+            sg_keys.append(sg_key.copy())
             sge_keys.extend(
                 [
                     {

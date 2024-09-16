@@ -84,14 +84,17 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def fetch_results(cls, key):
+        """Fetch the decoding results for a given key."""
         return cls().merge_get_parent_class(key).fetch_results()
 
     @classmethod
     def fetch_model(cls, key):
+        """Fetch the decoding model for a given key."""
         return cls().merge_get_parent_class(key).fetch_model()
 
     @classmethod
     def fetch_environments(cls, key):
+        """Fetch the decoding environments for a given key."""
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         return (
             cls()
@@ -101,6 +104,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def fetch_position_info(cls, key):
+        """Fetch the decoding position info for a given key."""
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         return (
             cls()
@@ -110,6 +114,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def fetch_linear_position_info(cls, key):
+        """Fetch the decoding linear position info for a given key."""
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         return (
             cls()
@@ -119,6 +124,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def fetch_spike_data(cls, key, filter_by_interval=True):
+        """Fetch the decoding spike data for a given key."""
         decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
         return (
             cls()
@@ -130,6 +136,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def create_decoding_view(cls, key, head_direction_name="head_orientation"):
+        """Create a decoding view for a given key."""
         results = cls.fetch_results(key)
         posterior = (
             results.squeeze()

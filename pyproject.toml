@@ -39,7 +39,7 @@ dependencies = [
     "black[jupyter]",
     "bottleneck",
     "dask",
-    "datajoint>=0.13.6",
+    "datajoint>=0.14.2",
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
@@ -165,7 +165,8 @@ omit = [ # which submodules have no tests
     # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
-    "*/spikesorting/*",
+    "*/spikesorting/v0/*",
+    # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",
 ]

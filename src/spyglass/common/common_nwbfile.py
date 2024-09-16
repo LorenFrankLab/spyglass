@@ -692,6 +692,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def nightly_cleanup():
+        """Clean up orphaned AnalysisNwbfile entries and external files."""
         child_tables = get_child_tables(AnalysisNwbfile)
         (AnalysisNwbfile - child_tables).delete_quick()
 

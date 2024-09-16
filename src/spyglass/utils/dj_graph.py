@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 from datajoint import FreeTable, Table
 from datajoint.condition import make_condition
 from datajoint.dependencies import unite_master_parts
+from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
@@ -601,7 +602,8 @@ class RestrGraph(AbstractGraph):
         """Return hash of all visited nodes."""
         initial = hash_md5(b"")
         for table in self.all_ft:
-            initial.update(table.fetch())
+            for row in table.fetch(as_dict=True):
+                initial.update(key_hash(row).encode("utf-8"))
         return initial.hexdigest()
 
     # ------------------------------- Add Nodes -------------------------------
@@ -939,6 +941,7 @@ class TableChain(RestrGraph):
 
     @property
     def path_str(self) -> str:
+        """Return string representation of path: parent -> {links} -> child."""
         if not self.path:
             return "No link"
         return self._link_symbol.join([self._camel(t) for t in self.path])
@@ -981,6 +984,7 @@ class TableChain(RestrGraph):
     # ---------------------------- Graph Traversal ----------------------------
 
     def cascade_search(self) -> None:
+        """Cascade restriction through graph to search for applicable table."""
         if self.cascaded:
             return
         restriction, restr_attrs = self._get_find_restr(self.leaf)
@@ -1033,6 +1037,7 @@ class TableChain(RestrGraph):
         limit: int = 100,
         **kwargs,
     ):
+        """Search parents/children for a match of the provided restriction."""
         if (
             self.found_restr
             or not table
@@ -1135,6 +1140,7 @@ class TableChain(RestrGraph):
     def cascade(
         self, restriction: str = None, direction: Direction = None, **kwargs
     ):
+        """Cascade restriction up or down the chain."""
         if not self.has_link:
             return
 

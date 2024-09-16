@@ -1,8 +1,8 @@
 import datajoint as dj
 
-from spyglass.linearization.v0.main import (  # noqa F401
+from spyglass.linearization.v0.main import (
     IntervalLinearizedPosition as LinearizedPositionV0,
-)
+)  # noqa F401
 from spyglass.linearization.v1.main import LinearizedPositionV1  # noqa F401
 from spyglass.utils import SpyglassMixin, _Merge
 
@@ -32,6 +32,7 @@ class LinearizedPositionOutput(_Merge, SpyglassMixin):
         """
 
     def fetch1_dataframe(self):
+        """Fetch a single dataframe from the merged table."""
         return self.fetch_nwb(self.proj())[0]["linearized_position"].set_index(
             "time"
         )

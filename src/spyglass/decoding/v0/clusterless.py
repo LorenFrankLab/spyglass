@@ -149,6 +149,15 @@ class UnitMarks(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarks table.
+
+        1. Fetch parameters, units, and recording from MarkParameters,
+            CuratedSpikeSorting, and CuratedRecording tables respectively.
+        2. Uses spikeinterface to extract waveforms for each unit.
+        3. Optionally calculates the peak amplitude of the waveform and
+            thresholds the waveform.
+        4. Saves the marks as a TimeSeries object in a new AnalysisNwbfile.
+        """
         # create a new AnalysisNwbfile and a timeseries for the marks and save
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -245,6 +254,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the marks as a list of pandas dataframes"""
         return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
 
     @staticmethod
@@ -324,6 +334,11 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarksIndicator table.
+
+        Bin spike times and associated spike waveform features according to the
+        sampling rate.
+        """
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 

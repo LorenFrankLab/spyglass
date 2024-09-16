@@ -485,43 +485,53 @@ class SpyglassConfig:
 
     @property
     def config(self) -> dict:
+        """Dictionary of config settings."""
         self.load_config()
         return self._config
 
     @property
     def base_dir(self) -> str:
+        """Base directory as a string."""
         return self.config.get(self.dir_to_var("base"))
 
     @property
     def raw_dir(self) -> str:
+        """Raw data directory as a string."""
         return self.config.get(self.dir_to_var("raw"))
 
     @property
     def analysis_dir(self) -> str:
+        """Analysis directory as a string."""
         return self.config.get(self.dir_to_var("analysis"))
 
     @property
     def recording_dir(self) -> str:
+        """Recording directory as a string."""
         return self.config.get(self.dir_to_var("recording"))
 
     @property
     def sorting_dir(self) -> str:
+        """Sorting directory as a string."""
         return self.config.get(self.dir_to_var("sorting"))
 
     @property
     def waveforms_dir(self) -> str:
+        """Waveforms directory as a string."""
         return self.config.get(self.dir_to_var("waveforms"))
 
     @property
     def temp_dir(self) -> str:
+        """Temp directory as a string."""
         return self.config.get(self.dir_to_var("temp"))
 
     @property
     def video_dir(self) -> str:
+        """Video directory as a string."""
         return self.config.get(self.dir_to_var("video"))
 
     @property
     def export_dir(self) -> str:
+        """Export directory as a string."""
         return self.config.get(self.dir_to_var("export"))
 
     @property
@@ -541,14 +551,17 @@ class SpyglassConfig:
 
     @property
     def dlc_project_dir(self) -> str:
+        """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))
 
     @property
     def dlc_video_dir(self) -> str:
+        """DLC video directory as a string."""
         return self.config.get(self.dir_to_var("video", "dlc"))
 
     @property
     def dlc_output_dir(self) -> str:
+        """DLC output directory as a string."""
         return self.config.get(self.dir_to_var("output", "dlc"))
 
 

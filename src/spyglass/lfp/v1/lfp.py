@@ -59,6 +59,13 @@ class LFPV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LFPV1 table with the filtered LFP data.
+
+        The LFP data is filtered and downsampled to the user-defined sampling
+        rate, specified as lfp_sampling_rate.  The filtered data is stored in
+        the AnalysisNwbfile table. The valid times for the filtered data are
+        stored in the IntervalList table.
+        """
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
@@ -196,7 +203,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
         LFPOutput.insert1(orig_key)
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
