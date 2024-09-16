@@ -426,20 +426,24 @@ class Probe(SpyglassMixin, dj.Manual):
                 )
                 # Test whether the Shanks and Electrodes in the NWB file match
                 # the existing database entries
-                bad_shanks = []
-                for shank_dict in shank_dict.values():
-                    if not len(cls.Shank() & shank_dict) == 1:
-                        bad_shanks.append(shank_dict)
+                existing_shanks = query * cls.Shank()
+                bad_shanks = [
+                    shank
+                    for shank in shank_dict.values()
+                    if len(existing_shanks & shank) != 1
+                ]
                 if bad_shanks:
                     raise ValueError(
                         "Mismatch between nwb file and existing database "
                         + f"entry for shanks: {bad_shanks}"
                     )
 
-                bad_electrodes = []
-                for e_dict in elect_dict.values():
-                    if not len(cls.Electrode() & e_dict) == 1:
-                        bad_electrodes.append(e_dict)
+                existing_electrodes = query * cls.Electrode()
+                bad_electrodes = [
+                    electrode
+                    for electrode in elect_dict.values()
+                    if len(existing_electrodes & electrode) != 1
+                ]
                 if bad_electrodes:
                     raise ValueError(
                         f"Mismatch between nwb file and existing database "
