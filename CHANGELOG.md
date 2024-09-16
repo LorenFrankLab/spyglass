@@ -46,6 +46,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 
     - Fix bug in `get_group_by_shank` #1096
     - Fix bug in `_compute_metric` #1099
+    - Fix bug in `insert_curation` returned key #1114
 
 ## [0.5.3] (August 27, 2024)
 
