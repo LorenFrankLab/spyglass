@@ -20,6 +20,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     #1108
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
 
 ### Pipelines
 
