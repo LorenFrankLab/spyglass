@@ -394,6 +394,7 @@ def frequent_imports():
     from spyglass.lfp.analysis.v1 import LFPBandSelection
     from spyglass.mua.v1.mua import MuaEventsV1
     from spyglass.ripple.v1.ripple import RippleTimesV1
+    from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
     from spyglass.spikesorting.v0.figurl_views import SpikeSortingRecordingView
 
     return (
@@ -403,6 +404,7 @@ def frequent_imports():
         RippleTimesV1,
         SortedSpikesIndicatorSelection,
         SpikeSortingRecordingView,
+        UnitAnnotation,
         UnitMarksIndicatorSelection,
     )
 
