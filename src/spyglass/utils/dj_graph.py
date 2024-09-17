@@ -13,7 +13,6 @@ from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 from datajoint import FreeTable, Table
 from datajoint.condition import make_condition
-from datajoint.dependencies import unite_master_parts
 from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
@@ -34,6 +33,11 @@ from spyglass.utils.dj_helper_fn import (
     fuzzy_get,
     unique_dicts,
 )
+
+try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
+    from datajoint.dependencies import topo_sort as dj_topo_sort
+except ImportError:
+    from datajoint.dependencies import unite_master_parts as dj_topo_sort
 
 
 class Direction(Enum):
@@ -474,7 +478,7 @@ class AbstractGraph(ABC):
             if not self._is_out(node, warn=False)
         ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
-        ordered = unite_master_parts(list(topological_sort(graph)))
+        ordered = dj_topo_sort(list(topological_sort(graph)))
         if reverse:
             ordered.reverse()
         return [n for n in ordered if n in nodes]
