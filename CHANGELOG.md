@@ -21,7 +21,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 - Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
-- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #11XX
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
 
 ### Pipelines
 
