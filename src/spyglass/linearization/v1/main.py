@@ -59,7 +59,6 @@ class TrackGraph(SpyglassMixin, dj.Manual):
         return make_track_graph(
             node_positions=track_graph_parameters["node_positions"],
             edges=track_graph_parameters["edges"],
-            edge_map=track_graph_parameters["edge_map"],
         )
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
