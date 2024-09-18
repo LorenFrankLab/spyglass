@@ -8,8 +8,11 @@
 
 ```python
 import datajoint as dj
+from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
 ```
 
 ### Infrastructure

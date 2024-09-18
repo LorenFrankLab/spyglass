@@ -169,7 +169,10 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
+    electrodes_id='': varchar(40) # Object ID for the processed electrodes
     """
+
+    # Note: electrodes id is used for recomputing
 
     def make(self, key):
         """Populate SpikeSortingRecording.
@@ -489,6 +492,20 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recording = recording.set_probe(tetrode, in_place=True)
 
         return dict(recording=recording, timestamps=np.asarray(timestamps))
+
+    def update_ids(self):
+        """Update object_id and electrodes_id in SpikeSortingRecording table."""
+        for key in self.fetch(as_dict=True):
+            self.update_id(key)
+        raise NotImplementedError
+
+        # import h5py
+        #
+        # with h5py.File(analysis_nwb_file_abs_path, "a") as f:
+        #     f["acquisition/ProcessedElectricalSeries/electrodes"].attrs[
+        #         "object_id"
+        #     ] = recompute_object_id
+        # recording_object_id = recompute_object_id
 
 
 def _consolidate_intervals(intervals, timestamps):
