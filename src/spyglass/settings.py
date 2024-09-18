@@ -143,6 +143,12 @@ class SpyglassConfig:
         self._test_mode = kwargs.get("test_mode") or dj_custom.get(
             "test_mode", False
         )
+        self._test_mode = (
+            False if (self._test_mode == "false") else self._test_mode
+        )
+        self._debug_mode = (
+            False if (self._debug_mode == "false") else self._debug_mode
+        )
 
         resolved_base = (
             base_dir
