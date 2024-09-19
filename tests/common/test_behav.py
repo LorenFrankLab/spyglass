@@ -101,8 +101,11 @@ def test_pos_interval_no_transaction(verbose_context, common, mini_restr):
         common.PositionIntervalMap()._no_transaction_make(mini_restr)
     after = common.PositionIntervalMap().fetch()
     assert (
-        len(after) == len(before) + 2
+        len(after) == len(before) + 3
     ), "PositionIntervalMap no_transaction had unexpected effect"
+    assert (
+        "" in after["position_interval_name"]
+    ), "PositionIntervalMap null insert failed"
 
 
 def test_get_pos_interval_name(pos_src, pos_interval_01):
