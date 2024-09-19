@@ -28,6 +28,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Common
 
     - Drop `SessionGroup` table #1106
+    - Improve electrodes import efficiency #1125
 
 - Decoding
 
