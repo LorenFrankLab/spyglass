@@ -426,6 +426,24 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
 
+    def _update_external(self, analysis_file_name: str):
+        """Update the external contents checksum for an analysis file.
+
+        USE WITH CAUTION. This should only be run after the file has been
+        verified to be correct by another method such as hashing.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        """
+        external_tbl = schema.external["analysis"]
+        file_path = analysis_dir + "/" + analysis_file_name
+        key = (external_tbl & f"filepath = '{file_path}'").fetch1(as_dict=True)
+        key["contents_hash"] = dj.hash.uuid_from_file(file_path)
+
+        self.update1(key)
+
     def add_units(
         self,
         analysis_file_name: str,

@@ -8,6 +8,7 @@ import probeinterface as pi
 import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
+from h5py import File as H5File
 from hdmf.data_utils import GenericDataChunkIterator
 
 from spyglass.common import Session  # noqa: F401
@@ -19,12 +20,14 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_nwbfile import schema as nwb_schema
 from spyglass.settings import test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -170,9 +173,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
     electrodes_id='': varchar(40) # Object ID for the processed electrodes
+    file_hash='': varchar(32) # Hash of the NWB file
     """
 
-    # Note: electrodes id is used for recomputing
+    # QUESTION: Should this file_hash be a (hidden) attr of AnalysisNwbfile?
+    #           Hidden would require the pre-release datajoint version.
+    #           Adding it there would centralize recompute abilities, but maybe
+    #           that's excessive if we only plan recompute for a handful of
+    #           tables.
 
     def make(self, key):
         """Populate SpikeSortingRecording.
@@ -223,6 +231,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             If specified, recompute this file. Use as resulting file name.
             If none, generate a new file name.
         """
+        file_hash = None
         if not key and not recompute_file_name:
             raise ValueError(
                 "Either key or recompute_file_name must be specified."
@@ -230,21 +239,40 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if recompute_file_name and not key:
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
-            key, recompute_object_id = query.fetch1("KEY", "object_id")
+            key, recompute_object_id, recompute_electrodes_id, file_hash = (
+                query.fetch1("KEY", "object_id", "electrodes_id")
+            )
         else:
-            recompute_object_id = None
+            recompute_object_id, recompute_electrodes_id = None, None
 
         parent = SpikeSortingRecordingSelection & key
-        recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
-            **cls()._get_preprocessed_recording(key),
-            nwb_file_name=parent.fetch1("nwb_file_name"),
-            recompute_file_name=recompute_file_name,
-            recompute_object_id=recompute_object_id,
+        recording_nwb_file_name, recording_object_id, electrodes_id = (
+            _write_recording_to_nwb(
+                **cls()._get_preprocessed_recording(key),
+                nwb_file_name=parent.fetch1("nwb_file_name"),
+                recompute_file_name=recompute_file_name,
+                recompute_object_id=recompute_object_id,
+                recompute_electrodes_id=recompute_electrodes_id,
+            )
         )
+
+        # check hash
+        if file_hash is not None:
+            file_path = AnalysisNwbfile.get_abs_path(recompute_file_name)
+            new_hash = NwbfileHasher(file_path).hash
+            if not file_hash == new_hash:
+                Path(file_path).unlink()  # remove mismatched file
+                (
+                    AnalysisNwbfile
+                    & {"analysis_file_name": recompute_file_name}
+                ).super_delete(safemode=False)
+                raise ValueError(f"Failed to recompute {recompute_file_name}.")
+            AnalysisNwbfile._update_external(recompute_file_name)
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
             object_id=recording_object_id,
+            electrodes_id=electrodes_id,
         )
 
     @classmethod
@@ -494,18 +522,22 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         return dict(recording=recording, timestamps=np.asarray(timestamps))
 
     def update_ids(self):
-        """Update object_id and electrodes_id in SpikeSortingRecording table."""
-        for key in self.fetch(as_dict=True):
-            self.update_id(key)
-        raise NotImplementedError
+        """Update electrodes_id, and file_hash in SpikeSortingRecording table.
 
-        # import h5py
-        #
-        # with h5py.File(analysis_nwb_file_abs_path, "a") as f:
-        #     f["acquisition/ProcessedElectricalSeries/electrodes"].attrs[
-        #         "object_id"
-        #     ] = recompute_object_id
-        # recording_object_id = recompute_object_id
+        Only used for transitioning to recompute NWB files, see #1093.
+        """
+        elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
+        for key in (self & "electrodes_id=''").fetch(as_dict=True):
+            analysis_file_path = AnalysisNwbfile.get_abs_path(
+                key["analysis_file_name"]
+            )
+            with H5File(analysis_file_path, "r") as f:
+                elect_id = f[elect_attr].attrs["object_id"]
+            key["electrodes_id"] = elect_id
+
+            key["file_hash"] = NwbfileHasher(analysis_file_path).hash
+
+            self.update1(key)
 
 
 def _consolidate_intervals(intervals, timestamps):
@@ -568,6 +600,7 @@ def _write_recording_to_nwb(
     nwb_file_name: str,
     recompute_file_name: Optional[str] = None,
     recompute_object_id: Optional[str] = None,
+    recompute_electrodes_id: Optional[str] = None,
 ):
     """Write a recording in NWB format
 
@@ -577,18 +610,43 @@ def _write_recording_to_nwb(
     timestamps : iterable
     nwb_file_name : str
         name of NWB file the recording originates
+    recompute_file_name : str, optional
+        name of the NWB file to recompute
+    recompute_object_id : str, optional
+        object ID for recomputed processed electrical series object,
+        acquisition/ProcessedElectricalSeries.
+    recompute_electrodes_id : str, optional
+        object ID for recomputed electrodes sub-object,
+        acquisition/ProcessedElectricalSeries/electrodes.
 
     Returns
     -------
     analysis_nwb_file : str
         name of analysis NWB file containing the preprocessed recording
     """
+    recompute_args = (
+        recompute_file_name,
+        recompute_object_id,
+        recompute_electrodes_id,
+    )
+    recompute = any(recompute_args)
+    if recompute and not all(recompute_args):
+        raise ValueError(
+            "If recomputing, must specify all of recompute_file_name, "
+            "recompute_object_id, and recompute_electrodes_id."
+        )
+
+    series_name = "ProcessedElectricalSeries"
+    series_attr = "acquisition/" + series_name
+    elect_attr = series_attr + "/electrodes"
 
     analysis_nwb_file = AnalysisNwbfile().create(
-        nwb_file_name=nwb_file_name, recompute_file_name=recompute_file_name
+        nwb_file_name=nwb_file_name,
+        recompute_file_name=recompute_file_name,
     )
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
-        analysis_nwb_file, from_schema=bool(recompute_file_name)
+        analysis_nwb_file,
+        from_schema=recompute,
     )
 
     with pynwb.NWBHDF5IO(
@@ -620,22 +678,22 @@ def _write_recording_to_nwb(
 
         nwbfile.add_acquisition(processed_electrical_series)
 
-        recording_object_id = nwbfile.acquisition[
-            "ProcessedElectricalSeries"
-        ].object_id
+        recording_object_id = nwbfile.acquisition[series_name].object_id
+        electrodes_id = nwbfile.acquisition[series_name].electrodes.object_id
+        # how get elect id?
+        __import__("pdb").set_trace()
+        # how get elect id?
 
         io.write(nwbfile)
 
     if recompute_object_id:
-        import h5py
-
-        with h5py.File(analysis_nwb_file_abs_path, "a") as f:
-            f["acquisition/ProcessedElectricalSeries"].attrs[
-                "object_id"
-            ] = recompute_object_id
+        with H5File(analysis_nwb_file_abs_path, "a") as f:
+            f[series_attr].attrs["object_id"] = recompute_object_id
+            f[elect_attr].attrs["object_id"] = recompute_electrodes_id
         recording_object_id = recompute_object_id
+        electrodes_id = recompute_electrodes_id
 
-    return analysis_nwb_file, recording_object_id
+    return analysis_nwb_file, recording_object_id, electrodes_id
 
 
 # For writing recording to NWB file

@@ -6,9 +6,11 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+<!-- When altering tables, import all foreign key references. -->
+
 ```python
 import datajoint as dj
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import *  # noqa
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 SpikeSortingRecording().alter()
