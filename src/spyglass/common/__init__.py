@@ -56,7 +56,7 @@ from spyglass.common.common_position import (
 )
 from spyglass.common.common_region import BrainRegion
 from spyglass.common.common_sensors import SensorData
-from spyglass.common.common_session import Session, SessionGroup
+from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import Task, TaskEpoch
 from spyglass.common.populate_all_common import populate_all_common

@@ -13,7 +13,7 @@ from spyglass.position.v1.dlc_utils import (
     red_led_bisector_orientation,
     two_pt_head_orientation,
 )
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 

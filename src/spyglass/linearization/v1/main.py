@@ -49,6 +49,7 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     edges: blob                # shape (n_edges, 2)
     linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
     linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
+    edge_map = NULL : blob     # Maps one edge to another before linearization
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
@@ -152,10 +153,9 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             TrackGraph() & {"track_graph_name": key["track_graph_name"]}
         ).fetch1()
 
-        track_graph = make_track_graph(
-            node_positions=track_graph_info["node_positions"],
-            edges=track_graph_info["edges"],
-        )
+        track_graph = (
+            TrackGraph & {"track_graph_name": key["track_graph_name"]}
+        ).get_networkx_track_graph()
 
         linear_position_df = get_linearized_position(
             position=position,
@@ -168,6 +168,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             ],
             sensor_std_dev=linearization_parameters["sensor_std_dev"],
             diagonal_bias=linearization_parameters["diagonal_bias"],
+            edge_map=track_graph_info["edge_map"],
         )
 
         linear_position_df["time"] = time

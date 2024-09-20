@@ -11,22 +11,52 @@
 ```python
 import datajoint as dj
 from spyglass.spikesorting.v1.recording import *  # noqa
+from spyglass.linearization.v1.main import *  # noqa
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
+TrackGraph.alter()  # Add edge map parameter
 SpikeSortingRecording().alter()
 SpikeSortingRecording().update_ids()
 ```
 
 ### Infrastructure
 
-- Disable populate transaction protection for long-populating tables #1066
+- Disable populate transaction protection for long-populating tables #1066,
+    #1108
 - Add docstrings to all public methods #1076
-- Remove `AnalysisNwbfileLog` #10XX
+- Update DataJoint to 0.14.2 #1081
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
+- Remove `AnalysisNwbfileLog` #1093
 
 ### Pipelines
 
+- Common
+
+    - Drop `SessionGroup` table #1106
+    - Improve electrodes import efficiency #1125
+
 - Decoding
+
     - Fix edge case errors in spike time loading #1083
+
+- Linearization
+
+    - Add edge_map parameter to LinearizedPositionV1 #1091
+
+- Position
+
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
+    - Restore #973, allow DLC without position tracking #1100
+    - Minor fix to `DLCCentroid` make function order #1112
+
+- Spike Sorting
+
+    - Fix bug in `get_group_by_shank` #1096
+    - Fix bug in `_compute_metric` #1099
+    - Fix bug in `insert_curation` returned key #1114
+    - Add fields to `SpikeSortingRecording` to allow recompute #1093
 
 ## [0.5.3] (August 27, 2024)
 

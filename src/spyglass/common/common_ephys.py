@@ -127,15 +127,23 @@ class Electrode(SpyglassMixin, dj.Imported):
 
         electrode_inserts = []
         electrodes = nwbf.electrodes.to_dataframe()
+
+        # Keep a dict of region IDs to avoid multiple fetches
+        region_ids_dict = dict()
+
         for elect_id, elect_data in electrodes.iterrows():
+            region_name = elect_data.group.location
+            if region_name not in region_ids_dict:
+                # Only fetch if not already fetched
+                region_ids_dict[region_name] = BrainRegion.fetch_add(
+                    region_name=region_name
+                )
             key.update(
                 {
                     "electrode_id": elect_id,
                     "name": str(elect_id),
                     "electrode_group_name": elect_data.group_name,
-                    "region_id": BrainRegion.fetch_add(
-                        region_name=elect_data.group.location
-                    ),
+                    "region_id": region_ids_dict[region_name],
                     "x": elect_data.get("x"),
                     "y": elect_data.get("y"),
                     "z": elect_data.get("z"),
