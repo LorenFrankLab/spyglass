@@ -219,6 +219,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     def _make_file(cls, key: dict = None, recompute_file_name: str = None):
         """Preprocess recording and write to NWB file.
 
+        All `_make_file` methods should exit early if the file already exists.
+
         - Get valid times for sort interval from IntervalList
         - Preprocess recording
         - Write processed recording to NWB file
@@ -236,7 +238,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(
                 "Either key or recompute_file_name must be specified."
             )
-        if recompute_file_name and not key:
+        elif recompute := bool(recompute_file_name and not key):
+            file_path = AnalysisNwbfile.get_abs_path(
+                recompute_file_name, from_schema=True
+            )
+            if Path(file_path).exists():
+                return
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
             key, recompute_object_id, recompute_electrodes_id, file_hash = (
@@ -246,7 +253,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recompute_object_id, recompute_electrodes_id = None, None
 
         parent = SpikeSortingRecordingSelection & key
-        recording_nwb_file_name, recording_object_id, electrodes_id = (
+        (recording_nwb_file_name, recording_object_id, electrodes_id) = (
             _write_recording_to_nwb(
                 **cls()._get_preprocessed_recording(key),
                 nwb_file_name=parent.fetch1("nwb_file_name"),
@@ -256,26 +263,18 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         )
 
-        # check hash
-        if file_hash is not None:
-            file_path = AnalysisNwbfile.get_abs_path(
-                recompute_file_name, from_schema=True
+        if recompute:
+            AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
+        else:
+            file_hash = AnalysisNwbfile().get_hash(
+                recording_nwb_file_name, from_schema=False
             )
-            new_hash = NwbfileHasher(file_path).hash
-            if not file_hash == new_hash:
-                Path(file_path).unlink()  # remove mismatched file
-                # force delete, including all downstream
-                (
-                    AnalysisNwbfile
-                    & {"analysis_file_name": recompute_file_name}
-                ).super_delete(safemode=False)
-                raise ValueError(f"Failed to recompute {recompute_file_name}.")
-            AnalysisNwbfile._update_external(recompute_file_name)
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
             object_id=recording_object_id,
             electrodes_id=electrodes_id,
+            file_hash=file_hash,
         )
 
     @classmethod
@@ -688,11 +687,13 @@ def _write_recording_to_nwb(
         io.write(nwbfile)
 
     if recompute_object_id:
+        logger.info(f"Recomputed {recompute_file_name}, fixing object IDs.")
         with H5File(analysis_nwb_file_abs_path, "a") as f:
             f[series_attr].attrs["object_id"] = recompute_object_id
             f[elect_attr].attrs["object_id"] = recompute_electrodes_id
         recording_object_id = recompute_object_id
         electrodes_id = recompute_electrodes_id
+        analysis_nwb_file = recompute_file_name
 
     return analysis_nwb_file, recording_object_id, electrodes_id
 

@@ -286,7 +286,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     )
 
     for file_name in nwb_files:
-        file_path = file_path_fn(file_name)
+        file_path = file_path_fn(file_name, from_schema=True)
         if not os.path.exists(file_path):
             if hasattr(query_expression, "_make_file"):
                 # Attempt to recompute the file

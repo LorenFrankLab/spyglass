@@ -17,6 +17,7 @@ from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
@@ -426,23 +427,72 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             io.write(nwbf)
             return nwb_object.object_id
 
-    def _update_external(self, analysis_file_name: str):
-        """Update the external contents checksum for an analysis file.
-
-        USE WITH CAUTION. This should only be run after the file has been
-        verified to be correct by another method such as hashing.
+    def get_hash(
+        self, analysis_file_name: str, from_schema: bool = False
+    ) -> str:
+        """Return the hash of the file contents.
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        """
-        external_tbl = schema.external["analysis"]
-        file_path = analysis_dir + "/" + analysis_file_name
-        key = (external_tbl & f"filepath = '{file_path}'").fetch1(as_dict=True)
-        key["contents_hash"] = dj.hash.uuid_from_file(file_path)
+        from_schema : bool, Optional
+            If true, get the file path from the schema externals table, skipping
+            checksum and file existence checks. Defaults to False.
 
-        self.update1(key)
+
+        Returns
+        -------
+        file_hash : str
+            The hash of the file contents.
+        """
+        return NwbfileHasher(
+            self.get_abs_path(analysis_file_name, from_schema=from_schema)
+        ).hash
+
+    def _update_external(self, analysis_file_name: str, file_hash: str):
+        """Update the external contents checksum for an analysis file.
+
+        USE WITH CAUTION. If the hash does not match the file contents, the file
+        and downstream entries are deleted.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        file_hash : str
+            The hash of the file contents as calculated by NwbfileHasher.
+            If the hash does not match the file contents, the file and
+            downstream entries are deleted.
+        """
+        file_path = self.get_abs_path(analysis_file_name, from_schema=True)
+        new_hash = self.get_hash(analysis_file_name, from_schema=True)
+
+        if file_hash != new_hash:
+            Path(file_path).unlink()  # remove mismatched file
+            # force delete, including all downstream, forcing permissions
+            del_kwargs = dict(force_permission=True, safemode=False)
+            if self._has_updated_dj_version:
+                del_kwargs["force_masters"] = True
+            query = self & {"analysis_file_name": analysis_file_name}
+            query.delete(**del_kwargs)
+            raise ValueError(
+                f"Failed to recompute {analysis_file_name}.",
+                "Could not exactly replicate file content.",
+                "Please re-populate from parent table.",
+            )
+
+        external_tbl = schema.external["analysis"]
+        file_path = (
+            self.__get_analysis_file_dir(analysis_file_name)
+            + f"/{analysis_file_name}"
+        )
+        key = (external_tbl & f"filepath = '{file_path}'").fetch1()
+        abs_path = Path(analysis_dir) / file_path
+        key["contents_hash"] = dj.hash.uuid_from_file(abs_path)
+        key["size"] = abs_path.stat().st_size
+
+        external_tbl.update1(key)
 
     def add_units(
         self,

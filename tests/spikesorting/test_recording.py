@@ -29,5 +29,3 @@ def test_recompute(spike_v1, pop_rec, common):
         pre.object_id == post.object_id
         and pre.electrodes.object_id == post.electrodes.object_id
     ), "Recompute failed to preserve object_ids"
-
-    __import__("pdb").set_trace()
