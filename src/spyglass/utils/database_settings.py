@@ -15,7 +15,7 @@ SHARED_MODULES = [
     "spikesorting",
     "decoding",
     "position",
-    "position_linearization",
+    "linearization",
     "ripple",
     "lfp",
     "waveform",

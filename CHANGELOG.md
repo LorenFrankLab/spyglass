@@ -6,12 +6,18 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+<!-- When altering tables, import all foreign key references. -->
+
 ```python
 import datajoint as dj
-from spyglass.linearization.v1.main import TrackGraph
+from spyglass.spikesorting.v1.recording import *  # noqa
+from spyglass.linearization.v1.main import *  # noqa
 
-TrackGraph.alter()  # Add edge map parameter
+dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 dj.FreeTable(dj.conn(), "common_session.session_group").drop()
+TrackGraph.alter()  # Add edge map parameter
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
 ```
 
 ### Infrastructure
@@ -22,6 +28,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Update DataJoint to 0.14.2 #1081
 - Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
+- Remove `AnalysisNwbfileLog` #1093
 
 ### Pipelines
 
@@ -49,6 +56,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `get_group_by_shank` #1096
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
+    - Add fields to `SpikeSortingRecording` to allow recompute #1093
 
 ## [0.5.3] (August 27, 2024)
 
