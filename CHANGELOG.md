@@ -20,15 +20,18 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     #1108
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
-- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
 - Fix bool settings imported from dj config file #1117
+- Allow definition of tasks and new probe entries from config #1074, #1120
+- Enforce match between ingested nwb probe geometry and existing table entry #1074
 
 ### Pipelines
 
 - Common
 
     - Drop `SessionGroup` table #1106
+    - Improve electrodes import efficiency #1125
 
 - Decoding
 
