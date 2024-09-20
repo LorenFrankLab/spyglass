@@ -353,7 +353,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        if from_schema:
+        if from_schema:  # Skips checksum and file existence checks
             return f"{analysis_dir}/" + (
                 schema.external["analysis"]
                 & f'filepath LIKE "%{analysis_nwb_file_name}"'

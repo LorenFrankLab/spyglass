@@ -240,7 +240,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
             key, recompute_object_id, recompute_electrodes_id, file_hash = (
-                query.fetch1("KEY", "object_id", "electrodes_id")
+                query.fetch1("KEY", "object_id", "electrodes_id", "file_hash")
             )
         else:
             recompute_object_id, recompute_electrodes_id = None, None
@@ -258,10 +258,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         # check hash
         if file_hash is not None:
-            file_path = AnalysisNwbfile.get_abs_path(recompute_file_name)
+            file_path = AnalysisNwbfile.get_abs_path(
+                recompute_file_name, from_schema=True
+            )
             new_hash = NwbfileHasher(file_path).hash
             if not file_hash == new_hash:
                 Path(file_path).unlink()  # remove mismatched file
+                # force delete, including all downstream
                 (
                     AnalysisNwbfile
                     & {"analysis_file_name": recompute_file_name}
@@ -527,7 +530,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         Only used for transitioning to recompute NWB files, see #1093.
         """
         elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-        for key in (self & "electrodes_id=''").fetch(as_dict=True):
+        needs_update = self & ["electrodes_id=''", "file_hash=''"]
+        for key in needs_update.fetch(as_dict=True):
             analysis_file_path = AnalysisNwbfile.get_abs_path(
                 key["analysis_file_name"]
             )
@@ -680,9 +684,6 @@ def _write_recording_to_nwb(
 
         recording_object_id = nwbfile.acquisition[series_name].object_id
         electrodes_id = nwbfile.acquisition[series_name].electrodes.object_id
-        # how get elect id?
-        __import__("pdb").set_trace()
-        # how get elect id?
 
         io.write(nwbfile)
 
