@@ -853,6 +853,9 @@ class Merge(dj.Manual):
         merge_id present in the input, relying on parent func to
         restrict on secondary or part-parent key(s).
 
+        Assumes that a valid set of merge_id keys should have OR logic
+        to allow selection of an entries.
+
         Parameters
         ----------
         restriction : str, dict, or dj.condition.AndList
@@ -878,9 +881,7 @@ class Merge(dj.Manual):
             merge_restr = [x for x in merge_id_list if x is not None]
         elif isinstance(restriction, str):
             parsed = [x.split(")")[0] for x in restriction.split("(") if x]
-            merge_restr = dj.condition.AndList(
-                [x for x in parsed if "merge_id" in x]
-            )
+            merge_restr = [x for x in parsed if "merge_id" in x]
 
         if len(merge_restr) == 0:
             return True
