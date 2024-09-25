@@ -33,6 +33,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 
     - Drop `SessionGroup` table #1106
     - Improve electrodes import efficiency #1125
+    - Fix logger method call in `common_task` #1132
 
 - Decoding
 
@@ -53,6 +54,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `get_group_by_shank` #1096
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
+    - Fix handling of waveform extraction sparse parameter #1132
 
 ## [0.5.3] (August 27, 2024)
 
