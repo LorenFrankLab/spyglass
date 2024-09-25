@@ -236,9 +236,9 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             if target_interval in interval
         ]
         if not possible_targets:
-            logger.warn(f"Interval not found for epoch {epoch}.")
+            logger.warning(f"Interval not found for epoch {epoch}.")
         elif len(possible_targets) > 1:
-            logger.warn(
+            logger.warning(
                 f"Multiple intervals found for epoch {epoch}. "
                 + f"matches are {possible_targets}."
             )
