@@ -273,12 +273,20 @@
 # <details><summary>Note for MySQL 8 users, including Frank Lab members</summary>
 #
 # Using a MySQL 8 server, like the server hosted by the Frank Lab, will
-# require the pre-release version of DataJoint to change one's password.
+# require DataJoint >= 0.14.2. To keep up to data with the latest DataJoint
+# features, install from GitHub
 #
 # ```bash
 # # cd /location/for/datajoint/source/files/
 # git clone https://github.com/datajoint/datajoint-python
 # pip install ./datajoint-python
+# ```
+#
+# You can then periodically fetch updates with the following commands...
+#
+# ```bash
+# # cd /location/for/datajoint/source/files/datajoint-python
+# git pull origin master
 # ```
 #
 # </details>
@@ -363,12 +371,20 @@
 
 # +
 import os
+import datajoint as dj
 from spyglass.settings import SpyglassConfig
 
 # change to the root directory of the project
 if os.path.basename(os.getcwd()) == "notebooks":
     os.chdir("..")
 
+# connect to the database
+dj.conn()
+
+# change your password
+dj.admin.set_password()
+
+# save the configuration
 SpyglassConfig().save_dj_config(
     save_method="local",  # global or local
     base_dir="/path/like/stelmo/nwb/",
