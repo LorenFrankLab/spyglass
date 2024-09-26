@@ -5,6 +5,7 @@ import datajoint as dj
 import ruamel.yaml as yaml
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import str_to_bool
 
 from . import dlc_reader
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
@@ -347,12 +348,3 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
                 test_error_p=results["Test error with p-cutoff"],
             )
         )
-
-
-def str_to_bool(value) -> bool:
-    """Return whether the provided string represents true. Otherwise false."""
-    # Due to distutils equivalent depreciation in 3.10
-    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
-    if not value:
-        return False
-    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
