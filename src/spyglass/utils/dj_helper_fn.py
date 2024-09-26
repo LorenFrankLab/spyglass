@@ -559,6 +559,7 @@ class NonDaemonPool(multiprocessing.pool.Pool):
         proc.__class__ = NonDaemonProcess
         return proc
 
+
 def str_to_bool(value) -> bool:
     """Return whether the provided string represents true. Otherwise false."""
     # Due to distutils equivalent depreciation in 3.10
