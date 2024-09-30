@@ -69,6 +69,10 @@ def get_nwb_file(nwb_file_path):
                 from ..common.common_dandi import DandiPath
 
                 dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath() & dandi_key:
+                    # Check if non-copied raw file is in Dandi
+                    dandi_key = {"filename": os.path.basename(nwb_file_path).replace("_.nwb", ".nwb")}
+
                 if not DandiPath & dandi_key:
                     # If not in Dandi, then we can't find the file
                     raise FileNotFoundError(
