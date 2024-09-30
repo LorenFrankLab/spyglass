@@ -72,7 +72,7 @@ def get_nwb_file(nwb_file_path):
                 if not DandiPath() & dandi_key:
                     # Check if non-copied raw file is in Dandi
                     dandi_key = {
-                        "filename": os.path.basename(nwb_file_path).replace(
+                        "filename": Path(nwb_file_path).name.replace(
                             "_.nwb", ".nwb"
                         )
                     }
@@ -116,8 +116,7 @@ def get_linked_nwbs(path):
         # open the nwb file (opens externally linked files as well)
         nwb = io.read()
         # get the linked files
-        linked_nwbs = [x for x in io._HDF5IO__built.keys() if (not x == path)]
-    return linked_nwbs
+        return [x for x in io._HDF5IO__built if (not x == path)]
 
 
 def get_config(nwb_file_path, calling_table=None):

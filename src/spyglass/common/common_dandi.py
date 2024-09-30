@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+from typing import Optional
 
 import datajoint as dj
 import fsspec
@@ -236,7 +237,7 @@ def _get_metadata(path):
     return meta
 
 
-def translate_name_to_dandi(folder, dandiset_dir: str = None):
+def translate_name_to_dandi(folder, dandiset_dir: Optional[str] = None):
     """Uses dandi.organize to translate filenames to dandi paths
 
     NOTE: The name for a given file depends on all files in the folder
