@@ -9,6 +9,7 @@
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066
+- Fix dandi upload process for nwb's with video or linked objects #1095
 
 ### Pipelines
 
