@@ -59,7 +59,6 @@ class TrackGraph(SpyglassMixin, dj.Manual):
         return make_track_graph(
             node_positions=track_graph_parameters["node_positions"],
             edges=track_graph_parameters["edges"],
-            edge_map=track_graph_parameters["edge_map"],
         )
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
@@ -154,10 +153,9 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             TrackGraph() & {"track_graph_name": key["track_graph_name"]}
         ).fetch1()
 
-        track_graph = make_track_graph(
-            node_positions=track_graph_info["node_positions"],
-            edges=track_graph_info["edges"],
-        )
+        track_graph = (
+            TrackGraph & {"track_graph_name": key["track_graph_name"]}
+        ).get_networkx_track_graph()
 
         linear_position_df = get_linearized_position(
             position=position,
@@ -170,6 +168,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             ],
             sensor_std_dev=linearization_parameters["sensor_std_dev"],
             diagonal_bias=linearization_parameters["diagonal_bias"],
+            edge_map=track_graph_info["edge_map"],
         )
 
         linear_position_df["time"] = time

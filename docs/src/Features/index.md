@@ -9,4 +9,3 @@ Spyglass.
 - [Mixin](./Mixin.md) - Spyglass-specific functionalities to DataJoint tables,
     including fetching NWB files, long-distance restrictions, and permission
     checks on delete operations.
-- [Session Groups](./SessionGroups.md) - How to operate on sets of sessions.

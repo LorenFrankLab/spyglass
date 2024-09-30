@@ -76,7 +76,9 @@ def pop_curation(spike_v1, pop_sort):
         description="testing sort",
     )
 
-    yield spike_v1.CurationV1().fetch("KEY", as_dict=True)[0]
+    yield (spike_v1.CurationV1() & {"parent_curation_id": -1}).fetch(
+        "KEY", as_dict=True
+    )[0]
 
 
 @pytest.fixture(scope="session")

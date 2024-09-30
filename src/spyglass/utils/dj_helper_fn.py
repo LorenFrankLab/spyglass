@@ -558,3 +558,12 @@ class NonDaemonPool(multiprocessing.pool.Pool):
 
         proc.__class__ = NonDaemonProcess
         return proc
+
+
+def str_to_bool(value) -> bool:
+    """Return whether the provided string represents true. Otherwise false."""
+    # Due to distutils equivalent depreciation in 3.10
+    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
+    if not value:
+        return False
+    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")

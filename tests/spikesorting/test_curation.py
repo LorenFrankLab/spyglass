@@ -37,15 +37,14 @@ def test_curation_sort(spike_v1, pop_curation):
     ), "CurationV1.get_sorting unexpected shape"
 
 
-def test_curation_sort_info(spike_v1, pop_curation):
+def test_curation_sort_info(spike_v1, pop_curation, pop_curation_metric):
     sort_info = spike_v1.CurationV1.get_sort_group_info(pop_curation)
+    sort_metric = spike_v1.CurationV1.get_sort_group_info(pop_curation_metric)
+
     assert (
         hash_sort_info(sort_info) == "be874e806a482ed2677fd0d0b449f965"
     ), "CurationV1.get_sort_group_info unexpected value"
 
-
-def test_curation_metric(spike_v1, pop_curation_metric):
-    sort_info = spike_v1.CurationV1.get_sort_group_info(pop_curation_metric)
     assert (
-        hash_sort_info(sort_info) == "48e437bc116900fe64e492d74595b56d"
+        hash_sort_info(sort_metric) == "48e437bc116900fe64e492d74595b56d"
     ), "CurationV1.get_sort_group_info unexpected value"
