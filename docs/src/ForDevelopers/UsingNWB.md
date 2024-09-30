@@ -144,9 +144,9 @@ ndx_franklab_novela.CameraDevice </b>
 | Spyglass Table |        Key        |                          NWBfile Location |                              Config option | Notes |
 | :------------- | :---------------: | ----------------------------------------: | -----------------------------------------: | ----: |
 | Probe          |    probe_type     |        nwbf.devices.\<\*Probe>.probe_type | config\["Probe"\]\[index\]\["probe_type"\] |   str |
-| Probe          |     probe_id      |        nwbf.devices.\<\*Probe>.probe_type |                                        XXX |   str |
-| Probe          |   manufacturer    |      nwbf.devices.\<\*Probe>.manufacturer |                                        XXX |   str |
-| Probe          | probe_description | nwbf.devices.\<\*Probe>.probe_description |                                        XXX |   str |
+| Probe          |     probe_id      |        nwbf.devices.\<\*Probe>.probe_type | config\["Probe"\]\[index\]\["probe_type"\] |   str |
+| Probe          |   manufacturer    |      nwbf.devices.\<\*Probe>.manufacturer | config\["Probe"\]\[index\]\["manufacturer"\] |   str |
+| Probe          | probe_description | nwbf.devices.\<\*Probe>.probe_description | config\["Probe"\]\[index\]\["description"\] |   str |
 | Probe          |    num_shanks     |        nwbf.devices.\<\*Probe>.num_shanks |                                        XXX |   int |
 
 <b> NWBfile Location: nwbf.devices.\<\*Probe>.\<\*Shank> <br/> Object type:
@@ -154,16 +154,18 @@ ndx_franklab_novela.Shank </b>
 
 | Spyglass Table |     Key     |                               NWBfile Location | Config option | Notes |
 | :------------- | :---------: | ---------------------------------------------: | ------------: | ----: |
-| Probe.Shank    | probe_shank | nwbf.devices.\<\*Probe>.\<\*Shank>.probe_shank |           XXX |   int |
+| Probe.Shank    | probe_shank | nwbf.devices.\<\*Probe>.\<\*Shank>.probe_shank |          config\["Probe"\]\[Shank\]\ |   int | In the config, a list of ints |
 
 <b> NWBfile Location: nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode> <br/>
 Object type: ndx_franklab_novela.Electrode </b>
 
 | Spyglass Table  |     Key      |                                               NWBfile Location | Config option | Notes |
 | :-------------- | :----------: | -------------------------------------------------------------: | ------------: | ----: |
-| Probe.Electrode | probe_shank  |                 nwbf.devices.\<\*Probe>.\<\*Shank>.probe_shank |           XXX |   int |
-| Probe.Electrode | contact_size | nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.contact_size |           XXX | float |
-| Probe.Electrode |    rel_x     |        nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.rel_x |           XXX | float |
+| Probe.Electrode | probe_shank  |                 nwbf.devices.\<\*Probe>.\<\*Shank>.probe_shank |           config\["Probe"]\["Electrode"]\[index]\["probe_shank"] |   int |
+| Probe.Electrode | contact_size | nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.contact_size |           config\["Probe"]\["Electrode"]\[index]\["contact_size"] | float |
+| Probe.Electrode |    rel_x     |        nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.rel_x |            config\["Probe"]\["Electrode"]\[index]\["rel_x"] | float |
+| Probe.Electrode |    rel_y     |        nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.rel_y |            config\["Probe"]\["Electrode"]\[index]\["rel_y"] | float |
+| Probe.Electrode |    rel_z     |        nwbf.devices.\<\*Probe>.\<\*Shank>.\<\*Electrode>.rel_z |            config\["Probe"]\["Electrode"]\[index]\["rel_z"] | float |
 
 <b> NWBfile Location: nwbf.epochs <br/> Object type: pynwb.epoch.TimeIntervals
 </b>
@@ -213,9 +215,9 @@ hdmf.common.table.DynamicTable </b>
 | :------------- | :--------------: | -----------------------------------------------: | ------------: | ----: |
 | Task           |    task_name     |             nwbf.processing.tasks.\[index\].name |               |       |
 | Task           | task_description |      nwbf.processing.\[index\].tasks.description |               |       |
-| TaskEpoch      |    task_name     |             nwbf.processing.\[index\].tasks.name |               |       |
-| TaskEpoch      |   camera_names   |        nwbf.processing.\[index\].tasks.camera_id |               |       |
-| TaskEpoch      | task_environment | nwbf.processing.\[index\].tasks.task_environment |               |       |
+| TaskEpoch      |    task_name     |             nwbf.processing.\[index\].tasks.name | config\["Tasks"\]\[index\]\["task_name"\]|       |
+| TaskEpoch      |   camera_names   |        nwbf.processing.\[index\].tasks.camera_id | config\["Tasks"\]\[index\]\["camera_id"\] |       |
+| TaskEpoch      | task_environment | nwbf.processing.\[index\].tasks.task_environment | config\["Tasks"\]\[index\]\["task_environment"\] |       |
 
 <b> NWBfile Location: nwbf.units </br> Object type: pynwb.misc.Units </b>
 

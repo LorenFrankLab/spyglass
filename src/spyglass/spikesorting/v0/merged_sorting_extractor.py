@@ -84,12 +84,13 @@ class MergedSortingExtractor(si.BaseSorting):
 
 class MergedSortingSegment(si.BaseSortingSegment):
     def __init__(self):
+        """Store all the unit spike trains in RAM."""
         si.BaseSortingSegment.__init__(self)
         # Store all the unit spike trains in RAM
         self._unit_spike_trains: Dict[int, np.array] = {}
 
     def add_unit(self, unit_id: int, spike_times: np.array):
-        # Add a unit spike train
+        """Add a unit spike train."""
         self._unit_spike_trains[unit_id] = spike_times
 
     def get_unit_spike_train(
@@ -98,7 +99,7 @@ class MergedSortingSegment(si.BaseSortingSegment):
         start_frame: Union[int, None] = None,
         end_frame: Union[int, None] = None,
     ) -> np.ndarray:
-        # Get a unit spike train
+        """Get a unit spike train."""
         spike_times = self._unit_spike_trains[unit_id]
         if start_frame is not None:
             spike_times = spike_times[spike_times >= start_frame]

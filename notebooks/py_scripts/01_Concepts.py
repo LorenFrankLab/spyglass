@@ -60,10 +60,7 @@
 # ```python
 # my_key = dict(value=key)  # whatever you're inserting
 # MyTable.insert1(my_key)  # error here
-# parents = MyTable.parents(as_objects=True)  # get the parents as FreeTables
-# for parent in parents:  # iterate through the parents, with only relevant fields
-#     parent_key = {k: v for k, v in my_key.items() if k in parent.heading.names}
-#     print(parent & parent_key)  # restricted parent
+# parents = MyTable().find_insert_fail(my_key)
 # ```
 #
 # If any of the printed tables are empty, you know you need to insert into that

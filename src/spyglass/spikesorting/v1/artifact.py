@@ -65,13 +65,14 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default parameters into ArtifactDetectionParameters."""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
 @schema
 class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     definition = """
-    # Processed recording and artifact detection parameters. Use `insert_selection` method to insert new rows.
+    # Processed recording/artifact detection parameters. See `insert_selection`.
     artifact_id: uuid
     ---
     -> SpikeSortingRecording
@@ -80,8 +81,9 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_selection(cls, key: dict):
-        """Insert a row into ArtifactDetectionSelection with an
-        automatically generated unique artifact ID as the sole primary key.
+        """Insert a row into ArtifactDetectionSelection.
+
+        Automatically generates a unique artifact ID as the sole primary key.
 
         Parameters
         ----------
@@ -91,7 +93,8 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         Returns
         -------
         artifact_id : str
-            the unique artifact ID serving as primary key for ArtifactDetectionSelection
+            the unique artifact ID serving as primary key for
+            ArtifactDetectionSelection
         """
         query = cls & key
         if query:
@@ -111,6 +114,17 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate ArtifactDetection with detected artifacts.
+
+        1. Fetches...
+            - Artifact parameters from ArtifactDetectionParameters
+            - Recording analysis NWB file from SpikeSortingRecording
+            - Valid times from IntervalList
+        2. Load the recording from the NWB file with spikeinterface
+        3. Detect artifacts using module-level `_get_artifact_times`
+        4. Insert result into IntervalList with `artifact_id` as
+            `interval_list_name`
+        """
         # FETCH:
         # - artifact parameters
         # - recording analysis nwb file
@@ -133,6 +147,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                 ).fetch1("interval_list_name"),
             }
         ).fetch1("valid_times")
+
         # DO:
         # - load recording
         recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
@@ -330,6 +345,8 @@ def merge_intervals(intervals):
     _type_
         _description_
     """
+    # TODO: Migrate to common_interval.py
+
     if len(intervals) == 0:
         return []
 

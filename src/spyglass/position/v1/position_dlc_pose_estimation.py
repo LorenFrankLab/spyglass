@@ -122,9 +122,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         if not v_path:
             raise FileNotFoundError(f"Video file not found for {key}")
         logger.info("Pose Estimation Selection")
-        v_dir = Path(v_path).parent
-        logger.info("video_dir: %s", v_dir)
-        v_path = find_mp4(video_path=v_dir, video_filename=v_fname)
+        logger.info(f"video_dir: {v_path}")
+        v_path = find_mp4(video_path=Path(v_path), video_filename=v_fname)
         if check_crop:
             params["cropping"] = self.get_video_crop(
                 video_path=v_path.as_posix()
@@ -163,7 +162,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         _nwb_table = AnalysisNwbfile
         log_path = None
 
-        def fetch1_dataframe(self):
+        def fetch1_dataframe(self) -> pd.DataFrame:
+            """Fetch a single bodypart dataframe."""
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -257,16 +257,19 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 populate_missing=False,
             )
         )
-        spatial_series = (
-            RawPosition() & {**key, "interval_list_name": interval_list_name}
-        ).fetch_nwb()[0]["raw_position"]
-        _, _, _, video_time = get_video_info(key)
-        pos_time = spatial_series.timestamps
+        if interval_list_name:
+            spatial_series = (
+                RawPosition()
+                & {**key, "interval_list_name": interval_list_name}
+            ).fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
+
+        _, _, meters_per_pixel, video_time = get_video_info(key)
+        key["meters_per_pixel"] = meters_per_pixel
 
         # TODO: should get timestamps from VideoFile, but need the
         # video_frame_ind from RawPosition, which also has timestamps
-
-        key["meters_per_pixel"] = spatial_series.conversion
 
         # Insert entry into DLCPoseEstimation
         logger.info(
@@ -295,7 +298,9 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             part_df = convert_to_cm(part_df, meters_per_pixel)
             logger.info("adding timestamps to DataFrame")
             part_df = add_timestamps(
-                part_df, pos_time=pos_time, video_time=video_time
+                part_df,
+                pos_time=getattr(spatial_series, "timestamps", video_time),
+                video_time=video_time,
             )
             key["bodypart"] = body_part
             key["analysis_file_name"] = AnalysisNwbfile().create(
@@ -308,8 +313,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 timestamps=part_df.time.to_numpy(),
                 conversion=METERS_PER_CM,
                 data=part_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=spatial_series.reference_frame,
-                comments=spatial_series.comments,
+                reference_frame=getattr(spatial_series, "reference_frame", ""),
+                comments=getattr(spatial_series, "comments", "no comments"),
                 description="x_position, y_position",
             )
             likelihood.create_timeseries(
@@ -348,7 +353,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             self.BodyPart.insert1(key)
             AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch_dataframe(self, *attrs, **kwargs):
+    def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch a concatenated dataframe of all bodyparts."""
         entries = (self.BodyPart & self).fetch("KEY")
         nwb_data_dict = {
             entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
@@ -405,6 +411,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
 
 def convert_to_cm(df, meters_to_pixels):
+    """Converts x and y columns from pixels to cm"""
     CM_TO_METERS = 100
     idx = pd.IndexSlice
     df.loc[:, idx[("x", "y")]] *= meters_to_pixels * CM_TO_METERS

@@ -376,7 +376,9 @@ class Probe(SpyglassMixin, dj.Manual):
             List of probe device types found in the NWB file.
         """
         config = config or dict()
-        all_probes_types, ndx_probes, _ = cls.get_all_probe_names(nwbf, config)
+        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
+            nwbf, config
+        )
 
         for probe_type in all_probes_types:
             new_probe_type_dict = dict()
@@ -397,6 +399,16 @@ class Probe(SpyglassMixin, dj.Manual):
                     elect_dict,
                 )
 
+            elif probe_type in config_probes:
+                cls._read_config_probe_data(
+                    config,
+                    probe_type,
+                    new_probe_type_dict,
+                    new_probe_dict,
+                    shank_dict,
+                    elect_dict,
+                )
+
             # check that number of shanks is consistent
             num_shanks = new_probe_type_dict["num_shanks"]
             assert num_shanks == 0 or num_shanks == len(
@@ -405,8 +417,6 @@ class Probe(SpyglassMixin, dj.Manual):
 
             # if probe id already exists, do not overwrite anything or create
             # new Shanks and Electrodes
-            # TODO: test whether the Shanks and Electrodes in the NWB file match
-            # the ones in the database
             query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
                 logger.info(
@@ -414,6 +424,31 @@ class Probe(SpyglassMixin, dj.Manual):
                     " the database. Spyglass will use that and not create a new"
                     " Probe, Shanks, or Electrodes."
                 )
+                # Test whether the Shanks and Electrodes in the NWB file match
+                # the existing database entries
+                existing_shanks = query * cls.Shank()
+                bad_shanks = [
+                    shank
+                    for shank in shank_dict.values()
+                    if len(existing_shanks & shank) != 1
+                ]
+                if bad_shanks:
+                    raise ValueError(
+                        "Mismatch between nwb file and existing database "
+                        + f"entry for shanks: {bad_shanks}"
+                    )
+
+                existing_electrodes = query * cls.Electrode()
+                bad_electrodes = [
+                    electrode
+                    for electrode in elect_dict.values()
+                    if len(existing_electrodes & electrode) != 1
+                ]
+                if bad_electrodes:
+                    raise ValueError(
+                        f"Mismatch between nwb file and existing database "
+                        f"entry for electrodes: {bad_electrodes}"
+                    )
                 continue
 
             cls.insert1(new_probe_dict, skip_duplicates=True)
@@ -522,6 +557,66 @@ class Probe(SpyglassMixin, dj.Manual):
                     "rel_y": electrode.rel_y,
                     "rel_z": electrode.rel_z,
                 }
+
+    @classmethod
+    def _read_config_probe_data(
+        cls,
+        config,
+        probe_type,
+        new_probe_type_dict,
+        new_probe_dict,
+        shank_dict,
+        elect_dict,
+    ):
+
+        # get the list of shank keys for the probe
+        shank_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Shank", []
+        )
+        for i in shank_list:
+            shank_dict[str(i)] = {"probe_id": probe_type, "probe_shank": int(i)}
+
+        # get the list of electrode keys for the probe
+        elect_dict_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Electrode", []
+        )
+        for i, e in enumerate(elect_dict_list):
+            elect_dict[str(i)] = {
+                "probe_id": probe_type,
+                "probe_shank": e["probe_shank"],
+                "probe_electrode": e["probe_electrode"],
+                "contact_size": e.get("contact_size"),
+                "rel_x": e.get("rel_x"),
+                "rel_y": e.get("rel_y"),
+                "rel_z": e.get("rel_z"),
+            }
+
+        # make the probe type if not in database
+        new_probe_type_dict.update(
+            {
+                "manufacturer": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("manufacturer"),
+                "probe_type": probe_type,
+                "probe_description": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("probe_description"),
+                "num_shanks": len(shank_list),
+            }
+        )
+
+        cls._add_probe_type(new_probe_type_dict)
+
+        # make the probe dictionary
+        new_probe_dict.update(
+            {
+                "probe_type": probe_type,
+                "probe_id": probe_type,
+                "contact_side_numbering": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("contact_side_numbering"),
+            }
+        )
 
     @classmethod
     def _add_probe_type(cls, new_probe_type_dict):

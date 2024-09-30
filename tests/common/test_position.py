@@ -30,8 +30,6 @@ def param_table(common_position, default_param_key, teardown):
     param_table = common_position.PositionInfoParameters()
     param_table.insert1(default_param_key, skip_duplicates=True)
     yield param_table
-    if teardown:
-        param_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -61,8 +59,6 @@ def upsample_position(
     )
     common_position.IntervalPositionInfo.populate(interval_pos_key)
     yield interval_pos_key
-    if teardown:
-        (param_table & upsample_param_key).delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -101,8 +97,6 @@ def upsample_position_error(
         interval_pos_key, skip_duplicates=not teardown
     )
     yield interval_pos_key
-    if teardown:
-        (param_table & upsample_param_key).delete(safemode=False)
 
 
 def test_interval_position_info_insert_error(

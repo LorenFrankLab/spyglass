@@ -6,15 +6,57 @@
 
 <!-- Running draft to be removed immediately prior to release. -->
 
+```python
+import datajoint as dj
+from spyglass.linearization.v1.main import TrackGraph
+
+TrackGraph.alter()  # Add edge map parameter
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
+```
+
 ### Infrastructure
 
-- Disable populate transaction protection for long-populating tables #1066
+- Disable populate transaction protection for long-populating tables #1066,
+    #1108
+- Add docstrings to all public methods #1076
+- Update DataJoint to 0.14.2 #1081
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
+- Fix bool settings imported from dj config file #1117
+- Allow definition of tasks and new probe entries from config #1074, #1120
+- Enforce match between ingested nwb probe geometry and existing table entry
+    #1074
+- Update DataJoint install and password instructions #1131
 - Fix dandi upload process for nwb's with video or linked objects #1095
 
 ### Pipelines
 
+- Common
+
+    - Drop `SessionGroup` table #1106
+    - Improve electrodes import efficiency #1125
+    - Fix logger method call in `common_task` #1132
+
 - Decoding
+
     - Fix edge case errors in spike time loading #1083
+
+- Linearization
+
+    - Add edge_map parameter to LinearizedPositionV1 #1091
+
+- Position
+
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
+    - Restore #973, allow DLC without position tracking #1100
+    - Minor fix to `DLCCentroid` make function order #1112
+
+- Spike Sorting
+
+    - Fix bug in `get_group_by_shank` #1096
+    - Fix bug in `_compute_metric` #1099
+    - Fix bug in `insert_curation` returned key #1114
+    - Fix handling of waveform extraction sparse parameter #1132
 
 ## [0.5.3] (August 27, 2024)
 
@@ -103,6 +145,7 @@
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
     - Efficiency improvement to `v0.Curation.insert_curation` #1072
+    - Add pytests for `spikesorting.v1` #1078
 
 ## [0.5.2] (April 22, 2024)
 

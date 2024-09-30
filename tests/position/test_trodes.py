@@ -30,8 +30,6 @@ def sel_table(teardown, params_table, trodes_sel_table, pos_interval_key):
         edit_name=new_name,
     )
     yield trodes_sel_table & restr_dict
-    if teardown:
-        (trodes_sel_table & restr_dict).delete(safemode=False)
 
 
 def test_sel_default(sel_table):

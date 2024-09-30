@@ -76,6 +76,15 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make(self, key):
+        """Populate the ArtifactDetection table.
+
+        If custom_artifact_detection is set in selection table, do nothing.
+
+        Fetches...
+            - Parameters from ArtifactDetectionParameters
+            - Recording from SpikeSortingRecording (loads with spikeinterface)
+        Uses module-level function _get_artifact_times to detect artifacts.
+        """
         if not (ArtifactDetectionSelection & key).fetch1(
             "custom_artifact_detection"
         ):
@@ -99,23 +108,6 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             artifact_removed_valid_times, artifact_times = _get_artifact_times(
                 recording, **artifact_params, **job_kwargs
             )
-
-            # NOTE: decided not to do this but to just create a single long segment; keep for now
-            # get artifact times by segment
-            # if AppendSegmentRecording, get artifact times for each segment
-            # if isinstance(recording, AppendSegmentRecording):
-            #     artifact_removed_valid_times = []
-            #     artifact_times = []
-            #     for rec in recording.recording_list:
-            #         rec_valid_times, rec_artifact_times = _get_artifact_times(rec, **artifact_params)
-            #         for valid_times in rec_valid_times:
-            #             artifact_removed_valid_times.append(valid_times)
-            #         for artifact_times in rec_artifact_times:
-            #             artifact_times.append(artifact_times)
-            #     artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
-            #     artifact_times = np.asarray(artifact_times)
-            # else:
-            #     artifact_removed_valid_times, artifact_times = _get_artifact_times(recording, **artifact_params)
 
             key["artifact_times"] = artifact_times
             key["artifact_removed_valid_times"] = artifact_removed_valid_times

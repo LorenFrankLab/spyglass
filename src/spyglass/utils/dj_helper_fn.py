@@ -337,6 +337,7 @@ def _get_nwb_object(objects, object_id):
 
 
 def get_child_tables(table):
+    """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table
     return [
         dj.FreeTable(
@@ -539,8 +540,10 @@ def populate_pass_function(value):
 
 
 class NonDaemonPool(multiprocessing.pool.Pool):
-    """NonDaemonPool. Used to create a pool of non-daemonized processes,
-    which are required for parallel populate operations in DataJoint.
+    """Non-daemonized pool for multiprocessing.
+
+    Used to create a pool of non-daemonized processes, which are required for
+    parallel populate operations in DataJoint.
     """
 
     # Explicitly set the start method to 'fork'
@@ -548,6 +551,7 @@ class NonDaemonPool(multiprocessing.pool.Pool):
     multiprocessing.set_start_method("fork", force=True)
 
     def Process(self, *args, **kwds):
+        """Return a non-daemonized process."""
         proc = super(NonDaemonPool, self).Process(*args, **kwds)
 
         class NonDaemonProcess(proc.__class__):
@@ -563,3 +567,12 @@ class NonDaemonPool(multiprocessing.pool.Pool):
 
         proc.__class__ = NonDaemonProcess
         return proc
+
+
+def str_to_bool(value) -> bool:
+    """Return whether the provided string represents true. Otherwise false."""
+    # Due to distutils equivalent depreciation in 3.10
+    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
+    if not value:
+        return False
+    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")

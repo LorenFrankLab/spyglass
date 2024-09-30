@@ -154,6 +154,7 @@ def get_config(nwb_file_path, calling_table=None):
 
 
 def close_nwb_files():
+    """Close all open NWB files."""
     for io, _ in __open_nwb_files.values():
         io.close()
     __open_nwb_files.clear()
@@ -563,6 +564,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
+    """Change group permissions for specified subject ids in analysis dir."""
     logger.warning("DEPRECATED: This function will be removed in `0.6`.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)

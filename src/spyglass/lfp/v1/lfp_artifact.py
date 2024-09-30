@@ -127,6 +127,15 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the LFPArtifactDetection table with artifact times.
+
+        1. Fetch parameters and LFP data from LFPArtifactDetectionParameters
+            and LFPV1, respectively.
+        2. Optionally reference the LFP data.
+        3. Pass data to chosen artifact detection algorithm.
+        3. Insert into LFPArtifactRemovedIntervalList, IntervalList, and
+            LFPArtifactDetection.
+        """
         artifact_params = (
             LFPArtifactDetectionParameters
             & {"artifact_params_name": key["artifact_params_name"]}
