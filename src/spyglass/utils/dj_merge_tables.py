@@ -3,7 +3,7 @@ from itertools import chain as iter_chain
 from pprint import pprint
 from re import sub as re_sub
 from time import time
-from typing import Union, List
+from typing import List, Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -348,7 +348,7 @@ class Merge(dj.Manual):
                         )
                     key = keys[0]
                     if part & key:
-                        print(f"Key already in part {part_name}: {key}")
+                        logger.info(f"Key already in part {part_name}: {key}")
                         continue
                     master_sk = {cls()._reserved_sk: part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
