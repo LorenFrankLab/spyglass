@@ -126,7 +126,7 @@ ignore-words-list = 'nevers'
 minversion = "7.0"
 addopts = [
     # "-sv", # no capture, verbose output
-    "--sw", # stepwise: resume with next test after failure
+    # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
