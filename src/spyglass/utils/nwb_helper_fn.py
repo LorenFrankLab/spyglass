@@ -116,7 +116,7 @@ def get_linked_nwbs(path):
         # open the nwb file (opens externally linked files as well)
         nwb = io.read()
         # get the linked files
-        return [x for x in io._HDF5IO__built if (not x == path)]
+        return [x for x in io._HDF5IO__built if x != path]
 
 
 def get_config(nwb_file_path, calling_table=None):
