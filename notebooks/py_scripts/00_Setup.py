@@ -45,7 +45,8 @@
 # For local use, download and install ...
 #
 # 1. [Python 3.9](https://wiki.python.org/moin/BeginnersGuide/Download).
-# 2. [mamba](https://mamba.readthedocs.io/en/latest/installation.html) as a
+# 2. [mamba](https://mamba.readthedocs.io/en/latest/installation/mamba-installation.html)
+#     as a
 #    replacement for conda. Spyglass installation is significantly faster with
 #    mamba.
 #    ```bash

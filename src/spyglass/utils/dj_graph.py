@@ -22,7 +22,6 @@ from networkx import (
     all_simple_paths,
     shortest_path,
 )
-from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
@@ -478,7 +477,7 @@ class AbstractGraph(ABC):
             if not self._is_out(node, warn=False)
         ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
-        ordered = dj_topo_sort(list(topological_sort(graph)))
+        ordered = dj_topo_sort(graph)
         if reverse:
             ordered.reverse()
         return [n for n in ordered if n in nodes]
@@ -869,10 +868,10 @@ class TableChain(RestrGraph):
             self.direction = Direction.DOWN
 
         self.leaf = None
-        if search_restr and not parent:
+        if search_restr and not self.parent:  # using `parent` fails on empty
             self.direction = Direction.UP
             self.leaf = self.child
-        if search_restr and not child:
+        if search_restr and not self.child:
             self.direction = Direction.DOWN
             self.leaf = self.parent
         if self.leaf:
