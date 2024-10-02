@@ -176,7 +176,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
         )
 
         # get the dandi name translations
-        translations = translate_name_to_dandi(destination_dir)
+        translations = lookup_dandi_translation(destination_dir, dandiset_dir)
 
         # upload the dandiset to the dandi server
         if dandi_api_key:
@@ -232,7 +232,7 @@ def _get_metadata(path):
     return meta
 
 
-def translate_name_to_dandi(folder, dandiset_dir: Optional[str] = None):
+def translate_name_to_dandi(folder):
     """Uses dandi.organize to translate filenames to dandi paths
 
     NOTE: The name for a given file depends on all files in the folder
@@ -241,17 +241,12 @@ def translate_name_to_dandi(folder, dandiset_dir: Optional[str] = None):
     ----------
     folder : str
         location of files to be translated
-    danidset_dir : str
-        location of organized dandiset directory. If provided, will use this to
-        lookup the dandi_path for each file in the folder
 
     Returns
     -------
     dict
         dictionary of filename to dandi_path translations
     """
-    if dandiset_dir is not None:
-        return lookup_dandi_translation(folder, dandiset_dir)
 
     files = Path(folder).glob("*")
     metadata = list(map(_get_metadata, files))
