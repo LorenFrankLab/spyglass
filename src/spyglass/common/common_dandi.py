@@ -145,20 +145,15 @@ class DandiPath(SpyglassMixin, dj.Manual):
 
         os.makedirs(destination_dir, exist_ok=False)
         for file in source_files:
-            if not os.path.exists(
-                f"{destination_dir}/{os.path.basename(file)}"
-            ):
-                if skip_raw_files and raw_dir in file:
-                    continue
-                # copy the file if it has external links so can be safely edited
-                if nwb_has_external_links(file):
-                    shutil.copy(
-                        file, f"{destination_dir}/{os.path.basename(file)}"
-                    )
-                else:
-                    os.symlink(
-                        file, f"{destination_dir}/{os.path.basename(file)}"
-                    )
+            if os.path.exists(f"{destination_dir}/{os.path.basename(file)}"):
+                continue
+            if skip_raw_files and raw_dir in file:
+                continue
+            # copy the file if it has external links so can be safely edited
+            if nwb_has_external_links(file):
+                shutil.copy(file, f"{destination_dir}/{os.path.basename(file)}")
+            else:
+                os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
 
         # validate the dandiset
         validate_dandiset(destination_dir, ignore_external_files=True)

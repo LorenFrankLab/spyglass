@@ -275,24 +275,19 @@ class Export(SpyglassMixin, dj.Computed):
         )
 
         # Check for linked nwb objects and add them to the export
-        exclude_files = []
-        for i, file in enumerate(file_paths):
-            if links := get_linked_nwbs(file["file_path"]):
-                for link in links:
-                    file_paths.append({"file_path": link})
-                logger.warning(
-                    "Dandi not yet supported for linked nwb objects "
-                    + f"excluding {file['file_path']} from export "
-                    + f" and including {links} instead"
-                )
-                exclude_files.append(i)
-        # Remove the files that contained linked nwb objects
-        file_paths = [
-            file_paths[i]
-            for i in range(len(file_paths))
-            if i not in exclude_files
-        ]
-        file_paths = unique_dicts(file_paths)
+        unlinked_files = set()
+        for file in file_paths:
+            if not (links := get_linked_nwbs(file["file_path"])):
+                unlinked_files.add(file)
+                continue
+            logger.warning(
+                "Dandi not yet supported for linked nwb objects "
+                + f"excluding {file['file_path']} from export "
+                + f" and including {links} instead"
+            )
+            for link in links:
+                unlinked_files.add(link)
+        file_paths = {"file_path": link for link in unlinked_files}
 
         table_inserts = [
             {**key, **rd, "table_id": i}
