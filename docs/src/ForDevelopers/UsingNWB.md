@@ -62,7 +62,7 @@ The following objects should be uniquely named.
 - Each recording and sorting is given truncated UUID strings as part of
     concatenations.
 
-Following broader Python conventions, methods a method that will not be
+Following broader Python conventions, a method that will not be
 explicitly called by the user should start with `_`
 
 ## Time
