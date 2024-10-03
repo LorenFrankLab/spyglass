@@ -27,6 +27,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Enforce match between ingested nwb probe geometry and existing table entry
     #1074
 - Update DataJoint install and password instructions #1131
+- Fix dandi upload process for nwb's with video or linked objects #1095
 - Minor docs fixes #1145
 
 ### Pipelines

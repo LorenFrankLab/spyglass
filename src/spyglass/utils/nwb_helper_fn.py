@@ -69,6 +69,14 @@ def get_nwb_file(nwb_file_path):
                 from ..common.common_dandi import DandiPath
 
                 dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath() & dandi_key:
+                    # Check if non-copied raw file is in Dandi
+                    dandi_key = {
+                        "filename": Path(nwb_file_path).name.replace(
+                            "_.nwb", ".nwb"
+                        )
+                    }
+
                 if not DandiPath & dandi_key:
                     # If not in Dandi, then we can't find the file
                     raise FileNotFoundError(
@@ -99,6 +107,16 @@ def file_from_dandi(filepath):
         if "HTTPFileSystem" in k:
             return True
     return False
+
+
+def get_linked_nwbs(path):
+    """Return a list of paths to NWB files that are linked by objects in
+    the file at the given path."""
+    with pynwb.NWBHDF5IO(path, "r") as io:
+        # open the nwb file (opens externally linked files as well)
+        nwb = io.read()
+        # get the linked files
+        return [x for x in io._HDF5IO__built if x != path]
 
 
 def get_config(nwb_file_path, calling_table=None):
