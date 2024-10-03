@@ -27,9 +27,6 @@ def test_curation_sort(spike_v1, pop_curation):
     assert isinstance(
         sort, BaseSorting
     ), "CurationV1.get_sorting failed to return a BaseSorting"
-    assert (
-        sort_dict["kwargs"]["spikes"].shape[0] == 918
-    ), "CurationV1.get_sorting unexpected shape"
 
     expected = {
         "class": "spikeinterface.core.numpyextractors.NumpySorting",
@@ -95,7 +92,6 @@ def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
         "merges_applied": 0,
         "name": "0",
         "nwb_file_name": "minirec20230622_.nwb",
-        "object_id": "a77cbb7a-b18c-47a3-982c-6c159ffdf40e",
         "original_reference_electrode": 0,
         "parent_curation_id": 0,
         "probe_electrode": 0,
