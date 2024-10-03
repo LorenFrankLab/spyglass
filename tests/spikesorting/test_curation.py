@@ -3,8 +3,6 @@ from datajoint.hash import key_hash
 from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
-from .conftest import hash_sort_info
-
 
 def test_curation_rec(spike_v1, pop_curation):
     rec = spike_v1.CurationV1.get_recording(pop_curation)
@@ -30,21 +28,93 @@ def test_curation_sort(spike_v1, pop_curation):
         sort, BaseSorting
     ), "CurationV1.get_sorting failed to return a BaseSorting"
     assert (
-        key_hash(sort_dict) == "612983fbf4958f6b2c7abe7ced86ab73"
-    ), "CurationV1.get_sorting unexpected value"
-    assert (
         sort_dict["kwargs"]["spikes"].shape[0] == 918
     ), "CurationV1.get_sorting unexpected shape"
 
+    expected = {
+        "class": "spikeinterface.core.numpyextractors.NumpySorting",
+        "module": "spikeinterface",
+        "relative_paths": False,
+    }
+    for k in expected:
+        assert (
+            sort_dict[k] == expected[k]
+        ), f"CurationV1.get_sorting unexpected value: {k}"
 
-def test_curation_sort_info(spike_v1, pop_curation, pop_curation_metric):
-    sort_info = spike_v1.CurationV1.get_sort_group_info(pop_curation)
-    sort_metric = spike_v1.CurationV1.get_sort_group_info(pop_curation_metric)
 
-    assert (
-        hash_sort_info(sort_info) == "be874e806a482ed2677fd0d0b449f965"
-    ), "CurationV1.get_sort_group_info unexpected value"
+def test_curation_sort_info(spike_v1, pop_curation):
+    sort_info = spike_v1.CurationV1.get_sort_group_info(pop_curation).fetch1()
+    exp = {
+        "bad_channel": "False",
+        "curation_id": 0,
+        "description": "testing sort",
+        "electrode_group_name": "0",
+        "electrode_id": 0,
+        "filtering": "None",
+        "impedance": 0.0,
+        "merges_applied": 0,
+        "name": "0",
+        "nwb_file_name": "minirec20230622_.nwb",
+        "original_reference_electrode": 0,
+        "parent_curation_id": -1,
+        "probe_electrode": 0,
+        "probe_id": "tetrode_12.5",
+        "probe_shank": 0,
+        "region_id": 1,
+        "sort_group_id": 0,
+        "sorter": "mountainsort4",
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+        "subregion_name": None,
+        "subsubregion_name": None,
+        "x": 0.0,
+        "x_warped": 0.0,
+        "y": 0.0,
+        "y_warped": 0.0,
+        "z": 0.0,
+        "z_warped": 0.0,
+    }
+    for k in exp:
+        assert (
+            sort_info[k] == exp[k]
+        ), f"CurationV1.get_sort_group_info unexpected value: {k}"
 
-    assert (
-        hash_sort_info(sort_metric) == "48e437bc116900fe64e492d74595b56d"
-    ), "CurationV1.get_sort_group_info unexpected value"
+
+def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
+    sort_metric = spike_v1.CurationV1.get_sort_group_info(
+        pop_curation_metric
+    ).fetch1()
+    expected = {
+        "bad_channel": "False",
+        "contacts": "",
+        "curation_id": 1,
+        "description": "after metric curation",
+        "electrode_group_name": "0",
+        "electrode_id": 0,
+        "filtering": "None",
+        "impedance": 0.0,
+        "merges_applied": 0,
+        "name": "0",
+        "nwb_file_name": "minirec20230622_.nwb",
+        "object_id": "a77cbb7a-b18c-47a3-982c-6c159ffdf40e",
+        "original_reference_electrode": 0,
+        "parent_curation_id": 0,
+        "probe_electrode": 0,
+        "probe_id": "tetrode_12.5",
+        "probe_shank": 0,
+        "region_id": 1,
+        "sort_group_id": 0,
+        "sorter": "mountainsort4",
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+        "subregion_name": None,
+        "subsubregion_name": None,
+        "x": 0.0,
+        "x_warped": 0.0,
+        "y": 0.0,
+        "y_warped": 0.0,
+        "z": 0.0,
+        "z_warped": 0.0,
+    }
+    for k in expected:
+        assert (
+            sort_metric[k] == expected[k]
+        ), f"CurationV1.get_sort_group_info unexpected value: {k}"
