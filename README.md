@@ -1,6 +1,6 @@
 # spyglass
 
-[![Import test](https://github.com/LorenFrankLab/spyglass/actions/workflows/workflow.yml/badge.svg)](https://github.com/LorenFrankLab/spyglass/actions/workflows/workflow.yml)
+[![Tests](https://github.com/LorenFrankLab/spyglass/actions/workflows/test-conda.yml/badge.svg)](https://github.com/LorenFrankLab/spyglass/actions/workflows/test-conda.yml)
 [![PyPI version](https://badge.fury.io/py/spyglass-neuro.svg)](https://badge.fury.io/py/spyglass-neuro)
 
 ![Spyglass Figure](docs/src/images/fig1.png)
