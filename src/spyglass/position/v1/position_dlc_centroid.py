@@ -296,10 +296,10 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
         key["dlc_position_object_id"] = nwb_analysis_file.add_nwb_object(
-            nwb_analysis_file.add_nwb_object(analysis_file_name, position)
+            analysis_file_name, position
         )
         key["dlc_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
-            nwb_analysis_file.add_nwb_object(analysis_file_name, velocity)
+            analysis_file_name, velocity
         )
 
         nwb_analysis_file.add(

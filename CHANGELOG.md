@@ -49,7 +49,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 
     - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
-    - Minor fix to `DLCCentroid` make function order #1112
+    - Minor fix to `DLCCentroid` make function order #1112, #1148
 
 - Spike Sorting
 
