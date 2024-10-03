@@ -2,8 +2,6 @@ import pytest
 from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
-from .conftest import hash_sort_info
-
 
 def test_merge_get_restr(spike_merge, pop_merge, pop_curation_metric):
     restr_id = spike_merge.get_restricted_merge_ids(
@@ -34,10 +32,42 @@ def test_merge_get_sorting(spike_merge, pop_merge):
 
 
 def test_merge_get_sort_group_info(spike_merge, pop_merge):
-    hash = hash_sort_info(spike_merge.get_sort_group_info(pop_merge))
-    assert (
-        hash == "48e437bc116900fe64e492d74595b56d"
-    ), "SpikeSortingOutput.get_sort_group_info unexpected value"
+    sort_info = spike_merge.get_sort_group_info(pop_merge).fetch1()
+    expected = {
+        "bad_channel": "False",
+        "contacts": "",
+        "curation_id": 1,
+        "description": "after metric curation",
+        "electrode_group_name": "0",
+        "electrode_id": 0,
+        "filtering": "None",
+        "impedance": 0.0,
+        "merges_applied": 0,
+        "name": "0",
+        "nwb_file_name": "minirec20230622_.nwb",
+        "original_reference_electrode": 0,
+        "parent_curation_id": 0,
+        "probe_electrode": 0,
+        "probe_id": "tetrode_12.5",
+        "probe_shank": 0,
+        "region_id": 1,
+        "sort_group_id": 0,
+        "sorter": "mountainsort4",
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+        "subregion_name": None,
+        "subsubregion_name": None,
+        "x": 0.0,
+        "x_warped": 0.0,
+        "y": 0.0,
+        "y_warped": 0.0,
+        "z": 0.0,
+        "z_warped": 0.0,
+    }
+
+    for k in expected:
+        assert (
+            sort_info[k] == expected[k]
+        ), f"SpikeSortingOutput.get_sort_group_info unexpected value: {k}"
 
 
 @pytest.fixture(scope="session")
