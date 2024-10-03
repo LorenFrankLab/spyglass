@@ -144,11 +144,19 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       before actually exporting anything, which is more associated with
     #       Selection
 
-    def list_file_paths(self, key: dict) -> list[str]:
+    def list_file_paths(self, key: dict, as_dict=True) -> list[str]:
         """Return a list of unique file paths for a given restriction/key.
 
         Note: This list reflects files fetched during the export process. For
         upstream files, use RestrGraph.file_paths.
+
+        Parameters
+        ----------
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+        as_dict : bool, optional
+            Return as a list of dicts: [{'file_path': x}]. Default True.
+            If False, returns a list of strings without key.
         """
         file_table = self * self.File & key
         analysis_fp = [
@@ -159,7 +167,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Nwbfile().get_abs_path(fname)
             for fname in (AnalysisNwbfile * file_table).fetch("nwb_file_name")
         ]
-        return [{"file_path": p} for p in list({*analysis_fp, *nwbfile_fp})]
+        unique_ft = list({*analysis_fp, *nwbfile_fp})
+        return [{"file_path": p} for p in unique_ft] if as_dict else unique_ft
 
     def get_restr_graph(self, key: dict, verbose=False) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
@@ -270,31 +279,33 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
 
         restr_graph = ExportSelection().get_restr_graph(paper_key)
-        file_paths = unique_dicts(  # Original plus upstream files
-            query.list_file_paths(paper_key) + restr_graph.file_paths
-        )
+        # Original plus upstream files
+        file_paths = {
+            *query.list_file_paths(paper_key, as_dict=False),
+            *restr_graph.file_paths,
+        }
 
         # Check for linked nwb objects and add them to the export
         unlinked_files = set()
         for file in file_paths:
-            if not (links := get_linked_nwbs(file["file_path"])):
+            if not (links := get_linked_nwbs(file)):
                 unlinked_files.add(file)
                 continue
             logger.warning(
                 "Dandi not yet supported for linked nwb objects "
-                + f"excluding {file['file_path']} from export "
+                + f"excluding {file} from export "
                 + f" and including {links} instead"
             )
-            for link in links:
-                unlinked_files.add(link)
-        file_paths = {"file_path": link for link in unlinked_files}
+            unlinked_files.update(links)
+        file_paths = unlinked_files  # TODO: what if linked items have links?
 
         table_inserts = [
             {**key, **rd, "table_id": i}
             for i, rd in enumerate(restr_graph.as_dict)
         ]
         file_inserts = [
-            {**key, **fp, "file_id": i} for i, fp in enumerate(file_paths)
+            {**key, "file_path": fp, "file_id": i}
+            for i, fp in enumerate(file_paths)
         ]
 
         version_ids = query.fetch("spyglass_version")
