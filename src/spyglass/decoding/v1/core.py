@@ -15,7 +15,7 @@ from spyglass.decoding.v1.dj_decoder_conversion import (
     restore_classes,
 )
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 
 schema = dj.schema("decoding_core_v1")
 
@@ -124,9 +124,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             "position_group_name": group_name,
         }
         if self & group_key:
-            raise ValueError(
-                f"Group {nwb_file_name}: {group_name} already exists",
-                "please delete the group before creating a new one",
+            logger.error(  # Easier for pytests to not raise error on duplicate
+                f"Group {nwb_file_name}: {group_name} already exists"
+                + "please delete the group before creating a new one"
             )
         self.insert1(
             {

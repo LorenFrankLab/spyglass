@@ -1,45 +1,6 @@
 import re
 
 import pytest
-from datajoint.hash import key_hash
-
-
-@pytest.fixture(scope="session")
-def spike_v1(common):
-    from spyglass.spikesorting import v1
-
-    yield v1
-
-
-@pytest.fixture(scope="session")
-def pop_rec(spike_v1, mini_dict, team_name):
-    spike_v1.SortGroup.set_group_by_shank(**mini_dict)
-    key = {
-        **mini_dict,
-        "sort_group_id": 0,
-        "preproc_param_name": "default",
-        "interval_list_name": "01_s1",
-        "team_name": team_name,
-    }
-    spike_v1.SpikeSortingRecordingSelection.insert_selection(key)
-    ssr_pk = (
-        (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
-    )
-    spike_v1.SpikeSortingRecording.populate(ssr_pk)
-
-    yield ssr_pk
-
-
-@pytest.fixture(scope="session")
-def pop_art(spike_v1, mini_dict, pop_rec):
-    key = {
-        "recording_id": pop_rec["recording_id"],
-        "artifact_param_name": "default",
-    }
-    spike_v1.ArtifactDetectionSelection.insert_selection(key)
-    spike_v1.ArtifactDetection.populate()
-
-    yield spike_v1.ArtifactDetection().fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
@@ -172,13 +133,6 @@ def pop_figurl_json(spike_v1, pop_metric):
         description="after figurl curation",
     )
     yield spike_v1.CurationV1().fetch("KEY", as_dict=True)  # list of dicts
-
-
-@pytest.fixture(scope="session")
-def spike_merge(spike_v1):
-    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-
-    yield SpikeSortingOutput()
 
 
 @pytest.fixture(scope="session")
