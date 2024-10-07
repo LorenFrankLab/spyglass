@@ -8,4 +8,4 @@ def test_unitwave_data(pop_unitwave):
 
 
 def test_pos_group(pop_pos_group):
-    assert False, "This test should fail"
+    assert len(pop_pos_group) > 0, "No position data found"

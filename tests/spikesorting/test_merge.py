@@ -3,12 +3,12 @@ from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
 
-def test_merge_get_restr(spike_merge, pop_merge, pop_curation_metric):
+def test_merge_get_restr(spike_merge, pop_spike_merge, pop_curation_metric):
     restr_id = spike_merge.get_restricted_merge_ids(
         pop_curation_metric, sources=["v1"]
     )[0]
     assert (
-        restr_id == pop_merge["merge_id"]
+        restr_id == pop_spike_merge["merge_id"]
     ), "SpikeSortingOutput merge_id mismatch"
 
     non_artifact = spike_merge.get_restricted_merge_ids(
@@ -17,22 +17,22 @@ def test_merge_get_restr(spike_merge, pop_merge, pop_curation_metric):
     assert restr_id == non_artifact, "SpikeSortingOutput merge_id mismatch"
 
 
-def test_merge_get_recording(spike_merge, pop_merge):
-    rec = spike_merge.get_recording(pop_merge)
+def test_merge_get_recording(spike_merge, pop_spike_merge):
+    rec = spike_merge.get_recording(pop_spike_merge)
     assert isinstance(
         rec, NwbRecordingExtractor
     ), "SpikeSortingOutput.get_recording failed to return a RecordingExtractor"
 
 
-def test_merge_get_sorting(spike_merge, pop_merge):
-    sort = spike_merge.get_sorting(pop_merge)
+def test_merge_get_sorting(spike_merge, pop_spike_merge):
+    sort = spike_merge.get_sorting(pop_spike_merge)
     assert isinstance(
         sort, BaseSorting
     ), "SpikeSortingOutput.get_sorting failed to return a BaseSorting"
 
 
-def test_merge_get_sort_group_info(spike_merge, pop_merge):
-    sort_info = spike_merge.get_sort_group_info(pop_merge).fetch1()
+def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
+    sort_info = spike_merge.get_sort_group_info(pop_spike_merge).fetch1()
     expected = {
         "bad_channel": "False",
         "contacts": "",
@@ -71,8 +71,8 @@ def test_merge_get_sort_group_info(spike_merge, pop_merge):
 
 
 @pytest.fixture(scope="session")
-def merge_times(spike_merge, pop_merge):
-    yield spike_merge.get_spike_times(pop_merge)
+def merge_times(spike_merge, pop_spike_merge):
+    yield spike_merge.get_spike_times(pop_spike_merge)
 
 
 def test_merge_get_spike_times(merge_times):
@@ -82,12 +82,12 @@ def test_merge_get_spike_times(merge_times):
 
 
 @pytest.mark.skip(reason="Not testing bc #1077")
-def test_merge_get_spike_indicators(spike_merge, pop_merge, merge_times):
-    ret = spike_merge.get_spike_indicator(pop_merge, time=merge_times)
+def test_merge_get_spike_indicators(spike_merge, pop_spike_merge, merge_times):
+    ret = spike_merge.get_spike_indicator(pop_spike_merge, time=merge_times)
     raise NotImplementedError(ret)
 
 
 @pytest.mark.skip(reason="Not testing bc #1077")
-def test_merge_get_firing_rate(spike_merge, pop_merge, merge_times):
-    ret = spike_merge.get_firing_rate(pop_merge, time=merge_times)
+def test_merge_get_firing_rate(spike_merge, pop_spike_merge, merge_times):
+    ret = spike_merge.get_firing_rate(pop_spike_merge, time=merge_times)
     raise NotImplementedError(ret)
