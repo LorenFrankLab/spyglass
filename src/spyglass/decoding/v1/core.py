@@ -56,14 +56,15 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     @classmethod
     def insert_default(cls):
         """Insert default decoding parameters"""
-        cls.insert(cls.contents, skip_duplicates=True)
+        cls.super().insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
         """Override insert to convert classes to dict before inserting"""
         for row in rows:
-            row["decoding_params"] = convert_classes_to_dict(
-                vars(row["decoding_params"])
-            )
+            params = row["decoding_params"]
+            if hasattr(params, "__dict__"):
+                params = vars(params)
+            row["decoding_params"] = convert_classes_to_dict(params)
         super().insert(rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
@@ -128,6 +129,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
                 f"Group {nwb_file_name}: {group_name} already exists"
                 + "please delete the group before creating a new one"
             )
+            return
         self.insert1(
             {
                 **group_key,

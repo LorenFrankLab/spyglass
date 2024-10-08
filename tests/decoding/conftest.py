@@ -133,9 +133,16 @@ def clusterless_curate(spike_v1, clusterless_params, spike_merge):
 
 
 @pytest.fixture(scope="session")
-def waveform_params(decode_v1):
+def waveform_params_tbl(decode_v1):
+    params_tbl = decode_v1.waveform_features.WaveformFeaturesParams
+    params_tbl.insert_default()
+    yield params_tbl
+
+
+@pytest.fixture(scope="session")
+def waveform_params(waveform_params_tbl):
     param_pk = {"features_param_name": "low_thresh_amplitude"}
-    decode_v1.waveform_features.WaveformFeaturesParams.insert1(
+    waveform_params_tbl.insert1(
         {
             **param_pk,
             "params": {
@@ -149,7 +156,7 @@ def waveform_params(decode_v1):
                 "waveform_features_params": {
                     "amplitude": {
                         "peak_sign": "neg",
-                        "estimate_peak_time": False,
+                        "estimate_peak_time": True,  # was False
                     }
                 },
             },
@@ -247,6 +254,7 @@ def pop_pos_group_upsampled(decode_v1, pos_merge_keys, group_name, mini_dict):
         **mini_dict,
         group_name=name,
         keys=pos_merge_keys,
+        upsample_rate=250,
     )
 
     yield decode_v1.core.PositionGroup & {
@@ -256,22 +264,32 @@ def pop_pos_group_upsampled(decode_v1, pos_merge_keys, group_name, mini_dict):
 
 
 @pytest.fixture(scope="session")
-def decode_clusterless_params_insert(decode_v1):
+def decode_clusterless_params_insert(decode_v1, track_graph):
+    # from non_local_detector.environment import Environment
     from non_local_detector.models import ContFragClusterlessClassifier
 
-    ContFragClusterlessClassifier(
+    # graph_entry = track_graph.fetch1()  # Restricted table
+    class_kwargs = dict(
         clusterless_algorithm_params={
             "block_size": 10000,
             "position_std": 12.0,
             "waveform_std": 24.0,
         },
+        # environments=[
+        #     Environment(
+        #         environment_name=graph_entry["track_graph_name"],
+        #         track_graph=track_graph.get_networkx_track_graph(),
+        #         edge_order=graph_entry["linear_edge_order"],
+        #         edge_spacing=graph_entry["linear_edge_spacing"],
+        #     )
+        # ],
     )
     params_pk = {"decoding_param_name": "contfrag_clusterless"}
-    decode_v1.core.DecodingParameters.insert_default()
+    # decode_v1.core.DecodingParameters.insert_default()
     decode_v1.core.DecodingParameters.insert1(
         {
             **params_pk,
-            "decoding_params": ContFragClusterlessClassifier(),
+            "decoding_params": ContFragClusterlessClassifier(**class_kwargs),
             "decoding_kwargs": dict(),
         },
         skip_duplicates=True,
@@ -320,6 +338,7 @@ def decode_sel_key(mini_dict, group_name, pos_interval, decode_interval):
 def clusterless_pop(
     decode_v1,
     decode_sel_key,
+    group_name,
     decode_clusterless_params_insert,
     pop_pos_group,
     group_unitwave,
@@ -330,6 +349,7 @@ def clusterless_pop(
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
+        "waveform_features_group_name": group_name,
         "estimate_decoding_params": False,
     }
 
@@ -357,6 +377,7 @@ def clusterless_pop_estimated(
     decode_clusterless_params_insert,
     pop_pos_group,
     group_unitwave,
+    group_name,
     teardown,
     decode_merge,
 ):
@@ -364,6 +385,7 @@ def clusterless_pop_estimated(
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
+        "waveform_features_group_name": group_name,
         "estimate_decoding_params": True,
     }
 
@@ -402,14 +424,15 @@ def spikes_decoding(
     decode_sel_key,
     group_name,
     pop_spikes_group,
+    pop_pos_group,
 ):
-    _ = pop_spikes_group  # ensure populated
+    _ = pop_spikes_group, pop_pos_group  # ensure populated
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
+        **decode_spike_params_insert,
         "sorted_spikes_group_name": group_name,
         "unit_filter_params_name": "default_exclusion",
-        **decode_spike_params_insert,
         "estimate_decoding_params": False,
     }
     spikes.SortedSpikesDecodingSelection.insert1(
@@ -422,20 +445,26 @@ def spikes_decoding(
 
 
 @pytest.fixture(scope="session")
+def spikes_decoding_key(spikes_decoding):
+    yield spikes_decoding.fetch("KEY")[0]
+
+
+@pytest.fixture(scope="session")
 def spikes_decoding_estimated(
     decode_spike_params_insert,
     decode_v1,
     decode_sel_key,
     group_name,
     pop_spikes_group,
+    pop_pos_group,
 ):
-    _ = pop_spikes_group  # ensure populated
+    _ = pop_spikes_group, pop_pos_group  # ensure populated
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
+        **decode_spike_params_insert,
         "sorted_spikes_group_name": group_name,
         "unit_filter_params_name": "default_exclusion",
-        **decode_spike_params_insert,
         "estimate_decoding_params": True,
     }
     spikes.SortedSpikesDecodingSelection.insert1(

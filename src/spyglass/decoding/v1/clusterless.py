@@ -60,9 +60,10 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         }
         if self & group_key:
             logger.error(  # No error on duplicate helps with pytests
-                f"Group {nwb_file_name}: {group_name} already exists",
-                "please delete the group before creating a new one",
+                f"Group {nwb_file_name}: {group_name} already exists"
+                + "please delete the group before creating a new one",
             )
+            return
         self.insert1(
             group_key,
             skip_duplicates=True,
@@ -586,7 +587,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 classifier.environments[0].track_graph, *traj_data
             )
         else:
-            position_info = self.fetch_position_info(self.fetch1("KEY")).loc[
+            # `fetch_position_info` returns a tuple
+            position_info = self.fetch_position_info(self.fetch1("KEY"))[0].loc[
                 time_slice
             ]
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
