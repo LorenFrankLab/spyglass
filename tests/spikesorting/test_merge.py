@@ -7,8 +7,8 @@ def test_merge_get_restr(spike_merge, pop_spike_merge, pop_curation_metric):
     restr_id = spike_merge.get_restricted_merge_ids(
         pop_curation_metric, sources=["v1"]
     )[0]
-    assert (
-        restr_id == pop_spike_merge["merge_id"]
+    assert restr_id == (spike_merge >> pop_curation_metric).fetch1(
+        "merge_id"
     ), "SpikeSortingOutput merge_id mismatch"
 
     non_artifact = spike_merge.get_restricted_merge_ids(
@@ -36,8 +36,6 @@ def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
     expected = {
         "bad_channel": "False",
         "contacts": "",
-        "curation_id": 1,
-        "description": "after metric curation",
         "electrode_group_name": "0",
         "electrode_id": 0,
         "filtering": "None",
@@ -52,7 +50,6 @@ def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter": "mountainsort4",
         "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,

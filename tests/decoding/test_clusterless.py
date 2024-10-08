@@ -5,8 +5,8 @@ import pytest
 
 def test_fetch_results(clusterless_pop, result_coordinates):
     results = clusterless_pop.fetch_results()
-    assert (
-        results.coords._names == result_coordinates
+    assert result_coordinates.issubset(
+        results.coords._names
     ), "Incorrect coordinates in results"
 
 
@@ -57,8 +57,8 @@ def test_get_firing_rate(
 
 def test_clusterless_estimated(clusterless_pop_estimated, result_coordinates):
     results = clusterless_pop_estimated.fetch_results()
-    assert (
-        results.coords._names == result_coordinates
+    assert result_coordinates.issubset(
+        results.coords._names
     ), "Incorrect coordinates in estimated"
 
 

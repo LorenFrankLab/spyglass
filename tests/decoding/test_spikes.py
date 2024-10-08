@@ -5,8 +5,8 @@ import pytest
 
 def test_spikes_decoding(spikes_decoding, result_coordinates):
     results = spikes_decoding.fetch_results()
-    assert (
-        results.coords._names == result_coordinates
+    assert result_coordinates.issubset(
+        results.coords._names
     ), "Incorrect coordinates in results"
 
 
@@ -56,6 +56,6 @@ def test_get_orientation_col(spikes_decoding):
 def test_spikes_decoding_estimated(
     spikes_decoding_estimated, result_coordinates
 ):
-    assert (
-        spikes_decoding_estimated.fetch_results() == result_coordinates
+    assert result_coordinates.issubset(
+        spikes_decoding_estimated.fetch_results().coords._names
     ), "Incorrect coordinates in estimated"

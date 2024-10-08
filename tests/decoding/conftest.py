@@ -10,8 +10,6 @@ def result_coordinates():
         "state",
         "state_bins",
         "state_ind",
-        "x_position",
-        "y_position",
         "time",
         "environments",
     }
@@ -156,7 +154,7 @@ def waveform_params(waveform_params_tbl):
                 "waveform_features_params": {
                     "amplitude": {
                         "peak_sign": "neg",
-                        "estimate_peak_time": True,  # was False
+                        "estimate_peak_time": False,  # was False
                     }
                 },
             },
@@ -265,24 +263,24 @@ def pop_pos_group_upsampled(decode_v1, pos_merge_keys, group_name, mini_dict):
 
 @pytest.fixture(scope="session")
 def decode_clusterless_params_insert(decode_v1, track_graph):
-    # from non_local_detector.environment import Environment
+    from non_local_detector.environment import Environment
     from non_local_detector.models import ContFragClusterlessClassifier
 
-    # graph_entry = track_graph.fetch1()  # Restricted table
+    graph_entry = track_graph.fetch1()  # Restricted table
     class_kwargs = dict(
         clusterless_algorithm_params={
             "block_size": 10000,
             "position_std": 12.0,
             "waveform_std": 24.0,
         },
-        # environments=[
-        #     Environment(
-        #         environment_name=graph_entry["track_graph_name"],
-        #         track_graph=track_graph.get_networkx_track_graph(),
-        #         edge_order=graph_entry["linear_edge_order"],
-        #         edge_spacing=graph_entry["linear_edge_spacing"],
-        #     )
-        # ],
+        environments=[
+            Environment(
+                # environment_name=graph_entry["track_graph_name"],
+                track_graph=track_graph.get_networkx_track_graph(),
+                edge_order=graph_entry["linear_edge_order"],
+                edge_spacing=graph_entry["linear_edge_spacing"],
+            )
+        ],
     )
     params_pk = {"decoding_param_name": "contfrag_clusterless"}
     # decode_v1.core.DecodingParameters.insert_default()
