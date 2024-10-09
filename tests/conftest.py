@@ -1383,7 +1383,8 @@ def pop_spike_merge(
     # TODO: add figurl fixtures when kachery_cloud is initialized
 
     spike_merge.insert([pop_curation_metric], part_name="CurationV1")
-    yield spike_merge.fetch("KEY", as_dict=True)[0]
+
+    yield (spike_merge << pop_curation_metric).fetch1("KEY")
 
 
 @pytest.fixture(scope="session")

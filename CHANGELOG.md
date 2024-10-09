@@ -30,6 +30,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Fix dandi upload process for nwb's with video or linked objects #1095, #1151
 - Minor docs fixes #1145
 - Remove stored hashes from pytests #1152
+- Add coverage of decoding pipeline to pytests #1155
 
 ### Pipelines
 

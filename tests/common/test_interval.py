@@ -20,9 +20,9 @@ def test_plot_intervals(mini_insert, interval_list):
     assert array_equal(times_fetch, times_plot), "plot_intervals failed"
 
 
-@pytest.mark.skip(reason="Broken by additional interval lists")
 def test_plot_epoch(mini_insert, interval_list):
-    fig = interval_list.plot_epoch_pos_raw_intervals(return_fig=True)
+    restr_interval = interval_list & "interval_list_name like 'raw%'"
+    fig = restr_interval.plot_epoch_pos_raw_intervals(return_fig=True)
     epoch_label = fig.get_axes()[0].get_yticklabels()[-1].get_text()
     assert epoch_label == "epoch", "plot_epoch failed"
 

@@ -50,7 +50,6 @@ def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,
         "x": 0.0,
@@ -74,7 +73,7 @@ def merge_times(spike_merge, pop_spike_merge):
 
 def test_merge_get_spike_times(merge_times):
     assert (
-        merge_times[0].shape[0] == 243
+        merge_times[0].shape[0] == 23908
     ), "SpikeSortingOutput.get_spike_times unexpected shape"
 
 
