@@ -719,14 +719,7 @@ class Merge(dj.Manual):
 
         return source
 
-    @staticmethod
-    def _init_tbl(tbl):
-        """Returned an initialized table."""
-        return tbl() if isinstance(tbl, type) else tbl
-
-    def merge_get_parent_class(
-        self, source: str, init: bool = False
-    ) -> dj.Table:
+    def merge_get_parent_class(self, source: str) -> dj.Table:
         """Return the class of the parent table for a given CamelCase source.
 
         Parameters
@@ -749,7 +742,7 @@ class Merge(dj.Manual):
                 f"No source class found for {source}: \n\t"
                 + f"{self.parts(camel_case=True)}"
             )
-        return self._init_tbl(ret) if init else ret
+        return ret
 
     def merge_restrict_class(
         self,
