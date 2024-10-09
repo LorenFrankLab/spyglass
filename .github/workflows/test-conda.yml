@@ -45,7 +45,6 @@ jobs:
       with:
         activate-environment: spyglass
         environment-file: environment.yml
-        miniforge-variant: Mambaforge
         miniforge-version: latest
         use-mamba: true
     - name: Install apt dependencies

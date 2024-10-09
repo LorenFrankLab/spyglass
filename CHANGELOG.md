@@ -30,6 +30,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Fix dandi upload process for nwb's with video or linked objects #1095, #1151
 - Minor docs fixes #1145
 - Remove stored hashes from pytests #1152
+- Remove mambaforge from tests #1153
 - Add coverage of decoding pipeline to pytests #1155
 
 ### Pipelines
@@ -53,6 +54,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
     - Minor fix to `DLCCentroid` make function order #1112, #1148
+    - Pass output path as string to `cv2.VideoWriter` #1150
 
 - Spike Sorting
 
