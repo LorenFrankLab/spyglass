@@ -10,9 +10,10 @@ def export_tbls(common):
 
 @pytest.fixture(scope="session")
 def gen_export_selection(
-    lfp, trodes_pos_v1, track_graph, export_tbls, populate_lfp
+    lfp, trodes_pos_v1, track_graph, export_tbls, populate_lfp, pos_merge_tables
 ):
     ExportSelection, _ = export_tbls
+    pos_merge = pos_merge_tables[0]
     _ = populate_lfp
 
     ExportSelection.start_export(paper_id=1, analysis_id=1)
@@ -20,6 +21,19 @@ def gen_export_selection(
     trodes_pos_v1.fetch()
     ExportSelection.start_export(paper_id=1, analysis_id=2)
     track_graph.fetch()
+    ExportSelection.start_export(paper_id=1, analysis_id=3)
+
+    # __import__("pdb").set_trace()
+    # Table1 & (Table2 & key)
+    # Table1 * (Table2 & key)
+
+    ExportSelection.start_export(paper_id=1, analysis_id=4)
+
+    merge_key = (
+        pos_merge.TrodesPosV1 & "trodes_pos_params_name LIKE '%ups%'"
+    ).fetch1("KEY")
+    (pos_merge & merge_key).fetch_nwb()
+
     ExportSelection.stop_export()
 
     yield dict(paper_id=1)
@@ -43,8 +57,27 @@ def test_export_selection_tables(gen_export_selection, export_tbls):
     paper = ExportSelection * ExportSelection.Table & paper_key
     len_tbl_1 = len(paper & dict(analysis_id=1))
     len_tbl_2 = len(paper & dict(analysis_id=2))
-    assert len_tbl_1 == 2, "Selection tables not captured correctly"
+    assert len_tbl_1 == 7, "Selection tables not captured correctly"
     assert len_tbl_2 == 1, "Selection tables not captured correctly"
+
+
+# def test_export_selection_joins(gen_export_selection, export_tbls):
+#     ExportSelection, _ = export_tbls
+#     paper_key = gen_export_selection
+#
+#     paper = ExportSelection * ExportSelection.Table & paper_key
+#     restr = paper & dict(analysis_id=3)
+#     pass
+
+
+def test_export_selection_merge_fetch(gen_export_selection, export_tbls):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    paper = ExportSelection * ExportSelection.Table & paper_key
+    restr = paper & dict(analysis_id=4)
+    assert restr is not None, "Selection merge not captured correctly"
+    __import__("pdb").set_trace()
 
 
 def tests_export_selection_max_id(gen_export_selection, export_tbls):
@@ -70,6 +103,7 @@ def populate_export(export_tbls, gen_export_selection):
 def test_export_populate(populate_export):
     table, file = populate_export
 
+    # NEEDS TO BE UPDATED
     assert len(file) == 4, "Export tables not captured correctly"
     assert len(table) == 31, "Export files not captured correctly"
 

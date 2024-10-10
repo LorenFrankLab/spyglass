@@ -39,6 +39,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Drop `SessionGroup` table #1106
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
+    - Export fixes #XXXX
+        - Allow `get_abs_path` to add selection entry.
 
 - Decoding
 

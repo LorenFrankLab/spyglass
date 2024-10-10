@@ -13,6 +13,7 @@ from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.export import ExportMixin
 
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
@@ -49,11 +50,11 @@ def is_merge_table(table):
     ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
 
 
-class Merge(dj.Manual):
+class Merge(ExportMixin, dj.Manual):
     """Adds funcs to support standard Merge table operations.
 
     Many methods have the @classmethod decorator to permit MergeTable.method()
-    symtax. This makes access to instance attributes (e.g., (MergeTable &
+    syntax. This makes access to instance attributes (e.g., (MergeTable &
     "example='restriction'").restriction) harder, but these attributes have
     limited utility when the user wants to, for example, restrict the merged
     view rather than the master table itself.
@@ -533,6 +534,10 @@ class Merge(dj.Manual):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
         merge_restriction = self.extract_merge_id(restriction)
+
+        if self.export_id:
+            self._log_fetch(restriction=merge_restriction)
+
         sources = set((self & merge_restriction).fetch(self._reserved_sk))
         nwb_list = []
         merge_ids = []
@@ -763,7 +768,6 @@ class Merge(dj.Manual):
         parent_class = self.merge_get_parent_class(parent)
         return parent_class & parent_key
 
-    @classmethod
     def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
@@ -780,8 +784,17 @@ class Merge(dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
+        restriction = self.restriction or restriction
+
+        if self.export_id:
+            self._log_fetch(  # Transforming restriction to merge_id
+                restriction=self.merge_restrict(restriction).fetch(
+                    RESERVED_PRIMARY_KEY, as_dict=True
+                )
+            )
+
         results = []
-        parts = self()._merge_restrict_parts(
+        parts = self._merge_restrict_parts(
             restriction=restriction,
             as_objects=True,
             return_empties=False,
