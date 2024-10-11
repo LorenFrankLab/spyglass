@@ -538,13 +538,15 @@ class Merge(ExportMixin, dj.Manual):
         if self.export_id:
             self._log_fetch(restriction=merge_restriction)
 
-        sources = set((self & merge_restriction).fetch(self._reserved_sk))
+        sources = set(
+            (self & merge_restriction).fetch(self._reserved_sk, log_fetch=False)
+        )
         nwb_list = []
         merge_ids = []
         for source in sources:
             source_restr = (
                 self & {self._reserved_sk: source} & merge_restriction
-            ).fetch("KEY")
+            ).fetch("KEY", log_fetch=False)
             nwb_list.extend(
                 (self & source_restr)
                 .merge_restrict_class(
@@ -844,6 +846,7 @@ class Merge(ExportMixin, dj.Manual):
         ):
             return
 
+        _ = kwargs.pop("force_masters", None)  # Part not accept this kwarg
         for part in parts:
             part.delete(force_permission=force_permission, *args, **kwargs)
 

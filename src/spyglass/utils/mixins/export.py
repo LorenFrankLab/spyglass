@@ -1,5 +1,6 @@
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
+from contextvars import ContextVar
 from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
@@ -11,11 +12,10 @@ from packaging.version import parse as version_parse
 from spyglass.utils.logging import logger
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
+FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
 class ExportMixin:
-
-    # ---------------------------- Version Handling ----------------------------
 
     @cached_property
     def _spyglass_version(self):
@@ -123,9 +123,48 @@ class ExportMixin:
 
     # ------------------------------- Log Fetch -------------------------------
 
+    def _called_funcs(self):
+        """Get stack trace functions."""
+        ignore = {
+            "__and__",  # caught by restrict
+            "__mul__",  # caught by join
+            "_called_funcs",  # run here
+            "_log_fetch",  # run here
+            "_log_fetch_nwb",  # run here
+            "<module>",
+            "_exec_file",
+            "_pseudo_sync_runner",
+            "_run_cell",
+            "_run_cmd_line_code",
+            "_run_with_log",
+            "execfile",
+            "init_code",
+            "initialize",
+            "inner",
+            "interact",
+            "launch_instance",
+            "mainloop",
+            "run",
+            "run_ast_nodes",
+            "run_cell",
+            "run_cell_async",
+            "run_code",
+            "run_line_magic",
+            "safe_execfile",
+            "start",
+            "start_ipython",
+        }
+
+        ret = {i.function for i in inspect_stack()} - ignore
+        return ret
+
     def _log_fetch(self, restriction=None, *args, **kwargs):
         """Log fetch for export."""
-        if not self.export_id or self.database == "common_usage":
+        if (
+            not self.export_id
+            or self.database == "common_usage"
+            or not FETCH_LOG_FLAG.get()
+        ):
             return
 
         banned = [
@@ -135,12 +174,12 @@ class ExportMixin:
             "_repr_html_",  # Prevents on Table() call in notebook
             "cautious_delete",  # Prevents add on permission check during delete
             # "get_abs_path",  # Assumes that fetch_nwb will catch file/table
-        ]
-        called = [i.function for i in inspect_stack()]
-        if set(banned) & set(called):  # if called by any in banned, return
+            "_check_delete_permission",  # Prevents on Table().delete()
+            "delete",  # Prevents on Table().delete()
+            "_load_admin",  # Prevents on permission check
+        ]  # if called by any in banned, return
+        if set(banned) & self._called_funcs():
             return
-
-        logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
 
         restr = restriction or self.restriction or True
         limit = kwargs.get("limit")
@@ -155,8 +194,6 @@ class ExportMixin:
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
 
-        __import__("pdb").set_trace()
-
         if isinstance(restr_str, str) and len(restr_str) > 2048:
             raise RuntimeError(
                 "Export cannot handle restrictions > 2048.\n\t"
@@ -170,37 +207,68 @@ class ExportMixin:
                 restriction=restr_str,
             )
         )
+        restr_logline = restr_str.replace("AND", "\n\tAND").replace(
+            "OR", "\n\tOR"
+        )
+        logger.debug(f"\nTable: {self.full_table_name}\nRestr: {restr_logline}")
 
     def _log_fetch_nwb(self, table, table_attr):
         """Log fetch_nwb for export table."""
         tbl_pk = "analysis_file_name"
-        fnames = (self * table).fetch(tbl_pk)
+        fnames = self.fetch(tbl_pk, log_fetch=True)
         logger.debug(
-            f"Export {self.export_id}: fetch_nwb {self.table_name}, {fnames}"
+            f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
         )
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        self._export_table.Table.insert1(
-            dict(
-                export_id=self.export_id,
-                table_name=self.full_table_name,
-                restriction=make_condition(self, self.restriction, set()),
-            ),
-            skip_duplicates=True,
-        )
+        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
+        table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
+
+    def _run_with_log(self, method, *args, log_fetch=True, **kwargs):
+        log_this_call = FETCH_LOG_FLAG.get()
+        if log_this_call:
+            FETCH_LOG_FLAG.set(False)
+        try:
+            ret = method(*args, **kwargs)
+        finally:
+            if log_this_call:
+                FETCH_LOG_FLAG.set(True)
+        if log_fetch and self.export_id and log_this_call:
+            logger.debug(f"Export: {self._called_funcs()}")
+            restriction = kwargs.get("restriction") or kwargs.get("other")
+            self._log_fetch(restriction=restriction)
+        return ret
+
+    # -------------------------- Intercept DJ methods --------------------------
 
     def fetch(self, *args, log_fetch=True, **kwargs):
         """Log fetch for export."""
-        ret = super().fetch(*args, **kwargs)
-        if log_fetch and self.export_id:
-            self._log_fetch(*args, **kwargs)
-        return ret
+        return self._run_with_log(
+            super().fetch, *args, log_fetch=log_fetch, **kwargs
+        )
 
     def fetch1(self, *args, log_fetch=True, **kwargs):
         """Log fetch1 for export."""
-        ret = super().fetch1(*args, **kwargs)
-        if log_fetch and self.export_id:
-            self._log_fetch(*args, **kwargs)
-        return ret
+        return self._run_with_log(
+            super().fetch1, *args, log_fetch=log_fetch, **kwargs
+        )
+
+    def restrict(self, restriction):
+        """Log restrict for export."""
+        log_fetch = "fetch_nwb" not in self._called_funcs()
+        return self._run_with_log(
+            super().restrict, restriction=restriction, log_fetch=log_fetch
+        )
+
+    def join(self, other, *args, **kwargs):
+        """Log join for export."""
+
+        logger.error("CAUSES ISSUES ON CASCADE of RestrGraph")
+
+        log_fetch = "fetch_nwb" not in self._called_funcs()
+
+        return self._run_with_log(
+            super().join, other=other, log_fetch=log_fetch, *args, **kwargs
+        )

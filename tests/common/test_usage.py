@@ -10,10 +10,17 @@ def export_tbls(common):
 
 @pytest.fixture(scope="session")
 def gen_export_selection(
-    lfp, trodes_pos_v1, track_graph, export_tbls, populate_lfp, pos_merge_tables
+    lfp,
+    trodes_pos_v1,
+    track_graph,
+    export_tbls,
+    populate_lfp,
+    pos_merge_tables,
+    pop_common_electrode_group,
+    common,
 ):
     ExportSelection, _ = export_tbls
-    pos_merge = pos_merge_tables[0]
+    pos_merge, lin_merge = pos_merge_tables
     _ = populate_lfp
 
     ExportSelection.start_export(paper_id=1, analysis_id=1)
@@ -23,9 +30,10 @@ def gen_export_selection(
     track_graph.fetch()
     ExportSelection.start_export(paper_id=1, analysis_id=3)
 
-    # __import__("pdb").set_trace()
-    # Table1 & (Table2 & key)
-    # Table1 * (Table2 & key)
+    _ = pop_common_electrode_group & "electrode_group_name = 1"
+    _ = common.IntervalPositionInfoSelection * (
+        common.IntervalList & "interval_list_name = 'pos 1 valid times'"
+    )
 
     ExportSelection.start_export(paper_id=1, analysis_id=4)
 
@@ -47,7 +55,7 @@ def test_export_selection_files(gen_export_selection, export_tbls):
     paper_key = gen_export_selection
 
     len_fi = len(ExportSelection * ExportSelection.File & paper_key)
-    assert len_fi == 1, "Selection files not captured correctly"
+    assert len_fi == 2, "Selection files not captured correctly"
 
 
 def test_export_selection_tables(gen_export_selection, export_tbls):
@@ -57,27 +65,42 @@ def test_export_selection_tables(gen_export_selection, export_tbls):
     paper = ExportSelection * ExportSelection.Table & paper_key
     len_tbl_1 = len(paper & dict(analysis_id=1))
     len_tbl_2 = len(paper & dict(analysis_id=2))
-    assert len_tbl_1 == 7, "Selection tables not captured correctly"
+    assert len_tbl_1 == 3, "Selection tables not captured correctly"
     assert len_tbl_2 == 1, "Selection tables not captured correctly"
 
 
-# def test_export_selection_joins(gen_export_selection, export_tbls):
-#     ExportSelection, _ = export_tbls
-#     paper_key = gen_export_selection
-#
-#     paper = ExportSelection * ExportSelection.Table & paper_key
-#     restr = paper & dict(analysis_id=3)
-#     pass
+def test_export_selection_joins(gen_export_selection, export_tbls, common):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    restr = (
+        ExportSelection * ExportSelection.Table
+        & paper_key
+        & dict(analysis_id=3)
+    )
+
+    assert "electrode_group_name = 1" in (
+        restr & {"table_name": common.ElectrodeGroup.full_table_name}
+    ).fetch1("restriction"), "Export restriction not captured correctly"
+
+    assert f"FROM {common.IntervalList.full_table_name}" in (
+        restr
+        & {"table_name": common.IntervalPositionInfoSelection.full_table_name}
+    ).fetch1("restriction"), "Export join not captured correctly"
 
 
-def test_export_selection_merge_fetch(gen_export_selection, export_tbls):
+def test_export_selection_merge_fetch(
+    gen_export_selection, export_tbls, trodes_pos_v1
+):
     ExportSelection, _ = export_tbls
     paper_key = gen_export_selection
 
     paper = ExportSelection * ExportSelection.Table & paper_key
     restr = paper & dict(analysis_id=4)
-    assert restr is not None, "Selection merge not captured correctly"
-    __import__("pdb").set_trace()
+
+    assert trodes_pos_v1.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export merge not captured correctly"
 
 
 def tests_export_selection_max_id(gen_export_selection, export_tbls):

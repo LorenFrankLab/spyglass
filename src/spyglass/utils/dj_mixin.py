@@ -30,8 +30,6 @@ try:
 except (ImportError, ModuleNotFoundError):
     pynapple = None
 
-# class SpyglassMixin:
-
 
 class SpyglassMixin(ExportMixin):
     """Mixin for Spyglass DataJoint tables.
@@ -172,26 +170,6 @@ class SpyglassMixin(ExportMixin):
         return (
             resolved,
             table_dict[resolved],
-        )
-
-    def _log_fetch_nwb(self, table, table_attr):
-        """Log fetch_nwb for export table."""
-        tbl_pk = "analysis_file_name"
-        fnames = (self * table).fetch(tbl_pk)
-        logger.debug(
-            f"Export {self.export_id}: fetch_nwb {self.table_name}, {fnames}"
-        )
-        self._export_table.File.insert(
-            [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
-            skip_duplicates=True,
-        )
-        self._export_table.Table.insert1(
-            dict(
-                export_id=self.export_id,
-                table_name=self.full_table_name,
-                restriction=make_condition(self, self.restriction, set()),
-            ),
-            skip_duplicates=True,
         )
 
     def fetch_nwb(self, *attrs, **kwargs):
@@ -515,7 +493,6 @@ class SpyglassMixin(ExportMixin):
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
-        print("DELETE from SpyglassMixin")
         if warn:
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
@@ -872,9 +849,10 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
     delete calls from upstream tables to downstream tables.
     """
 
-    # TODO: allow restrict to still restrict part if using part sk
+    # TODO: See #1163
 
     def delete(self, *args, **kwargs):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()
+
         (self.master & restriction).delete(*args, **kwargs)
