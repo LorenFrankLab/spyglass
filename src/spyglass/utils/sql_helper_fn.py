@@ -1,3 +1,4 @@
+from functools import cached_property
 from os import system as os_system
 from pathlib import Path
 from typing import List
@@ -5,9 +6,6 @@ from typing import List
 import yaml
 from datajoint import FreeTable
 from datajoint import config as dj_config
-
-from spyglass.settings import export_dir
-from spyglass.utils import logger
 
 
 class SQLDumpHelper:
@@ -40,6 +38,20 @@ class SQLDumpHelper:
         self.docker_id = docker_id
         self.spyglass_version = spyglass_version
 
+    @cached_property
+    def _export_dir(self):
+        """Lazy load export directory."""
+        from spyglass.settings import export_dir
+
+        return export_dir
+
+    @cached_property
+    def _logger(self):
+        """Lazy load logger."""
+        from spyglass.utils import logger
+
+        return logger
+
     def _get_credentials(self):
         """Get credentials for database connection."""
         return {
@@ -60,29 +72,6 @@ class SQLDumpHelper:
         with open(str(cnf_path), "w") as file:
             file.write(template.format(**self._get_credentials()))
         cnf_path.chmod(0o600)
-
-    def _bash_escape(self, s):
-        """Escape restriction string for bash."""
-        s = s.strip()
-
-        replace_map = {
-            "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
-            "  ": " ",  # Squash double spaces
-            "( (": "((",  # Squash double parens
-            ") )": ")",
-            '"': "'",  # Replace double quotes with single
-            "`": "",  # Remove backticks
-            " AND ": " \\\n\tAND ",  # Add newline and tab for readability
-            " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
-            ")AND(": ") \\\n\tAND (",
-            ")OR(": ") \\\n\tOR  (",
-            "#": "\\#",
-        }
-        for old, new in replace_map.items():
-            s = s.replace(old, new)
-        if s.startswith("(((") and s.endswith(")))"):
-            s = s[2:-2]  # Remove extra parens for readability
-        return s
 
     def _cmd_prefix(self, docker_id=None):
         """Get prefix for mysqldump command. Includes docker exec if needed."""
@@ -112,7 +101,7 @@ class SQLDumpHelper:
         self._write_sql_cnf()
 
         paper_dir = (
-            Path(export_dir) / self.paper_id
+            Path(self._export_dir) / self.paper_id
             if not self.docker_id
             else Path(".")
         )
@@ -148,7 +137,7 @@ class SQLDumpHelper:
             for table in tables_by_db:
                 if not (where := table.where_clause()):
                     continue
-                where = self._bash_escape(where)
+                where = bash_escape_sql(where)
                 database, table_name = (
                     table.full_table_name.replace("`", "")
                     .replace("#", "\\#")
@@ -166,7 +155,7 @@ class SQLDumpHelper:
         self._remove_encoding(dump_script)
         self._write_version_file()
 
-        logger.info(f"Export script written to {dump_script}")
+        self._logger.info(f"Export script written to {dump_script}")
 
         self._export_conda_env()
 
@@ -178,7 +167,9 @@ class SQLDumpHelper:
 
     def _write_version_file(self):
         """Write spyglass version to paper directory."""
-        version_file = Path(export_dir) / self.paper_id / "spyglass_version"
+        version_file = (
+            Path(self._export_dir) / self.paper_id / "spyglass_version"
+        )
         if version_file.exists():
             return
         with version_file.open("w") as file:
@@ -189,7 +180,7 @@ class SQLDumpHelper:
 
         Renames environment name to paper_id.
         """
-        yml_path = Path(export_dir) / self.paper_id / "environment.yml"
+        yml_path = Path(self._export_dir) / self.paper_id / "environment.yml"
         if yml_path.exists():
             return
         command = f"conda env export > {yml_path}"
@@ -202,4 +193,45 @@ class SQLDumpHelper:
         with yml_path.open("w") as file:
             yaml.dump(yml, file)
 
-        logger.info(f"Conda environment exported to {yml_path}")
+        self._logger.info(f"Conda environment exported to {yml_path}")
+
+
+def bash_escape_sql(s, add_newline=True):
+    """Escape restriction string for bash.
+
+    Parameters
+    ----------
+    s : str
+        SQL restriction string
+    add_newline : bool, optional
+        Add newlines for readability around AND & OR. Default True
+    """
+    s = s.strip()
+
+    replace_map = {
+        "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
+        "  ": " ",  # Squash double spaces
+        "( (": "((",  # Squash double parens
+        ") )": ")",
+        '"': "'",  # Replace double quotes with single
+        "`": "",  # Remove backticks
+    }
+
+    if add_newline:
+        replace_map.update(
+            {
+                " AND ": " \\\n\tAND ",  # Add newline and tab for readability
+                " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
+                ")AND(": ") \\\n\tAND (",
+                ")OR(": ") \\\n\tOR  (",
+                "#": "\\#",
+            }
+        )
+    else:  # Used in ExportMixin
+        replace_map.update({"%%%%": "%%"})  # Remove extra percent signs
+
+    for old, new in replace_map.items():
+        s = s.replace(old, new)
+    if s.startswith("(((") and s.endswith(")))"):
+        s = s[2:-2]  # Remove extra parens for readability
+    return s

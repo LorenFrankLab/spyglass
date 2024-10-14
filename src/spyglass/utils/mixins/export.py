@@ -1,5 +1,6 @@
 from atexit import register as exit_register
 from atexit import unregister as exit_unregister
+from collections import defaultdict
 from contextvars import ContextVar
 from functools import cached_property
 from inspect import stack as inspect_stack
@@ -10,12 +11,17 @@ from datajoint.condition import make_condition
 from packaging.version import parse as version_parse
 
 from spyglass.utils.logging import logger
+from spyglass.utils.sql_helper_fn import bash_escape_sql
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
 class ExportMixin:
+
+    _export_cache = defaultdict(set)
+
+    # ------------------------------ Version Info -----------------------------
 
     @cached_property
     def _spyglass_version(self):
@@ -95,6 +101,7 @@ class ExportMixin:
 
     def _export_id_cleanup(self):
         """Cleanup export ID."""
+        self._export_cache = dict()
         if environ.get(EXPORT_ENV_VAR):
             del environ[EXPORT_ENV_VAR]
         exit_unregister(self._export_id_cleanup)  # Remove exit hook
@@ -207,6 +214,14 @@ class ExportMixin:
                 + "If required, please open an issue on GitHub.\n\t"
                 + f"Restriction: {restr_str}"
             )
+
+        if isinstance(restr_str, str):
+            restr_str = bash_escape_sql(restr_str, add_newline=False)
+
+        if restr_str in self._export_cache[self.full_table_name]:
+            return
+        self._export_cache[self.full_table_name].add(restr_str)
+
         self._export_table.Table.insert1(
             dict(
                 export_id=self.export_id,
@@ -235,7 +250,7 @@ class ExportMixin:
 
     def _run_with_log(self, method, *args, log_export=True, **kwargs):
         log_this_call = FETCH_LOG_FLAG.get()  # One log per fetch call
-        if log_this_call:
+        if log_this_call and not self.database == "common_usage":
             FETCH_LOG_FLAG.set(False)
         try:
             ret = method(*args, **kwargs)
@@ -246,7 +261,8 @@ class ExportMixin:
             if getattr(method, "__name__", None) == "join":
                 other = kwargs.get("other")
                 if not hasattr(other, "_log_fetch"):
-                    logger.warning(f"Cannot export log join for {other}")
+                    logger.warning(f"Cannot export log join for\n{other}")
+                    __import__("pdb").set_trace()
                 restriction = (  # Fetch self as restricted by other
                     self.proj()
                     .join(other.proj(), log_export=False)
@@ -262,18 +278,24 @@ class ExportMixin:
 
     def fetch(self, *args, log_export=True, **kwargs):
         """Log fetch for export."""
+        if not self.export_id:
+            return super().fetch(*args, **kwargs)
         return self._run_with_log(
             super().fetch, *args, log_export=log_export, **kwargs
         )
 
     def fetch1(self, *args, log_export=True, **kwargs):
         """Log fetch1 for export."""
+        if not self.export_id:
+            return super().fetch1(*args, **kwargs)
         return self._run_with_log(
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
     def restrict(self, restriction):
         """Log restrict for export."""
+        if not self.export_id:
+            return super().restrict(restriction)
         log_export = "fetch_nwb" not in self._called_funcs()
         return self._run_with_log(
             super().restrict, restriction=restriction, log_export=log_export
@@ -285,6 +307,8 @@ class ExportMixin:
         Join in dj_helper_func related to fetch_nwb have `log_export=False`
         because these entries are caught on the file cascade in RestrGraph.
         """
+        if not self.export_id:
+            return super().join(other=other, *args, **kwargs)
 
         return self._run_with_log(
             super().join, other=other, log_export=log_export, *args, **kwargs

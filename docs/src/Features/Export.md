@@ -50,6 +50,18 @@ This is designed to capture any way that Spyglass is accessed, including
 restricting one table via a join with another table. If this process seems to be
 missing a way that Spyglass is accessed in your pipeline, please let us know.
 
+Note that logging all restrictions may log more than is necessary. For example,
+`MyTable & restr1 & restr2` will log `MyTable & restr1` and `MyTable & restr2`,
+despite returning the combined restriction. Logging will treat compound
+restrictions as 'OR' instead of 'AND' statements. This can be avoided by
+combining restrictions before using the `&` operator.
+
+```python
+MyTable & "a = b" & "c > 5"  # Will capture 'a = b' OR 'c > 5'
+MyTable & "a = b AND c > 5"  # Will capture 'a = b AND c > 5'
+MyTable & dj.AndList(["a = b", "c > 5"])  # Will capture 'a = b AND c > 5'
+```
+
 If this process captures too much, you can either run a process with logging
 disabled, or delete these entries from `ExportSelection` after the export is
 logged.

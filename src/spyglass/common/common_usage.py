@@ -165,12 +165,16 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         ]
         nwbfile_fp = [
             Nwbfile().get_abs_path(fname)
-            for fname in (AnalysisNwbfile * file_table).fetch("nwb_file_name")
+            for fname in AnalysisNwbfile.join(
+                file_table, log_export=False
+            ).fetch("nwb_file_name")
         ]
         unique_ft = list({*analysis_fp, *nwbfile_fp})
         return [{"file_path": p} for p in unique_ft] if as_dict else unique_ft
 
-    def get_restr_graph(self, key: dict, verbose=False) -> RestrGraph:
+    def get_restr_graph(
+        self, key: dict, verbose=False, cascade=True
+    ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
         Ignores duplicate entries.
@@ -181,20 +185,33 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Any valid restriction key for ExportSelection.Table
         verbose : bool, optional
             Turn on RestrGraph verbosity. Default False.
+        cascade : bool, optional
+            Propagate restrictions to upstream tables. Default True.
         """
         leaves = unique_dicts(
             (self * self.Table & key).fetch(
                 "table_name", "restriction", as_dict=True
             )
         )
-        return RestrGraph(seed_table=self, leaves=leaves, verbose=verbose)
+        return RestrGraph(
+            seed_table=self, leaves=leaves, verbose=verbose, cascade=cascade
+        )
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.
 
         Useful for checking what will be exported.
         """
+        kwargs["cascade"] = False
         return self.get_restr_graph(kwargs).leaf_ft
+
+    def show_all_tables(self, **kwargs) -> list[dj.FreeTable]:
+        """Return a list of all FreeTables for a given restriction/key.
+
+        Useful for checking what will be exported.
+        """
+        kwargs["cascade"] = True
+        return self.get_restr_graph(kwargs).restr_ft
 
     def _max_export_id(self, paper_id: str, return_all=False) -> int:
         """Return last export associated with a given paper id.
