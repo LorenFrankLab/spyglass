@@ -31,11 +31,10 @@ The current implementation relies on two classes in the Spyglass package
 
 The `ExportMixin` class adds functionality to DataJoint tables. A subset of
 methods are used to set an environment variable, `SPYGLASS_EXPORT_ID`, and,
-while active, intercept all `fetch`, `fetch_nwb`,
-`restrict` and `join`
-calls to tables. When these functions are
-called, the mixin grabs the table name and the restriction applied to the table
-and stores them in the `ExportSelection` part tables.
+while active, intercept all `fetch`, `fetch_nwb`, `restrict` and `join` calls to
+tables. When these functions are called, the mixin grabs the table name and the
+restriction applied to the table and stores them in the `ExportSelection` part
+tables.
 
 <!-- TODO: Mention intercepting of restrict and join. -->
 
@@ -48,8 +47,8 @@ and stores them in the `ExportSelection` part tables.
     the `*` operator.
 
 This is designed to capture any way that Spyglass is accessed, including
-restricting one table via a join with another table. If this process seems to
-be missing a way that Spyglass is accessed in your pipeline, please let us know.
+restricting one table via a join with another table. If this process seems to be
+missing a way that Spyglass is accessed in your pipeline, please let us know.
 
 If this process captures too much, you can either run a process with logging
 disabled, or delete these entries from `ExportSelection` after the export is
@@ -60,16 +59,16 @@ Disabling logging with the `log_export` flag:
 ```python
 MyTable().fetch(log_export=False)
 MyTable().fetch_nwb(log_export=False)
-MyTable().restrict(restr, log_export=False) # Instead of MyTable & restr
-MyTable().join(Other, log_export=False) # Instead of MyTable * Other
+MyTable().restrict(restr, log_export=False)  # Instead of MyTable & restr
+MyTable().join(Other, log_export=False)  # Instead of MyTable * Other
 ```
 
 ### Graph
 
 The `RestrGraph` class uses DataJoint's networkx graph to store each of the
-tables and restrictions intercepted by the `ExportMixin`'s `fetch` as
-'leaves'. The class then cascades these restrictions up from each leaf to all
-ancestors. Use is modeled in the methods of `ExportSelection`.
+tables and restrictions intercepted by the `ExportMixin`'s `fetch` as 'leaves'.
+The class then cascades these restrictions up from each leaf to all ancestors.
+Use is modeled in the methods of `ExportSelection`.
 
 ```python
 from spyglass.utils.dj_graph import RestrGraph
@@ -143,14 +142,14 @@ paper. Each shell script one `mysqldump` command per table.
 To implement an export for a non-Spyglass database, you will need to ...
 
 - Create a modified version of `ExportMixin`, including ...
-  - `_export_table` method to lazy load an export table like `ExportSelection`
-  - `export_id` attribute, plus setter and deleter methods, to manage the status
+    - `_export_table` method to lazy load an export table like `ExportSelection`
+    - `export_id` attribute, plus setter and deleter methods, to manage the status
         of the export.
-  - `fetch` and other methods to intercept and log exported content.
+    - `fetch` and other methods to intercept and log exported content.
 - Create a modified version of `ExportSelection`, that adjusts fields like
     `spyglass_version` to match the new database.
 
 Or, optionally, you can use the `RestrGraph` class to cascade hand-picked tables
-and restrictions without the background logging of `ExportMixin`. The
-assembled list of restricted free tables, `RestrGraph.all_ft`, can be passed to
+and restrictions without the background logging of `ExportMixin`. The assembled
+list of restricted free tables, `RestrGraph.all_ft`, can be passed to
 `Export.write_export` to generate a shell script for exporting the data.
