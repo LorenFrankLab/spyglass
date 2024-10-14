@@ -1,5 +1,4 @@
 import numpy as np
-from datajoint.hash import key_hash
 from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
@@ -44,7 +43,6 @@ def test_curation_sort_info(spike_v1, pop_curation):
     exp = {
         "bad_channel": "False",
         "curation_id": 0,
-        "description": "testing sort",
         "electrode_group_name": "0",
         "electrode_id": 0,
         "filtering": "None",
@@ -59,8 +57,6 @@ def test_curation_sort_info(spike_v1, pop_curation):
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter": "mountainsort4",
-        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,
         "x": 0.0,
@@ -70,6 +66,7 @@ def test_curation_sort_info(spike_v1, pop_curation):
         "z": 0.0,
         "z_warped": 0.0,
     }
+
     for k in exp:
         assert (
             sort_info[k] == exp[k]
@@ -99,8 +96,6 @@ def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter": "mountainsort4",
-        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,
         "x": 0.0,
