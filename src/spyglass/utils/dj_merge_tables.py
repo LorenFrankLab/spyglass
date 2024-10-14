@@ -509,6 +509,7 @@ class Merge(ExportMixin, dj.Manual):
         multi_source=False,
         disable_warning=False,
         return_merge_ids=False,
+        log_export=True,
         *attrs,
         **kwargs,
     ):
@@ -525,6 +526,8 @@ class Merge(ExportMixin, dj.Manual):
             Return from multiple parents. Default False.
         return_merge_ids: bool
             Default False. Return merge_ids with nwb files.
+        log_export: bool
+            Default True. During export, log this fetch an export event.
 
         Notes
         -----
@@ -535,7 +538,7 @@ class Merge(ExportMixin, dj.Manual):
         restriction = restriction or self.restriction or True
         merge_restriction = self.extract_merge_id(restriction)
 
-        if self.export_id:
+        if log_export and self.export_id:
             self._log_fetch(restriction=merge_restriction)
 
         sources = set(
@@ -772,7 +775,9 @@ class Merge(ExportMixin, dj.Manual):
         parent_class = self.merge_get_parent_class(parent)
         return parent_class & parent_key
 
-    def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
+    def merge_fetch(
+        self, restriction: str = True, log_export=True, *attrs, **kwargs
+    ) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
         Parameters
@@ -780,6 +785,8 @@ class Merge(ExportMixin, dj.Manual):
         restriction: str
             Optional restriction to apply before determining parent to return.
             Default True.
+        log_export: bool
+            Default True. During export, log this fetch an export event.
         attrs, kwargs
             arguments passed to DataJoint `fetch` call
 
@@ -790,7 +797,7 @@ class Merge(ExportMixin, dj.Manual):
         """
         restriction = self.restriction or restriction
 
-        if self.export_id:
+        if log_export and self.export_id:
             self._log_fetch(  # Transforming restriction to merge_id
                 restriction=self.merge_restrict(restriction).fetch(
                     RESERVED_PRIMARY_KEY, as_dict=True

@@ -100,7 +100,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         def insert1(self, key, **kwargs):
             """Override insert1 to auto-increment table_id."""
             key = self._auto_increment(key, pk="table_id")
-            kwargs["skip_duplicates"] = True
             super().insert1(key, **kwargs)
 
         def insert(self, keys: List[dict], **kwargs):
@@ -108,7 +107,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             if not isinstance(keys[0], dict):
                 raise TypeError("Pass Table Keys as list of dict")
             keys = [self._auto_increment(k, pk="table_id") for k in keys]
-            kwargs["skip_duplicates"] = True
             super().insert(keys, **kwargs)
 
     class File(SpyglassMixin, dj.Part):
