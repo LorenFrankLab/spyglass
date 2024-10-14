@@ -83,7 +83,7 @@ def test_export_selection_joins(gen_export_selection, export_tbls, common):
         restr & {"table_name": common.ElectrodeGroup.full_table_name}
     ).fetch1("restriction"), "Export restriction not captured correctly"
 
-    assert f"FROM {common.IntervalList.full_table_name}" in (
+    assert "pos 1 valid times" in (
         restr
         & {"table_name": common.IntervalPositionInfoSelection.full_table_name}
     ).fetch1("restriction"), "Export join not captured correctly"
@@ -126,9 +126,8 @@ def populate_export(export_tbls, gen_export_selection):
 def test_export_populate(populate_export):
     table, file = populate_export
 
-    # NEEDS TO BE UPDATED
     assert len(file) == 4, "Export tables not captured correctly"
-    assert len(table) == 31, "Export files not captured correctly"
+    assert len(table) == 35, "Export files not captured correctly"
 
 
 def test_invalid_export_id(export_tbls):

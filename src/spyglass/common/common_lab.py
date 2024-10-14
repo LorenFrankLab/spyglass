@@ -102,9 +102,7 @@ class LabMember(SpyglassMixin, dj.Manual):
     def _load_admin(cls):
         """Load admin list."""
         cls._admin = list(
-            (cls.LabMemberInfo & {"admin": True}).fetch(
-                "datajoint_user_name", log_fetch=True
-            )
+            (cls.LabMemberInfo & {"admin": True}).fetch("datajoint_user_name")
         ) + ["root"]
 
     @property
@@ -131,7 +129,7 @@ class LabMember(SpyglassMixin, dj.Manual):
             The lab member name.
         """
         query = (cls.LabMemberInfo & {"datajoint_user_name": dj_user}).fetch(
-            "lab_member_name", log_fetch=True
+            "lab_member_name"
         )
 
         if len(query) != 1:

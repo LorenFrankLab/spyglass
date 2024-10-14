@@ -186,13 +186,20 @@ class ExportMixin:
         offset = kwargs.get("offset")
         if limit or offset:  # Use result as restr if limit/offset
             restr = self.restrict(restr).fetch(
-                log_fetch=False, as_dict=True, limit=limit, offset=offset
+                log_export=False, as_dict=True, limit=limit, offset=offset
             )
 
         restr_str = make_condition(self, restr, set())
 
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
+
+        if isinstance(restr_str, str) and "SELECT" in restr_str:
+            raise RuntimeError(
+                "Export cannot handle subquery restrictions. Please submit a "
+                + "bug report on GitHub with the code you ran and this"
+                + f"restriction:\n\t{restr_str}"
+            )
 
         if isinstance(restr_str, str) and len(restr_str) > 2048:
             raise RuntimeError(
@@ -215,7 +222,7 @@ class ExportMixin:
     def _log_fetch_nwb(self, table, table_attr):
         """Log fetch_nwb for export table."""
         tbl_pk = "analysis_file_name"
-        fnames = self.fetch(tbl_pk, log_fetch=True)
+        fnames = self.fetch(tbl_pk, log_export=True)
         logger.debug(
             f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
         )
@@ -226,8 +233,8 @@ class ExportMixin:
         fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
         table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
 
-    def _run_with_log(self, method, *args, log_fetch=True, **kwargs):
-        log_this_call = FETCH_LOG_FLAG.get()
+    def _run_with_log(self, method, *args, log_export=True, **kwargs):
+        log_this_call = FETCH_LOG_FLAG.get()  # One log per fetch call
         if log_this_call:
             FETCH_LOG_FLAG.set(False)
         try:
@@ -235,40 +242,50 @@ class ExportMixin:
         finally:
             if log_this_call:
                 FETCH_LOG_FLAG.set(True)
-        if log_fetch and self.export_id and log_this_call:
+        if log_export and self.export_id and log_this_call:
+            if getattr(method, "__name__", None) == "join":
+                other = kwargs.get("other")
+                if not hasattr(other, "_log_fetch"):
+                    logger.warning(f"Cannot export log join for {other}")
+                restriction = (  # Fetch self as restricted by other
+                    self.proj()
+                    .join(other.proj(), log_export=False)
+                    .fetch(*self.primary_key, as_dict=True)
+                )
+            else:
+                restriction = kwargs.get("restriction")
             logger.debug(f"Export: {self._called_funcs()}")
-            restriction = kwargs.get("restriction") or kwargs.get("other")
             self._log_fetch(restriction=restriction)
         return ret
 
     # -------------------------- Intercept DJ methods --------------------------
 
-    def fetch(self, *args, log_fetch=True, **kwargs):
+    def fetch(self, *args, log_export=True, **kwargs):
         """Log fetch for export."""
         return self._run_with_log(
-            super().fetch, *args, log_fetch=log_fetch, **kwargs
+            super().fetch, *args, log_export=log_export, **kwargs
         )
 
-    def fetch1(self, *args, log_fetch=True, **kwargs):
+    def fetch1(self, *args, log_export=True, **kwargs):
         """Log fetch1 for export."""
         return self._run_with_log(
-            super().fetch1, *args, log_fetch=log_fetch, **kwargs
+            super().fetch1, *args, log_export=log_export, **kwargs
         )
 
     def restrict(self, restriction):
         """Log restrict for export."""
-        log_fetch = "fetch_nwb" not in self._called_funcs()
+        log_export = "fetch_nwb" not in self._called_funcs()
         return self._run_with_log(
-            super().restrict, restriction=restriction, log_fetch=log_fetch
+            super().restrict, restriction=restriction, log_export=log_export
         )
 
-    def join(self, other, *args, **kwargs):
-        """Log join for export."""
+    def join(self, other, log_export=True, *args, **kwargs):
+        """Log join for export.
 
-        logger.error("CAUSES ISSUES ON CASCADE of RestrGraph")
-
-        log_fetch = "fetch_nwb" not in self._called_funcs()
+        Join in dj_helper_func related to fetch_nwb have `log_export=False`
+        because these entries are caught on the file cascade in RestrGraph.
+        """
 
         return self._run_with_log(
-            super().join, other=other, log_fetch=log_fetch, *args, **kwargs
+            super().join, other=other, log_export=log_export, *args, **kwargs
         )

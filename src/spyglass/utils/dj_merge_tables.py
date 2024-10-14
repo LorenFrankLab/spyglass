@@ -539,14 +539,16 @@ class Merge(ExportMixin, dj.Manual):
             self._log_fetch(restriction=merge_restriction)
 
         sources = set(
-            (self & merge_restriction).fetch(self._reserved_sk, log_fetch=False)
+            (self & merge_restriction).fetch(
+                self._reserved_sk, log_export=False
+            )
         )
         nwb_list = []
         merge_ids = []
         for source in sources:
             source_restr = (
                 self & {self._reserved_sk: source} & merge_restriction
-            ).fetch("KEY", log_fetch=False)
+            ).fetch("KEY", log_export=False)
             nwb_list.extend(
                 (self & source_restr)
                 .merge_restrict_class(
@@ -836,7 +838,10 @@ class Merge(ExportMixin, dj.Manual):
         self.insert(successes)
 
     def delete(self, force_permission=False, *args, **kwargs):
-        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete
+
+        Delete all relevant part entries from self.restriction.
+        """
         if not (
             parts := self.merge_get_part(
                 restriction=self.restriction,
@@ -848,7 +853,16 @@ class Merge(ExportMixin, dj.Manual):
 
         _ = kwargs.pop("force_masters", None)  # Part not accept this kwarg
         for part in parts:
-            part.delete(force_permission=force_permission, *args, **kwargs)
+            part.delete(
+                force_permission=force_permission,
+                force_parts=True,
+                *args,
+                **kwargs,
+            )
+
+        # Delete orphaned master entries, no prompt
+        kwargs["safemode"] = False
+        (self - self.parts(as_objects=True)).super_delete(*args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
