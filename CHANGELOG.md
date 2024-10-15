@@ -32,6 +32,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Minor docs fixes #1145
 - Remove stored hashes from pytests #1152
 - Remove mambaforge from tests #1153
+- Run tests on pull requests #1164
 
 ### Pipelines
 
