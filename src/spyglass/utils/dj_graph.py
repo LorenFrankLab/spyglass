@@ -54,7 +54,6 @@ def dj_topo_sort(graph: DiGraph) -> List[str]:
     List[str]
         List of table names in topological order
     """
-    __import__("pdb").set_trace()
     try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
         from datajoint.dependencies import topo_sort
 

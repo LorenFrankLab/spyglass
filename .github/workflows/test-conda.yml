@@ -2,7 +2,7 @@ name: Tests
 
 on:
   push:
-    branches: 
+    branches:
       - '!test_branch'
       - '!documentation'
   schedule:  # once a day at midnight UTC
@@ -53,7 +53,7 @@ jobs:
         sudo apt-get install mysql-client libmysqlclient-dev libgirepository1.0-dev -y
         sudo apt-get install ffmpeg libsm6 libxext6 -y # non-dlc position deps
     - name: Run pip install for test deps
-      run: | 
+      run: |
         pip install --quiet .[test]
     - name: Download data
       env:
@@ -61,8 +61,8 @@ jobs:
         NWBFILE: minirec20230622.nwb # Relative to Base URL
         VID_ONE: 20230622_sample_01_a1/20230622_sample_01_a1.1.h264
         VID_TWO: 20230622_sample_02_a1/20230622_sample_02_a1.1.h264
-        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/ 
-        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/ 
+        RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
+        VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
         wget_opts() { # Declare func with download options
@@ -76,4 +76,4 @@ jobs:
         wget_opts $VID_DIR $VID_TWO
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc 
+        pytest --no-docker --no-dlc
