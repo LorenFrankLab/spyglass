@@ -1,6 +1,9 @@
 # Convenience functions
 # some DLC-utils copied from datajoint element-interface utils.py
 from pathlib import Path
+from random import choice as random_choice
+from shutil import move as shutil_move
+from string import ascii_letters
 
 import cv2
 import matplotlib.pyplot as plt
@@ -8,6 +11,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm as tqdm
 
+from spyglass.settings import temp_dir
 from spyglass.utils import logger
 from spyglass.utils.position import convert_to_pixels as _to_px
 from spyglass.utils.position import fill_nan
@@ -66,6 +70,12 @@ class VideoMaker:
         self.arrow_radius = arrow_radius
         self.circle_radius = circle_radius
 
+        self.output_temp_file = Path(temp_dir) / "temp.mp4"
+        while self.output_temp_file.exists():
+            self.output_temp_file = (  # unilikely, but just in case
+                Path(temp_dir) / f"temp_{random_choice(ascii_letters)}.mp4"
+            )
+
         if not Path(self.video_filename).exists():
             raise FileNotFoundError(f"Video not found: {self.video_filename}")
 
@@ -111,15 +121,17 @@ class VideoMaker:
 
     def make_video(self):
         """Make video based on processor chosen at init."""
+        logger.info(f"Making video: {self.output_video_filename}")
         if self.processor == "opencv":
             self.make_video_opencv()
         elif self.processor == "opencv-trodes":
             self.make_trodes_video()
         elif self.processor == "matplotlib":
             self.make_video_matplotlib()
+        shutil_move(self.output_temp_file, self.output_video_filename)
+        logger.info(f"Finished video: {self.output_video_filename}")
 
     def _init_video(self):
-        logger.info(f"Making video: {self.output_video_filename}")
         self.video = cv2.VideoCapture(str(self.video_filename))
         self.frame_size = (
             (int(self.video.get(3)), int(self.video.get(4)))
@@ -134,7 +146,7 @@ class VideoMaker:
     def _init_cv_video(self):
         _ = self._init_video()
         self.out = cv2.VideoWriter(
-            filename=str(self.output_video_filename),
+            filename=str(self.output_temp_file),
             fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
             fps=self.frame_rate,
             frameSize=self.frame_size,
@@ -159,7 +171,6 @@ class VideoMaker:
             cv2.destroyAllWindows()
         except cv2.error:  # if cv is already closed or does not have func
             pass
-        logger.info(f"Finished video: {self.output_video_filename}")
 
     def _get_frame(self, frame, init_only=False, crop_order=(0, 1, 2, 3)):
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -473,10 +484,9 @@ class VideoMaker:
             interval=1000 / fps,
             blit=True,
         )
-        movie.save(self.output_video_filename, writer=writer, dpi=400)
+        movie.save(self.output_temp_file, writer=writer, dpi=400)
         self.video.release()
         plt.style.use("default")
-        logger.info("finished making video with matplotlib")
         return
 
     def _get_centroid_data(self, pos_ind):

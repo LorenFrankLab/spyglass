@@ -437,12 +437,6 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
         frames = params.get("frames", None)
 
-        limit = None  # or int to only show first n frames
-        if limit:
-            output_video_filename = f"TEMP_FIRST_{limit}.mp4"
-            video_frame_inds = video_frame_inds[:limit]
-            pos_info_df = pos_info_df.head(limit)
-
         make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
@@ -461,8 +455,5 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             crop=pose_estimation_params.get("cropping"),
             **params.get("video_params", {}),
         )
-
-        if limit:
-            return
 
         self.insert1(key)
