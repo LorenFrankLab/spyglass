@@ -350,10 +350,23 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             },
             populate_missing=False,
         )
-        epoch = (
-            int(interval_name.replace("pos ", "").replace(" valid times", ""))
-            + 1
-        )
+
+        if isinstance(interval_name, str):
+            epoch = (
+                int(
+                    interval_name.replace("pos ", "").replace(
+                        " valid times", ""
+                    )
+                )
+                + 1
+            )
+        else:
+            logger.warning(
+                f"Could not find interval name for "
+                + f"{key['nwb_file_name']} epoch {key['epoch']}"
+            )
+            epoch = key["epoch"]
+
         pose_est_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
@@ -424,6 +437,12 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
         frames = params.get("frames", None)
 
+        limit = None  # or int to only show first n frames
+        if limit:
+            output_video_filename = f"TEMP_FIRST_{limit}.mp4"
+            video_frame_inds = video_frame_inds[:limit]
+            pos_info_df = pos_info_df.head(limit)
+
         make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
@@ -434,7 +453,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             centroids=centroids,
             likelihoods=likelihoods,
             position_time=np.asarray(pos_info_df.index),
-            processor=params.get("processor", "opencv"),
+            processor=params.get("processor", "matplotlib"),
             frames=np.arange(frames[0], frames[1]) if frames else None,
             percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
@@ -442,4 +461,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             crop=pose_estimation_params.get("cropping"),
             **params.get("video_params", {}),
         )
+
+        if limit:
+            return
+
         self.insert1(key)

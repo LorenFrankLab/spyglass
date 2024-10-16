@@ -541,7 +541,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
+            logger.error(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
             self.insert1(null_key, **insert_opts)
             return
 

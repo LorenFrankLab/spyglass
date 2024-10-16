@@ -57,6 +57,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Restore #973, allow DLC without position tracking #1100
     - Minor fix to `DLCCentroid` make function order #1112, #1148
     - Pass output path as string to `cv2.VideoWriter` #1150
+    - Set `DLCPosVideo` default processor to `matplotlib` #11XX
 
 - Spike Sorting
 
