@@ -2,7 +2,6 @@
 # some DLC-utils copied from datajoint element-interface utils.py
 import shutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from functools import cached_property
 from os import system as os_system
 from pathlib import Path
 from random import choices as random_choices
@@ -12,6 +11,8 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from guppy import hpy
+from memory_profiler import profile
 from tqdm import tqdm
 
 from spyglass.settings import temp_dir
@@ -59,11 +60,10 @@ class VideoMaker:
                 + "Use matplotlib or submit a feature request via GitHub."
             )
 
-        # self.output_temp_dir = Path(temp_dir) / "vid_frames"
-        self.output_temp_dir = Path(".")
-        # while self.output_temp_dir.exists():  # multi-user
-        # suffix = "".join(random_choices(ascii_letters, k=2))
-        # self.output_temp_dir = Path(temp_dir) / f"vid_frames_{suffix}"
+        self.output_temp_dir = Path(temp_dir) / "vid_frames"
+        while self.output_temp_dir.exists():  # multi-user
+            suffix = "".join(random_choices(ascii_letters, k=2))
+            self.output_temp_dir = Path(temp_dir) / f"vid_frames_{suffix}"
         self.output_temp_dir.mkdir(parents=True, exist_ok=True)
 
         if not Path(video_filename).exists():
@@ -86,12 +86,13 @@ class VideoMaker:
         _ = self._set_plot_bases()
 
         logger.info(f"Making video: {self.output_video_filename}")
+
         self.generate_frames_multithreaded()
         self.stitch_video_from_frames()
         logger.info(f"Finished video: {self.output_video_filename}")
         plt.close(self.fig)
 
-        # shutil.rmtree(self.output_temp_dir)
+        shutil.rmtree(self.output_temp_dir)
 
     def _set_frame_info(self):
         """Set the frame information for the video."""
@@ -232,14 +233,40 @@ class VideoMaker:
             self.crop[x1] : self.crop[x2], self.crop[y1] : self.crop[y2]
         ].copy()
 
+    def _get_centroid_data(self, pos_ind):
+        def centroid_to_px(*idx):
+            return _to_px(
+                data=self.position_mean[idx], cm_to_pixels=self.cm_to_pixels
+            )
+
+        if not self.crop:
+            return centroid_to_px(pos_ind)
+        return np.hstack(
+            (
+                centroid_to_px((pos_ind, 0, np.newaxis)) - self.crop_offset_x,
+                centroid_to_px((pos_ind, 1, np.newaxis)) - self.crop_offset_y,
+            )
+        )
+
+    def _set_orient_line(self, frame, pos_ind):
+        def orient_list(c):
+            return [c, c + 30 * np.cos(self.orientation_mean[pos_ind])]
+
+        if np.all(np.isnan(self.orientation_mean[pos_ind])):
+            self.orientation_line.set_data((np.NaN, np.NaN))
+        else:
+            c0, c1 = self._get_centroid_data(pos_ind)
+            self.orientation_line.set_data(orient_list(c0), orient_list(c1))
+
     def _generate_single_frame(self, frame_ind):
         """Generate a single frame and save it as an image."""
         # Each frame open video bc video not picklable as multiprocessing arg
+
         video = cv2.VideoCapture(str(self.video_filename))
         video.set(cv2.CAP_PROP_POS_FRAMES, frame_ind)
 
         ret, frame = video.read()
-        if not ret:
+        if not ret or frame is None or frame.size == 0:
             video.release()
             return None
 
@@ -295,54 +322,45 @@ class VideoMaker:
         self.fig.savefig(frame_path, dpi=400)
         video.release()
 
+        try:
+            cv2.destroyAllWindows()
+        except cv2.error:  # if cv is already closed or does not have func
+            pass
+
         return frame_path
-
-    def _get_centroid_data(self, pos_ind):
-        def centroid_to_px(*idx):
-            return _to_px(
-                data=self.position_mean[idx], cm_to_pixels=self.cm_to_pixels
-            )
-
-        if not self.crop:
-            return centroid_to_px(pos_ind)
-        return np.hstack(
-            (
-                centroid_to_px((pos_ind, 0, np.newaxis)) - self.crop_offset_x,
-                centroid_to_px((pos_ind, 1, np.newaxis)) - self.crop_offset_y,
-            )
-        )
-
-    def _set_orient_line(self, frame, pos_ind):
-        def orient_list(c):
-            return [c, c + 30 * np.cos(self.orientation_mean[pos_ind])]
-
-        if np.all(np.isnan(self.orientation_mean[pos_ind])):
-            self.orientation_line.set_data((np.NaN, np.NaN))
-        else:
-            c0, c1 = self._get_centroid_data(pos_ind)
-            self.orientation_line.set_data(orient_list(c0), orient_list(c1))
 
     def generate_frames_multithreaded(self):
         """Generate frames in parallel using ProcessPoolExecutor."""
         logger.info("Generating frames in parallel...")
+
+        MAX_JOBS_IN_QUEUE = 100
+
+        progress_bar = tqdm(leave=True, position=0)
+        progress_bar.reset(total=self.n_frames)
+
         with ProcessPoolExecutor(max_workers=25) as executor:
-            futures = {
-                executor.submit(
-                    self._generate_single_frame, frame_ind
-                ): frame_ind
-                for frame_ind in tqdm(self.frames, desc="Submitting frames")
-            }
-            for future in tqdm(
-                as_completed(futures),
-                total=self.n_frames,
-                desc="Generating frames",
-            ):
-                try:
-                    frame_path = future.result()
-                except Exception as exc:
-                    logger.error(
-                        f"Error generating frame {futures[future]}: {exc}"
+            jobs = {}  # dict of jobs
+
+            frames_left = self.n_frames
+            frames_iter = iter(self.frames)
+
+            while frames_left:
+                for this_frame in frames_iter:
+                    job = executor.submit(
+                        self._generate_single_frame, this_frame
                     )
+                    jobs[job] = this_frame
+                    if len(jobs) > MAX_JOBS_IN_QUEUE:
+                        break  # limit the job submission
+
+                for job in as_completed(jobs):
+                    frames_left -= 1
+
+                    _ = job.result()
+                    progress_bar.update()
+
+                    del jobs[job]
+                    break
 
     def stitch_video_from_frames(self):
         """Stitch generated frames into a video using ffmpeg."""

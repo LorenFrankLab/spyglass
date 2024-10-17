@@ -439,7 +439,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
 
         limit = 25  # or int to only show first n frames
         if limit:
-            output_video_filename = Path(".") / f"TEMP_TEST-RM_{limit}.mp4"
+            output_video_filename = Path(".") / f"TEMP_TEST-TH_{limit}.mp4"
             video_frame_inds = video_frame_inds[:limit]
             pos_info_df = pos_info_df.head(limit)
 
