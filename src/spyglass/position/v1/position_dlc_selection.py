@@ -437,9 +437,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
         frames = params.get("frames", None)
 
-        limit = 25  # or int to only show first n frames
-        if limit:
-            output_video_filename = Path(".") / f"TEMP_TEST-TH_{limit}.mp4"
+        if limit := params.get("limit", None):  # new int param for debugging
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
             video_frame_inds = video_frame_inds[:limit]
             pos_info_df = pos_info_df.head(limit)
 
@@ -462,7 +461,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             **params.get("video_params", {}),
         )
 
-        if limit:
+        if limit:  # don't insert if we're just debugging
             return
 
         self.insert1(key)
