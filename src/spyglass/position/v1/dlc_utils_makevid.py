@@ -1,18 +1,20 @@
 # Convenience functions
+
 # some DLC-utils copied from datajoint element-interface utils.py
+import atexit
 import shutil
+import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from os import system as os_system
 from pathlib import Path
 from random import choices as random_choices
 from string import ascii_letters
+from typing import Tuple
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from guppy import hpy
-from memory_profiler import profile
 from tqdm import tqdm
 
 from spyglass.settings import temp_dir
@@ -51,20 +53,33 @@ class VideoMaker:
         cm_to_pixels=1.0,
         disable_progressbar=False,
         crop=None,
+        batch_size=500,
+        max_workers=25,
+        max_jobs_in_queue=100,
         *args,
         **kwargs,
     ):
+        """Create a video from a set of position data.
+
+        Uses batch size as frame count for processing steps. All in temp_dir.
+            1. Extract frames from original video to 'orig_XXXX.png'
+            2. Multithread pool frames to matplotlib 'plot_XXXX.png'
+            3. Stitch frames into partial video 'partial_XXXX.mp4'
+            4. Concatenate partial videos into final video output
+
+        """
         if processor != "matplotlib":
             raise ValueError(
                 "open-cv processors are no longer supported. \n"
                 + "Use matplotlib or submit a feature request via GitHub."
             )
 
-        self.output_temp_dir = Path(temp_dir) / "vid_frames"
-        while self.output_temp_dir.exists():  # multi-user
+        self.temp_dir = Path(temp_dir) / "vid_frames"
+        while self.temp_dir.exists():  # multi-user protection
             suffix = "".join(random_choices(ascii_letters, k=2))
-            self.output_temp_dir = Path(temp_dir) / f"vid_frames_{suffix}"
-        self.output_temp_dir.mkdir(parents=True, exist_ok=True)
+            self.temp_dir = Path(temp_dir) / f"vid_frames_{suffix}"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        atexit.register(self.cleanup)
 
         if not Path(video_filename).exists():
             raise FileNotFoundError(f"Video not found: {video_filename}")
@@ -81,35 +96,39 @@ class VideoMaker:
         self.output_video_filename = output_video_filename
         self.cm_to_pixels = cm_to_pixels
         self.crop = crop
+        self.window_ind = np.arange(501) - 501 // 2
+
+        self.batch_size = batch_size
+        self.max_workers = max_workers
+        self.max_jobs_in_queue = max_jobs_in_queue
+
+        self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
+        self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         _ = self._set_frame_info()
         _ = self._set_plot_bases()
 
-        logger.info(f"Making video: {self.output_video_filename}")
-
-        self.generate_frames_multithreaded()
-        self.stitch_video_from_frames()
-        logger.info(f"Finished video: {self.output_video_filename}")
+        logger.info(
+            f"Making video: {self.output_video_filename} "
+            + f"in batches of {self.batch_size}"
+        )
+        self.process_frames()
         plt.close(self.fig)
+        logger.info(f"Finished video: {self.output_video_filename}")
 
-        shutil.rmtree(self.output_temp_dir)
+        self.cleanup()
+        atexit.unregister(self.cleanup)
+
+    def cleanup(self):
+        shutil.rmtree(self.temp_dir)
 
     def _set_frame_info(self):
         """Set the frame information for the video."""
-        if self.frames is None:
-            self.n_frames = int(
-                len(self.video_frame_inds) * self.percent_frames
-            )
-            self.frames = np.arange(0, self.n_frames)
-        else:
-            self.n_frames = len(self.frames)
-        self.pad_len = len(str(self.n_frames))
+        logger.debug("Setting frame information")
 
-        self.window_ind = np.arange(501) - 501 // 2
-
-        video = cv2.VideoCapture(str(self.video_filename))
+        width, height, self.frame_rate = self._get_input_stats()
         self.frame_size = (
-            (int(video.get(3)), int(video.get(4)))
+            (width, height)
             if not self.crop
             else (
                 self.crop[1] - self.crop[0],
@@ -121,12 +140,51 @@ class VideoMaker:
             if self.crop
             else self.frame_size[1] / self.frame_size[0]
         )
-        self.frame_rate = video.get(5)
         self.fps = int(np.round(self.frame_rate))
-        video.release()
+
+        if self.frames is None:
+            self.n_frames = int(
+                len(self.video_frame_inds) * self.percent_frames
+            )
+            self.frames = np.arange(0, self.n_frames)
+        else:
+            self.n_frames = len(self.frames)
+        self.pad_len = len(str(self.n_frames))
+
+    def _get_input_stats(self, video_filename=None) -> Tuple[int, int]:
+        """Get the width and height of the video."""
+        logger.debug("Getting video dimensions")
+
+        video_filename = video_filename or self.video_filename
+        ret = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v",
+                "-show_entries",
+                "stream=width,height,r_frame_rate",
+                "-of",
+                "csv=p=0:s=x",
+                video_filename,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if ret.returncode != 0:
+            raise ValueError(f"Error getting video dimensions: {ret.stderr}")
+
+        stats = ret.stdout.strip().split("x")
+        width, height = tuple(map(int, stats[:-1]))
+        frame_rate = eval(stats[-1])
+
+        return width, height, frame_rate
 
     def _set_plot_bases(self):
         """Create the figure and axes for the video."""
+        logger.debug("Setting plot bases")
         plt.style.use("dark_background")
         fig, axes = plt.subplots(
             2,
@@ -224,15 +282,6 @@ class VideoMaker:
         self.fig = fig
         self.axes = axes
 
-    def _get_frame(self, frame, crop_order=(2, 3, 0, 1)):
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        if not self.crop:
-            return frame
-        x1, x2, y1, y2 = self.crop_order
-        return frame[
-            self.crop[x1] : self.crop[x2], self.crop[y1] : self.crop[y2]
-        ].copy()
-
     def _get_centroid_data(self, pos_ind):
         def centroid_to_px(*idx):
             return _to_px(
@@ -260,18 +309,11 @@ class VideoMaker:
 
     def _generate_single_frame(self, frame_ind):
         """Generate a single frame and save it as an image."""
-        # Each frame open video bc video not picklable as multiprocessing arg
-
-        video = cv2.VideoCapture(str(self.video_filename))
-        video.set(cv2.CAP_PROP_POS_FRAMES, frame_ind)
-
-        ret, frame = video.read()
-        if not ret or frame is None or frame.size == 0:
-            video.release()
-            return None
-
-        frame = self._get_frame(frame)
-
+        frame_file = self.temp_dir / f"orig_{frame_ind:0{self.pad_len}d}.png"
+        if not frame_file.exists():
+            logger.warning(f"Frame not found: {frame_file}")
+            return
+        frame = plt.imread(frame_file)
         _ = self.axes[0].imshow(frame)
 
         pos_ind = np.where(self.video_frame_inds == frame_ind)[0]
@@ -316,33 +358,40 @@ class VideoMaker:
                     )
 
         # Zero-padded filename based on the dynamic padding length
-        frame_path = (
-            self.output_temp_dir / f"temp-{frame_ind:0{self.pad_len}d}.png"
-        )
+        frame_path = self.temp_dir / f"plot_{frame_ind:0{self.pad_len}d}.png"
         self.fig.savefig(frame_path, dpi=400)
-        video.release()
-
-        try:
-            cv2.destroyAllWindows()
-        except cv2.error:  # if cv is already closed or does not have func
-            pass
+        plt.cla()  # clear the current axes
 
         return frame_path
 
-    def generate_frames_multithreaded(self):
-        """Generate frames in parallel using ProcessPoolExecutor."""
-        logger.info("Generating frames in parallel...")
-
-        MAX_JOBS_IN_QUEUE = 100
+    def process_frames(self):
+        """Process video frames in batches and generate matplotlib frames."""
 
         progress_bar = tqdm(leave=True, position=0)
         progress_bar.reset(total=self.n_frames)
 
-        with ProcessPoolExecutor(max_workers=25) as executor:
+        num_batches = (self.n_frames // self.batch_size) + 1
+
+        for batch_num in range(num_batches):
+            start_frame = batch_num * self.batch_size
+
+            self.ffmpeg_extract(start_frame, self.batch_size)
+            self.plot_frames(start_frame, progress_bar)
+            self.ffmpeg_stitch_partial(start_frame, batch_num)
+
+            for frame_file in self.temp_dir.glob("*.png"):
+                frame_file.unlink()  # Delete orig and plot frames
+
+        progress_bar.close()
+        self.concat_partial_videos()
+
+    def plot_frames(self, start_frame, progress_bar):
+        logger.debug(f"Plotting frames: {start_frame}")
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}  # dict of jobs
 
-            frames_left = self.n_frames
-            frames_iter = iter(self.frames)
+            frames_left = self.batch_size
+            frames_iter = range(start_frame, start_frame + self.batch_size)
 
             while frames_left:
                 for this_frame in frames_iter:
@@ -350,7 +399,7 @@ class VideoMaker:
                         self._generate_single_frame, this_frame
                     )
                     jobs[job] = this_frame
-                    if len(jobs) > MAX_JOBS_IN_QUEUE:
+                    if len(jobs) > self.max_jobs_in_queue:
                         break  # limit the job submission
 
                 for job in as_completed(jobs):
@@ -362,21 +411,80 @@ class VideoMaker:
                     del jobs[job]
                     break
 
-    def stitch_video_from_frames(self):
-        """Stitch generated frames into a video using ffmpeg."""
-        logger.info("Stitching frames into video...")
+    def ffmpeg_extract(self, start_frame, num_frames):
+        """Use ffmpeg to extract a batch of frames."""
+        logger.debug(f"Extracting frames: {start_frame}")
+        end_frame = min(start_frame + num_frames - 1, self.n_frames - 1)
+        output_pattern = str(self.temp_dir / f"orig_%0{self.pad_len}d.png")
 
-        frame_pattern = str(
-            self.output_temp_dir / f"temp-%0{self.pad_len}d.png"
-        )
-        output_video = str(self.output_video_filename)
+        # Use ffmpeg to extract frames
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-i",
+            self.video_filename,
+            "-vf",
+            f"select=between(n\\,{start_frame}\\,{end_frame})",
+            "-vsync",
+            "vfr",
+            "-start_number",
+            str(start_frame),
+            "-n",  # no overwrite
+            output_pattern,
+            *self.ffmpeg_log_args,
+        ]
+        ret = subprocess.run(ffmpeg_cmd, stderr=subprocess.PIPE)
 
-        ffmpeg_cmd = (
-            "ffmpeg -hide_banner -loglevel error -y "
-            + f"-r {self.fps} -i {frame_pattern} "
-            + f"-c:v libx264 -pix_fmt yuv420p {output_video}"
-        )
-        os_system(ffmpeg_cmd)
+        extracted = len(list(self.temp_dir.glob("orig_*.png")))
+        logger.debug(f"Extracted frames: {start_frame}, len: {extracted}")
+        if extracted < self.batch_size - 1:
+            logger.warning(
+                f"Could not extract frames: {extracted} / {self.batch_size-1}"
+            )
+            one_err = "\n".join(str(ret.stderr).split("\\")[-3:-1])
+            logger.debug(f"\nExtract Error: {one_err}")
+            __import__("pdb").set_trace()
+
+    def ffmpeg_stitch_partial(self, start_frame, batch_num):
+        """Stitch a partial movie from processed frames."""
+        logger.debug(f"Stitching partial video: {batch_num}")
+        output_partial_video = str(self.temp_dir / f"partial_{batch_num}.mp4")
+        frame_pattern = str(self.temp_dir / f"plot_%0{self.pad_len}d.png")
+
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-r",
+            str(self.fps),
+            "-start_number",
+            str(start_frame),
+            "-i",
+            frame_pattern,
+            *self.ffmpeg_fmt_args,
+            output_partial_video,
+            *self.ffmpeg_log_args,
+        ]
+        subprocess.run(ffmpeg_cmd, check=True)
+
+    def concat_partial_videos(self):
+        """Concatenate all the partial videos into one final video."""
+        logger.debug("Concatenating partial videos")
+        concat_list_path = self.temp_dir / "concat_list.txt"
+        with open(concat_list_path, "w") as f:
+            for partial_video in sorted(self.temp_dir.glob("partial_*.mp4")):
+                f.write(f"file '{partial_video}'\n")
+
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_list_path),
+            *self.ffmpeg_fmt_args,
+            str(self.output_video_filename),
+            *self.ffmpeg_log_args,
+        ]
+        subprocess.run(ffmpeg_cmd, check=True)
 
 
 def make_video(**kwargs):
