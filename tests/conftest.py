@@ -116,6 +116,9 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
+    from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+    close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
 

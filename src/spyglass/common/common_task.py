@@ -134,8 +134,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         # schema if it isn't there and then add an entry for each epoch
 
         tasks_mod = nwbf.processing.get("tasks")
-        config_tasks = config.get("Tasks")
-        if tasks_mod is None and config_tasks is None:
+        config_tasks = config.get("Tasks", [])
+        if tasks_mod is None and (not config_tasks):
             logger.warn(
                 f"No tasks processing module found in {nwbf} or config\n"
             )
@@ -236,12 +236,10 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             if target_interval in interval
         ]
         if not possible_targets:
-            logger.warn(
-                f"Interval not found for epoch {epoch} in {nwb_file_name}."
-            )
+            logger.warning(f"Interval not found for epoch {epoch}.")
         elif len(possible_targets) > 1:
-            logger.warn(
-                f"Multiple intervals found for epoch {epoch} in {nwb_file_name}. "
+            logger.warning(
+                f"Multiple intervals found for epoch {epoch}. "
                 + f"matches are {possible_targets}."
             )
         else:

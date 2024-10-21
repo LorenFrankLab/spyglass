@@ -198,16 +198,6 @@ def is_uuid(text):
     return uuid_pattern.fullmatch(str(text)) is not None
 
 
-def hash_sort_info(sort_info):
-    """Hashes attributes of a dj.Table object that are not randomly assigned."""
-    no_str_uuid = {
-        k: v
-        for k, v in sort_info.fetch(as_dict=True)[0].items()
-        if not is_uuid(v) and k != "analysis_file_name"
-    }
-    return key_hash(no_str_uuid)
-
-
 @pytest.fixture(scope="session")
 def spike_v1_group():
     from spyglass.spikesorting.analysis.v1 import group

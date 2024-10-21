@@ -17,12 +17,12 @@ from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
+    DiGraph,
     NetworkXNoPath,
     NodeNotFound,
     all_simple_paths,
     shortest_path,
 )
-from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
@@ -34,10 +34,35 @@ from spyglass.utils.dj_helper_fn import (
     unique_dicts,
 )
 
-try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
-    from datajoint.dependencies import topo_sort as dj_topo_sort
-except ImportError:
-    from datajoint.dependencies import unite_master_parts as dj_topo_sort
+
+def dj_topo_sort(graph: DiGraph) -> List[str]:
+    """Topologically sort graph.
+
+    Uses datajoint's topo_sort if available, otherwise uses networkx's
+    topological_sort, combined with datajoint's unite_master_parts.
+
+    NOTE: This ordering will impact _hash_upstream, but usage should be
+    consistent before/after a no-transaction populate.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        Directed graph to sort
+
+    Returns
+    -------
+    List[str]
+        List of table names in topological order
+    """
+    try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
+        from datajoint.dependencies import topo_sort
+
+        return topo_sort(graph)
+    except ImportError:
+        from datajoint.dependencies import unite_master_parts
+        from networkx.algorithms.dag import topological_sort
+
+        return unite_master_parts(list(topological_sort(graph)))
 
 
 class Direction(Enum):
@@ -478,7 +503,7 @@ class AbstractGraph(ABC):
             if not self._is_out(node, warn=False)
         ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
-        ordered = dj_topo_sort(list(topological_sort(graph)))
+        ordered = dj_topo_sort(graph)
         if reverse:
             ordered.reverse()
         return [n for n in ordered if n in nodes]
@@ -784,7 +809,7 @@ class RestrGraph(AbstractGraph):
         """
         self.cascade()
         return [
-            {"file_path": self.analysis_file_tbl.get_abs_path(file)}
+            self.analysis_file_tbl.get_abs_path(file)
             for file in set(
                 [f for files in self.file_dict.values() for f in files]
             )
@@ -869,10 +894,10 @@ class TableChain(RestrGraph):
             self.direction = Direction.DOWN
 
         self.leaf = None
-        if search_restr and not parent:
+        if search_restr and not self.parent:  # using `parent` fails on empty
             self.direction = Direction.UP
             self.leaf = self.child
-        if search_restr and not child:
+        if search_restr and not self.child:
             self.direction = Direction.DOWN
             self.leaf = self.parent
         if self.leaf:

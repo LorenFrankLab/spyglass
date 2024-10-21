@@ -4,6 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pynwb
@@ -92,6 +93,10 @@ def get_nwb_file(nwb_file_path):
     if DandiPath().has_file_path(file_path=nwb_file_path):
         return _open_nwb_file(nwb_file_path, source="dandi")
 
+    if DandiPath().has_raw_path(file_path=nwb_file_path):
+        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
+        return _open_nwb_file(raw, source="dandi")
+
     # If not in Dandi, then we can't find the file
     raise FileNotFoundError(
         "NWB file not found in kachery or Dandi: "
@@ -108,6 +113,18 @@ def file_from_dandi(filepath):
         if "HTTPFileSystem" in k:
             return True
     return False
+
+
+def get_linked_nwbs(path: str) -> List[str]:
+    """Return a paths linked in the given NWB file.
+
+    Given a NWB file path, open & read the file to find any linked NWB objects.
+    """
+    with pynwb.NWBHDF5IO(path, "r") as io:
+        # open the nwb file (opens externally linked files as well)
+        _ = io.read()
+        # get the linked files
+        return [x for x in io._HDF5IO__built if x != path]
 
 
 def get_config(nwb_file_path, calling_table=None):

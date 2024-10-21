@@ -26,9 +26,21 @@ SpikeSortingRecording().update_ids()
     #1108
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
-- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086
-- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116
 - Remove `AnalysisNwbfileLog` #1093
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
+    #1137, #1162
+- Fix bool settings imported from dj config file #1117
+- Allow definition of tasks and new probe entries from config #1074, #1120
+- Enforce match between ingested nwb probe geometry and existing table entry
+    #1074
+- Update DataJoint install and password instructions #1131
+- Fix dandi upload process for nwb's with video or linked objects #1095, #1151
+- Minor docs fixes #1145
+- Test fixes
+    - Remove stored hashes from pytests #1152
+    - Remove mambaforge from tests #1153
+    - Remove debug statement #1164
 
 ### Pipelines
 
@@ -36,6 +48,7 @@ SpikeSortingRecording().update_ids()
 
     - Drop `SessionGroup` table #1106
     - Improve electrodes import efficiency #1125
+    - Fix logger method call in `common_task` #1132
 
 - Decoding
 
@@ -49,7 +62,8 @@ SpikeSortingRecording().update_ids()
 
     - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
-    - Minor fix to `DLCCentroid` make function order #1112
+    - Minor fix to `DLCCentroid` make function order #1112, #1148
+    - Pass output path as string to `cv2.VideoWriter` #1150
 
 - Spike Sorting
 
@@ -57,6 +71,7 @@ SpikeSortingRecording().update_ids()
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
     - Add fields to `SpikeSortingRecording` to allow recompute #1093
+    - Fix handling of waveform extraction sparse parameter #1132
 
 ## [0.5.3] (August 27, 2024)
 

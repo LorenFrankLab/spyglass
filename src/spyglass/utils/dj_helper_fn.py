@@ -358,6 +358,7 @@ def get_child_tables(table):
 def update_analysis_for_dandi_standard(
     filepath: str,
     age: str = "P4M/P8M",
+    resolve_external_table: bool = True,
 ):
     """Function to resolve common nwb file format errors within the database
 
@@ -367,6 +368,9 @@ def update_analysis_for_dandi_standard(
         abs path to the file to edit
     age : str, optional
         age to assign animal if missing, by default "P4M/P8M"
+    resolve_external_table : bool, optional
+        whether to update the external table. Set False if editing file
+        outside the database, by default True
     """
     from spyglass.common import LabMember
 
@@ -397,7 +401,7 @@ def update_analysis_for_dandi_standard(
             )
             file["/general/subject/species"][()] = new_species_value
 
-        if not (
+        elif not (
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
@@ -430,7 +434,9 @@ def update_analysis_for_dandi_standard(
             file["/general/experimenter"][:] = new_experimenter_value
 
     # update the datajoint external store table to reflect the changes
-    _resolve_external_table(filepath, file_name)
+    if resolve_external_table:
+        location = "raw" if filepath.endswith("_.nwb") else "analysis"
+        _resolve_external_table(filepath, file_name, location)
 
 
 def dandi_format_names(experimenter: List) -> List:
@@ -513,7 +519,10 @@ def make_file_obj_id_unique(nwb_path: str):
     new_id = str(uuid4())
     with h5py.File(nwb_path, "a") as f:
         f.attrs["object_id"] = new_id
-    _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
+    location = "raw" if nwb_path.endswith("_.nwb") else "analysis"
+    _resolve_external_table(
+        nwb_path, nwb_path.split("/")[-1], location=location
+    )
     return new_id
 
 
@@ -561,3 +570,12 @@ class NonDaemonPool(multiprocessing.pool.Pool):
 
         proc.__class__ = NonDaemonProcess
         return proc
+
+
+def str_to_bool(value) -> bool:
+    """Return whether the provided string represents true. Otherwise false."""
+    # Due to distutils equivalent depreciation in 3.10
+    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
+    if not value:
+        return False
+    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
