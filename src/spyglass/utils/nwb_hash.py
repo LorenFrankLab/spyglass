@@ -1,14 +1,20 @@
-from functools import cached_property
+import atexit
 from hashlib import md5
 from pathlib import Path
-from typing import Union
+from typing import Any, Union
 
 import h5py
 import numpy as np
+from tqdm import tqdm
 
 
 class NwbfileHasher:
-    def __init__(self, path: Union[str, Path], data_limit: int = 4095):
+    def __init__(
+        self,
+        path: Union[str, Path],
+        batch_size: int = 4095,
+        verbose: bool = True,
+    ):
         """Hashes the contents of an NWB file, limiting to partial data.
 
         In testing, chunking the data for large datasets caused false positives
@@ -20,24 +26,42 @@ class NwbfileHasher:
         ----------
         path : Union[str, Path]
             Path to the NWB file.
-        data_limit : int, optional
+        batch_size  : int, optional
             Limit of data to hash for large datasets, by default 4095.
+        verbose : bool, optional
+            Display progress bar, by default True.
         """
         self.file = h5py.File(path, "r")
-        self.data_limit = data_limit
+        atexit.register(self.cleanup)
+
+        self.batch_size = batch_size
+        self.verbose = verbose
+        self.hashed = md5("".encode())
+        self.hash = self.compute_hash()
+
+        self.cleanup()
+        atexit.unregister(self.cleanup)
+
+    def cleanup(self):
+        self.file.close()
 
     def collect_names(self, file):
         """Collects all object names in the file."""
 
         def collect_items(name, obj):
-            items_to_process.append((name, obj))
+            if isinstance(file.get(name, getclass=True), h5py.SoftLink):
+                print("SoftLink:", name)
+                items_to_process.append((name, file.get(name, getclass=True)))
+                __import__("pdb").set_trace()
+            else:
+                items_to_process.append((name, obj))
 
         items_to_process = []
         file.visititems(collect_items)
         items_to_process.sort(key=lambda x: x[0])
         return items_to_process
 
-    def serialize_attr_value(self, value):
+    def serialize_attr_value(self, value: Any):
         """Serializes an attribute value into bytes for hashing.
 
         Setting all numpy array types to string avoids false positives.
@@ -53,26 +77,63 @@ class NwbfileHasher:
             Serialized bytes of the attribute value.
         """
         if isinstance(value, np.ndarray):
-            return value.astype(str).tobytes()
+            return value.astype(str).tobytes()  # Try with and without `str`
         elif isinstance(value, (str, int, float)):
             return str(value).encode()
         return repr(value).encode()  # For other data types, use repr
 
-    @cached_property
-    def hash(self) -> str:
+    def hash_dataset(self, dataset: h5py.Dataset):
+        _ = self.hash_shape_dtype(dataset)
+
+        if dataset.shape == ():
+            self.hashed.update(self.serialize_attr_value(dataset[()]))
+            return
+
+        size = dataset.shape[0]
+        start = 0
+
+        while start < size:
+            end = min(start + self.batch_size, size)
+            self.hashed.update(self.serialize_attr_value(dataset[start:end]))
+            start = end
+
+    def hash_shape_dtype(self, obj: [h5py.Dataset, np.ndarray]) -> str:
+        if not hasattr(obj, "shape") or not hasattr(obj, "dtype"):
+            return
+        self.hashed.update(str(obj.shape).encode() + str(obj.dtype).encode())
+
+    def compute_hash(self) -> str:
         """Hashes the NWB file contents, limiting to partal data where large."""
-        hashed = md5("".encode())
-        for name, obj in self.collect_names(self.file):
-            if isinstance(obj, h5py.Dataset):  # hash the dataset name and shape
-                hashed.update(str(obj.shape).encode())
-                hashed.update(str(obj.dtype).encode())
-                partial_data = (  # full if scalar dataset, else use data_limit
-                    obj[()] if obj.shape == () else obj[: self.data_limit]
-                )
-                hashed.update(self.serialize_attr_value(partial_data))
+        # Dev note: fallbacks if slow: 1) read_direct_chunk, 2) read from offset
+
+        for name, obj in tqdm(
+            self.collect_names(self.file),
+            desc=self.file.filename.split("/")[-1].split(".")[0],
+            disable=not self.verbose,
+        ):
+            if "basic" in name:
+                __import__("pdb").set_trace()
+            self.hashed.update(name.encode())
             for attr_key in sorted(obj.attrs):
                 attr_value = obj.attrs[attr_key]
-                hashed.update(attr_key.encode())
-                hashed.update(self.serialize_attr_value(attr_value))
-        self.file.close()
-        return hashed.hexdigest()
+                _ = self.hash_shape_dtype(attr_value)
+                self.hashed.update(attr_key.encode())
+                self.hashed.update(self.serialize_attr_value(attr_value))
+
+            if isinstance(obj, h5py.Dataset):
+                _ = self.hash_dataset(obj)
+            elif isinstance(obj, h5py.SoftLink):
+                # TODO: Check that this works
+                self.hashed.update(obj.path.encode())
+                print("SoftLink:", obj.path)
+            elif isinstance(obj, h5py.Group):
+                for k, v in obj.items():
+                    self.hashed.update(k.encode())
+                    self.hashed.update(self.serialize_attr_value(v))
+            else:
+                raise TypeError(
+                    f"Unknown object type: {type(obj)}\n"
+                    + "Please report this an issue on GitHub."
+                )
+
+        return self.hashed.hexdigest()
