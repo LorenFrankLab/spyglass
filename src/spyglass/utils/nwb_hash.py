@@ -49,12 +49,7 @@ class NwbfileHasher:
         """Collects all object names in the file."""
 
         def collect_items(name, obj):
-            if isinstance(file.get(name, getclass=True), h5py.SoftLink):
-                print("SoftLink:", name)
-                items_to_process.append((name, file.get(name, getclass=True)))
-                __import__("pdb").set_trace()
-            else:
-                items_to_process.append((name, obj))
+            items_to_process.append((name, obj))
 
         items_to_process = []
         file.visititems(collect_items)
@@ -111,8 +106,6 @@ class NwbfileHasher:
             desc=self.file.filename.split("/")[-1].split(".")[0],
             disable=not self.verbose,
         ):
-            if "basic" in name:
-                __import__("pdb").set_trace()
             self.hashed.update(name.encode())
             for attr_key in sorted(obj.attrs):
                 attr_value = obj.attrs[attr_key]
@@ -125,7 +118,6 @@ class NwbfileHasher:
             elif isinstance(obj, h5py.SoftLink):
                 # TODO: Check that this works
                 self.hashed.update(obj.path.encode())
-                print("SoftLink:", obj.path)
             elif isinstance(obj, h5py.Group):
                 for k, v in obj.items():
                     self.hashed.update(k.encode())
