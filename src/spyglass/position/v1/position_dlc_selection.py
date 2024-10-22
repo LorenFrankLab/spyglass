@@ -8,18 +8,15 @@ import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
 
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
+from spyglass.common.common_behav import \
+    convert_epoch_interval_name_to_position_interval_name
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.position.v1.position_dlc_centroid import DLCCentroid
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
 from spyglass.position.v1.position_dlc_orient import DLCOrientation
 from spyglass.position.v1.position_dlc_pose_estimation import (
-    DLCPoseEstimation,
-    DLCPoseEstimationSelection,
-)
+    DLCPoseEstimation, DLCPoseEstimationSelection)
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
 from spyglass.utils import SpyglassMixin, logger
 
@@ -342,30 +339,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")
-
-        interval_name = convert_epoch_interval_name_to_position_interval_name(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": key["epoch"],
-            },
-            populate_missing=False,
-        )
-
-        if isinstance(interval_name, str):
-            epoch = (
-                int(
-                    interval_name.replace("pos ", "").replace(
-                        " valid times", ""
-                    )
-                )
-                + 1
-            )
-        else:
-            logger.warning(
-                f"Could not find interval name for "
-                + f"{key['nwb_file_name']} epoch {key['epoch']}"
-            )
-            epoch = key["epoch"]
+        epoch = key["epoch"]
 
         pose_est_key = {
             "nwb_file_name": key["nwb_file_name"],
