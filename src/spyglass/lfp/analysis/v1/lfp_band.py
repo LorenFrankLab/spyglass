@@ -173,6 +173,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]

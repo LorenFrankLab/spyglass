@@ -73,6 +73,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         cls.insert(epoch_inserts, skip_duplicates=True)
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
+        """Plot the intervals in the interval list."""
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=figsize)
         interval_count = 0
@@ -94,6 +95,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             return fig
 
     def plot_epoch_pos_raw_intervals(self, figsize=(20, 5), return_fig=False):
+        """Plot an epoch's position, raw data, and valid times intervals."""
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=(30, 3))
 
@@ -157,6 +159,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             return fig
 
     def nightly_cleanup(self, dry_run=True):
+        """Clean up orphaned IntervalList entries."""
         orphans = self - get_child_tables(self)
         if dry_run:
             return orphans
@@ -251,6 +254,7 @@ def interval_list_excludes(interval_list, timestamps):
 
 
 def consolidate_intervals(interval_list):
+    """Consolidate overlapping intervals in an interval list."""
     if interval_list.ndim == 1:
         interval_list = np.expand_dims(interval_list, 0)
     else:

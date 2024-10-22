@@ -55,9 +55,11 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default decoding parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
     def insert(self, rows, *args, **kwargs):
+        """Override insert to convert classes to dict before inserting"""
         for row in rows:
             row["decoding_params"] = convert_classes_to_dict(
                 vars(row["decoding_params"])
@@ -65,6 +67,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         super().insert(rows, *args, **kwargs)
 
     def fetch(self, *args, **kwargs):
+        """Return decoding parameters as a list of classes."""
         rows = super().fetch(*args, **kwargs)
         if len(rows) > 0 and len(rows[0]) > 1:
             content = []
@@ -85,6 +88,7 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
         return content
 
     def fetch1(self, *args, **kwargs):
+        """Return one decoding paramset as a class."""
         row = super().fetch1(*args, **kwargs)
         row["decoding_params"] = restore_classes(row["decoding_params"])
         return row
@@ -114,6 +118,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_variables: list[str] = ["position_x", "position_y"],
         upsample_rate: float = np.nan,
     ):
+        """Create a new position group."""
         group_key = {
             "nwb_file_name": nwb_file_name,
             "position_group_name": group_name,
@@ -176,6 +181,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
                             PositionOutput & {"merge_id": pos_merge_id}
                         ).fetch1_dataframe(),
                         upsampling_sampling_rate=upsample_rate,
+                        position_variable_names=position_variable_names,
                     )
                 )
             else:
@@ -189,11 +195,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             min_time = min([df.index.min() for df in position_info])
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
-        position_info = (
-            pd.concat(position_info, axis=0)
-            .loc[min_time:max_time]
-            .dropna(subset=position_variable_names)
-        )
+        position_info = pd.concat(position_info, axis=0).loc[min_time:max_time]
 
         return position_info, position_variable_names
 
@@ -202,6 +204,7 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         position_df: pd.DataFrame,
         upsampling_sampling_rate: float,
         upsampling_interpolation_method: str = "linear",
+        position_variable_names: list[str] = None,
     ) -> pd.DataFrame:
         """upsample position data to a fixed sampling rate
 
@@ -213,6 +216,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             sampling rate to upsample to
         upsampling_interpolation_method : str, optional
             pandas method for interpolation, by default "linear"
+        position_variable_names : list[str], optional
+            names of position variables of focus, for which nan values will not be
+            interpolated, by default None includes all columns
 
         Returns
         -------
@@ -239,10 +245,33 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             np.unique(np.concatenate((position_df.index, new_time))),
             name="time",
         )
+
+        # Find NaN intervals
+        nan_intervals = {}
+        if position_variable_names is None:
+            position_variable_names = position_df.columns
+        for column in position_variable_names:
+            is_nan = position_df[column].isna().to_numpy().astype(int)
+            st = np.where(np.diff(is_nan) == 1)[0] + 1
+            en = np.where(np.diff(is_nan) == -1)[0]
+            if is_nan[0]:
+                st = np.insert(st, 0, 0)
+            if is_nan[-1]:
+                en = np.append(en, len(is_nan) - 1)
+            st = position_df.index[st].to_numpy()
+            en = position_df.index[en].to_numpy()
+            nan_intervals[column] = list(zip(st, en))
+
+        # upsample and interpolate
         position_df = (
             position_df.reindex(index=new_index)
             .interpolate(method=upsampling_interpolation_method)
             .reindex(index=new_time)
         )
+
+        # Fill NaN intervals
+        for column, intervals in nan_intervals.items():
+            for st, en in intervals:
+                position_df[column][st:en] = np.nan
 
         return position_df

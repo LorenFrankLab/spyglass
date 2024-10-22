@@ -7,6 +7,7 @@ import datajoint as dj
 import yaml
 from pymysql.err import OperationalError
 
+from spyglass.utils.dj_helper_fn import str_to_bool
 from spyglass.utils.logging import logger
 
 
@@ -143,6 +144,8 @@ class SpyglassConfig:
         self._test_mode = kwargs.get("test_mode") or dj_custom.get(
             "test_mode", False
         )
+        self._test_mode = str_to_bool(self._test_mode)
+        self._debug_mode = str_to_bool(self._debug_mode)
 
         resolved_base = (
             base_dir
@@ -232,6 +235,7 @@ class SpyglassConfig:
     def _set_env_with_dict(self, env_dict) -> None:
         # NOTE: Kept for backwards compatibility. Should be removed in future
         # for custom paths. Keep self.env_defaults.
+        # SPYGLASS_BASE_DIR may be used for docker assembly of export
         for var, val in env_dict.items():
             os.environ[var] = str(val)
 
@@ -484,43 +488,53 @@ class SpyglassConfig:
 
     @property
     def config(self) -> dict:
+        """Dictionary of config settings."""
         self.load_config()
         return self._config
 
     @property
     def base_dir(self) -> str:
+        """Base directory as a string."""
         return self.config.get(self.dir_to_var("base"))
 
     @property
     def raw_dir(self) -> str:
+        """Raw data directory as a string."""
         return self.config.get(self.dir_to_var("raw"))
 
     @property
     def analysis_dir(self) -> str:
+        """Analysis directory as a string."""
         return self.config.get(self.dir_to_var("analysis"))
 
     @property
     def recording_dir(self) -> str:
+        """Recording directory as a string."""
         return self.config.get(self.dir_to_var("recording"))
 
     @property
     def sorting_dir(self) -> str:
+        """Sorting directory as a string."""
         return self.config.get(self.dir_to_var("sorting"))
 
     @property
     def waveforms_dir(self) -> str:
+        """Waveforms directory as a string."""
         return self.config.get(self.dir_to_var("waveforms"))
 
     @property
     def temp_dir(self) -> str:
+        """Temp directory as a string."""
         return self.config.get(self.dir_to_var("temp"))
 
     @property
     def video_dir(self) -> str:
+        """Video directory as a string."""
         return self.config.get(self.dir_to_var("video"))
 
     @property
     def export_dir(self) -> str:
+        """Export directory as a string."""
         return self.config.get(self.dir_to_var("export"))
 
     @property
@@ -540,14 +554,17 @@ class SpyglassConfig:
 
     @property
     def dlc_project_dir(self) -> str:
+        """DLC project directory as a string."""
         return self.config.get(self.dir_to_var("project", "dlc"))
 
     @property
     def dlc_video_dir(self) -> str:
+        """DLC video directory as a string."""
         return self.config.get(self.dir_to_var("video", "dlc"))
 
     @property
     def dlc_output_dir(self) -> str:
+        """DLC output directory as a string."""
         return self.config.get(self.dir_to_var("output", "dlc"))
 
 

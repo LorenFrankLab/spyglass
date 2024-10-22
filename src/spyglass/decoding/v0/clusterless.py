@@ -149,6 +149,15 @@ class UnitMarks(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarks table.
+
+        1. Fetch parameters, units, and recording from MarkParameters,
+            CuratedSpikeSorting, and CuratedRecording tables respectively.
+        2. Uses spikeinterface to extract waveforms for each unit.
+        3. Optionally calculates the peak amplitude of the waveform and
+            thresholds the waveform.
+        4. Saves the marks as a TimeSeries object in a new AnalysisNwbfile.
+        """
         # create a new AnalysisNwbfile and a timeseries for the marks and save
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -245,6 +254,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the marks as a list of pandas dataframes"""
         return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
 
     @staticmethod
@@ -324,6 +334,11 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarksIndicator table.
+
+        Bin spike times and associated spike waveform features according to the
+        sampling rate.
+        """
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 
@@ -521,29 +536,28 @@ def get_decoding_data_for_epoch(
     valid_slices : list[slice]
     """
 
-    valid_ephys_position_times_by_epoch = (
-        get_valid_ephys_position_times_by_epoch(nwb_file_name)
+    valid_slices = convert_valid_times_to_slice(
+        get_valid_ephys_position_times_by_epoch(nwb_file_name)[
+            interval_list_name
+        ]
     )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
-        interval_list_name
-    ]
-    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
 
     # position interval
-    position_interval_name = (
-        convert_epoch_interval_name_to_position_interval_name(
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    pos_interval_dict = dict(
+        nwb_dict,
+        interval_list_name=convert_epoch_interval_name_to_position_interval_name(
             {
-                "nwb_file_name": nwb_file_name,
+                **nwb_dict,
                 "interval_list_name": interval_list_name,
             }
-        )
+        ),
     )
 
     position_info = (
         IntervalPositionInfo()
         & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": position_interval_name,
+            **pos_interval_dict,
             "position_info_param_name": position_info_param_name,
         }
     ).fetch1_dataframe()
@@ -553,14 +567,7 @@ def get_decoding_data_for_epoch(
     )
 
     marks = (
-        (
-            UnitMarksIndicator()
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": position_interval_name,
-                **additional_mark_keys,
-            }
-        )
+        (UnitMarksIndicator() & {**pos_interval_dict, **additional_mark_keys})
     ).fetch_xarray()
 
     marks = xr.concat(

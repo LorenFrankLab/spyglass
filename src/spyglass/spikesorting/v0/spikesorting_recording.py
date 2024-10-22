@@ -21,7 +21,10 @@ from spyglass.common.common_lab import LabTeam  # noqa: F401
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import recording_dir
-from spyglass.spikesorting.utils import get_group_by_shank
+from spyglass.spikesorting.utils import (
+    _get_recording_timestamps,
+    get_group_by_shank,
+)
 from spyglass.utils import SpyglassMixin
 from spyglass.utils.dj_helper_fn import dj_replace
 
@@ -226,7 +229,8 @@ class SortGroup(SpyglassMixin, dj.Manual):
                     n_found += 1
                 else:
                     Warning(
-                        "Relative electrode locations have three coordinates; only two are currently supported"
+                        "Relative electrode locations have three coordinates; "
+                        + "only two are currently supported"
                     )
         return np.ndarray.tolist(geometry)
 
@@ -254,6 +258,7 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
     # All existing entries are below 48
 
     def insert_default(self):
+        """Inserts the default preprocessing parameters for spike sorting."""
         # set up the default filter parameters
         freq_min = 300  # high pass filter value
         freq_max = 6000  # low pass filter value
@@ -296,6 +301,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     _parallel_make = True
 
     def make(self, key):
+        """Populates the SpikeSortingRecording table with the recording data.
+
+        1. Fetches ...
+            - Sort interval and parameters from SpikeSortingRecordingSelection
+                and SpikeSortingPreprocessingParameters
+            - Channel IDs and reference electrode from SortGroup, filtered by
+                filtereing parameters
+        2. Saves the recording data to the recording directory
+        3. Inserts the path to the recording data into SpikeSortingRecording
+        """
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
@@ -341,28 +356,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_recording_timestamps(recording):
-        num_segments = recording.get_num_segments()
-
-        if num_segments <= 1:
-            return recording.get_times()
-
-        frames_per_segment = [0] + [
-            recording.get_num_frames(segment_index=i)
-            for i in range(num_segments)
-        ]
-
-        cumsum_frames = np.cumsum(frames_per_segment)
-        total_frames = np.sum(frames_per_segment)
-
-        timestamps = np.zeros((total_frames,))
-        for i in range(num_segments):
-            start_index = cumsum_frames[i]
-            end_index = cumsum_frames[i + 1]
-            timestamps[start_index:end_index] = recording.get_times(
-                segment_index=i
-            )
-
-        return timestamps
+        return _get_recording_timestamps(recording)
 
     def _get_sort_interval_valid_times(self, key):
         """Identifies the intersection between sort interval specified by the user
@@ -379,17 +373,23 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             (start, end) times for valid stretches of the sorting interval
 
         """
+        nwb_file_name, sort_interval_name, params, interval_list_name = (
+            SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
+            & key
+        ).fetch1(
+            "nwb_file_name",
+            "sort_interval_name",
+            "preproc_params",
+            "interval_list_name",
+        )
+
         sort_interval = (
             SortInterval
             & {
-                "nwb_file_name": key["nwb_file_name"],
-                "sort_interval_name": key["sort_interval_name"],
+                "nwb_file_name": nwb_file_name,
+                "sort_interval_name": sort_interval_name,
             }
         ).fetch1("sort_interval")
-
-        interval_list_name = (SpikeSortingRecordingSelection & key).fetch1(
-            "interval_list_name"
-        )
 
         valid_interval_times = (
             IntervalList
@@ -403,9 +403,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             sort_interval, valid_interval_times
         )
         # Exclude intervals shorter than specified length
-        params = (SpikeSortingPreprocessingParameters & key).fetch1(
-            "preproc_params"
-        )
         if "min_segment_length" in params:
             valid_sort_times = intervals_by_length(
                 valid_sort_times, min_length=params["min_segment_length"]

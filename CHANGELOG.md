@@ -1,18 +1,71 @@
 # Change Log
 
-## [0.5.3] (Unreleased)
+## [0.5.4] (Unreleased)
 
-## Release Notes
+### Release Notes
 
 <!-- Running draft to be removed immediately prior to release. -->
 
 ```python
-from spyglass.common.common_behav import PositionIntervalMap
-from spyglass.decoding.v1.core import PositionGroup
+import datajoint as dj
+from spyglass.linearization.v1.main import TrackGraph
 
-PositionIntervalMap.alter()
-PositionGroup.alter()
+TrackGraph.alter()  # Add edge map parameter
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 ```
+
+### Infrastructure
+
+- Disable populate transaction protection for long-populating tables #1066,
+    #1108
+- Add docstrings to all public methods #1076
+- Update DataJoint to 0.14.2 #1081
+- Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
+    #1137, #1162
+- Fix bool settings imported from dj config file #1117
+- Allow definition of tasks and new probe entries from config #1074, #1120
+- Enforce match between ingested nwb probe geometry and existing table entry
+    #1074
+- Update DataJoint install and password instructions #1131
+- Fix dandi upload process for nwb's with video or linked objects #1095, #1151
+- Minor docs fixes #1145
+- Test fixes
+    - Remove stored hashes from pytests #1152
+    - Remove mambaforge from tests #1153
+    - Remove debug statement #1164
+
+### Pipelines
+
+- Common
+
+    - Drop `SessionGroup` table #1106
+    - Improve electrodes import efficiency #1125
+    - Fix logger method call in `common_task` #1132
+
+- Decoding
+
+    - Fix edge case errors in spike time loading #1083
+
+- Linearization
+
+    - Add edge_map parameter to LinearizedPositionV1 #1091
+
+- Position
+
+    - Fix video directory bug in `DLCPoseEstimationSelection` #1103
+    - Restore #973, allow DLC without position tracking #1100
+    - Minor fix to `DLCCentroid` make function order #1112, #1148
+    - Pass output path as string to `cv2.VideoWriter` #1150
+
+- Spike Sorting
+
+    - Fix bug in `get_group_by_shank` #1096
+    - Fix bug in `_compute_metric` #1099
+    - Fix bug in `insert_curation` returned key #1114
+    - Fix handling of waveform extraction sparse parameter #1132
+
+## [0.5.3] (August 27, 2024)
 
 ### Infrastructure
 
@@ -28,17 +81,24 @@ PositionGroup.alter()
 - Migrate `pip` dependencies from `environment.yml`s to `pyproject.toml` #966
 - Add documentation for common error messages #997
 - Expand `delete_downstream_merge` -> `delete_downstream_parts`. #1002
-- `cautious_delete` now checks `IntervalList` and externals tables. #1002
+- `cautious_delete` now ...
+    - Checks `IntervalList` and externals tables. #1002
+    - Ends early if called on empty table. #1055
 - Allow mixin tables with parallelization in `make` to run populate with
-    `processes > 1` #1001, #1052
+    `processes > 1` #1001, #1052, #1068
 - Speed up fetch_nwb calls through merge tables #1017
 - Allow `ModuleNotFoundError` or `ImportError` for optional dependencies #1023
 - Ensure integrity of group tables #1026
 - Convert list of LFP artifact removed interval list to array #1046
-- Merge duplicate functions in decoding and spikesorting #1050
-- Revise docs organization.
+- Merge duplicate functions in decoding and spikesorting #1050, #1053, #1062,
+    #1066, #1069
+- Reivise docs organization.
     - Misc -> Features/ForDevelopers. #1029
     - Installation instructions -> Setup notebook. #1029
+- Migrate SQL export tools to `utils` to support exporting `DandiPath` #1048
+- Add tool for checking threads for metadata locks on a table #1063
+- Use peripheral tables as fallback in `TableChains` #1035
+- Ignore non-Spyglass tables during descendant check for `part_masters` #1035
 
 ### Pipelines
 
@@ -55,11 +115,14 @@ PositionGroup.alter()
     - `PositionIntervalMap` now inserts null entries for missing intervals #870
     - `AnalysisFileLog` now truncates table names that exceed field length #1021
     - Disable logging with `AnalysisFileLog` #1024
+    - Remove `common_ripple` schema #1061
 
 - Decoding:
 
     - Default values for classes on `ImportError` #966
     - Add option to upsample data rate in `PositionGroup` #1008
+    - Avoid interpolating over large `nan` intervals in position #1033
+    - Minor code calling corrections #1073
 
 - Position
 
@@ -88,6 +151,9 @@ PositionGroup.alter()
     - Add `UnitAnnotation` table and naming convention for units #1027, #1052
     - Set `sparse` parameter to waveform extraction step in `spikesorting.v1`
         #1039
+    - Efficiency improvement to `v0.Curation.insert_curation` #1072
+    - Add pytests for `spikesorting.v1` #1078
+
 ## [0.5.2] (April 22, 2024)
 
 ### Infrastructure
@@ -320,3 +386,4 @@ PositionGroup.alter()
 [0.5.1]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.1
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
+[0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4

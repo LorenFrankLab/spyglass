@@ -65,6 +65,7 @@ schema = dj.schema("decoding_sortedspikes")
 @schema
 class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
     """Bins spike times into regular intervals given by the sampling rate.
+
     Start and stop time of the interval are defined by the interval list.
     """
 
@@ -79,8 +80,8 @@ class SortedSpikesIndicatorSelection(SpyglassMixin, dj.Lookup):
 @schema
 class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """Bins spike times into regular intervals given by the sampling rate.
-    Useful for GLMs and for decoding.
 
+    Useful for GLMs and for decoding.
     """
 
     definition = """
@@ -91,6 +92,12 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the SortedSpikesIndicator table.
+
+        Fetches the spike times from the CuratedSpikeSorting table and bins
+        them into regular intervals given by the sampling rate. The spike
+        indicator is stored in an AnalysisNwbfile.
+        """
         pprint.pprint(key)
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
@@ -157,10 +164,12 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
             self.insert1(key)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Return the first spike indicator as a dataframe."""
         return self.fetch_dataframe()[0]
 
-    def fetch_dataframe(self):
+    def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Return all spike indicators as a list of dataframes."""
         return pd.concat(
             [
                 data["spike_indicator"].set_index("time")
@@ -183,6 +192,7 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
+        """Insert default parameters for decoding with sorted spikes"""
         self.insert(
             [
                 make_default_decoding_params(),
@@ -192,9 +202,11 @@ class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
         )
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to convert classes to dict"""
         super().insert1(convert_classes_to_dict(key), **kwargs)
 
     def fetch1(self, *args, **kwargs):
+        """Override fetch1 to restore classes"""
         return restore_classes(super().fetch1(*args, **kwargs))
 
 
@@ -267,24 +279,32 @@ def get_decoding_data_for_epoch(
     valid_slices : list[slice]
 
     """
-    # valid slices
-    valid_ephys_position_times_by_epoch = (
-        get_valid_ephys_position_times_by_epoch(nwb_file_name)
+
+    valid_slices = convert_valid_times_to_slice(
+        get_valid_ephys_position_times_by_epoch(nwb_file_name)[
+            interval_list_name
+        ]
     )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
-        interval_list_name
-    ]
-    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
 
     # position interval
-    position_interval_name = (
-        convert_epoch_interval_name_to_position_interval_name(
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    pos_interval_dict = dict(
+        nwb_dict,
+        interval_list_name=convert_epoch_interval_name_to_position_interval_name(
             {
-                "nwb_file_name": nwb_file_name,
+                **nwb_dict,
                 "interval_list_name": interval_list_name,
             }
-        )
+        ),
     )
+
+    position_info = (
+        IntervalPositionInfo()
+        & {
+            **pos_interval_dict,
+            "position_info_param_name": position_info_param_name,
+        }
+    ).fetch1_dataframe()
 
     # spikes
     valid_times = np.asarray(
@@ -302,15 +322,6 @@ def get_decoding_data_for_epoch(
     )
     spikes = pd.concat([spikes.loc[times] for times in valid_slices])
 
-    # position
-    position_info = (
-        IntervalPositionInfo()
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": position_interval_name,
-            "position_info_param_name": position_info_param_name,
-        }
-    ).fetch1_dataframe()
     new_time = spikes.index.to_numpy()
     new_index = pd.Index(
         np.unique(np.concatenate((position_info.index, new_time))),

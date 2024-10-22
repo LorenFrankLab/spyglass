@@ -5,6 +5,7 @@ import datajoint as dj
 import ruamel.yaml as yaml
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import str_to_bool
 
 from . import dlc_reader
 from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
@@ -27,6 +28,7 @@ class DLCModelInput(SpyglassMixin, dj.Manual):
     """
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to add dlc_model_name from project_path"""
         # expects key from DLCProject with config_path
         project_path = Path(key["config_path"]).parent
         if not project_path.exists():
@@ -82,6 +84,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         key: dict = None,
         **kwargs,
     ):
+        """Insert entry into DLCModelSource and corresponding Part table"""
         cls.insert1(
             {
                 "dlc_model_name": dlc_model_name,
@@ -94,7 +97,12 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         table_query = dj.FreeTable(
             dj.conn(), full_table_name=part_table.parents()[-1]
         ) & {"project_name": project_name}
-        project_path = table_query.fetch1("project_path")
+
+        if cls._test_mode:  # temporary fix for #1105
+            project_path = table_query.fetch(limit=1)[0]
+        else:
+            project_path = table_query.fetch1("project_path")
+
         part_table.insert1(
             {
                 "dlc_model_name": dlc_model_name,
@@ -116,6 +124,7 @@ class DLCModelParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls, **kwargs):
+        """Insert the default parameter set"""
         params = {
             "params": {},
             "shuffle": 1,
@@ -128,6 +137,7 @@ class DLCModelParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_default(cls):
+        """Return the default parameter set. If it doesn't exist, insert it."""
         query = cls & {"dlc_model_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -172,6 +182,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         """
 
     def make(self, key):
+        """Populate DLCModel table with model information."""
         from deeplabcut.utils.auxiliaryfunctions import GetScorerName
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
@@ -337,12 +348,3 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
                 test_error_p=results["Test error with p-cutoff"],
             )
         )
-
-
-def str_to_bool(value) -> bool:
-    """Return whether the provided string represents true. Otherwise false."""
-    # Due to distutils equivalent depreciation in 3.10
-    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
-    if not value:
-        return False
-    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")

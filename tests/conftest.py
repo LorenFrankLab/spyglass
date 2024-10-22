@@ -116,6 +116,9 @@ def pytest_configure(config):
 
 
 def pytest_unconfigure(config):
+    from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+    close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
 
@@ -386,7 +389,6 @@ def populate_exception():
 @pytest.fixture(scope="session")
 def frequent_imports():
     """Often needed for graph cascade."""
-    from spyglass.common.common_ripple import RippleLFPSelection
     from spyglass.decoding.v0.clusterless import UnitMarksIndicatorSelection
     from spyglass.decoding.v0.sorted_spikes import (
         SortedSpikesIndicatorSelection,
@@ -395,16 +397,17 @@ def frequent_imports():
     from spyglass.lfp.analysis.v1 import LFPBandSelection
     from spyglass.mua.v1.mua import MuaEventsV1
     from spyglass.ripple.v1.ripple import RippleTimesV1
+    from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
     from spyglass.spikesorting.v0.figurl_views import SpikeSortingRecordingView
 
     return (
         LFPBandSelection,
         MuaEventsV1,
         PositionGroup,
-        RippleLFPSelection,
         RippleTimesV1,
         SortedSpikesIndicatorSelection,
         SpikeSortingRecordingView,
+        UnitAnnotation,
         UnitMarksIndicatorSelection,
     )
 
@@ -467,8 +470,6 @@ def trodes_params(trodes_params_table, teardown):
         [v for k, v in paramsets.items()], skip_duplicates=True
     )
     yield paramsets
-    if teardown:
-        trodes_params_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -490,8 +491,6 @@ def trodes_sel_keys(
     ]
     trodes_sel_table.insert(keys, skip_duplicates=True)
     yield keys
-    if teardown:
-        trodes_sel_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -499,8 +498,6 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
     v1 = sgp.v1.TrodesPosV1()
     v1.populate(trodes_sel_keys)
     yield v1
-    if teardown:
-        v1.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -611,8 +608,6 @@ def track_graph(teardown, sgpl, track_graph_key):
     )
 
     yield sgpl.TrackGraph & {"track_graph_name": "6 arm"}
-    if teardown:
-        sgpl.TrackGraph().delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -647,8 +642,6 @@ def lin_sel(teardown, sgpl, lin_sel_key):
     sel_table = sgpl.LinearizationSelection()
     sel_table.insert1(lin_sel_key, skip_duplicates=True)
     yield sel_table
-    if teardown:
-        sel_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -656,8 +649,6 @@ def lin_v1(teardown, sgpl, lin_sel):
     v1 = sgpl.LinearizedPositionV1()
     v1.populate()
     yield v1
-    if teardown:
-        v1.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -818,6 +809,13 @@ def dlc_project_name():
 
 
 @pytest.fixture(scope="session")
+def team_name(common):
+    team_name = "sc_eb"
+    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    yield team_name
+
+
+@pytest.fixture(scope="session")
 def insert_project(
     verbose_context,
     teardown,
@@ -825,6 +823,7 @@ def insert_project(
     dlc_project_name,
     dlc_project_tbl,
     common,
+    team_name,
     bodyparts,
     mini_copy_name,
 ):
@@ -847,8 +846,6 @@ def insert_project(
         RippleTimesV1,
     )
 
-    team_name = "sc_eb"
-    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
     video_list = common.VideoFile().fetch(
         "nwb_file_name", "epoch", as_dict=True
     )[:2]
@@ -884,7 +881,6 @@ def insert_project(
     yield project_key, cfg, config_path
 
     if teardown:
-        (dlc_project_tbl & project_key).delete(safemode=False)
         shutil_rmtree(str(Path(config_path).parent))
 
 
@@ -991,13 +987,16 @@ def populate_training(
     if len(train_tbl & model_train_key) == 0:
         _ = add_training_files
         DOWNLOADS.move_dlc_items(labeled_vid_dir)
-        sgp.v1.DLCModelTraining.populate(model_train_key)
+    sgp.v1.DLCModelTraining().populate(model_train_key)
     yield model_train_key
 
 
 @pytest.fixture(scope="session")
 def model_source_key(sgp, model_train_key, populate_training):
-    yield (sgp.v1.DLCModelSource & model_train_key).fetch1("KEY")
+
+    _ = populate_training
+
+    yield (sgp.v1.DLCModelSource & model_train_key).fetch("KEY")[0]
 
 
 @pytest.fixture(scope="session")

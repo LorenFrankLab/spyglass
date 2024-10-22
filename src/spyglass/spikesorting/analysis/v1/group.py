@@ -6,8 +6,10 @@ import numpy as np
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("spikesorting_group_v1")
 
@@ -41,6 +43,7 @@ class UnitSelectionParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls):
+        """Insert default unit selection parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
@@ -65,12 +68,15 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         unit_filter_params_name: str = "all_units",
         keys: list[dict] = [],
     ):
+        """Create a new group of sorted spikes"""
         group_key = {
             "sorted_spikes_group_name": group_name,
             "nwb_file_name": nwb_file_name,
             "unit_filter_params_name": unit_filter_params_name,
         }
         if self & group_key:
+            if test_mode:
+                return
             raise ValueError(
                 f"Group {nwb_file_name}: {group_name} already exists",
                 "please delete the group before creating a new one",
@@ -250,7 +256,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         multiunit: bool = False,
         smoothing_sigma: float = 0.015,
     ) -> np.ndarray:
-        """get time-dependent firing rate for units in the group
+        """Get time-dependent firing rate for units in the group
 
         Parameters
         ----------
@@ -259,33 +265,22 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         time : np.ndarray
             time vector for which to calculate the firing rate
         multiunit : bool, optional
-            if True, return the multiunit firing rate for units in the group, by default False
+            if True, return the multiunit firing rate for units in the group,
+            by default False
         smoothing_sigma : float, optional
-            standard deviation of gaussian filter to smooth firing rates in seconds, by default 0.015
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds, by default 0.015
 
         Returns
         -------
         np.ndarray
             time-dependent firing rate with shape (len(time), n_units)
         """
-        spike_indicator = cls.get_spike_indicator(key, time)
-        if spike_indicator.ndim == 1:
-            spike_indicator = spike_indicator[:, np.newaxis]
-
-        sampling_frequency = 1 / np.median(np.diff(time))
-
-        if multiunit:
-            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-        return np.stack(
-            [
-                get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis],
-                    sampling_frequency,
-                    smoothing_sigma,
-                )
-                for indicator in spike_indicator.T
-            ],
-            axis=1,
+        return firing_rate_from_spike_indicator(
+            spike_indicator=cls.get_spike_indicator(key, time),
+            time=time,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )
 
 

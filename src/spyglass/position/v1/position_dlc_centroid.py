@@ -64,7 +64,8 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Get the default centroid parameters"""
         query = cls & {"dlc_centroid_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -133,6 +134,20 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
     log_path = None
 
     def make(self, key):
+        """Populate the DLCCentroid table with the centroid of the bodyparts
+
+        Uses a decorator around the _logged_make method to log the process
+        to a file.
+
+        1. Fetch parameters and centroid method.
+        2. Fetch a concatenated dataframe of all bodyparts from
+            DLCSmoothInterpCohort.
+        3. Use the Centroid class to calculate the centroid.
+        4. Optionally, interpolate over NaNs and smooth the centroid.
+        5. Create a Position and Velocity objects for the centroid and video
+            frame indices.
+        5. Add these objects to the Analysis NWB file.
+        """
         output_dir = infer_output_dir(key=key, makedir=False)
         self.log_path = Path(output_dir, "log.log")
         self._logged_make(key)
@@ -239,19 +254,22 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         total_nan = np.sum(final_df.loc[:, idx[("x", "y")]].isna().any(axis=1))
 
         logger.info(f"total NaNs in centroid dataset: {total_nan}")
-        spatial_series = (RawPosition() & key).fetch_nwb()[0]["raw_position"]
         position = pynwb.behavior.Position()
         velocity = pynwb.behavior.BehavioralTimeSeries()
+        if query := (RawPosition() & key):
+            spatial_series = query.fetch_nwb()[0]["raw_position"]
+        else:
+            spatial_series = None
 
         common_attrs = {
             "conversion": METERS_PER_CM,
-            "comments": spatial_series.comments,
+            "comments": getattr(spatial_series, "comments", ""),
         }
         position.create_spatial_series(
             name="position",
             timestamps=final_df.index.to_numpy(),
             data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-            reference_frame=spatial_series.reference_frame,
+            reference_frame=getattr(spatial_series, "reference_frame", ""),
             description="x_position, y_position",
             **common_attrs,
         )
@@ -277,6 +295,13 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         # Add to Analysis NWB file
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
+        key["dlc_position_object_id"] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name, position
+        )
+        key["dlc_velocity_object_id"] = nwb_analysis_file.add_nwb_object(
+            analysis_file_name, velocity
+        )
+
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],
             analysis_file_name=analysis_file_name,
@@ -286,16 +311,11 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             {
                 **key,
                 "analysis_file_name": analysis_file_name,
-                "dlc_position_object_id": nwb_analysis_file.add_nwb_object(
-                    analysis_file_name, position
-                ),
-                "dlc_velocity_object_id": nwb_analysis_file.add_nwb_object(
-                    analysis_file_name, velocity
-                ),
             }
         )
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(

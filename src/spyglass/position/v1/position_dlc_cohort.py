@@ -6,9 +6,9 @@ import pandas as pd
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import file_log, infer_output_dir
-from spyglass.position.v1.position_dlc_pose_estimation import (  # noqa: F401
+from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
-)
+)  # noqa: F401
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterp
 from spyglass.utils import SpyglassMixin, logger
 
@@ -40,7 +40,6 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
     # Need to ensure that nwb_file_name/epoch/interval list name endure as primary keys
     definition = """
     -> DLCSmoothInterpCohortSelection
-    ---
     """
     log_path = None
 
@@ -54,7 +53,8 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         dlc_smooth_interp_info_object_id : varchar(80)
         """
 
-        def fetch1_dataframe(self):
+        def fetch1_dataframe(self) -> pd.DataFrame:
+            """Fetch a single dataframe."""
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -91,6 +91,14 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
             )
 
     def make(self, key):
+        """Populate DLCSmoothInterpCohort table with the combined bodyparts.
+
+        Calls _logged_make to log the process to a log.log file while...
+        1. Fetching the cohort selection and smooted interpolated data for each
+              bodypart.
+        2. Ensuring the number of bodyparts match across data and parameters.
+        3. Inserting the combined bodyparts into DLCSmoothInterpCohort.
+        """
         output_dir = infer_output_dir(key=key, makedir=False)
         self.log_path = Path(output_dir) / "log.log"
         self._logged_make(key)
@@ -116,6 +124,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
                 + f"bodyparts_params_dict {len(bp_params_dict)}"
             )
 
+        # TODO: change to DLCSmoothInterp.heading.names
         table_column_names = list(table_entries[0].dtype.fields.keys())
 
         part_keys = [

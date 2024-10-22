@@ -215,9 +215,9 @@ class DockerMySQLManager:
             return
 
         container_name = self.container_name
-        self.container.stop()
-        self.logger.info(f"Container {container_name} stopped.")
+        self.container.stop()  # Logger I/O operations close during teardown
+        print(f"Container {container_name} stopped.")
 
         if remove:
             self.container.remove()
-            self.logger.info(f"Container {container_name} removed.")
+            print(f"Container {container_name} removed.")

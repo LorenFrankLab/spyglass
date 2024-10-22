@@ -30,8 +30,8 @@
 
 # ## Other materials
 #
-# DataJoint is an "Object-relational mapping" tool, which means that it gives us
-# a Python object for tables that exist on a shared SQL server. Many Spyglass
+# DataJoint is an tool that helps us create Python classes for
+# tables that exist on a shared SQL server. Many Spyglass
 # imports are DataJoint tables like this.
 #
 # Any 'introduction to SQL' will give an overview of relational data models as
@@ -60,10 +60,7 @@
 # ```python
 # my_key = dict(value=key)  # whatever you're inserting
 # MyTable.insert1(my_key)  # error here
-# parents = MyTable.parents(as_objects=True)  # get the parents as FreeTables
-# for parent in parents:  # iterate through the parents, with only relevant fields
-#     parent_key = {k: v for k, v in my_key.items() if k in parent.heading.names}
-#     print(parent & parent_key)  # restricted parent
+# parents = MyTable().find_insert_fail(my_key)
 # ```
 #
 # If any of the printed tables are empty, you know you need to insert into that

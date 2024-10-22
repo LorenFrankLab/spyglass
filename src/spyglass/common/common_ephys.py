@@ -98,6 +98,13 @@ class Electrode(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
+        """Populate the Electrode table with data from the NWB file.
+
+        - Uses the electrode table from the NWB file.
+        - Adds the region_id from the BrainRegion table.
+        - Uses novela Probe.Electrode if available.
+        - Overrides with information from the config YAML based on primary key
+        """
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
@@ -120,15 +127,23 @@ class Electrode(SpyglassMixin, dj.Imported):
 
         electrode_inserts = []
         electrodes = nwbf.electrodes.to_dataframe()
+
+        # Keep a dict of region IDs to avoid multiple fetches
+        region_ids_dict = dict()
+
         for elect_id, elect_data in electrodes.iterrows():
+            region_name = elect_data.group.location
+            if region_name not in region_ids_dict:
+                # Only fetch if not already fetched
+                region_ids_dict[region_name] = BrainRegion.fetch_add(
+                    region_name=region_name
+                )
             key.update(
                 {
                     "electrode_id": elect_id,
                     "name": str(elect_id),
                     "electrode_group_name": elect_data.group_name,
-                    "region_id": BrainRegion.fetch_add(
-                        region_name=elect_data.group.location
-                    ),
+                    "region_id": region_ids_dict[region_name],
                     "x": elect_data.get("x"),
                     "y": elect_data.get("y"),
                     "z": elect_data.get("z"),
@@ -145,13 +160,15 @@ class Electrode(SpyglassMixin, dj.Imported):
             # TODO this could be better resolved by making an extension for the
             # electrodes table
 
-            if (
-                isinstance(elect_data.group.device, ndx_franklab_novela.Probe)
-                and "probe_shank" in elect_data
-                and "probe_electrode" in elect_data
-                and "bad_channel" in elect_data
-                and "ref_elect_id" in elect_data
-            ):
+            extra_cols = [
+                "probe_shank",
+                "probe_electrode",
+                "bad_channel",
+                "ref_elect_id",
+            ]
+            if isinstance(
+                elect_data.group.device, ndx_franklab_novela.Probe
+            ) and all(col in elect_data for col in extra_cols):
                 key.update(
                     {
                         "probe_id": elect_data.group.device.probe_type,
@@ -162,6 +179,11 @@ class Electrode(SpyglassMixin, dj.Imported):
                         ),
                         "original_reference_electrode": elect_data.ref_elect_id,
                     }
+                )
+            else:
+                logger.warning(
+                    "Electrode did not match extected novela format.\nPlease "
+                    + f"ensure the following in YAML config: {extra_cols}."
                 )
 
             # override with information from the config YAML based on primary
@@ -339,6 +361,7 @@ class Raw(SpyglassMixin, dj.Imported):
         )
 
     def nwb_object(self, key):
+        """Return the NWB object in the raw NWB file."""
         # TODO return the nwb_object; FIX: this should be replaced with a fetch
         # call. Note that we're using the raw file so we can modify the other
         # one.
@@ -438,6 +461,14 @@ class LFP(SpyglassMixin, dj.Imported):
     """
 
     def make(self, key):
+        """Populate the LFP table with data from the NWB file.
+
+        1. Fetches the raw data and sampling rate from the Raw table.
+        2. Ignores intervals < 1 second long.
+        3. Decimates the data to 1 KHz
+        4. Applies LFP 0-400 Hz filter from FirFilterParameters table.
+        5. Generates a new analysis NWB file with the LFP data.
+        """
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
@@ -534,7 +565,7 @@ class LFP(SpyglassMixin, dj.Imported):
         self.insert1(key)
 
     def nwb_object(self, key):
-        # return the NWB object in the raw NWB file
+        """Return the NWB object in the raw NWB file."""
         lfp_file_name = (
             LFP() & {"nwb_file_name": key["nwb_file_name"]}
         ).fetch1("analysis_file_name")
@@ -546,7 +577,8 @@ class LFP(SpyglassMixin, dj.Imported):
         )
         return lfp_nwbf.objects[nwb_object_id]
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch the LFP data as a pandas DataFrame."""
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
@@ -709,10 +741,20 @@ class LFPBand(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     -> IntervalList
-    filtered_data_object_id: varchar(40)  # the NWB object ID for loading this object from the file
+    filtered_data_object_id: varchar(40)  # the NWB object ID for this object
     """
 
     def make(self, key):
+        """Populate the LFPBand table.
+
+        1. Fetches the LFP data and sampling rate from the LFP table.
+        2. Fetches electrode and reference electrode ids from LFPBandSelection.
+        3. Fetches interval list and filter from LFPBandSelection.
+        4. Applies filter using FirFilterParameters `filter_data` method.
+        5. Generates a new analysis NWB file with the filtered data as an
+              ElectricalSeries.
+        6. Adds resulting interval list to IntervalList table.
+        """
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -915,7 +957,8 @@ class LFPBand(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
+        """Fetch the LFP band data as a pandas DataFrame."""
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,

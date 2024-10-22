@@ -116,6 +116,7 @@ class SortingviewWorkspace(SpyglassMixin, dj.Computed):
         SortingviewWorkspace.URL.insert1(key)
 
     def remove_sorting_from_workspace(self, key):
+        """Remove a sorting from the workspace. NOT IMPLEMENTED YET"""
         return NotImplementedError
 
     def url_trythis(self, key: dict, sortingview_sorting_id: str = None):

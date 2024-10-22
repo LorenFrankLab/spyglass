@@ -110,6 +110,7 @@ class VideoMaker:
         self.make_video()
 
     def make_video(self):
+        """Make video based on processor chosen at init."""
         if self.processor == "opencv":
             self.make_video_opencv()
         elif self.processor == "opencv-trodes":
@@ -133,7 +134,7 @@ class VideoMaker:
     def _init_cv_video(self):
         _ = self._init_video()
         self.out = cv2.VideoWriter(
-            filename=self.output_video_filename,
+            filename=str(self.output_video_filename),
             fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
             fps=self.frame_rate,
             frameSize=self.frame_size,
@@ -228,6 +229,7 @@ class VideoMaker:
         )
 
     def make_video_opencv(self):
+        """Make video using opencv."""
         _ = self._init_cv_video()
 
         if self.video_time:
@@ -293,6 +295,7 @@ class VideoMaker:
         return
 
     def make_trodes_video(self):
+        """Make video using opencv with trodes data."""
         _ = self._init_cv_video()
 
         if np.any(self.video_time):
@@ -339,6 +342,7 @@ class VideoMaker:
         self._close_cv_video()
 
     def make_video_matplotlib(self):
+        """Make video using matplotlib."""
         import matplotlib.animation as animation
 
         self.position_mean = self.position_mean["DLC"]
@@ -559,4 +563,5 @@ class VideoMaker:
 
 
 def make_video(**kwargs):
+    """Passthrough for VideoMaker class for backwards compatibility."""
     VideoMaker(**kwargs)

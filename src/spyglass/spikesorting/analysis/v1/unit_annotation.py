@@ -101,9 +101,8 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         """
         if len(self) == len(UnitAnnotation()):
             logger.warning(
-                "fetching all unit spikes",
-                "if this is unintended, please call as: ",
-                "(UnitAnnotation & key).fetch_unit_spikes()",
+                "fetching all unit spikes if this is unintended, please call as"
+                + ": (UnitAnnotation & key).fetch_unit_spikes()"
             )
         # get the set of nwb files to load
         merge_keys = [

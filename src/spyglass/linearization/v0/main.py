@@ -1,5 +1,6 @@
 import datajoint as dj
 import numpy as np
+from pandas import DataFrame
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -57,8 +58,7 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
-        # CB: Does this need to be a public method? Can other methods inherit
-        # the logic? It's a pretty simple wrapper around make_track_graph.
+        """Get the track graph as a networkx graph."""
         if track_graph_parameters is None:
             track_graph_parameters = self.fetch1()
         return make_track_graph(
@@ -123,6 +123,7 @@ class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Compute linearized position for a given key."""
         logger.info(f"Computing linear position for: {key}")
 
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
@@ -190,5 +191,6 @@ class IntervalLinearizedPosition(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> DataFrame:
+        """Fetch a single dataframe"""
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

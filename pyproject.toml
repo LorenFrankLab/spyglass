@@ -39,7 +39,7 @@ dependencies = [
     "black[jupyter]",
     "bottleneck",
     "dask",
-    "datajoint>=0.13.6",
+    "datajoint>=0.14.2",
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
@@ -126,7 +126,7 @@ ignore-words-list = 'nevers'
 minversion = "7.0"
 addopts = [
     # "-sv", # no capture, verbose output
-    "--sw", # stepwise: resume with next test after failure
+    # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
@@ -165,11 +165,14 @@ omit = [ # which submodules have no tests
     # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
-    "*/spikesorting/*",
+    "*/spikesorting/v0/*",
+    # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",
 ]
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
 line-length = 80
+
+[tool.ruff.lint]
 ignore = ["F401" , "E402", "E501"]

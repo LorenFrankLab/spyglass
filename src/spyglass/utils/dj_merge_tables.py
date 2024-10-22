@@ -3,7 +3,7 @@ from itertools import chain as iter_chain
 from pprint import pprint
 from re import sub as re_sub
 from time import time
-from typing import Union
+from typing import List, Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -29,7 +29,7 @@ def is_merge_table(table):
     def trim_def(definition):
         return re_sub(
             r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        )
+        ).replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
@@ -348,7 +348,7 @@ class Merge(dj.Manual):
                         )
                     key = keys[0]
                     if part & key:
-                        print(f"Key already in part {part_name}: {key}")
+                        logger.info(f"Key already in part {part_name}: {key}")
                         continue
                     master_sk = {cls()._reserved_sk: part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
@@ -532,17 +532,22 @@ class Merge(dj.Manual):
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
-        sources = set((self & restriction).fetch(self._reserved_sk))
+        merge_restriction = self.extract_merge_id(restriction)
+        sources = set((self & merge_restriction).fetch(self._reserved_sk))
         nwb_list = []
         merge_ids = []
         for source in sources:
             source_restr = (
-                self & {self._reserved_sk: source} & restriction
+                self & {self._reserved_sk: source} & merge_restriction
             ).fetch("KEY")
             nwb_list.extend(
-                self.merge_restrict_class(
-                    source_restr, permit_multiple_rows=True
-                ).fetch_nwb()
+                (self & source_restr)
+                .merge_restrict_class(
+                    restriction,
+                    permit_multiple_rows=True,
+                    add_invalid_restrict=False,
+                )
+                .fetch_nwb()
             )
             if return_merge_ids:
                 merge_ids.extend([k[self._reserved_pk] for k in source_restr])
@@ -684,6 +689,7 @@ class Merge(dj.Manual):
 
     @property
     def source_class_dict(self) -> dict:
+        """Dictionary of part names and their respective classes."""
         # NOTE: fails if table is aliased in dj.Part but not merge script
         # i.e., must import aliased table as part name
         if not self._source_class_dict:
@@ -737,10 +743,15 @@ class Merge(dj.Manual):
         return ret
 
     def merge_restrict_class(
-        self, key: dict, permit_multiple_rows: bool = False
+        self,
+        key: dict,
+        permit_multiple_rows: bool = False,
+        add_invalid_restrict=True,
     ) -> dj.Table:
         """Returns native parent class, restricted with key."""
-        parent = self.merge_get_parent(key)
+        parent = self.merge_get_parent(
+            key, add_invalid_restrict=add_invalid_restrict
+        )
         parent_key = parent.fetch("KEY", as_dict=True)
 
         if not permit_multiple_rows and len(parent_key) > 1:
@@ -832,6 +843,49 @@ class Merge(dj.Manual):
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+    @classmethod
+    def extract_merge_id(cls, restriction) -> Union[dict, list]:
+        """Utility function to extract merge_id from a restriction
+
+        Removes all other restricted attributes, and defaults to a
+        universal set (either empty dict or True) when there is no
+        merge_id present in the input, relying on parent func to
+        restrict on secondary or part-parent key(s).
+
+        Assumes that a valid set of merge_id keys should have OR logic
+        to allow selection of an entries.
+
+        Parameters
+        ----------
+        restriction : str, dict, or dj.condition.AndList
+            A datajoint restriction
+
+        Returns
+        -------
+        restriction
+            A restriction containing only the merge_id key
+        """
+        if restriction is None:
+            return None
+        if isinstance(restriction, dict):
+            if merge_id := restriction.get("merge_id"):
+                return {"merge_id": merge_id}
+            else:
+                return {}
+        merge_restr = []
+        if isinstance(restriction, dj.condition.AndList) or isinstance(
+            restriction, List
+        ):
+            merge_id_list = [cls.extract_merge_id(r) for r in restriction]
+            merge_restr = [x for x in merge_id_list if x is not None]
+        elif isinstance(restriction, str):
+            parsed = [x.split(")")[0] for x in restriction.split("(") if x]
+            merge_restr = [x for x in parsed if "merge_id" in x]
+
+        if len(merge_restr) == 0:
+            return True
+        return merge_restr
 
 
 _Merge = Merge

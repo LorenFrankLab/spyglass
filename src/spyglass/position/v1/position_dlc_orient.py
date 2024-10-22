@@ -15,7 +15,7 @@ from spyglass.position.v1.dlc_utils import (
     red_led_bisector_orientation,
     two_pt_head_orientation,
 )
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
@@ -43,6 +43,7 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_params(cls, params_name: str, params: dict, **kwargs):
+        """Insert a set of parameters for orientation calculation"""
         cls.insert1(
             {"dlc_orientation_params_name": params_name, "params": params},
             **kwargs,
@@ -50,6 +51,7 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls, **kwargs):
+        """Insert the default set of parameters for orientation calculation"""
         params = {
             "orient_method": "red_green_orientation",
             "bodypart1": "greenLED",
@@ -63,6 +65,7 @@ class DLCOrientationParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_default(cls):
+        """Return the default set of parameters for orientation calculation"""
         query = cls & {"dlc_orientation_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -111,6 +114,14 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         return pos_df
 
     def make(self, key):
+        """Populate the DLCOrientation table.
+
+        1. Fetch parameters and position data from DLCOrientationParams and
+            DLCSmoothInterpCohort.BodyPart tables, respectively.
+        2. Apply chosen orientation method to position data.
+        3. Generate a CompassDirection object and add it to the AnalysisNwbfile.
+        4. Insert the key into the DLCOrientation table.
+        """
         # Get labels to smooth from Parameters table
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         pos_df = self._get_pos_df(key)
@@ -123,6 +134,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         orient_func = _key_to_func_dict[params["orient_method"]]
         orientation = orient_func(pos_df, **params)
 
+        # TODO: Absorb this into the `no_orientation` function
         if not params["orient_method"] == "none":
             # Smooth orientation
             is_nan = np.isnan(orientation)
@@ -182,7 +194,8 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         self.insert1(key)
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetch a single dataframe"""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(

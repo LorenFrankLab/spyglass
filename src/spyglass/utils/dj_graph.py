@@ -7,30 +7,62 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from enum import Enum
 from functools import cached_property
+from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 from datajoint import FreeTable, Table
 from datajoint.condition import AndList, make_condition
-from datajoint.dependencies import unite_master_parts
+from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
+    DiGraph,
     NetworkXNoPath,
     NodeNotFound,
     all_simple_paths,
     shortest_path,
 )
-from networkx.algorithms.dag import topological_sort
 from tqdm import tqdm
 
 from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     PERIPHERAL_TABLES,
+    ensure_names,
     fuzzy_get,
     unique_dicts,
 )
+
+
+def dj_topo_sort(graph: DiGraph) -> List[str]:
+    """Topologically sort graph.
+
+    Uses datajoint's topo_sort if available, otherwise uses networkx's
+    topological_sort, combined with datajoint's unite_master_parts.
+
+    NOTE: This ordering will impact _hash_upstream, but usage should be
+    consistent before/after a no-transaction populate.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        Directed graph to sort
+
+    Returns
+    -------
+    List[str]
+        List of table names in topological order
+    """
+    try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
+        from datajoint.dependencies import topo_sort
+
+        return topo_sort(graph)
+    except ImportError:
+        from datajoint.dependencies import unite_master_parts
+        from networkx.algorithms.dag import topological_sort
+
+        return unite_master_parts(list(topological_sort(graph)))
 
 
 class Direction(Enum):
@@ -148,7 +180,7 @@ class AbstractGraph(ABC):
 
     def _camel(self, table):
         """Convert table name(s) to camel case."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if isinstance(table, str):
             return to_camel_case(table.split(".")[-1].strip("`"))
         if isinstance(table, Iterable) and not isinstance(
@@ -158,23 +190,9 @@ class AbstractGraph(ABC):
 
     # ------------------------------ Graph Nodes ------------------------------
 
-    def _ensure_names(
-        self, table: Union[str, Table] = None
-    ) -> Union[str, List[str]]:
-        """Ensure table is a string."""
-        if table is None:
-            return None
-        if isinstance(table, str):
-            return table
-        if isinstance(table, Iterable) and not isinstance(
-            table, (Table, TableMeta)
-        ):
-            return [self._ensure_names(t) for t in table]
-        return getattr(table, "full_table_name", None)
-
     def _get_node(self, table: Union[str, Table]):
         """Get node from graph."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if not (node := self.graph.nodes.get(table)):
             raise ValueError(
                 f"Table {table} not found in graph."
@@ -184,7 +202,7 @@ class AbstractGraph(ABC):
 
     def _set_node(self, table, attr: str = "ft", value: Any = None):
         """Set attribute on node. General helper for various attributes."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         _ = self._get_node(table)  # Ensure node exists
         self.graph.nodes[table][attr] = value
 
@@ -200,8 +218,8 @@ class AbstractGraph(ABC):
             Tuple of boolean indicating direction and edge data. True if child
             is child of parent.
         """
-        child = self._ensure_names(child)
-        parent = self._ensure_names(parent)
+        child = ensure_names(child)
+        parent = ensure_names(parent)
 
         if edge := self.graph.get_edge_data(parent, child):
             return False, edge
@@ -221,7 +239,7 @@ class AbstractGraph(ABC):
 
     def _get_restr(self, table):
         """Get restriction from graph node."""
-        return self._get_node(self._ensure_names(table)).get("restr")
+        return self._get_node(ensure_names(table)).get("restr")
 
     def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
@@ -248,7 +266,7 @@ class AbstractGraph(ABC):
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if with_restr:
             if not (restr := self._get_restr(table) or False):
                 if warn:
@@ -262,9 +280,9 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    def _is_out(self, table, warn=True):
+    def _is_out(self, table, warn=True, keep_alias=False):
         """Check if table is outside of spyglass."""
-        table = self._ensure_names(table)
+        table = ensure_names(table)
         if self.graph.nodes.get(table):
             return False
         ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
@@ -484,11 +502,11 @@ class AbstractGraph(ABC):
             return nodes
         nodes = [
             node
-            for node in self._ensure_names(nodes)
+            for node in ensure_names(nodes)
             if not self._is_out(node, warn=False)
         ]
         graph = self.graph.subgraph(nodes) if subgraph else self.graph
-        ordered = unite_master_parts(list(topological_sort(graph)))
+        ordered = dj_topo_sort(graph)
         if reverse:
             ordered.reverse()
         return [n for n in ordered if n in nodes]
@@ -640,6 +658,15 @@ class RestrGraph(AbstractGraph):
     def leaf_ft(self):
         """Get restricted FreeTables from graph leaves."""
         return [self._get_ft(table, with_restr=True) for table in self.leaves]
+
+    @property
+    def hash(self):
+        """Return hash of all visited nodes."""
+        initial = hash_md5(b"")
+        for table in self.all_ft:
+            for row in table.fetch(as_dict=True):
+                initial.update(key_hash(row).encode("utf-8"))
+        return initial.hexdigest()
 
     # ------------------------------- Add Nodes -------------------------------
 
@@ -815,7 +842,7 @@ class RestrGraph(AbstractGraph):
         """
         self.cascade()
         return [
-            {"file_path": self.analysis_file_tbl.get_abs_path(file)}
+            self.analysis_file_tbl.get_abs_path(file)
             for file in set(
                 [f for files in self.file_dict.values() for f in files]
             )
@@ -851,7 +878,8 @@ class TableChain(RestrGraph):
         Returns path OrderedDict of full table names in chain. If directed is
         True, uses directed graph. If False, uses undirected graph. Undirected
         excludes PERIPHERAL_TABLES like interval_list, nwbfile, etc. to maintain
-        valid joins.
+        valid joins by default. If no path is found, another search is attempted
+        with PERIPHERAL_TABLES included.
     cascade(restriction: str = None, direction: str = "up")
         Given a restriction at the beginning, return a restricted FreeTable
         object at the end of the chain. If direction is 'up', start at the child
@@ -871,8 +899,8 @@ class TableChain(RestrGraph):
         banned_tables: List[str] = None,
         **kwargs,
     ):
-        self.parent = self._ensure_names(parent)
-        self.child = self._ensure_names(child)
+        self.parent = ensure_names(parent)
+        self.child = ensure_names(child)
 
         if not self.parent and not self.child:
             raise ValueError("Parent or child table required.")
@@ -881,8 +909,12 @@ class TableChain(RestrGraph):
         super().__init__(seed_table=seed_table, verbose=verbose)
 
         self._ignore_peripheral(except_tables=[self.parent, self.child])
-        self.no_visit.update(self._ensure_names(banned_tables) or [])
+        self._ignore_outside_spy(except_tables=[self.parent, self.child])
+
+        self.no_visit.update(ensure_names(banned_tables) or [])
+
         self.no_visit.difference_update(set([self.parent, self.child]))
+
         self.searched_tables = set()
         self.found_restr = False
         self.link_type = None
@@ -895,10 +927,10 @@ class TableChain(RestrGraph):
             self.direction = Direction.DOWN
 
         self.leaf = None
-        if search_restr and not parent:
+        if search_restr and not self.parent:  # using `parent` fails on empty
             self.direction = Direction.UP
             self.leaf = self.child
-        if search_restr and not child:
+        if search_restr and not self.child:
             self.direction = Direction.DOWN
             self.leaf = self.parent
         if self.leaf:
@@ -915,10 +947,22 @@ class TableChain(RestrGraph):
 
     def _ignore_peripheral(self, except_tables: List[str] = None):
         """Ignore peripheral tables in graph traversal."""
-        except_tables = self._ensure_names(except_tables)
+        except_tables = ensure_names(except_tables)
         ignore_tables = set(PERIPHERAL_TABLES) - set(except_tables or [])
         self.no_visit.update(ignore_tables)
-        self.undirect_graph.remove_nodes_from(ignore_tables)
+
+    def _ignore_outside_spy(self, except_tables: List[str] = None):
+        """Ignore tables not shared on shared prefixes."""
+        except_tables = ensure_names(except_tables)
+        ignore_tables = set(  # Ignore tables not in shared modules
+            [
+                t
+                for t in self.undirect_graph.nodes
+                if t not in except_tables
+                and self._is_out(t, warn=False, keep_alias=True)
+            ]
+        )
+        self.no_visit.update(ignore_tables)
 
     # --------------------------- Dunder Properties ---------------------------
 
@@ -959,6 +1003,7 @@ class TableChain(RestrGraph):
 
     @property
     def path_str(self) -> str:
+        """Return string representation of path: parent -> {links} -> child."""
         if not self.path:
             return "No link"
         return self._link_symbol.join([self._camel(t) for t in self.path])
@@ -1001,6 +1046,7 @@ class TableChain(RestrGraph):
     # ---------------------------- Graph Traversal ----------------------------
 
     def cascade_search(self) -> None:
+        """Cascade restriction through graph to search for applicable table."""
         if self.cascaded:
             return
         restriction, restr_attrs = self._get_find_restr(self.leaf)
@@ -1053,6 +1099,7 @@ class TableChain(RestrGraph):
         limit: int = 100,
         **kwargs,
     ):
+        """Search parents/children for a match of the provided restriction."""
         if (
             self.found_restr
             or not table
@@ -1112,9 +1159,9 @@ class TableChain(RestrGraph):
             List of names in the path.
         """
         source, target = self.parent, self.child
-        search_graph = self.graph if directed else self.undirect_graph
-
-        search_graph.remove_nodes_from(self.no_visit)
+        search_graph = (  # Copy to ensure orig not modified by no_visit
+            self.graph.copy() if directed else self.undirect_graph.copy()
+        )
 
         try:
             path = shortest_path(search_graph, source, target)
@@ -1142,6 +1189,12 @@ class TableChain(RestrGraph):
             self.link_type = "directed"
         elif path := self.find_path(directed=False):
             self.link_type = "undirected"
+        else:  # Search with peripheral
+            self.no_visit.difference_update(PERIPHERAL_TABLES)
+            if path := self.find_path(directed=True):
+                self.link_type = "directed with peripheral"
+            elif path := self.find_path(directed=False):
+                self.link_type = "undirected with peripheral"
         self.searched_path = True
 
         return path
@@ -1178,7 +1231,9 @@ class TableChain(RestrGraph):
         # but that's not a typical use case, were the start and end are desired
         if null_on_fail:
             non_numeric = [
-                t for t in self.path if not t.isnumeric() and t != start
+                t
+                for t in self.path
+                if not t.isnumeric() and t != start and not self._is_out(t)
             ]
             if any(self._get_restr(t) is None for t in non_numeric):
                 for table in non_numeric:
@@ -1199,7 +1254,6 @@ from itertools import product as iter_product
 from pathlib import Path
 
 import datajoint as dj
-from datajoint.autopopulate import AutoPopulate
 
 
 class ImportedGraph(TableChain):

@@ -4,6 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pynwb
@@ -69,6 +70,14 @@ def get_nwb_file(nwb_file_path):
                 from ..common.common_dandi import DandiPath
 
                 dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath() & dandi_key:
+                    # Check if non-copied raw file is in Dandi
+                    dandi_key = {
+                        "filename": Path(nwb_file_path).name.replace(
+                            "_.nwb", ".nwb"
+                        )
+                    }
+
                 if not DandiPath & dandi_key:
                     # If not in Dandi, then we can't find the file
                     raise FileNotFoundError(
@@ -99,6 +108,18 @@ def file_from_dandi(filepath):
         if "HTTPFileSystem" in k:
             return True
     return False
+
+
+def get_linked_nwbs(path: str) -> List[str]:
+    """Return a paths linked in the given NWB file.
+
+    Given a NWB file path, open & read the file to find any linked NWB objects.
+    """
+    with pynwb.NWBHDF5IO(path, "r") as io:
+        # open the nwb file (opens externally linked files as well)
+        _ = io.read()
+        # get the linked files
+        return [x for x in io._HDF5IO__built if x != path]
 
 
 def get_config(nwb_file_path, calling_table=None):
@@ -139,6 +160,7 @@ def get_config(nwb_file_path, calling_table=None):
 
 
 def close_nwb_files():
+    """Close all open NWB files."""
     for io, _ in __open_nwb_files.values():
         io.close()
     __open_nwb_files.clear()
@@ -548,6 +570,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
+    """Change group permissions for specified subject ids in analysis dir."""
     logger.warning("DEPRECATED: This function will be removed in `0.6`.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)

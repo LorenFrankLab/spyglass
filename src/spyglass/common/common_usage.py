@@ -6,7 +6,6 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
-from pathlib import Path
 from typing import List, Union
 
 import datajoint as dj
@@ -23,6 +22,8 @@ from spyglass.utils.dj_helper_fn import (
     unique_dicts,
     update_analysis_for_dandi_standard,
 )
+from spyglass.utils.nwb_helper_fn import get_linked_nwbs
+from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
 schema = dj.schema("common_usage")
 
@@ -69,6 +70,7 @@ class ActivityLog(dj.Manual):
 
     @classmethod
     def deprecate_log(cls, name, warning=True) -> None:
+        """Log a deprecation warning for a feature."""
         if warning:
             logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
         cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
@@ -96,10 +98,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """
 
         def insert1(self, key, **kwargs):
+            """Override insert1 to auto-increment table_id."""
             key = self._auto_increment(key, pk="table_id")
             super().insert1(key, **kwargs)
 
         def insert(self, keys: List[dict], **kwargs):
+            """Override insert to auto-increment table_id."""
             if not isinstance(keys[0], dict):
                 raise TypeError("Pass Table Keys as list of dict")
             keys = [self._auto_increment(k, pk="table_id") for k in keys]
@@ -140,11 +144,19 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       before actually exporting anything, which is more associated with
     #       Selection
 
-    def list_file_paths(self, key: dict) -> list[str]:
+    def list_file_paths(self, key: dict, as_dict=True) -> list[str]:
         """Return a list of unique file paths for a given restriction/key.
 
         Note: This list reflects files fetched during the export process. For
         upstream files, use RestrGraph.file_paths.
+
+        Parameters
+        ----------
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+        as_dict : bool, optional
+            Return as a list of dicts: [{'file_path': x}]. Default True.
+            If False, returns a list of strings without key.
         """
         file_table = self * self.File & key
         analysis_fp = [
@@ -155,7 +167,8 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Nwbfile().get_abs_path(fname)
             for fname in (AnalysisNwbfile * file_table).fetch("nwb_file_name")
         ]
-        return [{"file_path": p} for p in list({*analysis_fp, *nwbfile_fp})]
+        unique_ft = list({*analysis_fp, *nwbfile_fp})
+        return [{"file_path": p} for p in unique_ft] if as_dict else unique_ft
 
     def get_restr_graph(self, key: dict, verbose=False) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
@@ -232,11 +245,14 @@ class Export(SpyglassMixin, dj.Computed):
         """
 
     def populate_paper(self, paper_id: Union[str, dict]):
+        """Populate Export for a given paper_id."""
+        self.load_shared_schemas()
         if isinstance(paper_id, dict):
             paper_id = paper_id.get("paper_id")
         self.populate(ExportSelection().paper_export_id(paper_id))
 
     def make(self, key):
+        """Populate Export table with the latest export for a given paper."""
         paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
         query = ExportSelection & paper_key
 
@@ -263,178 +279,52 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
 
         restr_graph = ExportSelection().get_restr_graph(paper_key)
-        file_paths = unique_dicts(  # Original plus upstream files
-            query.list_file_paths(paper_key) + restr_graph.file_paths
-        )
+        # Original plus upstream files
+        file_paths = {
+            *query.list_file_paths(paper_key, as_dict=False),
+            *restr_graph.file_paths,
+        }
+
+        # Check for linked nwb objects and add them to the export
+        unlinked_files = set()
+        for file in file_paths:
+            if not (links := get_linked_nwbs(file)):
+                unlinked_files.add(file)
+                continue
+            logger.warning(
+                "Dandi not yet supported for linked nwb objects "
+                + f"excluding {file} from export "
+                + f" and including {links} instead"
+            )
+            unlinked_files.update(links)
+        file_paths = unlinked_files  # TODO: what if linked items have links?
 
         table_inserts = [
             {**key, **rd, "table_id": i}
             for i, rd in enumerate(restr_graph.as_dict)
         ]
         file_inserts = [
-            {**key, **fp, "file_id": i} for i, fp in enumerate(file_paths)
+            {**key, "file_path": fp, "file_id": i}
+            for i, fp in enumerate(file_paths)
         ]
 
-        # Writes but does not run mysqldump. Assumes single version per paper.
-        version_key = query.fetch("spyglass_version", as_dict=True)[0]
-        self.write_export(
-            free_tables=restr_graph.restr_ft, **paper_key, **version_key
+        version_ids = query.fetch("spyglass_version")
+        if len(set(version_ids)) > 1:
+            raise ValueError(
+                "Multiple versions in ExportSelection\n"
+                + "Please rerun all analyses with the same version"
+            )
+        self.compare_versions(
+            version_ids[0],
+            msg="Must use same Spyglass version for analysis and export",
         )
+
+        sql_helper = SQLDumpHelper(**paper_key, spyglass_version=version_ids[0])
+        sql_helper.write_mysqldump(free_tables=restr_graph.restr_ft)
 
         self.insert1({**key, **paper_key})
         self.Table().insert(table_inserts)
         self.File().insert(file_inserts)
-
-    def _get_credentials(self):
-        """Get credentials for database connection."""
-        return {
-            "user": dj_config["database.user"],
-            "password": dj_config["database.password"],
-            "host": dj_config["database.host"],
-        }
-
-    def _write_sql_cnf(self):
-        """Write SQL cnf file to avoid password prompt."""
-        cnf_path = Path("~/.my.cnf").expanduser()
-
-        if cnf_path.exists():
-            return
-
-        template = "[client]\nuser={user}\npassword={password}\nhost={host}\n"
-
-        with open(str(cnf_path), "w") as file:
-            file.write(template.format(**self._get_credentials()))
-        cnf_path.chmod(0o600)
-
-    def _bash_escape(self, s):
-        """Escape restriction string for bash."""
-        s = s.strip()
-
-        replace_map = {
-            "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
-            "  ": " ",  # Squash double spaces
-            "( (": "((",  # Squash double parens
-            ") )": ")",
-            '"': "'",  # Replace double quotes with single
-            "`": "",  # Remove backticks
-            " AND ": " \\\n\tAND ",  # Add newline and tab for readability
-            " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
-            ")AND(": ") \\\n\tAND (",
-            ")OR(": ") \\\n\tOR  (",
-            "#": "\\#",
-        }
-        for old, new in replace_map.items():
-            s = s.replace(old, new)
-        if s.startswith("(((") and s.endswith(")))"):
-            s = s[2:-2]  # Remove extra parens for readability
-        return s
-
-    def _cmd_prefix(self, docker_id=None):
-        """Get prefix for mysqldump command. Includes docker exec if needed."""
-        if not docker_id:
-            return "mysqldump "
-        return (
-            f"docker exec -i {docker_id} \\\n\tmysqldump "
-            + "-u {user} --password={password} \\\n\t".format(
-                **self._get_credentials()
-            )
-        )
-
-    def _write_mysqldump(
-        self,
-        free_tables: List[FreeTable],
-        paper_id: str,
-        docker_id=None,
-        spyglass_version=None,
-    ):
-        """Write mysqlmdump.sh script to export data.
-
-        Parameters
-        ----------
-        paper_id : str
-            Paper ID to use for export file names
-        docker_id : str, optional
-            Docker container ID to export from. Default None
-        spyglass_version : str, optional
-            Spyglass version to include in export. Default None
-        """
-        paper_dir = Path(export_dir) / paper_id if not docker_id else Path(".")
-        paper_dir.mkdir(exist_ok=True)
-
-        dump_script = paper_dir / f"_ExportSQL_{paper_id}.sh"
-        dump_content = paper_dir / f"_Populate_{paper_id}.sql"
-
-        prefix = self._cmd_prefix(docker_id)
-        version = (  # Include spyglass version as comment in dump
-            "echo '--'\n"
-            + f"echo '-- SPYGLASS VERSION: {spyglass_version} --'\n"
-            + "echo '--'\n\n"
-            if spyglass_version
-            else ""
-        )
-        create_cmd = (
-            "echo 'CREATE DATABASE IF NOT EXISTS {database}; "
-            + "USE {database};'\n\n"
-        )
-        dump_cmd = prefix + '{database} {table} --where="\\\n\t{where}"\n\n'
-
-        tables_by_db = sorted(free_tables, key=lambda x: x.full_table_name)
-
-        with open(dump_script, "w") as file:
-            file.write(
-                "#!/bin/bash\n\n"
-                + f"exec > {dump_content}\n\n"  # Redirect output to sql file
-                + f"{version}"  # Include spyglass version as comment
-            )
-
-            prev_db = None
-            for table in tables_by_db:
-                if not (where := table.where_clause()):
-                    continue
-                where = self._bash_escape(where)
-                database, table_name = (
-                    table.full_table_name.replace("`", "")
-                    .replace("#", "\\#")
-                    .split(".")
-                )
-                if database != prev_db:
-                    file.write(create_cmd.format(database=database))
-                    prev_db = database
-                file.write(
-                    dump_cmd.format(
-                        database=database, table=table_name, where=where
-                    )
-                )
-        logger.info(f"Export script written to {dump_script}")
-
-    def write_export(
-        self,
-        free_tables: List[FreeTable],
-        paper_id: str,
-        docker_id=None,
-        spyglass_version=None,
-    ):
-        """Write export bash script for all tables in graph.
-
-        Also writes a user-specific .my.cnf file to avoid password prompt.
-
-        Parameters
-        ----------
-        free_tables : List[FreeTable]
-            List of restricted FreeTables to export
-        paper_id : str
-            Paper ID to use for export file names
-        docker_id : str, optional
-            Docker container ID to export from. Default None
-        spyglass_version : str, optional
-            Spyglass version to include in export. Default None
-        """
-        self._write_sql_cnf()
-        self._write_mysqldump(
-            free_tables, paper_id, docker_id, spyglass_version
-        )
-
-        # TODO: export conda env
 
     def prepare_files_for_export(self, key, **kwargs):
         """Resolve common known errors to make a set of analysis
