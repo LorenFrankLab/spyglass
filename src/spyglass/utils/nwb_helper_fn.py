@@ -4,6 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pynwb
@@ -109,12 +110,14 @@ def file_from_dandi(filepath):
     return False
 
 
-def get_linked_nwbs(path):
-    """Return a list of paths to NWB files that are linked by objects in
-    the file at the given path."""
+def get_linked_nwbs(path: str) -> List[str]:
+    """Return a paths linked in the given NWB file.
+
+    Given a NWB file path, open & read the file to find any linked NWB objects.
+    """
     with pynwb.NWBHDF5IO(path, "r") as io:
         # open the nwb file (opens externally linked files as well)
-        nwb = io.read()
+        _ = io.read()
         # get the linked files
         return [x for x in io._HDF5IO__built if x != path]
 

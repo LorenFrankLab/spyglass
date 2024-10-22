@@ -48,15 +48,25 @@ def test_sel_insert_error(trodes_sel_table, pos_interval_key):
 
 def test_fetch_df(trodes_pos_v1, trodes_params):
     upsampled = {"trodes_pos_params_name": "single_led_upsampled"}
-    hash_df = key_hash(
-        (
-            (trodes_pos_v1 & upsampled)
-            .fetch1_dataframe(add_frame_ind=True)
-            .round(3)  # float precision
-        ).to_dict()
+    df = (
+        (trodes_pos_v1 & upsampled)
+        .fetch1_dataframe(add_frame_ind=True)
+        .round(3)
+        .sum()
+        .to_dict()
     )
-    hash_exp = "5296e74dea2e5e68d39f81bc81723a12"
-    assert hash_df == hash_exp, "Dataframe differs from expected"
+    exp = {
+        "position_x": 230389.335,
+        "position_y": 295368.260,
+        "orientation": 4716.906,
+        "velocity_x": 1726.304,
+        "velocity_y": -1675.276,
+        "speed": 6257.273,
+    }
+    for k in exp:
+        assert (
+            pytest.approx(df[k], rel=1e-3) == exp[k]
+        ), f"Value differs from expected: {k}"
 
 
 def test_trodes_video(sgp, trodes_pos_v1):

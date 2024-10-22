@@ -134,7 +134,7 @@ class VideoMaker:
     def _init_cv_video(self):
         _ = self._init_video()
         self.out = cv2.VideoWriter(
-            filename=self.output_video_filename,
+            filename=str(self.output_video_filename),
             fourcc=cv2.VideoWriter_fourcc(*"mp4v"),
             fps=self.frame_rate,
             frameSize=self.frame_size,
