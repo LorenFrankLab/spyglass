@@ -378,12 +378,20 @@ class VideoMaker:
         progress_bar.reset(total=self.n_frames)
 
         for start_frame in range(0, self.n_frames, self.batch_size):
-            end_frame = min(start_frame + self.batch_size - 1, self.n_frames)
+            end_frame = min(start_frame + self.batch_size, self.n_frames) - 1
             logger.debug(f"Processing frames: {start_frame} - {end_frame}")
+
+            output_partial_video = (
+                self.temp_dir / f"partial_{self._pad(start_frame)}.mp4"
+            )
+            if output_partial_video.exists():
+                logger.debug(f"Skipping existing video: {output_partial_video}")
+                progress_bar.update(end_frame - start_frame)
+                continue
 
             self.ffmpeg_extract(start_frame, end_frame)
             self.plot_frames(start_frame, end_frame, progress_bar)
-            self.ffmpeg_stitch_partial(start_frame)
+            self.ffmpeg_stitch_partial(start_frame, str(output_partial_video))
 
             for frame_file in self.temp_dir.glob("*.png"):
                 frame_file.unlink()  # Delete orig and plot frames
@@ -460,12 +468,9 @@ class VideoMaker:
     def _pad(self, frame_ind):
         return f"{frame_ind:0{self.pad_len}d}"
 
-    def ffmpeg_stitch_partial(self, start_frame):
+    def ffmpeg_stitch_partial(self, start_frame, output_partial_video):
         """Stitch a partial movie from processed frames."""
         logger.debug(f"Stitch part vid  : {start_frame}")
-        output_partial_video = str(
-            self.temp_dir / f"partial_{self._pad(start_frame)}.mp4"
-        )
         frame_pattern = str(self.temp_dir / f"plot_%0{self.pad_len}d.png")
 
         ffmpeg_cmd = [
