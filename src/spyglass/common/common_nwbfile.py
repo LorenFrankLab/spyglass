@@ -3,7 +3,6 @@ import random
 import stat
 import string
 from pathlib import Path
-from time import time
 from uuid import uuid4
 
 import datajoint as dj
@@ -18,6 +17,7 @@ from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
@@ -95,7 +95,9 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
 
     @classmethod
-    def get_abs_path(cls, nwb_file_name: str, new_file: bool = False) -> str:
+    def get_abs_path(
+        cls, nwb_file_name: str, new_file: bool = False, **kwargs
+    ) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR must be set, either as an environment or part of
@@ -172,9 +174,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
-    _creation_times = {}
-
-    def create(self, nwb_file_name: str) -> str:
+    def create(
+        self, nwb_file_name: str, recompute_file_name: str = None
+    ) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
         Note that this does NOT add the file to the schema; that needs to be
@@ -184,15 +186,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         nwb_file_name : str
             The name of an NWB file to be copied.
+        recompute_file_name : str, optional
+            The name of the file to be regenerated. Defaults to None.
 
         Returns
         -------
         analysis_file_name : str
             The name of the new NWB file.
         """
-        # To allow some times to occur before create
-        # creation_time = self._creation_times.pop("pre_create_time", time())
-
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(
@@ -213,17 +214,23 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             else:
                 alter_source_script = True
 
-            analysis_file_name = self.__get_new_file_name(nwb_file_name)
+            analysis_file_name = (
+                recompute_file_name or self.__get_new_file_name(nwb_file_name)
+            )
+
             # write the new file
-            logger.info(f"Writing new NWB file {analysis_file_name}")
+            if not recompute_file_name:
+                logger.info(f"Writing new NWB file {analysis_file_name}")
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name
             )
+
             # export the new NWB file
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
                 export_io.export(io, nwbf)
+
         if alter_source_script:
             self._alter_spyglass_version(analysis_file_abs_path)
 
@@ -234,8 +241,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
-
-        # self._creation_times[analysis_file_name] = creation_time
 
         return analysis_file_name
 
@@ -329,7 +334,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self.insert1(key)
 
     @classmethod
-    def get_abs_path(cls, analysis_nwb_file_name: str) -> str:
+    def get_abs_path(
+        cls, analysis_nwb_file_name: str, from_schema: bool = False
+    ) -> str:
         """Return the absolute path for an analysis NWB file given the name.
 
         The spyglass config from settings.py must be set.
@@ -338,12 +345,21 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         analysis_nwb_file_name : str
             The name of the NWB file in AnalysisNwbfile.
+        from schema : bool, optional
+            If true, get the file path from the schema externals table, skipping
+            checksum and file existence checks. Defaults to False.
 
         Returns
         -------
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        if from_schema:  # Skips checksum and file existence checks
+            return f"{analysis_dir}/" + (
+                schema.external["analysis"]
+                & f'filepath LIKE "%{analysis_nwb_file_name}"'
+            ).fetch1("filepath")
+
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
         if cls & file_key:
@@ -410,6 +426,73 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
             return nwb_object.object_id
+
+    def get_hash(
+        self, analysis_file_name: str, from_schema: bool = False
+    ) -> str:
+        """Return the hash of the file contents.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        from_schema : bool, Optional
+            If true, get the file path from the schema externals table, skipping
+            checksum and file existence checks. Defaults to False.
+
+
+        Returns
+        -------
+        file_hash : str
+            The hash of the file contents.
+        """
+        return NwbfileHasher(
+            self.get_abs_path(analysis_file_name, from_schema=from_schema)
+        ).hash
+
+    def _update_external(self, analysis_file_name: str, file_hash: str):
+        """Update the external contents checksum for an analysis file.
+
+        USE WITH CAUTION. If the hash does not match the file contents, the file
+        and downstream entries are deleted.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        file_hash : str
+            The hash of the file contents as calculated by NwbfileHasher.
+            If the hash does not match the file contents, the file and
+            downstream entries are deleted.
+        """
+        file_path = self.get_abs_path(analysis_file_name, from_schema=True)
+        new_hash = self.get_hash(analysis_file_name, from_schema=True)
+
+        if file_hash != new_hash:
+            Path(file_path).unlink()  # remove mismatched file
+            # force delete, including all downstream, forcing permissions
+            del_kwargs = dict(force_permission=True, safemode=False)
+            if self._has_updated_dj_version:
+                del_kwargs["force_masters"] = True
+            query = self & {"analysis_file_name": analysis_file_name}
+            query.delete(**del_kwargs)
+            raise ValueError(
+                f"Failed to recompute {analysis_file_name}.",
+                "Could not exactly replicate file content.",
+                "Please re-populate from parent table.",
+            )
+
+        external_tbl = schema.external["analysis"]
+        file_path = (
+            self.__get_analysis_file_dir(analysis_file_name)
+            + f"/{analysis_file_name}"
+        )
+        key = (external_tbl & f"filepath = '{file_path}'").fetch1()
+        abs_path = Path(analysis_dir) / file_path
+        key["contents_hash"] = dj.hash.uuid_from_file(abs_path)
+        key["size"] = abs_path.stat().st_size
+
+        external_tbl.update1(key)
 
     def add_units(
         self,
@@ -699,100 +782,3 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
-
-    def log(self, *args, **kwargs):
-        """Null log method. Revert to _disabled_log to turn back on."""
-        logger.debug("Logging disabled.")
-
-    def _disabled_log(self, analysis_file_name, table=None):
-        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
-        if isinstance(analysis_file_name, dict):
-            analysis_file_name = analysis_file_name["analysis_file_name"]
-        time_delta = time() - self._creation_times[analysis_file_name]
-        file_size = Path(self.get_abs_path(analysis_file_name)).stat().st_size
-
-        AnalysisNwbfileLog().log(
-            analysis_file_name=analysis_file_name,
-            time_delta=time_delta,
-            file_size=file_size,
-            table=table,
-        )
-
-    def increment_access(self, *args, **kwargs):
-        """Null method. Revert to _disabled_increment_access to turn back on."""
-        logger.debug("Incrementing access disabled.")
-
-    def _disabled_increment_access(self, keys, table=None):
-        """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
-        if not isinstance(keys, list):
-            key = [keys]
-
-        for key in keys:
-            AnalysisNwbfileLog().increment_access(key, table=table)
-
-
-@schema
-class AnalysisNwbfileLog(dj.Manual):
-    definition = """
-    id: int auto_increment
-    ---
-    -> AnalysisNwbfile
-    dj_user                       : varchar(64) # user who created the file
-    timestamp = CURRENT_TIMESTAMP : timestamp   # when the file was created
-    table = null                  : varchar(64) # creating table
-    time_delta = null             : float       # how long it took to create
-    file_size = null              : float       # size of the file in bytes
-    accessed = 0                  : int         # n times accessed
-    unique index (analysis_file_name)
-    """
-
-    def log(
-        self,
-        analysis_file_name=None,
-        time_delta=None,
-        file_size=None,
-        table=None,
-    ):
-        """Log the creation of an analysis NWB file.
-
-        Parameters
-        ----------
-        analysis_file_name : str
-            The name of the analysis NWB file.
-        """
-
-        self.insert1(
-            {
-                "dj_user": dj.config["database.user"],
-                "analysis_file_name": analysis_file_name,
-                "time_delta": time_delta,
-                "file_size": file_size,
-                "table": table[:64],
-            }
-        )
-
-    def increment_access(self, key, table=None):
-        """Increment the accessed field for the given analysis file name.
-
-        Parameters
-        ----------
-        key : Union[str, dict]
-            The name of the analysis NWB file, or a key to the table.
-        table : str, optional
-            The table that created the file.
-        """
-        if isinstance(key, str):
-            key = {"analysis_file_name": key}
-
-        if not (query := self & key):
-            self.log(**key, table=table)
-        entries = query.fetch(as_dict=True)
-
-        inserts = []
-        for entry in entries:
-            entry["accessed"] += 1
-            if table and not entry.get("table"):
-                entry["table"] = table
-            inserts.append(entry)
-
-        self.insert(inserts, replace=True)

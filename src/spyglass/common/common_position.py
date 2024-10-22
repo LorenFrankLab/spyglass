@@ -88,9 +88,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         """Insert smoothed head position, orientation and velocity."""
         logger.info(f"Computing position for: {key}")
 
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         raw_position = RawPosition.PosObject & key
         spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
@@ -116,8 +114,6 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         )
 
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
-
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 

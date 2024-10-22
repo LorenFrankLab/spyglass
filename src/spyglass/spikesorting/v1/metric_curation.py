@@ -1,6 +1,5 @@
 import os
 import uuid
-from time import time
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
@@ -226,8 +225,6 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         7. Saves the waveforms, metrics, labels, and merge groups to an
             analysis NWB file and inserts into MetricCuration table.
         """
-
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
         nwb_file_name = (
             SpikeSortingSelection * MetricCurationSelection & key
@@ -304,7 +301,6 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     @classmethod

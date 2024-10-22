@@ -22,6 +22,23 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
+def _open_nwb_file(nwb_file_path, source="local"):
+    """Open an NWB file, add to cache, return contents. Does not close file."""
+    if source == "local":
+        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode="r", load_namespaces=True)
+        nwbfile = io.read()
+    elif source == "dandi":
+        from ..common.common_dandi import DandiPath
+
+        io, nwbfile = DandiPath().fetch_file_from_dandi(
+            nwb_file_path=nwb_file_path
+        )
+    else:
+        raise ValueError(f"Invalid open_nwb source: {source}")
+    __open_nwb_files[nwb_file_path] = (io, nwbfile)
+    return nwbfile
+
+
 def get_nwb_file(nwb_file_path):
     """Return an NWBFile object with the given file path in read mode.
 
@@ -41,62 +58,50 @@ def get_nwb_file(nwb_file_path):
         NWB file object for the given path opened in read mode.
     """
     if not nwb_file_path.startswith("/"):
-        from ..common import Nwbfile
+        from spyglass.common import Nwbfile
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
 
-    if nwbfile is None:
-        # check to see if the file exists
-        if not os.path.exists(nwb_file_path):
-            logger.info(
-                "NWB file not found locally; checking kachery for "
-                + f"{nwb_file_path}"
-            )
-            # first try the analysis files
-            from ..sharing.sharing_kachery import AnalysisNwbfileKachery
+    if nwbfile is not None:
+        return nwbfile
 
-            # the download functions assume just the filename, so we need to
-            # get that from the path
-            if not AnalysisNwbfileKachery.download_file(
-                os.path.basename(nwb_file_path), permit_fail=True
-            ):
-                logger.info(
-                    "NWB file not found in kachery; checking Dandi for "
-                    + f"{nwb_file_path}"
-                )
-                # Dandi fallback SB 2024-04-03
-                from ..common.common_dandi import DandiPath
+    if os.path.exists(nwb_file_path):
+        return _open_nwb_file(nwb_file_path)
 
-                dandi_key = {"filename": os.path.basename(nwb_file_path)}
-                if not DandiPath() & dandi_key:
-                    # Check if non-copied raw file is in Dandi
-                    dandi_key = {
-                        "filename": Path(nwb_file_path).name.replace(
-                            "_.nwb", ".nwb"
-                        )
-                    }
+    logger.info(
+        f"NWB file not found locally; checking kachery for {nwb_file_path}"
+    )
 
-                if not DandiPath & dandi_key:
-                    # If not in Dandi, then we can't find the file
-                    raise FileNotFoundError(
-                        f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
-                    )
-                io, nwbfile = DandiPath().fetch_file_from_dandi(
-                    dandi_key
-                )  # TODO: consider case where file in multiple dandisets
-                __open_nwb_files[nwb_file_path] = (io, nwbfile)
-                return nwbfile
+    from ..sharing.sharing_kachery import AnalysisNwbfileKachery
 
-        # now open the file
-        io = pynwb.NWBHDF5IO(
-            path=nwb_file_path, mode="r", load_namespaces=True
-        )  # keep file open
-        nwbfile = io.read()
-        __open_nwb_files[nwb_file_path] = (io, nwbfile)
+    kachery_success = AnalysisNwbfileKachery.download_file(
+        os.path.basename(nwb_file_path), permit_fail=True
+    )
+    if kachery_success:
+        return _open_nwb_file(nwb_file_path)
 
-    return nwbfile
+    logger.info(
+        "NWB file not found in kachery; checking Dandi for "
+        + f"{nwb_file_path}"
+    )
+
+    # Dandi fallback SB 2024-04-03
+    from ..common.common_dandi import DandiPath
+
+    if DandiPath().has_file_path(file_path=nwb_file_path):
+        return _open_nwb_file(nwb_file_path, source="dandi")
+
+    if DandiPath().has_raw_path(file_path=nwb_file_path):
+        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
+        return _open_nwb_file(raw, source="dandi")
+
+    # If not in Dandi, then we can't find the file
+    raise FileNotFoundError(
+        "NWB file not found in kachery or Dandi: "
+        + f"{os.path.basename(nwb_file_path)}."
+    )
 
 
 def file_from_dandi(filepath):

@@ -286,9 +286,12 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     )
 
     for file_name in nwb_files:
-        file_path = file_path_fn(file_name)
-        if not os.path.exists(file_path):  # retrieve the file from kachery.
-            # This also opens the file and stores the file object
+        file_path = file_path_fn(file_name, from_schema=True)
+        if not os.path.exists(file_path):
+            if hasattr(query_expression, "_make_file"):
+                # Attempt to recompute the file
+                query_expression._make_file(recompute_file_name=file_name)
+            # get from kachery/dandi, store in cache
             get_nwb_file(file_path)
 
     query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
