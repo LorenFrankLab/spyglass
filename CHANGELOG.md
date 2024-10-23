@@ -34,6 +34,9 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Remove stored hashes from pytests #1152
     - Remove mambaforge from tests #1153
     - Remove debug statement #1164
+- Allow python < 3.13 #1169
+- Remove numpy version restriction #1169
+- Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
 
 ### Pipelines
 
