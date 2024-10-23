@@ -425,7 +425,10 @@ class VideoMaker:
 
                 for job in as_completed(jobs):
                     frames_left -= 1
-                    ret = job.result()
+                    try:
+                        ret = job.result()
+                    except IndexError:
+                        ret = None
                     self._debug_print(f"Finish: {ret}")
                     progress_bar.update()
                     del jobs[job]
