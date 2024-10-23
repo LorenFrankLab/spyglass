@@ -46,7 +46,7 @@ dependencies = [
     "matplotlib",
     "ndx_franklab_novela>=0.1.0",
     "non_local_detector",
-    "numpy<1.24",
+    "numpy",
     "opencv-python",
     "panel>=1.4.0",                  # panel #6325 resolved
     "position_tools>=0.1.0",
