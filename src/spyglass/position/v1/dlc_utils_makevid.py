@@ -7,8 +7,6 @@ import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from os import system as os_system
 from pathlib import Path
-from random import choices as random_choices
-from string import ascii_letters
 from typing import Tuple
 
 import matplotlib.pyplot as plt
@@ -56,6 +54,7 @@ class VideoMaker:
         max_workers=25,
         max_jobs_in_queue=250,
         debug=False,
+        key_hash=None,
         *args,
         **kwargs,
     ):
@@ -74,10 +73,8 @@ class VideoMaker:
                 + "Use matplotlib or submit a feature request via GitHub."
             )
 
-        self.temp_dir = Path(temp_dir) / "vid_frames"
-        while self.temp_dir.exists():  # multi-user protection
-            suffix = "".join(random_choices(ascii_letters, k=2))
-            self.temp_dir = Path(temp_dir) / f"vid_frames_{suffix}"
+        # key_hash supports resume from previous run
+        self.temp_dir = Path(temp_dir) / f"dlc_vid_{key_hash}"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Temporary directory: {self.temp_dir}")
         atexit.register(self.cleanup)
@@ -442,6 +439,7 @@ class VideoMaker:
         # Use ffmpeg to extract frames
         ffmpeg_cmd = [
             "ffmpeg",
+            "-y",  # overwrite
             "-i",
             self.video_filename,
             "-vf",
@@ -475,6 +473,7 @@ class VideoMaker:
 
         ffmpeg_cmd = [
             "ffmpeg",
+            "-y",  # overwrite
             "-r",
             str(self.fps),
             "-start_number",
@@ -498,6 +497,7 @@ class VideoMaker:
 
         ffmpeg_cmd = [
             "ffmpeg",
+            "-y",  # overwrite
             "-f",
             "concat",
             "-safe",

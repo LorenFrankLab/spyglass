@@ -435,6 +435,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),
+            key_hash=dj.hash.key_hash(key),
             **params.get("video_params", {}),
         )
 
