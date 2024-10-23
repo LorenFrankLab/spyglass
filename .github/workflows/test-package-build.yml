@@ -29,7 +29,6 @@ jobs:
           python-version: 3.9
       - run: |
           pip install --upgrade build twine
-          pip install importlib_metadata==7.2.1 # twine #977
       - name: Build sdist and wheel
         run: python -m build
       - run: twine check dist/*
@@ -50,6 +49,7 @@ jobs:
     needs: [build]
     strategy:
       matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
         package: ['wheel', 'sdist', 'archive']
     steps:
       - name: Download sdist and wheel artifacts
@@ -66,11 +66,13 @@ jobs:
           path: archive/
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: ${{ matrix.python-version }}
       - name: Display Python version
         run: python -c "import sys; print(sys.version)"
-      - name: Update pip
-        run: pip install --upgrade pip
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade setuptools wheel
+          pip install --upgrade pip
       - name: Install wheel
         if: matrix.package == 'wheel'
         run: pip install dist/*.whl
