@@ -50,6 +50,7 @@ jobs:
     needs: [build]
     strategy:
       matrix:
+        python-version: [3.9, 3.10, 3.11, 3.12]
         package: ['wheel', 'sdist', 'archive']
     steps:
       - name: Download sdist and wheel artifacts
@@ -66,7 +67,7 @@ jobs:
           path: archive/
       - uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: ${{ matrix.python-version }}
       - name: Display Python version
         run: python -c "import sys; print(sys.version)"
       - name: Update pip
