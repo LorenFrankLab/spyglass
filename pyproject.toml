@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "spyglass-neuro"
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.9,<3.13"
 license = { file = "LICENSE" }
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
