@@ -74,7 +74,6 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install --upgrade setuptools wheel
-          pip install --upgrade setuptools_scm pkg_resources
       - name: Install wheel
         if: matrix.package == 'wheel'
         run: pip install dist/*.whl
