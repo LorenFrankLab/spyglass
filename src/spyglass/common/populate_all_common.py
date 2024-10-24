@@ -48,7 +48,7 @@ def log_insert_error(
             **error_constants,
             table=table.__name__,
             error_type=type(err).__name__,
-            error_message=str(err),
+            error_message=str(err)[:255],
             error_raw=str(err),
         )
     )
