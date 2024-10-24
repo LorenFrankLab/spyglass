@@ -483,7 +483,16 @@ class VideoMaker:
             output_partial_video,
             *self.ffmpeg_log_args,
         ]
-        subprocess.run(ffmpeg_cmd, check=True)
+        try:
+            ret = subprocess.run(
+                ffmpeg_cmd,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                check=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error stitching partial video: {e.stderr}")
 
     def concat_partial_videos(self):
         """Concatenate all the partial videos into one final video."""
@@ -507,7 +516,16 @@ class VideoMaker:
             str(self.output_video_filename),
             *self.ffmpeg_log_args,
         ]
-        subprocess.run(ffmpeg_cmd, check=True)
+        try:
+            ret = subprocess.run(
+                ffmpeg_cmd,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Error stitching partial video: {e.stderr}")
 
 
 def make_video(**kwargs):
