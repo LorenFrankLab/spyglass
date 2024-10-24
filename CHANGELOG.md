@@ -21,7 +21,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 - Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
-- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116, #1137
+- Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
+    #1137, #1162
 - Fix bool settings imported from dj config file #1117
 - Allow definition of tasks and new probe entries from config #1074, #1120
 - Enforce match between ingested nwb probe geometry and existing table entry
@@ -29,8 +30,13 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Update DataJoint install and password instructions #1131
 - Fix dandi upload process for nwb's with video or linked objects #1095, #1151
 - Minor docs fixes #1145
-- Remove stored hashes from pytests #1152
-- Remove mambaforge from tests #1153
+- Test fixes
+    - Remove stored hashes from pytests #1152
+    - Remove mambaforge from tests #1153
+    - Remove debug statement #1164
+    - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
+- Allow python \< 3.13 #1169
+- Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 
 ### Pipelines
