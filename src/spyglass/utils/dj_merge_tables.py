@@ -538,9 +538,6 @@ class Merge(ExportMixin, dj.Manual):
         restriction = restriction or self.restriction or True
         merge_restriction = self.extract_merge_id(restriction)
 
-        if log_export and self.export_id:
-            self._log_fetch(restriction=merge_restriction)
-
         sources = set(
             (self & merge_restriction).fetch(
                 self._reserved_sk, log_export=False
@@ -550,7 +547,8 @@ class Merge(ExportMixin, dj.Manual):
         merge_ids = []
         for source in sources:
             source_restr = (
-                self & {self._reserved_sk: source} & merge_restriction
+                self
+                & dj.AndList([{self._reserved_sk: source}, merge_restriction])
             ).fetch("KEY", log_export=False)
             nwb_list.extend(
                 (self & source_restr)

@@ -248,30 +248,48 @@ class ExportMixin:
         fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
         table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
 
+    def _run_join(self, **kwargs):
+        """Log join for export.
+
+        Special case to log primary keys of each table in join, avoiding
+        long restriction strings.
+        """
+        table_list = [self]
+        other = kwargs.get("other")
+
+        if hasattr(other, "_log_fetch"):  # Check if other has mixin
+            table_list.append(other)  # can other._log_fetch
+        else:
+            logger.warning(f"Cannot export log join for\n{other}")
+
+        joined = self.proj().join(other.proj(), log_export=False)
+        for table in table_list:  # log separate for unique pks
+            for r in joined.fetch(*table.primary_key, as_dict=True):
+                table._log_fetch(restriction=r)
+
     def _run_with_log(self, method, *args, log_export=True, **kwargs):
+        """Run method, log fetch, and return result.
+
+        Uses FETCH_LOG_FLAG to prevent multiple logs in one user call.
+        """
         log_this_call = FETCH_LOG_FLAG.get()  # One log per fetch call
+
         if log_this_call and not self.database == "common_usage":
             FETCH_LOG_FLAG.set(False)
+
         try:
             ret = method(*args, **kwargs)
         finally:
             if log_this_call:
                 FETCH_LOG_FLAG.set(True)
+
         if log_export and self.export_id and log_this_call:
-            if getattr(method, "__name__", None) == "join":
-                other = kwargs.get("other")
-                if not hasattr(other, "_log_fetch"):
-                    logger.warning(f"Cannot export log join for\n{other}")
-                    __import__("pdb").set_trace()
-                restriction = (  # Fetch self as restricted by other
-                    self.proj()
-                    .join(other.proj(), log_export=False)
-                    .fetch(*self.primary_key, as_dict=True)
-                )
+            if getattr(method, "__name__", None) == "join":  # special case
+                self._run_join(**kwargs)
             else:
-                restriction = kwargs.get("restriction")
+                self._log_fetch(restriction=kwargs.get("restriction"))
             logger.debug(f"Export: {self._called_funcs()}")
-            self._log_fetch(restriction=restriction)
+
         return ret
 
     # -------------------------- Intercept DJ methods --------------------------
