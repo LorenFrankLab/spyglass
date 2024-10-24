@@ -1,7 +1,6 @@
 # Convenience functions
 
 # some DLC-utils copied from datajoint element-interface utils.py
-import atexit
 import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -77,7 +76,6 @@ class VideoMaker:
         self.temp_dir = Path(temp_dir) / f"dlc_vid_{key_hash}"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         logger.debug(f"Temporary directory: {self.temp_dir}")
-        atexit.register(self.cleanup)
 
         if not Path(video_filename).exists():
             raise FileNotFoundError(f"Video not found: {video_filename}")
@@ -116,13 +114,9 @@ class VideoMaker:
         self.process_frames()
         plt.close(self.fig)
         logger.info(f"Finished video: {self.output_video_filename}")
-
-        self.cleanup()
         logger.debug(f"Dropped frames: {self.dropped_frames}")
-        atexit.unregister(self.cleanup)
 
-    def cleanup(self):
-        shutil.rmtree(self.temp_dir)
+        shutil.rmtree(self.temp_dir)  # Clean up temp directory
 
     def _set_frame_info(self):
         """Set the frame information for the video."""
@@ -375,6 +369,8 @@ class VideoMaker:
         progress_bar.reset(total=self.n_frames)
 
         for start_frame in range(0, self.n_frames, self.batch_size):
+            if start_frame >= self.n_frames:  # Skip if no frames left
+                break
             end_frame = min(start_frame + self.batch_size, self.n_frames) - 1
             logger.debug(f"Processing frames: {start_frame} - {end_frame}")
 
@@ -428,7 +424,7 @@ class VideoMaker:
                     try:
                         ret = job.result()
                     except IndexError:
-                        ret = None
+                        ret = "IndexError"
                     self._debug_print(f"Finish: {ret}")
                     progress_bar.update()
                     del jobs[job]
