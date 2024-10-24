@@ -3,6 +3,7 @@ spyglass.code-workspace
 mountainsort4_output/
 .idea/
 mysql_config
+memray*
 
 # Notebooks
 *.ipynb

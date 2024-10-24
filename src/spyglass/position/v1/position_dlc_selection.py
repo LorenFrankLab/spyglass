@@ -342,18 +342,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")
+        epoch = key["epoch"]
 
-        interval_name = convert_epoch_interval_name_to_position_interval_name(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": key["epoch"],
-            },
-            populate_missing=False,
-        )
-        epoch = (
-            int(interval_name.replace("pos ", "").replace(" valid times", ""))
-            + 1
-        )
         pose_est_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
@@ -424,6 +414,11 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
         frames = params.get("frames", None)
 
+        if limit := params.get("limit", None):  # new int param for debugging
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
+            video_frame_inds = video_frame_inds[:limit]
+            pos_info_df = pos_info_df.head(limit)
+
         make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
@@ -434,12 +429,18 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             centroids=centroids,
             likelihoods=likelihoods,
             position_time=np.asarray(pos_info_df.index),
-            processor=params.get("processor", "opencv"),
+            processor=params.get("processor", "matplotlib"),
             frames=np.arange(frames[0], frames[1]) if frames else None,
             percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),
+            key_hash=dj.hash.key_hash(key),
+            debug=params.get("debug", False),
             **params.get("video_params", {}),
         )
+
+        if limit:  # don't insert if we're just debugging
+            return
+
         self.insert1(key)
