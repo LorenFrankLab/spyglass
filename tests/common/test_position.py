@@ -4,64 +4,6 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def common_position(common):
-    yield common.common_position
-
-
-@pytest.fixture(scope="session")
-def interval_position_info(common_position):
-    yield common_position.IntervalPositionInfo
-
-
-@pytest.fixture(scope="session")
-def default_param_key():
-    yield {"position_info_param_name": "default"}
-
-
-@pytest.fixture(scope="session")
-def interval_key(common):
-    yield (common.IntervalList & "interval_list_name LIKE 'pos 0%'").fetch1(
-        "KEY"
-    )
-
-
-@pytest.fixture(scope="session")
-def param_table(common_position, default_param_key, teardown):
-    param_table = common_position.PositionInfoParameters()
-    param_table.insert1(default_param_key, skip_duplicates=True)
-    yield param_table
-
-
-@pytest.fixture(scope="session")
-def upsample_position(
-    common,
-    common_position,
-    param_table,
-    default_param_key,
-    teardown,
-    interval_key,
-):
-    params = (param_table & default_param_key).fetch1()
-    upsample_param_key = {"position_info_param_name": "upsampled"}
-    param_table.insert1(
-        {
-            **params,
-            **upsample_param_key,
-            "is_upsampled": 1,
-            "max_separation": 80,
-            "upsampling_sampling_rate": 500,
-        },
-        skip_duplicates=True,
-    )
-    interval_pos_key = {**interval_key, **upsample_param_key}
-    common_position.IntervalPositionInfoSelection.insert1(
-        interval_pos_key, skip_duplicates=True
-    )
-    common_position.IntervalPositionInfo.populate(interval_pos_key)
-    yield interval_pos_key
-
-
-@pytest.fixture(scope="session")
 def interval_pos_key(upsample_position):
     yield upsample_position
 
@@ -73,16 +15,17 @@ def test_interval_position_info_insert(common_position, interval_pos_key):
 @pytest.fixture(scope="session")
 def upsample_position_error(
     upsample_position,
-    default_param_key,
-    param_table,
+    default_interval_pos_param_key,
+    pos_info_param,
     common,
     common_position,
     teardown,
-    interval_key,
+    interval_keys,
 ):
-    params = (param_table & default_param_key).fetch1()
+    interval_key = interval_keys[0]
+    params = (pos_info_param & default_interval_pos_param_key).fetch1()
     upsample_param_key = {"position_info_param_name": "upsampled error"}
-    param_table.insert1(
+    pos_info_param.insert1(
         {
             **params,
             **upsample_param_key,
@@ -97,6 +40,10 @@ def upsample_position_error(
         interval_pos_key, skip_duplicates=not teardown
     )
     yield interval_pos_key
+
+    (common_position.IntervalPositionInfoSelection & interval_pos_key).delete(
+        safemode=False
+    )
 
 
 def test_interval_position_info_insert_error(
