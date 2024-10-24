@@ -393,8 +393,6 @@ class_map = {
     "RippleParameters": {"ripple_v1": "spyglass.ripple.v1.ripple"},
     "RippleTimesV1": {"ripple_v1": "spyglass.ripple.v1.ripple"},
 }
-
-
 import importlib
 import inspect
 from collections import defaultdict
@@ -404,44 +402,61 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import datajoint as dj
-from datajoint.utils import from_camel_case, to_camel_case
+from datajoint import Table
+from datajoint.utils import to_camel_case
 
 from spyglass.common.common_session import Session
 from spyglass.lfp.lfp_merge import ImportedLFP  # for cascade
 from spyglass.linearization.merge import LinearizedPositionOutput as LO
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_graph import Direction, RestrGraph, TableChain
+from spyglass.utils.dj_helper_fn import ensure_names
 from spyglass.utils.replication import class_map
 
 
-class ImportedGraph(TableChain):
+class ImportedGraph(RestrGraph):
     def __init__(
         self,
-        target: TableChain = None,
-        class_map: dict = None,
+        target: RestrGraph,
+        new_tbl: Table,
         new_restr: str = None,
+        class_map: dict = None,
         banned_tables: list = None,
+        cascade: bool = True,
         *args,
         **kwargs,
     ):
-        banned_tables = banned_tables or []
-        banned_tables.extend(list(getattr(target, "no_visit", [])))
+        kwargs["verbose"] = True  # TODO: remove
 
-        super().__init__(banned_tables=banned_tables, *args, **kwargs)
+        banned_tables = banned_tables or []
+        banned_tables.extend(list(target.graph.nodes - target.visited))
+
         self._class_map = class_map
         self.target = target
 
-        if new_restr:
-            self.cascade(
-                direction=Direction.DOWN,
-                restriction=new_restr,
-                null_on_fail=False,
-            )
+        super().__init__(
+            banned_tables=banned_tables,
+            seed_table=new_tbl,
+            leaves={
+                "table_name": new_tbl.full_table_name,
+                "restriction": new_restr,
+            },
+            direction="up",
+            cascade=True,
+            *args,
+            **kwargs,
+        )
+
+        self.cascaded = False
+        self.to_visit = self._topo_sort(self.target.visited - self.visited)
+
+        if cascade:
+            self.cascade_target()
+            self.cascaded = True
 
     def merged_list_of_dicts(self, *args):
         # TODO: accept list from multi-table fetches
         merged = []
-        # merged = [{**a, **b} for a, b in iter_product(list1, list2)]
         for combo in iter_product(*args):
             new = dict()
             for this_dict in combo:
@@ -451,17 +466,11 @@ class ImportedGraph(TableChain):
 
     def cascade1_target(self, next_tbl: str = None):
         target = self.target
-        if (
-            not self.target  # Missing target
-            or not self.has_link  # Cannot find path
-            or not target._get_restr(self.child)  # Target not at end of chain
-        ):
-            self._log_truncate("No target or no link")
-            return
 
         # Find next table to cascade to
         next_tbl = next_tbl or self.find_cascade_stop()
-        next_class = self._get_class(next_tbl, with_restr=False)
+
+        self._log_truncate(f"Next   : {next_tbl}")
 
         # Find that table's parents
         all_parents = set(self._get_ft(next_tbl).parents())
@@ -478,11 +487,12 @@ class ImportedGraph(TableChain):
             attr_map = self._get_edge(parent, next_tbl)[1]["attr_map"]
             parent_keys.append(self._get_key(parent, attr_map=attr_map))
         for parent in next_parents:
-            attr_map = target._get_edge(parent, next_tbl)[1]["attr_map"]
+            attr_map = self._get_edge(parent, next_tbl)[1]["attr_map"]
             parent_keys.append(target._get_key(parent, attr_map=attr_map))
         next_inserts = self.merged_list_of_dicts(*parent_keys)
 
         # Populate or insert next table
+        next_class = self._get_class(next_tbl, with_restr=False)
         if isinstance(next_class, (dj.Imported, dj.Computed)):
             self._log_truncate(f"AutoPop: {next_tbl}")
             next_class.populate(next_inserts)
@@ -495,22 +505,23 @@ class ImportedGraph(TableChain):
 
         # TODO: gets hung up on selection table before a merge
 
+        self.to_visit.remove(next_tbl)
+
     def cascade_target(self, limit=20):
-        while limit > 0 and self.find_cascade_stop():
+        while limit > 0 and self.to_visit:
             self.cascade1_target()
             limit -= 1
 
     def find_cascade_stop(self):
         """Find the first table in the chain without a restriction."""
-        for table in self.non_alias(self.path):
-            if self._get_restr(table) is False:
+        for table in self.non_alias(self.to_visit):
+            if self._get_restr(table) is None:
                 return table
         return None
 
     # -------------------- Map Package for Importing Class --------------------
     # This is needed to run populate on tables directly.
     # Dict[Class, Dict[Schema, Module]
-    # TODO: use datajoint regex to only import Imported/Computed tables
 
     @cached_property
     def class_map(self):
@@ -597,8 +608,6 @@ class ImportedGraph(TableChain):
             entry = {schema_name: module_name}
 
             # Map class names to schema and module names
-            self._log_truncate(f"Mapping : {module_name}")
-
             db_tables = self.database_map.get(schema_name, [])
             for name, obj in inspect.getmembers(module, inspect.isclass):
                 if name not in db_tables:
@@ -615,7 +624,7 @@ class ImportedGraph(TableChain):
 
     def _decompose_name(self, name: str) -> Tuple[str, str, str]:
         """Decompose table name into schema and table name."""
-        schema, table = self._ensure_names(name).strip("`").split(".")
+        schema, table = ensure_names(name).strip("`").split(".")
         part = None
         if "__" in table and "`__" not in table:
             table, part = table.split("__")
@@ -637,12 +646,11 @@ class ImportedGraph(TableChain):
 
 
 if __name__ == "__main__":
-    target_analysis = RestrGraph(
+    ta = RestrGraph(
         seed_table=LO(),
         leaves={
             LO.full_table_name: "source='LinearizedPositionV1'",
         },
-        # class_map=class_map,
         direction="up",
         verbose=False,
         cascade=True,
@@ -652,14 +660,11 @@ if __name__ == "__main__":
     new_dict = {"nwb_file_name": new_file}
     oc = ImportedGraph(
         class_map=class_map,
-        target=target_analysis,
+        target=ta,
+        new_tbl=Session(),
         new_restr=new_dict,
-        parent=Session(),
-        child=LO(),
-        direction="down",
-        banned_tables=list(target_analysis.no_visit),
+        banned_tables=list(ta.no_visit),
         verbose=True,
     )
-    oc.class_map
-    # oc.cascade(restriction=new_dict, direction="down", null_on_fail=False)
-    # oc.cascade_target()
+    oc.cascade(restriction=new_dict, direction="down", null_on_fail=False)
+    oc.cascade_target()
