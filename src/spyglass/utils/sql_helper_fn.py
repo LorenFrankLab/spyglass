@@ -212,7 +212,7 @@ def bash_escape_sql(s, add_newline=True):
         "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
         "  ": " ",  # Squash double spaces
         "( (": "((",  # Squash double parens
-        ") )": ")",
+        ") )": "))",
         '"': "'",  # Replace double quotes with single
         "`": "",  # Remove backticks
     }
@@ -232,6 +232,5 @@ def bash_escape_sql(s, add_newline=True):
 
     for old, new in replace_map.items():
         s = s.replace(old, new)
-    if s.startswith("(((") and s.endswith(")))"):
-        s = s[2:-2]  # Remove extra parens for readability
+
     return s
