@@ -419,7 +419,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             video_frame_inds = video_frame_inds[:limit]
             pos_info_df = pos_info_df.head(limit)
 
-        make_video(
+        video_maker = make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
             position_mean={
@@ -441,6 +441,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
 
         if limit:  # don't insert if we're just debugging
-            return
+            return video_maker
 
-        self.insert1(key)
+        if output_video_filename.exists():
+            self.insert1(key)

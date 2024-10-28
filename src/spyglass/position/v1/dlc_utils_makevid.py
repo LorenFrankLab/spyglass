@@ -530,4 +530,4 @@ class VideoMaker:
 
 def make_video(**kwargs):
     """Passthrough for VideoMaker class for backwards compatibility."""
-    VideoMaker(**kwargs)
+    return VideoMaker(**kwargs)
