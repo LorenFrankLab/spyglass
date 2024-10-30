@@ -8,6 +8,7 @@ from os import environ
 from re import match as re_match
 
 from datajoint.condition import make_condition
+from datajoint.table import Table
 from packaging.version import parse as version_parse
 
 from spyglass.utils.logging import logger
@@ -264,6 +265,8 @@ class ExportMixin:
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
+            if isinstance(table, type) and issubclass(table, Table):
+                table = table()  # adapted from dj.declare.compile_foreign_key
             for r in joined.fetch(*table.primary_key, as_dict=True):
                 table._log_fetch(restriction=r)
 
