@@ -319,7 +319,7 @@ class ExportMixin:
             return super().restrict(restriction)
         log_export = "fetch_nwb" not in self._called_funcs()
         return self._run_with_log(
-            super().restrict, restriction=restriction, log_export=log_export
+            super().restrict, restriction=dj.AndList([restriction, self.restriction]), log_export=log_export
         )
 
     def join(self, other, log_export=True, *args, **kwargs):
