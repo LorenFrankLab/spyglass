@@ -76,10 +76,11 @@ class SQLDumpHelper:
 
     def _cmd_prefix(self, docker_id=None):
         """Get prefix for mysqldump command. Includes docker exec if needed."""
+        default = "mysqldump --hex-blob "
         if not docker_id:
-            return "mysqldump "
+            return default
         return (
-            f"docker exec -i {docker_id} \\\n\tmysqldump "
+            f"docker exec -i {docker_id} \\\n\t{default}"
             + "-u {user} --password={password} \\\n\t".format(
                 **self._get_credentials()
             )
