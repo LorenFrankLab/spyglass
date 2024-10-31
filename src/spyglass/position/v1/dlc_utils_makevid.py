@@ -49,9 +49,9 @@ class VideoMaker:
         cm_to_pixels=1.0,
         disable_progressbar=False,
         crop=None,
-        batch_size=500,
-        max_workers=25,
-        max_jobs_in_queue=250,
+        batch_size=512,
+        max_workers=256,
+        max_jobs_in_queue=128,
         debug=False,
         key_hash=None,
         *args,
@@ -305,12 +305,18 @@ class VideoMaker:
 
     def _generate_single_frame(self, frame_ind):
         """Generate a single frame and save it as an image."""
+        # Zero-padded filename based on the dynamic padding length
         padded = self._pad(frame_ind)
+        frame_out_path = self.temp_dir / f"plot_{padded}.png"
+        if frame_out_path.exists():
+            return frame_ind  # Skip if frame already exists
+
         frame_file = self.temp_dir / f"orig_{padded}.png"
-        if not frame_file.exists():
+        if not frame_file.exists():  # Skip if input frame not found
             self.dropped_frames.add(frame_ind)
             print(f"\rFrame not found: {frame_file}", end="")
             return
+
         frame = plt.imread(frame_file)
         _ = self.axes[0].imshow(frame)
 
@@ -355,9 +361,7 @@ class VideoMaker:
                         np.asarray(self.likelihoods[bodypart][likelihood_inds]),
                     )
 
-        # Zero-padded filename based on the dynamic padding length
-        frame_path = self.temp_dir / f"plot_{padded}.png"
-        self.fig.savefig(frame_path, dpi=400)
+        self.fig.savefig(frame_out_path, dpi=400)
         plt.cla()  # clear the current axes
 
         return frame_ind
@@ -394,7 +398,7 @@ class VideoMaker:
         logger.info("Concatenating partial videos")
         self.concat_partial_videos()
 
-    def _debug_print(self, msg=None, end=""):
+    def _debug_print(self, msg="             ", end=""):
         """Print a self-overwiting message if debug is enabled."""
         if self.debug:
             print(f"\r{msg}", end=end)
@@ -433,12 +437,17 @@ class VideoMaker:
     def ffmpeg_extract(self, start_frame, end_frame):
         """Use ffmpeg to extract a batch of frames."""
         logger.debug(f"Extracting frames: {start_frame} - {end_frame}")
+        last_frame = self.temp_dir / f"orig_{self._pad(end_frame)}.png"
+        if last_frame.exists():  # assumes all frames previously extracted
+            logger.debug(f"Skipping existing frames: {last_frame}")
+            return
+
         output_pattern = str(self.temp_dir / f"orig_%0{self.pad_len}d.png")
 
         # Use ffmpeg to extract frames
         ffmpeg_cmd = [
             "ffmpeg",
-            "-y",  # overwrite
+            "-n",  # no overwrite
             "-i",
             self.video_filename,
             "-vf",
@@ -447,7 +456,6 @@ class VideoMaker:
             "vfr",
             "-start_number",
             str(start_frame),
-            "-n",  # no overwrite
             output_pattern,
             *self.ffmpeg_log_args,
         ]
