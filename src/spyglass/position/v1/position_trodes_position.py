@@ -13,6 +13,7 @@ from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.position import fill_nan
 
 schema = dj.schema("position_v1_trodes_position")
 
@@ -327,19 +328,35 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             pos_df = pos_df[:min_len]
             video_time = video_time[:min_len]
 
+        centroids = {
+            "red": np.asarray(adj_df[["xloc", "yloc"]]),
+            "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
+        }
+        position_mean = np.asarray(pos_df[["position_x", "position_y"]])
+        orientation_mean = np.asarray(pos_df[["orientation"]])
+        position_time = np.asarray(pos_df.index)
+        if np.any(video_time):
+            centroids = {
+                color: fill_nan(
+                    variable=data,
+                    video_time=video_time,
+                    variable_time=position_time,
+                )
+                for color, data in centroids.items()
+            }
+            position_mean = fill_nan(position_mean, video_time, position_time)
+            orientation_mean = fill_nan(
+                orientation_mean, video_time, position_time
+            )
+
         make_video(
-            processor="opencv-trodes",
             video_filename=video_path,
-            centroids={
-                "red": np.asarray(adj_df[["xloc", "yloc"]]),
-                "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
-            },
-            position_mean=np.asarray(pos_df[["position_x", "position_y"]]),
-            orientation_mean=np.asarray(pos_df[["orientation"]]),
+            centroids=centroids,
             video_time=video_time,
-            position_time=np.asarray(pos_df.index),
+            position_mean=position_mean,
+            orientation_mean=orientation_mean,
+            position_time=position_time,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
-            disable_progressbar=False,
         )
         self.insert1(dict(**key, has_video=True))

@@ -80,10 +80,16 @@ class VideoMaker:
         if not Path(video_filename).exists():
             raise FileNotFoundError(f"Video not found: {video_filename}")
 
+        try:
+            position_mean = position_mean["DLC"]
+            orientation_mean = orientation_mean["DLC"]
+        except IndexError:
+            pass  # trodes data provides bare arrays
+
         self.video_filename = video_filename
         self.video_frame_inds = video_frame_inds
-        self.position_mean = position_mean["DLC"]
-        self.orientation_mean = orientation_mean["DLC"]
+        self.position_mean = position_mean
+        self.orientation_mean = orientation_mean
         self.centroids = centroids
         self.likelihoods = likelihoods
         self.position_time = position_time
@@ -163,7 +169,7 @@ class VideoMaker:
                 "stream=width,height,r_frame_rate",
                 "-of",
                 "csv=p=0:s=x",
-                video_filename,
+                str(video_filename),
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
