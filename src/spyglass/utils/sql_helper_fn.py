@@ -1,3 +1,4 @@
+import re
 from functools import cached_property
 from os import system as os_system
 from pathlib import Path
@@ -75,10 +76,11 @@ class SQLDumpHelper:
 
     def _cmd_prefix(self, docker_id=None):
         """Get prefix for mysqldump command. Includes docker exec if needed."""
+        default = "mysqldump --hex-blob "
         if not docker_id:
-            return "mysqldump "
+            return default
         return (
-            f"docker exec -i {docker_id} \\\n\tmysqldump "
+            f"docker exec -i {docker_id} \\\n\t{default}"
             + "-u {user} --password={password} \\\n\t".format(
                 **self._get_credentials()
             )
@@ -196,6 +198,34 @@ class SQLDumpHelper:
         self._logger.info(f"Conda environment exported to {yml_path}")
 
 
+def remove_redundant(s):
+    """Remove redundant parentheses from a string.
+
+    '((a=b)OR((c=d)AND((e=f))))' -> '(a=b) OR ((c=d) AND (e=f))'
+
+    Full solve would require content parsing, this removes duplicates.
+    https://codegolf.stackexchange.com/questions/250596/remove-redundant-parentheses
+    """
+
+    def is_list(x):  # Check if element is a list
+        return isinstance(x, list)
+
+    def list_to_str(x):  # Convert list to string
+        return "(%s)" % "".join(map(list_to_str, x)) if is_list(x) else x
+
+    def flatten_list(nested):
+        ret = [flatten_list(e) if is_list(e) else e for e in nested if e]
+        return ret[0] if ret == [[*ret[0]]] else ret  # first if all same
+
+    tokens = repr("\"'" + s)[3:]  # Quote to safely eval the string
+    as_list = tokens.translate({40: "',['", 41: "'],'"})  # parens -> square
+    flattened = flatten_list(eval(as_list))  # Flatten the nested list
+    as_str = list_to_str(flattened)  # back to str
+
+    # space out AND and OR for readability
+    return re.sub(r"\b(and|or)\b", r" \1 ", as_str, flags=re.IGNORECASE)
+
+
 def bash_escape_sql(s, add_newline=True):
     """Escape restriction string for bash.
 
@@ -207,12 +237,22 @@ def bash_escape_sql(s, add_newline=True):
         Add newlines for readability around AND & OR. Default True
     """
     s = s.strip()
+    if s.startswith("WHERE"):
+        s = s[5:].strip()
+
+    # Balance parentheses - because make_condition may unbalance outside parens
+    n_open = s.count("(")
+    n_close = s.count(")")
+    add_open = max(0, n_close - n_open)
+    add_close = max(0, n_open - n_close)
+    balanced = "(" * add_open + s + ")" * add_close
+
+    s = remove_redundant(balanced)
 
     replace_map = {
-        "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
         "  ": " ",  # Squash double spaces
         "( (": "((",  # Squash double parens
-        ") )": ")",
+        ") )": "))",
         '"': "'",  # Replace double quotes with single
         "`": "",  # Remove backticks
     }
@@ -231,7 +271,6 @@ def bash_escape_sql(s, add_newline=True):
         replace_map.update({"%%%%": "%%"})  # Remove extra percent signs
 
     for old, new in replace_map.items():
-        s = s.replace(old, new)
-    if s.startswith("(((") and s.endswith(")))"):
-        s = s[2:-2]  # Remove extra parens for readability
+        s = re.sub(re.escape(old), new, s)
+
     return s

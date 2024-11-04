@@ -172,7 +172,7 @@ class SpyglassMixin(ExportMixin):
             table_dict[resolved],
         )
 
-    def fetch_nwb(self, log_export=True, *attrs, **kwargs):
+    def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
         Implementing class must have a foreign key reference to Nwbfile or
@@ -184,6 +184,7 @@ class SpyglassMixin(ExportMixin):
         """
         table, tbl_attr = self._nwb_table_tuple
 
+        log_export = kwargs.pop("log_export", True)
         if log_export and self.export_id and "analysis" in tbl_attr:
             self._log_fetch_nwb(table, tbl_attr)
 
