@@ -17,6 +17,7 @@ from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
 from networkx import (
+    DiGraph,
     NetworkXNoPath,
     NodeNotFound,
     all_simple_paths,
@@ -33,10 +34,35 @@ from spyglass.utils.dj_helper_fn import (
     unique_dicts,
 )
 
-try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
-    from datajoint.dependencies import topo_sort as dj_topo_sort
-except ImportError:
-    from datajoint.dependencies import unite_master_parts as dj_topo_sort
+
+def dj_topo_sort(graph: DiGraph) -> List[str]:
+    """Topologically sort graph.
+
+    Uses datajoint's topo_sort if available, otherwise uses networkx's
+    topological_sort, combined with datajoint's unite_master_parts.
+
+    NOTE: This ordering will impact _hash_upstream, but usage should be
+    consistent before/after a no-transaction populate.
+
+    Parameters
+    ----------
+    graph : nx.DiGraph
+        Directed graph to sort
+
+    Returns
+    -------
+    List[str]
+        List of table names in topological order
+    """
+    try:  # Datajoint 0.14.2+ uses topo_sort instead of unite_master_parts
+        from datajoint.dependencies import topo_sort
+
+        return topo_sort(graph)
+    except ImportError:
+        from datajoint.dependencies import unite_master_parts
+        from networkx.algorithms.dag import topological_sort
+
+        return unite_master_parts(list(topological_sort(graph)))
 
 
 class Direction(Enum):
