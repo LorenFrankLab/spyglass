@@ -4,7 +4,6 @@
 import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from os import system as os_system
 from pathlib import Path
 from typing import Tuple
 
@@ -128,9 +127,32 @@ class VideoMaker:
         """Set the frame information for the video."""
         logger.debug("Setting frame information")
 
-        width, height, self.frame_rate = self._get_input_stats()
+        ret = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v",
+                "-show_entries",
+                "stream=width,height,r_frame_rate,nb_frames",
+                "-of",
+                "csv=p=0:s=x",
+                str(self.video_filename),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if ret.returncode != 0:
+            raise ValueError(f"Error getting video dimensions: {ret.stderr}")
+
+        stats = ret.stdout.strip().split("x")
+        self.width, self.height = tuple(map(int, stats[:2]))
+        self.frame_rate = eval(stats[2])
+
         self.frame_size = (
-            (width, height)
+            (self.width, self.height)
             if not self.crop
             else (
                 self.crop[1] - self.crop[0],
@@ -144,45 +166,21 @@ class VideoMaker:
         )
         self.fps = int(np.round(self.frame_rate))
 
-        if self.frames is None:
+        if self.frames is None and self.video_frame_inds is not None:
             self.n_frames = int(
                 len(self.video_frame_inds) * self.percent_frames
             )
             self.frames = np.arange(0, self.n_frames)
-        else:
+        elif self.frames is not None:
             self.n_frames = len(self.frames)
+        else:
+            self.n_frames = int(stats[3])
+
         self.pad_len = len(str(self.n_frames))
 
-    def _get_input_stats(self, video_filename=None) -> Tuple[int, int]:
+    def _set_input_stats(self, video_filename=None) -> Tuple[int, int]:
         """Get the width and height of the video."""
-        logger.debug("Getting video dimensions")
-
-        video_filename = video_filename or self.video_filename
-        ret = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v",
-                "-show_entries",
-                "stream=width,height,r_frame_rate",
-                "-of",
-                "csv=p=0:s=x",
-                str(video_filename),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if ret.returncode != 0:
-            raise ValueError(f"Error getting video dimensions: {ret.stderr}")
-
-        stats = ret.stdout.strip().split("x")
-        width, height = tuple(map(int, stats[:-1]))
-        frame_rate = eval(stats[-1])
-
-        return width, height, frame_rate
+        logger.debug("Getting video stats with ffprobe")
 
     def _set_plot_bases(self):
         """Create the figure and axes for the video."""
@@ -507,6 +505,7 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"Error stitching partial video: {e.stderr}")
+            logger.debug(f"stderr: {ret.stderr}")
 
     def concat_partial_videos(self):
         """Concatenate all the partial videos into one final video."""
@@ -540,6 +539,7 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"Error stitching partial video: {e.stderr}")
+            logger.debug(f"stderr: {ret.stderr}")
 
 
 def make_video(**kwargs):

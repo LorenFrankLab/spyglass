@@ -358,5 +358,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             position_time=position_time,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
+            key_hash=dj.hash.key_hash(key),
         )
-        self.insert1(dict(**key, has_video=True))
+
+        # self.insert1(dict(**key, has_video=True)) # INTENTIONAL FAIL
