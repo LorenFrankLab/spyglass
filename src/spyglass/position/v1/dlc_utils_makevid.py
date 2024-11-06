@@ -121,7 +121,8 @@ class VideoMaker:
         logger.info(f"Finished video: {self.output_video_filename}")
         logger.debug(f"Dropped frames: {self.dropped_frames}")
 
-        shutil.rmtree(self.temp_dir)  # Clean up temp directory
+        if not debug:
+            shutil.rmtree(self.temp_dir)  # Clean up temp directory
 
     def _set_frame_info(self):
         """Set the frame information for the video."""

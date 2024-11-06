@@ -1,5 +1,6 @@
 import copy
 import os
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -304,9 +305,27 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
 
+        # Check if video exists
         if not video_path:
             self.insert1(dict(**key, has_video=False))
             return
+
+        # Check timepoints overlap
+        if not set(video_time).intersection(set(pos_df.index)):
+            raise ValueError(
+                "No overlapping time points between video and position data"
+            )
+
+        params_pk = "trodes_pos_params_name"
+        params = (TrodesPosParams() & {params_pk: key[params_pk]}).fetch1(
+            "params"
+        )
+
+        # Check if upsampled
+        if params["is_upsampled"]:
+            raise NotImplementedError(
+                "Upsampled position data not supported for video creation"
+            )
 
         video_path = find_mp4(
             video_path=os.path.dirname(video_path) + "/",
@@ -316,14 +335,17 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         output_video_filename = (
             key["nwb_file_name"].replace(".nwb", "")
             + f"_{epoch:02d}_"
-            + f'{key["trodes_pos_params_name"]}.mp4'
+            + f"{key[params_pk]}.mp4"
         )
 
         adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
 
-        if test_mode:
+        # if limit := params.get("limit", None):
+        limit = 550
+        if limit or test_mode:
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
             # pytest video data has mismatched shapes in some cases
-            min_len = min(len(adj_df), len(pos_df), len(video_time))
+            min_len = limit or min(len(adj_df), len(pos_df), len(video_time))
             adj_df = adj_df[:min_len]
             pos_df = pos_df[:min_len]
             video_time = video_time[:min_len]
@@ -335,6 +357,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         position_mean = np.asarray(pos_df[["position_x", "position_y"]])
         orientation_mean = np.asarray(pos_df[["orientation"]])
         position_time = np.asarray(pos_df.index)
+
         if np.any(video_time):
             centroids = {
                 color: fill_nan(
@@ -344,12 +367,18 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
                 )
                 for color, data in centroids.items()
             }
-            position_mean = fill_nan(position_mean, video_time, position_time)
+            position_mean = fill_nan(
+                variable=position_mean,
+                video_time=video_time,
+                variable_time=position_time,
+            )
             orientation_mean = fill_nan(
-                orientation_mean, video_time, position_time
+                variable=orientation_mean,
+                video_time=video_time,
+                variable_time=position_time,
             )
 
-        make_video(
+        vid_maker = make_video(
             video_filename=video_path,
             centroids=centroids,
             video_time=video_time,
@@ -358,7 +387,12 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             position_time=position_time,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
+            debug=params.get("debug", False),
             key_hash=dj.hash.key_hash(key),
+            **params,
         )
 
-        # self.insert1(dict(**key, has_video=True)) # INTENTIONAL FAIL
+        if limit:
+            return vid_maker
+
+        self.insert1(dict(**key, has_video=True))
