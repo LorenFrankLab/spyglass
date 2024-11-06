@@ -145,10 +145,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -519,11 +519,12 @@ class SpyglassMixin(ExportMixin):
             List of keys for populating table.
         """
         RestrGraph = self._graph_deps[1]
-
         if not (parents := self.parents(as_objects=True, primary=True)):
             # Should not happen, as this is only called from populated tables
             raise RuntimeError("No upstream tables found for upstream hash.")
 
+        if isinstance(keys, dict):
+            keys = [keys]  # case for single population key
         leaves = {  # Restriction on each primary parent
             p.full_table_name: [
                 {k: v for k, v in key.items() if k in p.heading.names}
@@ -550,7 +551,7 @@ class SpyglassMixin(ExportMixin):
         processes = kwargs.pop("processes", 1)
 
         # Decide if using transaction protection
-        use_transact = kwargs.pop("use_transation", None)
+        use_transact = kwargs.pop("use_transaction", None)
         if use_transact is None:  # if user does not specify, use class default
             use_transact = self._use_transaction
             if self._use_transaction is False:  # If class default is off, warn
