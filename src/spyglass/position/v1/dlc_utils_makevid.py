@@ -99,6 +99,7 @@ class VideoMaker:
         self.crop = crop
         self.window_ind = np.arange(501) - 501 // 2
         self.debug = debug
+        self.start_time = pd.to_datetime(position_time[0] * 1e9, unit="ns")
 
         self.dropped_frames = set()
 
@@ -177,6 +178,9 @@ class VideoMaker:
         else:
             self.n_frames = int(stats[3])
 
+        if self.debug:  # If debugging, limit frames to available data
+            self.n_frames = min(len(self.position_mean), self.n_frames)
+
         self.pad_len = len(str(self.n_frames))
 
     def _set_input_stats(self, video_filename=None) -> Tuple[int, int]:
@@ -207,7 +211,6 @@ class VideoMaker:
                 zorder=102,
                 color=color,
                 label=f"{bodypart} position",
-                # animated=True,
                 alpha=0.6,
             )
             for color, bodypart in zip(COLOR_SWATCH, self.centroids.keys())
@@ -245,6 +248,7 @@ class VideoMaker:
             self.position_time[0] - self.position_time[-1]
         ).total_seconds()
 
+        # TODO: Update legend location based on centroid position
         axes[0].legend(loc="lower right", fontsize=4)
         self.title = axes[0].set_title(
             f"time = {time_delta:3.4f}s\n frame = {0}",
@@ -313,13 +317,13 @@ class VideoMaker:
         # Zero-padded filename based on the dynamic padding length
         padded = self._pad(frame_ind)
         frame_out_path = self.temp_dir / f"plot_{padded}.png"
-        if frame_out_path.exists():
+        if frame_out_path.exists() and not self.debug:
             return frame_ind  # Skip if frame already exists
 
         frame_file = self.temp_dir / f"orig_{padded}.png"
         if not frame_file.exists():  # Skip if input frame not found
             self.dropped_frames.add(frame_ind)
-            print(f"\rFrame not found: {frame_file}", end="")
+            self._debug_print(f"Frame not found: {frame_file}", end="")
             return
 
         frame = plt.imread(frame_file)
@@ -333,38 +337,40 @@ class VideoMaker:
                 self.centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
             self.orientation_line.set_data((np.NaN, np.NaN))
             self.title.set_text(f"time = {0:3.4f}s\n frame = {frame_ind}")
-        else:
-            pos_ind = pos_ind[0]
-            likelihood_inds = pos_ind + self.window_ind
-            neg_inds = np.where(likelihood_inds < 0)[0]
-            likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
 
-            dlc_centroid_data = self._get_centroid_data(pos_ind)
+            self.fig.savefig(frame_out_path, dpi=400)
+            plt.cla()  # clear the current axes
+            return frame_ind
 
-            for bodypart in self.centroid_plot_objs:
-                self.centroid_plot_objs[bodypart].set_offsets(
-                    _to_px(
-                        data=self.centroids[bodypart][pos_ind],
-                        cm_to_pixels=self.cm_to_pixels,
-                    )
+        pos_ind = pos_ind[0]
+        likelihood_inds = pos_ind + self.window_ind
+        neg_inds = np.where(likelihood_inds < 0)[0]
+        likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
+
+        dlc_centroid_data = self._get_centroid_data(pos_ind)
+
+        for bodypart in self.centroid_plot_objs:
+            self.centroid_plot_objs[bodypart].set_offsets(
+                _to_px(
+                    data=self.centroids[bodypart][pos_ind],
+                    cm_to_pixels=self.cm_to_pixels,
                 )
-            self.centroid_position_dot.set_offsets(dlc_centroid_data)
-            _ = self._set_orient_line(frame, pos_ind)
-
-            time_delta = pd.Timedelta(
-                pd.to_datetime(self.position_time[pos_ind] * 1e9, unit="ns")
-                - pd.to_datetime(self.position_time[0] * 1e9, unit="ns")
-            ).total_seconds()
-
-            self.title.set_text(
-                f"time = {time_delta:3.4f}s\n frame = {frame_ind}"
             )
-            if self.likelihoods:
-                for bodypart in self.likelihood_objs.keys():
-                    self.likelihood_objs[bodypart].set_data(
-                        self.window_ind / self.frame_rate,
-                        np.asarray(self.likelihoods[bodypart][likelihood_inds]),
-                    )
+        self.centroid_position_dot.set_offsets(dlc_centroid_data)
+        _ = self._set_orient_line(frame, pos_ind)
+
+        time_delta = pd.Timedelta(
+            pd.to_datetime(self.position_time[pos_ind] * 1e9, unit="ns")
+            - self.start_time
+        ).total_seconds()
+
+        self.title.set_text(f"time = {time_delta:3.4f}s\n frame = {frame_ind}")
+        if self.likelihoods:
+            for bodypart in self.likelihood_objs.keys():
+                self.likelihood_objs[bodypart].set_data(
+                    self.window_ind / self.frame_rate,
+                    np.asarray(self.likelihoods[bodypart][likelihood_inds]),
+                )
 
         self.fig.savefig(frame_out_path, dpi=400)
         plt.cla()  # clear the current axes
@@ -420,7 +426,7 @@ class VideoMaker:
                 while len(jobs) < self.max_jobs_in_queue:
                     try:
                         this_frame = next(frames_iter)
-                        self._debug_print(f"Submit: {this_frame}")
+                        self._debug_print(f"Submit: {self._pad(this_frame)}")
                         job = executor.submit(
                             self._generate_single_frame, this_frame
                         )
@@ -434,10 +440,10 @@ class VideoMaker:
                         ret = job.result()
                     except IndexError:
                         ret = "IndexError"
-                    self._debug_print(f"Finish: {ret}")
+                    self._debug_print(f"Finish: {self._pad(ret)}")
                     progress_bar.update()
                     del jobs[job]
-        self._debug_print(end="\n")
+        self._debug_print(msg="", end="\n")
 
     def ffmpeg_extract(self, start_frame, end_frame):
         """Use ffmpeg to extract a batch of frames."""
@@ -475,7 +481,10 @@ class VideoMaker:
             one_err = "\n".join(str(ret.stderr).split("\\")[-3:-1])
             logger.debug(f"\nExtract Error: {one_err}")
 
-    def _pad(self, frame_ind):
+    def _pad(self, frame_ind=None):
+        """Pad a frame index with leading zeros."""
+        if frame_ind is None:
+            return "?" * self.pad_len
         return f"{frame_ind:0{self.pad_len}d}"
 
     def ffmpeg_stitch_partial(self, start_frame, output_partial_video):

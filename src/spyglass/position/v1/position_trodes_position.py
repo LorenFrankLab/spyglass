@@ -340,14 +340,14 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
 
-        # if limit := params.get("limit", None):
-        limit = 550
+        limit = params.get("limit", None)
         if limit or test_mode:
+            params["debug"] = True
             output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
             # pytest video data has mismatched shapes in some cases
             min_len = limit or min(len(adj_df), len(pos_df), len(video_time))
-            adj_df = adj_df[:min_len]
-            pos_df = pos_df[:min_len]
+            adj_df = adj_df.head(min_len)
+            pos_df = pos_df.head(min_len)
             video_time = video_time[:min_len]
 
         centroids = {
@@ -358,28 +358,30 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         orientation_mean = np.asarray(pos_df[["orientation"]])
         position_time = np.asarray(pos_df.index)
 
-        if np.any(video_time):
-            centroids = {
-                color: fill_nan(
-                    variable=data,
-                    video_time=video_time,
-                    variable_time=position_time,
-                )
-                for color, data in centroids.items()
-            }
-            position_mean = fill_nan(
-                variable=position_mean,
+        video_frame_inds = pos_df["video_frame_ind"].astype(int).to_numpy()
+
+        centroids = {
+            color: fill_nan(
+                variable=data,
                 video_time=video_time,
                 variable_time=position_time,
             )
-            orientation_mean = fill_nan(
-                variable=orientation_mean,
-                video_time=video_time,
-                variable_time=position_time,
-            )
+            for color, data in centroids.items()
+        }
+        position_mean = fill_nan(
+            variable=position_mean,
+            video_time=video_time,
+            variable_time=position_time,
+        )
+        orientation_mean = fill_nan(
+            variable=orientation_mean,
+            video_time=video_time,
+            variable_time=position_time,
+        )
 
         vid_maker = make_video(
             video_filename=video_path,
+            video_frame_inds=video_frame_inds,
             centroids=centroids,
             video_time=video_time,
             position_mean=position_mean,
@@ -387,7 +389,6 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             position_time=position_time,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
-            debug=params.get("debug", False),
             key_hash=dj.hash.key_hash(key),
             **params,
         )
