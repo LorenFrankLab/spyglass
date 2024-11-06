@@ -125,7 +125,8 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    # "-sv", # no capture, verbose output
+    "-s", # no capture
+    # "-v", # verbose output
     # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",

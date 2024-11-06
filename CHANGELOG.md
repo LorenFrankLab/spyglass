@@ -34,9 +34,10 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Remove stored hashes from pytests #1152
     - Remove mambaforge from tests #1153
     - Remove debug statement #1164
+    - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
-- Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
+- Merge table delete removes orphaned master entries #1164
 
 ### Pipelines
 
@@ -45,6 +46,9 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Drop `SessionGroup` table #1106
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
+    - Export fixes #1164
+        - Allow `get_abs_path` to add selection entry.
+        - Log restrictions and joins.
 
 - Decoding
 

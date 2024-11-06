@@ -1,3 +1,5 @@
+import re
+from functools import cached_property
 from os import system as os_system
 from pathlib import Path
 from typing import List
@@ -5,9 +7,6 @@ from typing import List
 import yaml
 from datajoint import FreeTable
 from datajoint import config as dj_config
-
-from spyglass.settings import export_dir
-from spyglass.utils import logger
 
 
 class SQLDumpHelper:
@@ -40,6 +39,20 @@ class SQLDumpHelper:
         self.docker_id = docker_id
         self.spyglass_version = spyglass_version
 
+    @cached_property
+    def _export_dir(self):
+        """Lazy load export directory."""
+        from spyglass.settings import export_dir
+
+        return export_dir
+
+    @cached_property
+    def _logger(self):
+        """Lazy load logger."""
+        from spyglass.utils import logger
+
+        return logger
+
     def _get_credentials(self):
         """Get credentials for database connection."""
         return {
@@ -61,35 +74,13 @@ class SQLDumpHelper:
             file.write(template.format(**self._get_credentials()))
         cnf_path.chmod(0o600)
 
-    def _bash_escape(self, s):
-        """Escape restriction string for bash."""
-        s = s.strip()
-
-        replace_map = {
-            "WHERE ": "",  # Remove preceding WHERE of dj.where_clause
-            "  ": " ",  # Squash double spaces
-            "( (": "((",  # Squash double parens
-            ") )": ")",
-            '"': "'",  # Replace double quotes with single
-            "`": "",  # Remove backticks
-            " AND ": " \\\n\tAND ",  # Add newline and tab for readability
-            " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
-            ")AND(": ") \\\n\tAND (",
-            ")OR(": ") \\\n\tOR  (",
-            "#": "\\#",
-        }
-        for old, new in replace_map.items():
-            s = s.replace(old, new)
-        if s.startswith("(((") and s.endswith(")))"):
-            s = s[2:-2]  # Remove extra parens for readability
-        return s
-
     def _cmd_prefix(self, docker_id=None):
         """Get prefix for mysqldump command. Includes docker exec if needed."""
+        default = "mysqldump --hex-blob "
         if not docker_id:
-            return "mysqldump "
+            return default
         return (
-            f"docker exec -i {docker_id} \\\n\tmysqldump "
+            f"docker exec -i {docker_id} \\\n\t{default}"
             + "-u {user} --password={password} \\\n\t".format(
                 **self._get_credentials()
             )
@@ -112,7 +103,7 @@ class SQLDumpHelper:
         self._write_sql_cnf()
 
         paper_dir = (
-            Path(export_dir) / self.paper_id
+            Path(self._export_dir) / self.paper_id
             if not self.docker_id
             else Path(".")
         )
@@ -148,7 +139,7 @@ class SQLDumpHelper:
             for table in tables_by_db:
                 if not (where := table.where_clause()):
                     continue
-                where = self._bash_escape(where)
+                where = bash_escape_sql(where)
                 database, table_name = (
                     table.full_table_name.replace("`", "")
                     .replace("#", "\\#")
@@ -166,7 +157,7 @@ class SQLDumpHelper:
         self._remove_encoding(dump_script)
         self._write_version_file()
 
-        logger.info(f"Export script written to {dump_script}")
+        self._logger.info(f"Export script written to {dump_script}")
 
         self._export_conda_env()
 
@@ -178,7 +169,9 @@ class SQLDumpHelper:
 
     def _write_version_file(self):
         """Write spyglass version to paper directory."""
-        version_file = Path(export_dir) / self.paper_id / "spyglass_version"
+        version_file = (
+            Path(self._export_dir) / self.paper_id / "spyglass_version"
+        )
         if version_file.exists():
             return
         with version_file.open("w") as file:
@@ -189,7 +182,7 @@ class SQLDumpHelper:
 
         Renames environment name to paper_id.
         """
-        yml_path = Path(export_dir) / self.paper_id / "environment.yml"
+        yml_path = Path(self._export_dir) / self.paper_id / "environment.yml"
         if yml_path.exists():
             return
         command = f"conda env export > {yml_path}"
@@ -202,4 +195,82 @@ class SQLDumpHelper:
         with yml_path.open("w") as file:
             yaml.dump(yml, file)
 
-        logger.info(f"Conda environment exported to {yml_path}")
+        self._logger.info(f"Conda environment exported to {yml_path}")
+
+
+def remove_redundant(s):
+    """Remove redundant parentheses from a string.
+
+    '((a=b)OR((c=d)AND((e=f))))' -> '(a=b) OR ((c=d) AND (e=f))'
+
+    Full solve would require content parsing, this removes duplicates.
+    https://codegolf.stackexchange.com/questions/250596/remove-redundant-parentheses
+    """
+
+    def is_list(x):  # Check if element is a list
+        return isinstance(x, list)
+
+    def list_to_str(x):  # Convert list to string
+        return "(%s)" % "".join(map(list_to_str, x)) if is_list(x) else x
+
+    def flatten_list(nested):
+        ret = [flatten_list(e) if is_list(e) else e for e in nested if e]
+        return ret[0] if ret == [[*ret[0]]] else ret  # first if all same
+
+    tokens = repr("\"'" + s)[3:]  # Quote to safely eval the string
+    as_list = tokens.translate({40: "',['", 41: "'],'"})  # parens -> square
+    flattened = flatten_list(eval(as_list))  # Flatten the nested list
+    as_str = list_to_str(flattened)  # back to str
+
+    # space out AND and OR for readability
+    return re.sub(r"\b(and|or)\b", r" \1 ", as_str, flags=re.IGNORECASE)
+
+
+def bash_escape_sql(s, add_newline=True):
+    """Escape restriction string for bash.
+
+    Parameters
+    ----------
+    s : str
+        SQL restriction string
+    add_newline : bool, optional
+        Add newlines for readability around AND & OR. Default True
+    """
+    s = s.strip()
+    if s.startswith("WHERE"):
+        s = s[5:].strip()
+
+    # Balance parentheses - because make_condition may unbalance outside parens
+    n_open = s.count("(")
+    n_close = s.count(")")
+    add_open = max(0, n_close - n_open)
+    add_close = max(0, n_open - n_close)
+    balanced = "(" * add_open + s + ")" * add_close
+
+    s = remove_redundant(balanced)
+
+    replace_map = {
+        "  ": " ",  # Squash double spaces
+        "( (": "((",  # Squash double parens
+        ") )": "))",
+        '"': "'",  # Replace double quotes with single
+        "`": "",  # Remove backticks
+    }
+
+    if add_newline:
+        replace_map.update(
+            {
+                " AND ": " \\\n\tAND ",  # Add newline and tab for readability
+                " OR ": " \\\n\tOR  ",  # OR extra space to align with AND
+                ")AND(": ") \\\n\tAND (",
+                ")OR(": ") \\\n\tOR  (",
+                "#": "\\#",
+            }
+        )
+    else:  # Used in ExportMixin
+        replace_map.update({"%%%%": "%%"})  # Remove extra percent signs
+
+    for old, new in replace_map.items():
+        s = re.sub(re.escape(old), new, s)
+
+    return s
