@@ -3,16 +3,17 @@
 # some DLC-utils copied from datajoint element-interface utils.py
 import shutil
 import subprocess
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
 from typing import Tuple
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from spyglass.settings import temp_dir
+from spyglass.settings import temp_dir, test_mode
 from spyglass.utils import logger
 from spyglass.utils.position import convert_to_pixels as _to_px
 
@@ -29,6 +30,8 @@ COLOR_SWATCH = [
     "#b045f3",
     "#ffe91a",
 ]
+
+matplotlib.use("Agg")  # Use non-interactive backend
 
 
 class VideoMaker:
@@ -106,6 +109,7 @@ class VideoMaker:
         self.batch_size = batch_size
         self.max_workers = max_workers
         self.max_jobs_in_queue = max_jobs_in_queue
+        self.timeout = 30 if test_mode else 300
 
         self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
@@ -437,9 +441,9 @@ class VideoMaker:
                 for job in as_completed(jobs):
                     frames_left -= 1
                     try:
-                        ret = job.result()
-                    except IndexError:
-                        ret = "IndexError"
+                        ret = job.result(timeout=self.timeout)
+                    except (IndexError, TimeoutError) as e:
+                        ret = type(e).__name__
                     self._debug_print(f"Finish: {self._pad(ret)}")
                     progress_bar.update()
                     del jobs[job]
@@ -485,6 +489,8 @@ class VideoMaker:
         """Pad a frame index with leading zeros."""
         if frame_ind is None:
             return "?" * self.pad_len
+        elif not isinstance(frame_ind, int):
+            return frame_ind
         return f"{frame_ind:0{self.pad_len}d}"
 
     def ffmpeg_stitch_partial(self, start_frame, output_partial_video):

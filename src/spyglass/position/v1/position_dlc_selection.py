@@ -8,9 +8,6 @@ import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
 
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.position.v1.position_dlc_centroid import DLCCentroid
@@ -436,7 +433,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),
             key_hash=dj.hash.key_hash(key),
-            debug=params.get("debug", False),
+            debug=params.get("debug", True),  # REVERT TO FALSE
             **params.get("video_params", {}),
         )
 

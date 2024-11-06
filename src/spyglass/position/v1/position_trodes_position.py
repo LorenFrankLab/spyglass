@@ -272,7 +272,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             - Raw position data from the RawPosition table
             - Position data from the TrodesPosV1 table
             - Video data from the VideoFile table
-        Generates a video using opencv and the VideoMaker class.
+        Generates a video using VideoMaker class.
         """
         M_TO_CM = 100
 
@@ -323,9 +323,12 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         # Check if upsampled
         if params["is_upsampled"]:
-            raise NotImplementedError(
-                "Upsampled position data not supported for video creation"
+            logger.error(
+                "Upsampled position data not supported for video creation\n"
+                + "Please submit a feature request via GitHub if needed."
             )
+            self.insert1(dict(**key, has_video=False))  # Null insert
+            return
 
         video_path = find_mp4(
             video_path=os.path.dirname(video_path) + "/",
@@ -358,7 +361,12 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         orientation_mean = np.asarray(pos_df[["orientation"]])
         position_time = np.asarray(pos_df.index)
 
-        video_frame_inds = pos_df["video_frame_ind"].astype(int).to_numpy()
+        ind_col = (
+            pos_df["video_frame_ind"]
+            if "video_frame_ind" in pos_df.columns
+            else pos_df.index
+        )
+        video_frame_inds = ind_col.astype(int).to_numpy()
 
         centroids = {
             color: fill_nan(
