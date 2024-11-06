@@ -519,11 +519,12 @@ class SpyglassMixin(ExportMixin):
             List of keys for populating table.
         """
         RestrGraph = self._graph_deps[1]
-
         if not (parents := self.parents(as_objects=True, primary=True)):
             # Should not happen, as this is only called from populated tables
             raise RuntimeError("No upstream tables found for upstream hash.")
 
+        if isintance(keys, dict):
+            keys = [keys] # case for single population key
         leaves = {  # Restriction on each primary parent
             p.full_table_name: [
                 {k: v for k, v in key.items() if k in p.heading.names}
