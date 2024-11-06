@@ -551,7 +551,7 @@ class SpyglassMixin(ExportMixin):
         processes = kwargs.pop("processes", 1)
 
         # Decide if using transaction protection
-        use_transact = kwargs.pop("use_transation", None)
+        use_transact = kwargs.pop("use_transaction", None)
         if use_transact is None:  # if user does not specify, use class default
             use_transact = self._use_transaction
             if self._use_transaction is False:  # If class default is off, warn
