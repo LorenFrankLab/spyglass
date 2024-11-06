@@ -145,10 +145,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -523,8 +523,8 @@ class SpyglassMixin(ExportMixin):
             # Should not happen, as this is only called from populated tables
             raise RuntimeError("No upstream tables found for upstream hash.")
 
-        if isintance(keys, dict):
-            keys = [keys] # case for single population key
+        if isinstance(keys, dict):
+            keys = [keys]  # case for single population key
         leaves = {  # Restriction on each primary parent
             p.full_table_name: [
                 {k: v for k, v in key.items() if k in p.heading.names}
