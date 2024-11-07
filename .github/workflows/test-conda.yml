@@ -8,7 +8,7 @@ on:
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
   pull_request_review:
-    - types: [submitted]
+    types: [submitted]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
 
 concurrency: # Replace Cancel Workflow Action
