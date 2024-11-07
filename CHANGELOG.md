@@ -65,9 +65,10 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Minor fix to `DLCCentroid` make function order #1112, #1148
     - Video creator tools:
         - Pass output path as string to `cv2.VideoWriter` #1150
-        - Set `DLCPosVideo` default processor to `matplotlib`, remove support
-            for `open-cv` #1168
-        - `VideoMaker` class to process frames in multithreaded batches #1168
+        - Set `DLCPosVideo` default processor to `matplotlib`, remove support for
+            `open-cv` #1168
+        - `VideoMaker` class to process frames in multithreaded batches #1168, #1174
+        - `TrodesPosVideo` updates for `matplotlib` processor #1174
 
 - Spike Sorting
 

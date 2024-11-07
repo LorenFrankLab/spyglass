@@ -434,7 +434,9 @@ def find_mp4(
         .rsplit(video_filepath.parent.as_posix(), maxsplit=1)[-1]
         .split("/")[-1]
     )
-    return _convert_mp4(video_file, video_path, output_path, videotype="mp4")
+    return _convert_mp4(
+        video_file, video_path, output_path, videotype="mp4", count_frames=True
+    )
 
 
 def _convert_mp4(
