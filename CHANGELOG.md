@@ -24,7 +24,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
     #1137, #1162
 - Fix bool settings imported from dj config file #1117
-- Allow definition of tasks and new probe entries from config #1074, #1120
+- Allow definition of tasks and new probe entries from config #1074, #1120, #1179
 - Enforce match between ingested nwb probe geometry and existing table entry
     #1074
 - Update DataJoint install and password instructions #1131
