@@ -402,6 +402,7 @@ class Probe(SpyglassMixin, dj.Manual):
             elif probe_type in config_probes:
                 cls._read_config_probe_data(
                     config,
+                    config_probes,
                     probe_type,
                     new_probe_type_dict,
                     new_probe_dict,
@@ -562,6 +563,7 @@ class Probe(SpyglassMixin, dj.Manual):
     def _read_config_probe_data(
         cls,
         config,
+        config_probes,
         probe_type,
         new_probe_type_dict,
         new_probe_dict,
