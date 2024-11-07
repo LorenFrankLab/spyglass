@@ -7,6 +7,8 @@ on:
       - '!documentation'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
+  pull_request_review:
+    - types: [submitted]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
 
 concurrency: # Replace Cancel Workflow Action
@@ -15,6 +17,9 @@ concurrency: # Replace Cancel Workflow Action
 
 jobs:
   run-tests:
+    if: | # If not PR OR is approved PR.
+      github.event_name != 'pull_request_review'
+      || github.event.review.state == 'approved'
     runs-on: ubuntu-latest
     defaults:
      run:
@@ -22,8 +27,6 @@ jobs:
     env:
       OS: ubuntu-latest
       PYTHON: '3.9'
-      UCSF_BOX_TOKEN: ${{ secrets.UCSF_BOX_TOKEN }} # for download and testing
-      UCSF_BOX_USER: ${{ secrets.UCSF_BOX_USER }}
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -57,23 +60,23 @@ jobs:
         pip install --quiet .[test]
     - name: Download data
       env:
-        BASEURL: ftps://ftp.box.com/trodes_to_nwb_test_data/
-        NWBFILE: minirec20230622.nwb # Relative to Base URL
-        VID_ONE: 20230622_sample_01_a1/20230622_sample_01_a1.1.h264
-        VID_TWO: 20230622_sample_02_a1/20230622_sample_02_a1.1.h264
+        BASEURL: https://ucsf.box.com/shared/static/
+        NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
+        VID1URL: ykep8ek4ogad20wz4p0vuyuqfo60cv3w.h264
+        VID2URL: d2jjk0y565ru75xqojio3hymmehzr5he.h264
+        NWBFILE: minirec20230622.nwb
+        VID_ONE: 20230622_minirec_01_s1.1.h264
+        VID_TWO: 20230622_minirec_02_s2.1.h264
         RAW_DIR: /home/runner/work/spyglass/spyglass/tests/_data/raw/
         VID_DIR: /home/runner/work/spyglass/spyglass/tests/_data/video/
       run: |
         mkdir -p $RAW_DIR $VID_DIR
-        wget_opts() { # Declare func with download options
-          wget \
-            --recursive --no-verbose --no-host-directories --no-directories \
-            --user "$UCSF_BOX_USER" --password "$UCSF_BOX_TOKEN" \
-            -P "$1" "$BASEURL""$2"
+        curl_opts() { # Declare func with download options
+          curl -L --output "$1""$2" "$BASEURL""$3"
         }
-        wget_opts $RAW_DIR $NWBFILE
-        wget_opts $VID_DIR $VID_ONE
-        wget_opts $VID_DIR $VID_TWO
+        curl_opts $RAW_DIR $NWBFILE $NWB_URL
+        curl_opts $VID_DIR $VID_ONE $VID1URL
+        curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Run tests
       run: |
         pytest --no-docker --no-dlc

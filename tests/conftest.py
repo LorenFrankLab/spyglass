@@ -108,7 +108,6 @@ def pytest_configure(config):
     )
 
     DOWNLOADS = DataDownloader(
-        nwb_file_name=TEST_FILE,
         base_dir=BASE_DIR,
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
