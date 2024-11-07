@@ -31,8 +31,6 @@ COLOR_SWATCH = [
     "#ffe91a",
 ]
 
-matplotlib.use("Agg")  # Use non-interactive backend
-
 
 class VideoMaker:
     def __init__(
@@ -114,6 +112,9 @@ class VideoMaker:
         self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
+        prev_backend = matplotlib.get_backend()
+        matplotlib.use("Agg")  # Use non-interactive backend
+
         _ = self._set_frame_info()
         _ = self._set_plot_bases()
 
@@ -128,6 +129,8 @@ class VideoMaker:
 
         if not debug:
             shutil.rmtree(self.temp_dir)  # Clean up temp directory
+
+        matplotlib.use(prev_backend)  # Reset to previous backend
 
     def _set_frame_info(self):
         """Set the frame information for the video."""
