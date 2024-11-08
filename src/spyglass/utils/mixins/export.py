@@ -7,7 +7,7 @@ from inspect import stack as inspect_stack
 from os import environ
 from re import match as re_match
 
-from datajoint.condition import make_condition
+from datajoint.condition import AndList, make_condition
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
@@ -320,7 +320,7 @@ class ExportMixin:
         log_export = "fetch_nwb" not in self._called_funcs()
         return self._run_with_log(
             super().restrict,
-            restriction=dj.AndList([restriction, self.restriction]),
+            restriction=AndList([restriction, self.restriction]),
             log_export=log_export,
         )
 

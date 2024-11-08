@@ -97,7 +97,7 @@ def position_video(common_position):
 
 def test_position_video(position_video, upsample_position):
     _ = position_video.populate()
-    assert len(position_video) == 1, "Failed to populate PositionVideo table."
+    assert len(position_video) == 2, "Failed to populate PositionVideo table."
 
 
 def test_convert_to_pixels():

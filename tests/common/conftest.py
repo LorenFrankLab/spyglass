@@ -56,4 +56,4 @@ def common_ephys(common):
 @pytest.fixture(scope="session")
 def pop_common_electrode_group(common_ephys):
     common_ephys.ElectrodeGroup.populate()
-    yield common_ephys.ElectrodeGroup
+    yield common_ephys.ElectrodeGroup()

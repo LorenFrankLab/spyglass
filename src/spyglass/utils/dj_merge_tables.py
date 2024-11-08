@@ -774,7 +774,7 @@ class Merge(ExportMixin, dj.Manual):
         return parent_class & parent_key
 
     def merge_fetch(
-        self, restriction: str = True, log_export=True, *attrs, **kwargs
+        self, *attrs, restriction: str = True, log_export=True, **kwargs
     ) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 

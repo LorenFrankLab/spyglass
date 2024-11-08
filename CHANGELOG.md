@@ -24,7 +24,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
     #1137, #1162
 - Fix bool settings imported from dj config file #1117
-- Allow definition of tasks and new probe entries from config #1074, #1120, #1179
+- Allow definition of tasks and new probe entries from config #1074, #1120,
+    #1179
 - Enforce match between ingested nwb probe geometry and existing table entry
     #1074
 - Update DataJoint install and password instructions #1131
@@ -35,9 +36,11 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Remove mambaforge from tests #1153
     - Remove debug statement #1164
     - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
+    - Initialize tables in pytests #1181
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
+- Edit `merge_fetch` to expect positional before keyword arguments #1181
 
 ### Pipelines
 
