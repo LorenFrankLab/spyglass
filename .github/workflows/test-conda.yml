@@ -7,8 +7,8 @@ on:
       - '!documentation'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
-  pull_request_review:
-    types: [submitted]
+  pull_request:
+    types: [synchronize, opened, reopened, labeled]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
 
 concurrency: # Replace Cancel Workflow Action
@@ -18,8 +18,8 @@ concurrency: # Replace Cancel Workflow Action
 jobs:
   run-tests:
     if: | # If not PR OR is approved PR.
-      github.event_name != 'pull_request_review'
-      || github.event.review.state == 'approved'
+      github.event_name != 'pull_request'
+      || contains(github.event.pull_request.labels.*.name, 'RunTests')
     runs-on: ubuntu-latest
     defaults:
      run:
