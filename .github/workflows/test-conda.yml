@@ -7,7 +7,7 @@ on:
       - '!documentation'
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
-  pull_request:
+  pull_request: # requires approval for first-time contributors
     types: [synchronize, opened, reopened, labeled]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
 
@@ -17,9 +17,6 @@ concurrency: # Replace Cancel Workflow Action
 
 jobs:
   run-tests:
-    if: | # If not PR OR is approved PR.
-      github.event_name != 'pull_request'
-      || contains(github.event.pull_request.labels.*.name, 'RunTests')
     runs-on: ubuntu-latest
     defaults:
      run:
