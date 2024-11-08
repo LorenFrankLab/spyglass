@@ -243,14 +243,16 @@ def graph_tables(dj_conn, graph_schema):
     # Merge inserts after declaring tables
     merge_keys = graph_schema["PkNode"].fetch("KEY", offset=1, as_dict=True)
     graph_schema["MergeOutput"].insert(merge_keys, skip_duplicates=True)
-    merge_child_keys = graph_schema["MergeOutput"].merge_fetch(
-        True, "merge_id", offset=1
+    merge_child_keys = graph_schema["MergeOutput"]().merge_fetch(
+        "merge_id", restriction=True, offset=1
     )
     merge_child_inserts = [
         (i, j, k + 10)
         for i, j, k in zip(merge_child_keys, range(4), range(10, 15))
     ]
-    graph_schema["MergeChild"].insert(merge_child_inserts, skip_duplicates=True)
+    graph_schema["MergeChild"]().insert(
+        merge_child_inserts, skip_duplicates=True
+    )
 
     yield graph_schema
 

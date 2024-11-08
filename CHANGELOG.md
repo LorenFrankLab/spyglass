@@ -36,10 +36,12 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Remove mambaforge from tests #1153
     - Remove debug statement #1164
     - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
+    - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
+- Edit `merge_fetch` to expect positional before keyword arguments #1181
 
 ### Pipelines
 
