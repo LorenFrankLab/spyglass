@@ -266,7 +266,7 @@ class Curation(SpyglassMixin, dj.Manual):
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
         if object_ids == "":
-            logger.warn(
+            logger.warning(
                 "Sorting contains no units."
                 "Created an empty analysis nwb file anyway."
             )

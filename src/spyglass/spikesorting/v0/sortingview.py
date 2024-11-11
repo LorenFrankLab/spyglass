@@ -72,7 +72,7 @@ class SortingviewWorkspace(SpyglassMixin, dj.Computed):
                 LabMember.LabMemberInfo & {"lab_member_name": team_member}
             ).fetch("google_user_name")
             if len(google_user_id) != 1:
-                logger.warn(
+                logger.warning(
                     f"Google user ID for {team_member} does not exist or more than one ID detected;\
                         permission not given to {team_member}, skipping..."
                 )

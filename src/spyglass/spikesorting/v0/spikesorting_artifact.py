@@ -263,7 +263,7 @@ def _get_artifact_times(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        logger.warn("No artifacts detected.")
+        logger.warning("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     # convert indices to intervals

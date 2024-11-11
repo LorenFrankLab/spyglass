@@ -368,7 +368,7 @@ class SpyglassMixin(ExportMixin):
             not self._session_connection  # Table has no session
             or self._member_pk in self.heading.names  # Table has experimenter
         ):
-            logger.warn(  # Permit delete if no session connection
+            logger.warning(  # Permit delete if no session connection
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
                 + "\nBe careful not to delete others' data."
@@ -376,7 +376,7 @@ class SpyglassMixin(ExportMixin):
             return
 
         if not (sess_summary := self._get_exp_summary()):
-            logger.warn(
+            logger.warning(
                 f"Could not find a connection from {self.camel_name} "
                 + "to Session.\n Be careful not to delete others' data."
             )

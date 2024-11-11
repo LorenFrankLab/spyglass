@@ -66,14 +66,14 @@ class Merge(ExportMixin, dj.Manual):
         self._reserved_sk = RESERVED_SECONDARY_KEY
         if not self.is_declared:
             if not is_merge_table(self):  # Check definition
-                logger.warn(
+                logger.warning(
                     "Merge table with non-default definition\n"
                     + f"Expected:\n{MERGE_DEFINITION.strip()}\n"
                     + f"Actual  :\n{self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    logger.warn(  # PK is only 'merge_id' in parts, no others
+                    logger.warning(  # PK is only 'merge_id' in parts, no others
                         f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
@@ -721,7 +721,7 @@ class Merge(ExportMixin, dj.Manual):
                 raise ValueError(f"Unable to find source for {source}")
             source = fetched_source[0]
             if len(fetched_source) > 1:
-                logger.warn(f"Multiple sources. Selecting first: {source}.")
+                logger.warning(f"Multiple sources. Selecting first: {source}.")
         if isinstance(source, dj.Table):
             source = self._part_name(source)
         if isinstance(source, dict):
@@ -814,7 +814,7 @@ class Merge(ExportMixin, dj.Manual):
             try:
                 results.extend(part.fetch(*attrs, **kwargs))
             except DataJointError as e:
-                logger.warn(
+                logger.warning(
                     f"{e.args[0]} Skipping "
                     + to_camel_case(part.table_name.split("__")[-1])
                 )

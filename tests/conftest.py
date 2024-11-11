@@ -419,7 +419,6 @@ def video_keys(common, base_dir):
     for file in DOWNLOADS.file_downloads:
         if file.endswith(".h264"):
             DOWNLOADS.wait_for(file)
-    DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
 

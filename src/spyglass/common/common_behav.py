@@ -197,7 +197,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
-                logger.warn("Loading DataFrame with multiple intervals.")
+                logger.warning("Loading DataFrame with multiple intervals.")
 
             df_list = [
                 pd.DataFrame(
@@ -395,7 +395,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
         )
 
         if videos is None:
-            logger.warn(f"No video data interface found in {nwb_file_name}\n")
+            logger.warning(
+                f"No video data interface found in {nwb_file_name}\n"
+            )
             return
         else:
             videos = videos.time_series
