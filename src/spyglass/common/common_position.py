@@ -463,7 +463,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         }
 
     def fetch1_dataframe(self):
-        return self._data_to_df(self.fetch_nwb(close_file=False)[0])  # !!! JAG changed
+        return self._data_to_df(self.fetch_nwb(close_file=False)[0])
 
     @staticmethod
     def _data_to_df(data, prefix="head_", add_frame_ind=False):
