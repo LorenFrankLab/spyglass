@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -118,6 +117,9 @@ class VideoMaker:
         _ = self._set_frame_info()
         _ = self._set_plot_bases()
 
+        if test_mode:  # CICD fails with ambiguous pool error
+            self._debug_one_frame()
+
         logger.info(
             f"Making video: {self.output_video_filename} "
             + f"in batches of {self.batch_size}"
@@ -189,10 +191,6 @@ class VideoMaker:
             self.n_frames = min(len(self.position_mean), self.n_frames)
 
         self.pad_len = len(str(self.n_frames))
-
-    def _set_input_stats(self, video_filename=None) -> Tuple[int, int]:
-        """Get the width and height of the video."""
-        logger.debug("Getting video stats with ffprobe")
 
     def _set_plot_bases(self):
         """Create the figure and axes for the video."""
@@ -383,6 +381,12 @@ class VideoMaker:
         plt.cla()  # clear the current axes
 
         return frame_ind
+
+    def _debug_one_frame(self):
+        """Debug a single frame."""
+        frame_ind = 10
+        self.ffmepg_extract(frame_ind, frame_ind + 1)
+        self._generate_single_frame(frame_ind)
 
     def process_frames(self):
         """Process video frames in batches and generate matplotlib frames."""

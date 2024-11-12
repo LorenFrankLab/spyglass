@@ -344,9 +344,10 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
 
         limit = params.get("limit", None)
-        if limit or test_mode:
+        if limit:
             params["debug"] = True
             output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
+        if limit or test_mode:
             # pytest video data has mismatched shapes in some cases
             min_len = limit or min(len(adj_df), len(pos_df), len(video_time))
             adj_df = adj_df.head(min_len)
