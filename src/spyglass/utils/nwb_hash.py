@@ -7,12 +7,45 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
+DEFAULT_BATCH_SIZE = 4095
+
+
+def hash_directory(directory_path: str, batch_size: int = DEFAULT_BATCH_SIZE):
+    """Generate a hash of the contents of a directory, recursively.
+
+    Searches though all files in the directory and subdirectories, hashing
+    the contents of files. nwb files are hashed with the NwbfileHasher class.
+
+    Parameters
+    ----------
+    directory_path : str
+        Path to the directory to hash.
+    batch_size : int, optional
+        Limit of data to hash for large files, by default 4095.
+    """
+    hash_obj = md5()
+
+    for file_path in sorted(Path(directory_path).rglob("*")):
+        if not file_path.is_file():  # Only hash files, not directories
+            continue
+        if file_path.suffix == ".nwb":
+            hasher = NwbfileHasher(file_path, batch_size=batch_size)
+            hash_obj.update(hasher.hash.encode())
+            continue
+        with file_path.open("rb") as f:
+            while chunk := f.read(batch_size):
+                hash_obj.update(chunk)
+        # update with the rel path to for same file in diff dirs
+        hash_obj.update(str(file_path.relative_to(directory_path)).encode())
+
+    return hash_obj.hexdigest()  # Return the hex digest of the hash
+
 
 class NwbfileHasher:
     def __init__(
         self,
         path: Union[str, Path],
-        batch_size: int = 4095,
+        batch_size: int = DEFAULT_BATCH_SIZE,
         verbose: bool = True,
     ):
         """Hashes the contents of an NWB file, limiting to partial data.

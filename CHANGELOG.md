@@ -37,6 +37,7 @@ SpikeSortingRecording().update_ids()
 - Update DataJoint install and password instructions #1131
 - Fix dandi upload process for nwb's with video or linked objects #1095, #1151
 - Minor docs fixes #1145
+- Add Nwb hashing tool #1093
 - Test fixes
     - Remove stored hashes from pytests #1152
     - Remove mambaforge from tests #1153
