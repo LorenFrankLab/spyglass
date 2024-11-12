@@ -385,7 +385,7 @@ class VideoMaker:
     def _debug_one_frame(self):
         """Debug a single frame."""
         frame_ind = 10
-        self.ffmepg_extract(frame_ind, frame_ind + 1)
+        self.ffmpeg_extract(frame_ind, frame_ind + 1)
         self._generate_single_frame(frame_ind)
 
     def process_frames(self):

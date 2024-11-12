@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
