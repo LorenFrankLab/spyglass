@@ -9,7 +9,7 @@
 name: spyglass
 channels:
   - conda-forge
-  - defaults
+  # - defaults # deprecated
   - franklab
   - edeno
   # - pytorch # dlc-only

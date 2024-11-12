@@ -75,5 +75,5 @@ jobs:
         curl_opts $VID_DIR $VID_ONE $VID1URL
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Run tests
-      run: | # DO NOT MERGE - must revert
-        pytest --no-docker --no-dlc tests/position/test_trodes.py -k test_trodes_video
+      run: |
+        pytest --no-docker --no-dlc tests/
