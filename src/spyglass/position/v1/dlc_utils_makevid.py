@@ -5,7 +5,6 @@ import shutil
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, TimeoutError, as_completed
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
@@ -190,10 +189,6 @@ class VideoMaker:
 
         self.pad_len = len(str(self.n_frames))
 
-    def _set_input_stats(self, video_filename=None) -> Tuple[int, int]:
-        """Get the width and height of the video."""
-        logger.debug("Getting video stats with ffprobe")
-
     def _set_plot_bases(self):
         """Create the figure and axes for the video."""
         logger.debug("Setting plot bases")
@@ -309,15 +304,20 @@ class VideoMaker:
             )
         )
 
-    def _set_orient_line(self, frame, pos_ind):
-        def orient_list(c):
-            return [c, c + 30 * np.cos(self.orientation_mean[pos_ind])]
+    def _get_orient_line(self, pos_ind):
+        orient = self.orientation_mean[pos_ind]
+        if isinstance(orient, np.ndarray):
+            orient = orient[0]  # Trodes passes orientation as a 1D array
 
-        if np.all(np.isnan(self.orientation_mean[pos_ind])):
-            self.orientation_line.set_data((np.NaN, np.NaN))
+        def orient_list(c, axis="x"):
+            func = np.cos if axis == "x" else np.sin
+            return [c, c + 30 * func(orient)]
+
+        if np.all(np.isnan(orient)):
+            return ([np.NaN], [np.NaN])
         else:
-            c0, c1 = self._get_centroid_data(pos_ind)
-            self.orientation_line.set_data(orient_list(c0), orient_list(c1))
+            x, y = self._get_centroid_data(pos_ind)
+            return (orient_list(x), orient_list(y, axis="y"))
 
     def _generate_single_frame(self, frame_ind):
         """Generate a single frame and save it as an image."""
@@ -364,7 +364,7 @@ class VideoMaker:
                 )
             )
         self.centroid_position_dot.set_offsets(dlc_centroid_data)
-        _ = self._set_orient_line(frame, pos_ind)
+        self.orientation_line.set_data(self._get_orient_line(pos_ind))
 
         time_delta = pd.Timedelta(
             pd.to_datetime(self.position_time[pos_ind] * 1e9, unit="ns")

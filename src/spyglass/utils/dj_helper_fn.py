@@ -124,7 +124,7 @@ def _subclass_factory(
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):
-        logger.warn(
+        logger.warning(
             "Deprecation: this class has been moved out of "
             + f"{old_module}\n"
             + f"\t{old_name} -> {new_module}.{new_class.__name__}"

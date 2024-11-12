@@ -37,7 +37,7 @@ class Subject(SpyglassMixin, dj.Manual):
         """
         config = config or dict()
         if "Subject" not in config and nwbf.subject is None:
-            logger.warn("No subject metadata found.\n")
+            logger.warning("No subject metadata found.\n")
             return None
 
         conf = config["Subject"][0] if "Subject" in config else dict()

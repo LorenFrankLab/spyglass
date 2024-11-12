@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -108,7 +109,6 @@ def pytest_configure(config):
     )
 
     DOWNLOADS = DataDownloader(
-        nwb_file_name=TEST_FILE,
         base_dir=BASE_DIR,
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
@@ -420,7 +420,6 @@ def video_keys(common, base_dir):
     for file in DOWNLOADS.file_downloads:
         if file.endswith(".h264"):
             DOWNLOADS.wait_for(file)
-    DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
 

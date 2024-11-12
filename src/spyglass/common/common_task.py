@@ -33,7 +33,7 @@ class Task(SpyglassMixin, dj.Manual):
         """
         tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            logger.warn(f"No tasks processing module found in {nwbf}\n")
+            logger.warning(f"No tasks processing module found in {nwbf}\n")
             return
         for task in tasks_mod.data_interfaces.values():
             if cls.check_task_table(task):
@@ -136,7 +136,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         tasks_mod = nwbf.processing.get("tasks")
         config_tasks = config.get("Tasks", [])
         if tasks_mod is None and (not config_tasks):
-            logger.warn(
+            logger.warning(
                 f"No tasks processing module found in {nwbf} or config\n"
             )
             return
@@ -163,7 +163,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         for camera_id in valid_camera_ids
                     ]
                 else:
-                    logger.warn(
+                    logger.warning(
                         f"No camera device found with ID {camera_ids} in NWB "
                         + f"file {nwbf}\n"
                     )
@@ -186,7 +186,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         epoch, session_intervals
                     )
                     if target_interval is None:
-                        logger.warn("Skipping epoch.")
+                        logger.warning("Skipping epoch.")
                         continue
                     key["interval_list_name"] = target_interval
                     task_inserts.append(key.copy())
@@ -219,7 +219,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     epoch, session_intervals
                 )
                 if target_interval is None:
-                    logger.warn("Skipping epoch.")
+                    logger.warning("Skipping epoch.")
                     continue
                 new_key["interval_list_name"] = target_interval
                 task_inserts.append(key.copy())
