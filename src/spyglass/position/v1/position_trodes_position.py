@@ -176,9 +176,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         raw_position = RawPosition.PosObject & key
         spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
@@ -220,7 +218,6 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         PositionOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
