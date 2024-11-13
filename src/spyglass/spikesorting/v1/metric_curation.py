@@ -189,7 +189,7 @@ class MetricCurationSelection(SpyglassMixin, dj.Manual):
             key for the inserted row
         """
         if cls & key:
-            logger.warn("This row has already been inserted.")
+            logger.warning("This row has already been inserted.")
             return (cls & key).fetch1()
         key["metric_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)

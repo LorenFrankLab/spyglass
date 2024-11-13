@@ -157,7 +157,7 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
         """
         query = cls & key
         if query:
-            logger.warn("Similar row(s) already inserted.")
+            logger.warning("Similar row(s) already inserted.")
             return query.fetch(as_dict=True)
         key["recording_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)

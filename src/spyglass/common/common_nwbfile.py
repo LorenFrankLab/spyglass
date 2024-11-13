@@ -365,7 +365,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         if cls & file_key:
             try:
                 # runs if file exists locally
-                return (cls & file_key).fetch1("analysis_file_abs_path")
+                return (cls & file_key).fetch1(
+                    "analysis_file_abs_path", log_export=False
+                )
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message

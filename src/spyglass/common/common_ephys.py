@@ -460,6 +460,8 @@ class LFP(SpyglassMixin, dj.Imported):
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key):
         """Populate the LFP table with data from the NWB file.
 
