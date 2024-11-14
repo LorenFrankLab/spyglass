@@ -324,6 +324,8 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Waveforms(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> WaveformSelection
     ---
@@ -523,6 +525,8 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class QualityMetrics(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> MetricSelection
     ---
