@@ -13,6 +13,7 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 
+from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -234,11 +235,18 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     }
     file_name_str, file_path_fn = tbl_map[which]
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
-        query_expression.join(
-            tbl.proj(nwb2load_filepath=attr_name), log_export=False
-        )
+        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024

@@ -51,8 +51,9 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
     - Export fixes #1164
-        - Allow `get_abs_path` to add selection entry.
-        - Log restrictions and joins.
+        - Allow `get_abs_path` to add selection entry. #1164
+        - Log restrictions and joins. #1164
+        - Check if querying table inherits mixin in `fetch_nwb`. #XXXX
     - Error specificity in `LabMemberInfo` #XXXX
 
 - Decoding
