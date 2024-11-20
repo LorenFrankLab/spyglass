@@ -53,6 +53,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Export fixes #1164
         - Allow `get_abs_path` to add selection entry.
         - Log restrictions and joins.
+    - Error specificity in `LabMemberInfo` #XXXX
 
 - Decoding
 
