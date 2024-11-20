@@ -54,6 +54,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
         - Allow `get_abs_path` to add selection entry. #1164
         - Log restrictions and joins. #1164
         - Check if querying table inherits mixin in `fetch_nwb`. #XXXX
+        - Ensure externals entries before adding to export. #XXXX
     - Error specificity in `LabMemberInfo` #XXXX
 
 - Decoding
