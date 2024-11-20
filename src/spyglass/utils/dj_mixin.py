@@ -145,10 +145,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -857,4 +857,9 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()
 
-        (self.master & restriction).delete(*args, **kwargs)
+        try:  # try restriction on master
+            restricted = self.master & restriction
+        except DataJointError:  # if error, assume restr of self
+            restricted = self & restriction
+
+        restricted.delete(*args, **kwargs)
