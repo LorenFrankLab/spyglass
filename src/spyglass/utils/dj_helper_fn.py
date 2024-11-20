@@ -13,7 +13,6 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 
-from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -224,6 +223,7 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         Function to get the absolute path to the NWB file.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
