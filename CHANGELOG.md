@@ -77,6 +77,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
             `open-cv` #1168
         - `VideoMaker` class to process frames in multithreaded batches #1168, #1174
         - `TrodesPosVideo` updates for `matplotlib` processor #1174
+    - User prompt if ambiguous insert in `DLCModelSource` #1192
 
 - Spike Sorting
 
