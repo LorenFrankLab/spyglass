@@ -237,7 +237,7 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression.join(
-            tbl.proj(nwb2load_filepath=attr_name), log_export=False
+            tbl.proj(nwb2load_filepath=attr_name),
         )
     ).fetch(file_name_str)
 
@@ -274,6 +274,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """
     kwargs["as_dict"] = True  # force return as dictionary
 
+    close_file = kwargs.pop("close_file", True)
+
     tbl, attr_name = nwb_master
     if "analysis" in attr_name:
         file_name_attr = "analysis_file_name"
@@ -294,7 +296,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             get_nwb_file(file_path)
 
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), log_export=False
+        tbl.proj(nwb2load_filepath=attr_name),
     )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
@@ -318,7 +320,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     ret = []
     for rec_dict in rec_dicts:
-        nwbf = get_nwb_file(rec_dict.pop("nwb2load_filepath"))
+        nwbf, io = get_nwb_file(rec_dict.pop("nwb2load_filepath"), return_io=True)
         # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
         # remove '_object_id' from attr name
         nwb_objs = {
@@ -329,6 +331,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             if "object_id" in id_attr and rec_dict[id_attr] != ""
         }
         ret.append({**rec_dict, **nwb_objs})
+        if close_file:
+            io.close()
     return ret
 
 

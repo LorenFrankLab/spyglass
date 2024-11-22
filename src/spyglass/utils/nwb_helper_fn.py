@@ -22,7 +22,7 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
-def get_nwb_file(nwb_file_path):
+def get_nwb_file(nwb_file_path, **kwargs):
     """Return an NWBFile object with the given file path in read mode.
 
     If the file is not found locally, this will check if it has been shared
@@ -45,7 +45,7 @@ def get_nwb_file(nwb_file_path):
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
-    _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
+    io, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
 
     if nwbfile is None:
         # check to see if the file exists
@@ -95,6 +95,11 @@ def get_nwb_file(nwb_file_path):
         )  # keep file open
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
+
+    __open_nwb_files.clear()
+    return_io = kwargs.pop("return_io", False)
+    if return_io:
+        return nwbfile, io
 
     return nwbfile
 
