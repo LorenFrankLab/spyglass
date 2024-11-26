@@ -38,6 +38,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
+    - Add coverage of decoding pipeline to pytests #1155
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
