@@ -42,6 +42,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
+- Move cleanup of `IntervalList` orphan entries to nightly cleanup #1195
 
 ### Pipelines
 
