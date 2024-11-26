@@ -247,7 +247,7 @@ def main():
     SpikeSorting().nightly_cleanup()
     IntervalList().nightly_cleanup()
     nwbfile_schema.external['analysis'].delete(delete_external_files=True))
-    **nwbfile_schema**.external['raw'].delete(delete_external_files=True))
+    nwbfile_schema.external['raw'].delete(delete_external_files=True))
     spikes_schema.external['analysis'].delete(delete_external_files=True))
     clusterless_schema.external['analysis'].delete(delete_external_files=True))
 ```
