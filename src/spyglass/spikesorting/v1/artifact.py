@@ -308,7 +308,10 @@ def _get_artifact_times(
             ),
             np.searchsorted(
                 valid_timestamps,
-                valid_timestamps[interval[1]] + half_removal_window_s,
+                np.minimum(
+                    valid_timestamps[interval[1]] + half_removal_window_s,
+                    valid_timestamps[-1],
+                ),
             ),
         ]
         artifact_intervals_s[interval_idx] = [
