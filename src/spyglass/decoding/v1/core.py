@@ -97,7 +97,20 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     def fetch1(self, *args, **kwargs):
         """Return one decoding paramset as a class."""
         row = super().fetch1(*args, **kwargs)
-        row["decoding_params"] = restore_classes(row["decoding_params"])
+
+        if len(args) == 0:
+            row["decoding_params"] = restore_classes(row["decoding_params"])
+            return row
+
+        if "decoding_params" in args:
+            if len(args) == 1:
+                return restore_classes(row)
+            row = list(row)
+            row[args.index("decoding_params")] = restore_classes(
+                row[args.index("decoding_params")]
+            )
+            return tuple(row)
+
         return row
 
 
