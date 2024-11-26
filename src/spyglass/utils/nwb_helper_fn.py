@@ -96,7 +96,6 @@ def get_nwb_file(nwb_file_path, **kwargs):
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
 
-    __open_nwb_files.clear()
     return_io = kwargs.pop("return_io", False)
     if return_io:
         return nwbfile, io
