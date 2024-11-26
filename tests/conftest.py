@@ -28,6 +28,7 @@ warnings.filterwarnings("ignore", module="tensorflow")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -108,7 +109,6 @@ def pytest_configure(config):
     )
 
     DOWNLOADS = DataDownloader(
-        nwb_file_name=TEST_FILE,
         base_dir=BASE_DIR,
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
@@ -420,7 +420,6 @@ def video_keys(common, base_dir):
     for file in DOWNLOADS.file_downloads:
         if file.endswith(".h264"):
             DOWNLOADS.wait_for(file)
-    DOWNLOADS.rename_files()
 
     return common.VideoFile().fetch(as_dict=True)
 
@@ -480,6 +479,65 @@ def pos_interval(sgp):
 @pytest.fixture(scope="session")
 def pos_interval_key(sgp, mini_copy_name, pos_interval):
     yield {"nwb_file_name": mini_copy_name, "interval_list_name": pos_interval}
+
+
+@pytest.fixture(scope="session")
+def common_position(common):
+    yield common.common_position
+
+
+@pytest.fixture(scope="session")
+def interval_position_info(common_position):
+    yield common_position.IntervalPositionInfo
+
+
+@pytest.fixture(scope="session")
+def default_interval_pos_param_key():
+    yield {"position_info_param_name": "default"}
+
+
+@pytest.fixture(scope="session")
+def interval_keys(common):
+    yield (common.IntervalList & "interval_list_name LIKE 'pos %'").fetch("KEY")
+
+
+@pytest.fixture(scope="session")
+def pos_info_param(common_position, default_interval_pos_param_key, teardown):
+    pos_info_param = common_position.PositionInfoParameters()
+    pos_info_param.insert1(default_interval_pos_param_key, skip_duplicates=True)
+    yield pos_info_param
+
+
+@pytest.fixture(scope="session")
+def upsample_position(
+    common,
+    common_position,
+    pos_info_param,
+    default_interval_pos_param_key,
+    teardown,
+    interval_keys,
+):
+    params = (pos_info_param & default_interval_pos_param_key).fetch1()
+    upsample_param_key = {"position_info_param_name": "upsampled"}
+    pos_info_param.insert1(
+        {
+            **params,
+            **upsample_param_key,
+            "is_upsampled": 1,
+            "max_separation": 80,
+            "upsampling_sampling_rate": 500,
+        },
+        skip_duplicates=True,
+    )
+    interval_pos_keys = [
+        {**interval_key, **upsample_param_key} for interval_key in interval_keys
+    ]
+    common_position.IntervalPositionInfoSelection.insert(
+        interval_pos_keys, skip_duplicates=True
+    )
+    common_position.IntervalPositionInfo.populate(interval_pos_keys)
+
+    yield interval_pos_keys[0]
 
 
 @pytest.fixture(scope="session")

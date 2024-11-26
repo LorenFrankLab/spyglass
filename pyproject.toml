@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "spyglass-neuro"
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
-requires-python = ">=3.9,<3.10"
+requires-python = ">=3.9,<3.13"
 license = { file = "LICENSE" }
 authors = [
     { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
@@ -46,11 +46,11 @@ dependencies = [
     "matplotlib",
     "ndx_franklab_novela>=0.1.0",
     "non_local_detector",
-    "numpy<1.24",
+    "numpy",
     "opencv-python",
-    "panel>=1.4.0", # panel #6325 resolved
+    "panel>=1.4.0",                  # panel #6325 resolved
     "position_tools>=0.1.0",
-    "pubnub<6.4.0",            # TODO: remove this when sortingview is updated
+    "pubnub<6.4.0",                  # TODO: remove this when sortingview is updated
     "pydotplus",
     "pynwb>=2.2.0,<3",
     "ripple_detection",
@@ -62,21 +62,21 @@ dependencies = [
 
 [project.optional-dependencies]
 dlc = [
-  "ffmpeg",
-  "deeplabcut[tf]",          # removing dlc pin removes need to pin tf/numba
+    "ffmpeg",
+    "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
 ]
 test = [
-    "click",                 # for CLI subpackage only
-    "docker",                # for tests in a container
+    "click",                  # for CLI subpackage only
+    "docker",                 # for tests in a container
     "ghostipy",
-    "kachery",               # database access
+    "kachery",                # database access
     "kachery-client",
     "kachery-cloud>=0.4.0",
     "opencv-python-headless", # for headless testing of Qt
-    "pre-commit",            # linting
-    "pytest",                # unit testing
-    "pytest-cov",            # code coverage
-    "pytest-xvfb",           # for headless testing of Qt
+    "pre-commit",             # linting
+    "pytest",                 # unit testing
+    "pytest-cov",             # code coverage
+    "pytest-xvfb",            # for headless testing of Qt
 ]
 docs = [
     "hatch",                 # Get version from env
@@ -125,7 +125,8 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    # "-sv", # no capture, verbose output
+    "-s", # no capture
+    # "-v", # verbose output
     # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
@@ -134,7 +135,7 @@ addopts = [
     # "--no-dlc",      # don't run DLC tests
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
-    "--doctest-modules", # run doctests in all modules
+    "--doctest-modules",                              # run doctests in all modules
     "--cov=spyglass",
     "--cov-report=term-missing",
     "--no-cov-on-fail",
@@ -143,9 +144,9 @@ testpaths = ["tests"]
 log_level = "INFO"
 env = [
     "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
-    "DISPLAY = :0", # QT fails headless without this
-    "TF_ENABLE_ONEDNN_OPTS = 0", # TF disable approx calcs
-    "TF_CPP_MIN_LOG_LEVEL = 2", # Disable TF warnings
+    "DISPLAY = :0",                # QT fails headless without this
+    "TF_ENABLE_ONEDNN_OPTS = 0",   # TF disable approx calcs
+    "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
 ]
 
 [tool.coverage.run]
@@ -176,4 +177,4 @@ omit = [ # which submodules have no tests
 line-length = 80
 
 [tool.ruff.lint]
-ignore = ["F401" , "E402", "E501"]
+ignore = ["F401", "E402", "E501"]

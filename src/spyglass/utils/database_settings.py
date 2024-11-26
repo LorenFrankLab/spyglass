@@ -20,6 +20,7 @@ SHARED_MODULES = [
     "lfp",
     "waveform",
     "mua",
+    "sharing",
 ]
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "

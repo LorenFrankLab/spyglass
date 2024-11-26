@@ -124,7 +124,7 @@ def _subclass_factory(
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):
-        logger.warn(
+        logger.warning(
             "Deprecation: this class has been moved out of "
             + f"{old_module}\n"
             + f"\t{old_name} -> {new_module}.{new_class.__name__}"
@@ -236,7 +236,9 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
 
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
-        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+        query_expression.join(
+            tbl.proj(nwb2load_filepath=attr_name), log_export=False
+        )
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -291,7 +293,9 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    query_table = query_expression.join(
+        tbl.proj(nwb2load_filepath=attr_name), log_export=False
+    )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:

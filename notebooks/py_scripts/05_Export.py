@@ -96,7 +96,7 @@ if os.path.basename(os.getcwd()) == "notebooks":
 dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 from spyglass.common.common_usage import Export, ExportSelection
-from spyglass.lfp.analysis.v1 import LFPBandV1
+from spyglass.common.common_ephys import Electrode
 from spyglass.position.v1 import TrodesPosV1
 from spyglass.spikesorting.v1.curation import CurationV1
 
@@ -137,11 +137,19 @@ paper_key = {"paper_id": "paper1"}
 
 ExportSelection().start_export(**paper_key, analysis_id="analysis1")
 my_lfp_data = (
-    LFPBandV1  # Logging this table
-    & "nwb_file_name LIKE 'med%'"  # using a string restriction
-    & {"filter_name": "Theta 5-11 Hz"}  # and a dictionary restriction
+    Electrode  # Logging this table
+    & dj.AndList(
+        [
+            "nwb_file_name LIKE 'min%'",  # using a string restrictionshared
+            {"electrode_id": 1},  # and a dictionary restriction
+        ]
+    )
 ).fetch()
 # -
+
+# **Note**: Compound resrictions (e.g., `Table & a & b`) will be logged separately
+# as `Table & a` or `Table & b`. To fully restrict, use strings (e.g.,
+# `Table & 'a AND b'`) or `dj.AndList([a,b])`.
 
 # We can check that it was logged. The syntax of the restriction will look
 # different from what we see in python, but the `preview_tables` will look
@@ -150,22 +158,23 @@ my_lfp_data = (
 
 ExportSelection.Table()
 
-# And log more under the same analysis ...
+# If there seem to be redundant entries in this part table, we can ignore them.
+# They'll be merged later during `Export.populate`.
+#
+# Let's log more under the same analysis ...
 #
 
-my_other_lfp_data = (
-    LFPBandV1
-    & {
-        "nwb_file_name": "mediumnwb20230802_.nwb",
-        "filter_name": "Theta 5-10 Hz",
-    }
-).fetch()
+my_other_lfp_data = (Electrode & "electrode_id > 125").fetch()
 
 # Since these restrictions are mutually exclusive, we can check that the will
-# be combined appropriately by priviewing the logged tables...
+# be combined appropriately by previewing the logged tables...
 #
 
 ExportSelection().preview_tables(**paper_key)
+
+# For a more comprehensive view of what would be in the export, you can look at
+# `ExportSelection().show_all_tables(**paper_key)`. This may take some time to
+# generate.
 
 # Let's try adding a new analysis with a fetched nwb file. Starting a new export
 # will stop the previous one.
