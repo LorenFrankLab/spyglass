@@ -81,6 +81,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
     - Fix handling of waveform extraction sparse parameter #1132
+    - Limit Artifact detection intervals to valid times #1196
 
 ## [0.5.3] (August 27, 2024)
 
