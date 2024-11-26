@@ -11,6 +11,7 @@ speeds. eLife 10, e64505 (2021).
 
 import copy
 import uuid
+from functools import wraps
 from pathlib import Path
 
 import datajoint as dj
@@ -35,6 +36,26 @@ from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("decoding_clusterless_v1")
+
+
+def classmethod_full_key_decorator(required_keys=[]):
+    def decorator(method):
+        @wraps(method)
+        def wrapper(cls, key=None, *args, **kwargs):
+            # Ensure key is not None
+            if key is None:
+                key = {}
+
+            # Check if required keys are in key, and fetch if not
+            if not all([k in key for k in required_keys]):
+                key = (cls() & key).fetch1("KEY")
+
+            # Call the original method with the modified key
+            return method(cls, key, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 @schema
@@ -467,6 +488,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return new_spike_times, new_waveform_features
 
     @classmethod
+    @classmethod_full_key_decorator(
+        required_keys=["nwb_file_name", "waveform_features_group_name"]
+    )
     def get_spike_indicator(cls, key, time):
         """get spike indicator matrix for the group
 
