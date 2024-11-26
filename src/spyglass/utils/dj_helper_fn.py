@@ -274,7 +274,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """
     kwargs["as_dict"] = True  # force return as dictionary
 
-    close_file = kwargs.pop("close_file", True)
+    close_file = kwargs.pop("close_file", False)
 
     tbl, attr_name = nwb_master
     if "analysis" in attr_name:
