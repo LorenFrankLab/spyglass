@@ -228,10 +228,14 @@ disk. There are several tables that retain lists of files that have been
 generated during analyses. If someone deletes analysis entries, files will still
 be on disk.
 
-To remove orphaned files, we run the following commands in our cron jobs:
+Additionally, there are periphery tables such as `IntervalList` which are used
+to store entries created by downstream tables. These entries are not
+automatically deleted when the downstream entry is removed,
+
+To remove orphaned files and entries, we run the following commands in our cron jobs:
 
 ```python
-from spyglass.common import AnalysisNwbfile
+from spyglass.common import AnalysisNwbfile, IntervalList
 from spyglass.spikesorting import SpikeSorting
 from spyglass.common.common_nwbfile import schema as nwbfile_schema
 from spyglass.decoding.v1.sorted_spikes import schema as spikes_schema
@@ -241,8 +245,9 @@ from spyglass.decoding.v1.clusterless import schema as clusterless_schema
 def main():
     AnalysisNwbfile().nightly_cleanup()
     SpikeSorting().nightly_cleanup()
+    IntervalList().nightly_cleanup()
     nwbfile_schema.external['analysis'].delete(delete_external_files=True))
-    nwbfile_schema.external['raw'].delete(delete_external_files=True))
+    **nwbfile_schema**.external['raw'].delete(delete_external_files=True))
     spikes_schema.external['analysis'].delete(delete_external_files=True))
     clusterless_schema.external['analysis'].delete(delete_external_files=True))
 ```
