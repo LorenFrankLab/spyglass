@@ -320,7 +320,9 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
 
     ret = []
     for rec_dict in rec_dicts:
-        nwbf, io = get_nwb_file(rec_dict.pop("nwb2load_filepath"), return_io=True)
+        nwbf, io = get_nwb_file(
+            rec_dict.pop("nwb2load_filepath"), return_io=True
+        )
         # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
         # remove '_object_id' from attr name
         nwb_objs = {
