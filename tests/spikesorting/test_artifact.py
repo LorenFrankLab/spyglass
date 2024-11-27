@@ -21,8 +21,10 @@ def test_null_artifact_detection(spike_v1, art_interval):
     rec = spike_v1.SpikeSortingRecording.get_recording(rec_key)
 
     input_times = art_interval["valid_times"]
-    null_times = _get_artifact_times(rec, input_times)
+    if len(input_times) == 1:
+        input_times = input_times[0]
+    null_times = np.concatenate(_get_artifact_times(rec, input_times))
 
     assert np.array_equal(
-        input_times[0], null_times[0]
+        input_times, null_times
     ), "Null artifact detection failed"

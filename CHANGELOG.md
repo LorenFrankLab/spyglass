@@ -38,6 +38,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
+    - Add coverage of decoding pipeline to pytests #1155
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
@@ -85,6 +86,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
     - Fix handling of waveform extraction sparse parameter #1132
+    - Limit Artifact detection intervals to valid times #1196
 
 ## [0.5.3] (August 27, 2024)
 
