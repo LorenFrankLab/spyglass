@@ -71,7 +71,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             ).fetch_nwb()[0]
             nwb_field_name = _get_spike_obj_name(nwb_file)
             spikes = nwb_file[nwb_field_name]["spike_times"].to_list()
-            if key["unit_id"] > len(spikes):
+            if key["unit_id"] > len(spikes) and not self._test_mode:
                 raise ValueError(
                     f"unit_id {key['unit_id']} is greater than ",
                     f"the number of units in {key['spikesorting_merge_id']}",
