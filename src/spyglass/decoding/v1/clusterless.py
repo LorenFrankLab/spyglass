@@ -11,7 +11,6 @@ speeds. eLife 10, e64505 (2021).
 
 import copy
 import uuid
-from functools import wraps
 from pathlib import Path
 
 import datajoint as dj
@@ -33,29 +32,10 @@ from spyglass.decoding.v1.waveform_features import (
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils.dj_helper_fn import full_key_decorator
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("decoding_clusterless_v1")
-
-
-def classmethod_full_key_decorator(required_keys=[]):
-    def decorator(method):
-        @wraps(method)
-        def wrapper(cls, key=None, *args, **kwargs):
-            # Ensure key is not None
-            if key is None:
-                key = {}
-
-            # Check if required keys are in key, and fetch if not
-            if not all([k in key for k in required_keys]):
-                key = (cls() & key).fetch1("KEY")
-
-            # Call the original method with the modified key
-            return method(cls, key, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 @schema
@@ -336,8 +316,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         """Retrieve the decoding model"""
         return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
 
-    @staticmethod
-    def fetch_environments(key):
+    @classmethod
+    @full_key_decorator(required_keys=["decoding_param_name"])
+    def fetch_environments(cls, key):
         """Fetch the environments for the decoding model
 
         Parameters
@@ -375,8 +356,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         return classifier.environments
 
-    @staticmethod
-    def fetch_position_info(key):
+    @classmethod
+    @full_key_decorator(
+        required_keys=[
+            "nwb_file_name",
+            "position_group_name",
+            "encoding_interval",
+            "decoding_interval",
+        ]
+    )
+    def fetch_position_info(cls, key):
         """Fetch the position information for the decoding model
 
         Parameters
@@ -401,8 +390,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         return position_info, position_variable_names
 
-    @staticmethod
-    def fetch_linear_position_info(key):
+    @classmethod
+    @full_key_decorator(
+        required_keys=[
+            "nwb_file_name",
+            "position_group_name",
+            "encoding_interval",
+            "decoding_interval",
+        ]
+    )
+    def fetch_linear_position_info(cls, key):
         """Fetch the position information and project it onto the track graph
 
         Parameters
@@ -437,8 +434,11 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             axis=1,
         ).loc[min_time:max_time]
 
-    @staticmethod
-    def fetch_spike_data(key, filter_by_interval=True):
+    @classmethod
+    @full_key_decorator(
+        required_keys=["nwb_file_name", "waveform_features_group_name"]
+    )
+    def fetch_spike_data(cls, key, filter_by_interval=True):
         """Fetch the spike times for the decoding model
 
         Parameters
@@ -488,9 +488,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return new_spike_times, new_waveform_features
 
     @classmethod
-    @classmethod_full_key_decorator(
-        required_keys=["nwb_file_name", "waveform_features_group_name"]
-    )
     def get_spike_indicator(cls, key, time):
         """get spike indicator matrix for the group
 

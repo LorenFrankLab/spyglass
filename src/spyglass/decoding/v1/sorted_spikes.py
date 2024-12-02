@@ -33,6 +33,7 @@ from spyglass.spikesorting.spikesorting_merge import (
     SpikeSortingOutput,
 )  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import full_key_decorator
 
 schema = dj.schema("decoding_sorted_spikes_v1")
 
@@ -275,8 +276,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         """Retrieve the decoding model"""
         return SortedSpikesDetector.load_model(self.fetch1("classifier_path"))
 
-    @staticmethod
-    def fetch_environments(key):
+    @classmethod
+    @full_key_decorator(required_keys=["decoding_param_name"])
+    def fetch_environments(cls, key):
         """Fetch the environments for the decoding model
 
         Parameters
@@ -314,8 +316,16 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         return classifier.environments
 
-    @staticmethod
-    def fetch_position_info(key):
+    @classmethod
+    @full_key_decorator(
+        required_keys=[
+            "position_group_name",
+            "nwb_file_name",
+            "encoding_interval",
+            "decoding_interval",
+        ]
+    )
+    def fetch_position_info(cls, key):
         """Fetch the position information for the decoding model
 
         Parameters
@@ -339,8 +349,16 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         return position_info, position_variable_names
 
-    @staticmethod
-    def fetch_linear_position_info(key):
+    @classmethod
+    @full_key_decorator(
+        required_keys=[
+            "position_group_name",
+            "nwb_file_name",
+            "encoding_interval",
+            "decoding_interval",
+        ]
+    )
+    def fetch_linear_position_info(cls, key):
         """Fetch the position information and project it onto the track graph
 
         Parameters
@@ -374,9 +392,16 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             axis=1,
         ).loc[min_time:max_time]
 
-    @staticmethod
+    @classmethod
+    @full_key_decorator(
+        required_keys=["encoding_interval", "decoding_interval"]
+    )
     def fetch_spike_data(
-        key, filter_by_interval=True, time_slice=None, return_unit_ids=False
+        cls,
+        key,
+        filter_by_interval=True,
+        time_slice=None,
+        return_unit_ids=False,
     ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """Fetch the spike times for the decoding model
 

@@ -3,6 +3,7 @@
 import inspect
 import multiprocessing.pool
 import os
+from functools import wraps
 from pathlib import Path
 from typing import Iterable, List, Type, Union
 from uuid import uuid4
@@ -580,3 +581,42 @@ def str_to_bool(value) -> bool:
     if not value:
         return False
     return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
+
+
+def full_key_decorator(required_keys: list[str] = None):
+    """Decorator to ensure that the key is fully specified before calling the
+    method. If the key is not fully specified, the method will attempt to fetch
+    the complete key from the database.
+
+    Parameters
+    ----------
+    required_keys : list[str], optional
+        List of keys that must be present in the key. If None, all keys are
+        required. Default None
+    """
+
+    def decorator(method):
+        @wraps(method)
+        def wrapper(cls, key=None, *args, **kwargs):
+            # Ensure key is not None
+            if key is None:
+                key = {}
+
+            # Check if required keys are in key, and fetch if not
+            key_check = (
+                cls.primary_key if required_keys is None else required_keys
+            )
+            if not all([k in key for k in key_check]):
+                if not len(query := cls() & key) == 1:
+                    raise KeyError(
+                        f"Key {key} is neither fully specified nor a unique entry in"
+                        + f"{cls.full_table_name}"
+                    )
+                key = query.fetch1("KEY")
+
+            # Call the original method with the modified key
+            return method(cls, key, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
