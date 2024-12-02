@@ -94,20 +94,44 @@ class DataDownloader:
 
         return ret
 
-    def wait_for(self, target: str):
-        """Wait for target to finish downloading."""
-        status = self.file_downloads.get(target).poll()
+    def wait_for(self, target: str, timeout: int = 50, interval=5):
+        """Wait for target to finish downloading, and clean up if needed.
 
-        limit = 10
-        while status is None and limit > 0:
-            time_sleep(5)
-            limit -= 1
-            status = self.file_downloads.get(target).poll()
+        Parameters
+        ----------
+        target : str
+            Name of file to wait for.
+        timeout : int, optional
+            Maximum time to wait for download to finish.
+        interval : int, optional
+            Time between checks for download completion.
 
-        if status != 0:  # Error downloading
-            raise ValueError(f"Error downloading: {target}")
-        if limit < 1:  # Reached attempt limit
-            raise TimeoutError(f"Timeout downloading: {target}")
+        Raises
+        ------
+        ValueError
+            If download failed or target not being downloaded.
+        TimeoutError
+            If download took too long.
+        """
+        process = self.file_downloads.get(target)
+        if not process:
+            raise ValueError(f"No active download process for target: {target}")
+
+        elapsed_time = 0
+        try:  # Refactored to clean up process streams
+            while (status := process.poll()) is None:
+                if elapsed_time >= timeout:
+                    process.terminate()  # Terminate on timeout
+                    process.wait()
+                    raise TimeoutError(f"Timeout waiting for {target}.")
+                time_sleep(interval)
+                elapsed_time += interval
+            if status != 0:
+                raise ValueError(f"Error occurred during download of {target}.")
+        finally:  # Ensure process streams are closed and cleaned up
+            process.stdout and process.stdout.close()
+            process.stderr and process.stderr.close()
+            self.file_downloads.pop(target, None)  # Remove target from dict
 
     def move_dlc_items(self, dest_dir: Path):
         """Move completed DLC files to dest_dir."""
