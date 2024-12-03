@@ -85,12 +85,10 @@ class DataDownloader:
 
             if dest.exists():
                 cmd = ["echo", f"Already have {target}"]
+                ret[target] = "Done"
             else:
                 cmd = ["curl", "-L", "--output", str(dest), f"{path['url']}"]
-
-            print(f"cmd: {cmd}")
-
-            ret[target] = Popen(cmd, **self.cmd_kwargs)
+                ret[target] = Popen(cmd, **self.cmd_kwargs)
 
         return ret
 
@@ -116,6 +114,8 @@ class DataDownloader:
         process = self.file_downloads.get(target)
         if not process:
             raise ValueError(f"No active download process for target: {target}")
+        if process == "Done":
+            return
 
         elapsed_time = 0
         try:  # Refactored to clean up process streams
@@ -131,7 +131,7 @@ class DataDownloader:
         finally:  # Ensure process streams are closed and cleaned up
             process.stdout and process.stdout.close()
             process.stderr and process.stderr.close()
-            self.file_downloads.pop(target, None)  # Remove target from dict
+            self.file_downloads[target] = "Done"  # Remove target from dict
 
     def move_dlc_items(self, dest_dir: Path):
         """Move completed DLC files to dest_dir."""

@@ -23,19 +23,12 @@ from pandas.errors import PerformanceWarning
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 warnings.filterwarnings("ignore", module="tensorflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="h5py")
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module="mountainsort4"
-)
-warnings.filterwarnings(
-    "ignore", category=DeprecationWarning, module="datajoint"
-)
+
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
