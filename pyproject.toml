@@ -149,8 +149,10 @@ env = [
     "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
 ]
 filterwarnings = [
-  "ignore::ResourceWarning",
-  "ignore::DeprecationWarning",
+  "ignore::ResourceWarning:.*",
+  "ignore::DeprecationWarning:.*",
+  "ignore::UserWarning:.*",
+  "ignore::MissingRequiredBuildWarning:.*",
 ]
 
 [tool.coverage.run]

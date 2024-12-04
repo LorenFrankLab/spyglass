@@ -80,7 +80,6 @@ def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
     expected = {
         "bad_channel": "False",
         "contacts": "",
-        "curation_id": 1,
         "description": "after metric curation",
         "electrode_group_name": "0",
         "electrode_id": 0,

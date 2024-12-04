@@ -126,8 +126,8 @@ class PositionGroup(SpyglassMixin, dj.Manual):
         }
         if self & group_key:
             logger.error(  # Easier for pytests to not raise error on duplicate
-                f"Group {nwb_file_name}: {group_name} already exists"
-                + "please delete the group before creating a new one"
+                f"Group {nwb_file_name}: {group_name} already exists. "
+                + "Please delete the group before creating a new one"
             )
             return
         self.insert1(

@@ -157,7 +157,7 @@ def test_restr_from_upstream(graph_tables, restr, expect_n, msg):
         ("PkAliasNode", "parent_attr > 17", 2, "pk pk alias"),
         ("SkAliasNode", "parent_attr > 18", 2, "sk sk alias"),
         ("MergeChild", "parent_attr > 18", 2, "merge child"),
-        ("MergeChild", {"parent_attr": 19}, 1, "dict restr"),
+        ("MergeChild", {"parent_attr": 18}, 1, "dict restr"),
     ],
 )
 def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
