@@ -230,7 +230,9 @@ be on disk.
 
 Additionally, there are periphery tables such as `IntervalList` which are used
 to store entries created by downstream tables. These entries are not
-automatically deleted when the downstream entry is removed,
+automatically deleted when the downstream entry is removed. To minimize interference
+with ongoing user entry creation, we recommend running these cleanups on a less frequent
+basis (e.g. weekly).
 
 To remove orphaned files and entries, we run the following commands in our cron jobs:
 
@@ -245,7 +247,7 @@ from spyglass.decoding.v1.clusterless import schema as clusterless_schema
 def main():
     AnalysisNwbfile().nightly_cleanup()
     SpikeSorting().nightly_cleanup()
-    IntervalList().nightly_cleanup()
+    IntervalList().cleanup()
     nwbfile_schema.external['analysis'].delete(delete_external_files=True))
     nwbfile_schema.external['raw'].delete(delete_external_files=True))
     spikes_schema.external['analysis'].delete(delete_external_files=True))
