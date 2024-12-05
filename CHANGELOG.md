@@ -42,6 +42,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
+- Add mixin method `get_fully_defined_key` #1198
 
 ### Pipelines
 
@@ -57,6 +58,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+    - Allow fetch of partial key from `DecodingParameters` #1198
+    - Allow data fetching with partial but unique key #1198
 
 - Linearization
 
@@ -115,7 +118,6 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Add tool for checking threads for metadata locks on a table #1063
 - Use peripheral tables as fallback in `TableChains` #1035
 - Ignore non-Spyglass tables during descendant check for `part_masters` #1035
-- Add utility `full_key_decorator` for us in mixin tables #1198
 
 ### Pipelines
 
@@ -140,8 +142,6 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Add option to upsample data rate in `PositionGroup` #1008
     - Avoid interpolating over large `nan` intervals in position #1033
     - Minor code calling corrections #1073
-    - Allow fetch or partial key from `DecodingParameters` #1198
-    - Allow data fetching with partial but unique key #1198
 
 - Position
 
