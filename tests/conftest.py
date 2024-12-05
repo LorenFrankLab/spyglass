@@ -17,18 +17,12 @@ import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
+from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
-
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-warnings.filterwarnings("ignore", module="tensorflow")
-warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
-warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -114,6 +108,19 @@ def pytest_configure(config):
         download_dlc=not NO_DLC,
     )
 
+    warnings.filterwarnings("ignore", module="tensorflow")
+    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+    warnings.filterwarnings(
+        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    )
+    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+    warnings.filterwarnings(
+        "ignore", category=PerformanceWarning, module="pandas"
+    )
+    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+    warnings.simplefilter("ignore", category=ResourceWarning)
+    warnings.simplefilter("ignore", category=DeprecationWarning)
+
 
 def pytest_unconfigure(config):
     from spyglass.utils.nwb_helper_fn import close_nwb_files
@@ -121,6 +128,9 @@ def pytest_unconfigure(config):
     close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
+        analysis_dir = BASE_DIR / "analysis"
+        for file in analysis_dir.glob("*.nwb"):
+            file.unlink()
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -1357,6 +1367,8 @@ def sorter_dict():
 
 @pytest.fixture(scope="session")
 def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
+    pre = spike_v1.SpikeSorting().fetch("KEY", as_dict=True)
+
     key = {
         **mini_dict,
         **sorter_dict,
@@ -1367,7 +1379,9 @@ def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
     spike_v1.SpikeSortingSelection.insert_selection(key)
     spike_v1.SpikeSorting.populate()
 
-    yield spike_v1.SpikeSorting().fetch("KEY", as_dict=True)[0]
+    yield (spike_v1.SpikeSorting() - pre).fetch(
+        "KEY", as_dict=True, order_by="time_of_sort desc"
+    )[0]
 
 
 @pytest.fixture(scope="session")
@@ -1379,9 +1393,16 @@ def sorting_objs(spike_v1, pop_sort):
 
 @pytest.fixture(scope="session")
 def pop_curation(spike_v1, pop_sort):
+
+    parent_curation_id = -1
+    has_sort = spike_v1.CurationV1 & {"sorting_id": pop_sort["sorting_id"]}
+    if has_sort:
+        parent_curation_id = has_sort.fetch1("curation_id")
+
     spike_v1.CurationV1.insert_curation(
         sorting_id=pop_sort["sorting_id"],
         description="testing sort",
+        parent_curation_id=parent_curation_id,
     )
 
     yield (spike_v1.CurationV1() & {"parent_curation_id": -1}).fetch(
@@ -1418,20 +1439,20 @@ def metric_objs(spike_v1, pop_metric):
 @pytest.fixture(scope="session")
 def pop_curation_metric(spike_v1, pop_metric, metric_objs):
     labels, merge_groups, metrics = metric_objs
-    parent_dict = {"parent_curation_id": 0}
+    desc_dict = dict(description="after metric curation")
     spike_v1.CurationV1.insert_curation(
         sorting_id=(
             spike_v1.MetricCurationSelection
             & {"metric_curation_id": pop_metric["metric_curation_id"]}
         ).fetch1("sorting_id"),
-        **parent_dict,
+        parent_curation_id=0,
         labels=labels,
         merge_groups=merge_groups,
         metrics=metrics,
-        description="after metric curation",
+        **desc_dict,
     )
 
-    yield (spike_v1.CurationV1 & parent_dict).fetch("KEY", as_dict=True)[0]
+    yield (spike_v1.CurationV1 & desc_dict).fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
