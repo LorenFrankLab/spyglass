@@ -31,6 +31,7 @@ def test_fetch_linearized_position(clusterless_pop, clusterless_key):
     assert lin_pos is not None, "Linearized position is None"
 
 
+# NOTE: Impacts spikesorting merge tests
 def test_fetch_spike_by_interval(decode_v1, clusterless_pop, clusterless_key):
     begin, end = decode_v1.clusterless._get_interval_range(clusterless_key)
     spikes = clusterless_pop.fetch_spike_data(
