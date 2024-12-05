@@ -70,20 +70,27 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     def fetch(self, *args, **kwargs):
         """Return decoding parameters as a list of classes."""
         rows = super().fetch(*args, **kwargs)
-        if len(rows) > 0 and len(rows[0]) > 1:
+        if kwargs.get("format", None) == "array":
+            # case when recalled by dj.fetch(), class conversion performed later in stack
+            return rows
+
+        if not len(args):
+            # infer args from table heading
+            args = tuple(self.heading)
+
+        if "decoding_params" not in args:
+            return rows
+
+        params_index = args.index("decoding_params")
+        if len(args) == 1:
+            # only fetching decoding_params
+            content = [restore_classes(r) for r in rows]
+        elif len(rows):
             content = []
-            for (
-                decoding_param_name,
-                decoding_params,
-                decoding_kwargs,
-            ) in rows:
-                content.append(
-                    (
-                        decoding_param_name,
-                        restore_classes(decoding_params),
-                        decoding_kwargs,
-                    )
-                )
+            for row in zip(*rows):
+                row = list(row)
+                row[params_index] = restore_classes(row[params_index])
+                content.append(tuple(row))
         else:
             content = rows
         return content
@@ -91,7 +98,20 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     def fetch1(self, *args, **kwargs):
         """Return one decoding paramset as a class."""
         row = super().fetch1(*args, **kwargs)
-        row["decoding_params"] = restore_classes(row["decoding_params"])
+
+        if len(args) == 0:
+            row["decoding_params"] = restore_classes(row["decoding_params"])
+            return row
+
+        if "decoding_params" in args:
+            if len(args) == 1:
+                return restore_classes(row)
+            row = list(row)
+            row[args.index("decoding_params")] = restore_classes(
+                row[args.index("decoding_params")]
+            )
+            return tuple(row)
+
         return row
 
 

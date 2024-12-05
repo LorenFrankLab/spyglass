@@ -44,6 +44,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
 - Allow part restriction `SpyglassMixinPart.delete` #1192
+- Add mixin method `get_fully_defined_key` #1198
 
 ### Pipelines
 
@@ -62,6 +63,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+    - Allow fetch of partial key from `DecodingParameters` #1198
+    - Allow data fetching with partial but unique key #1198
 
 - Linearization
 
