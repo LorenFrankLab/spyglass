@@ -8,7 +8,6 @@ from ripple_detection import get_multiunit_population_firing_rate
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
-from spyglass.utils.dj_helper_fn import full_key_decorator
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
@@ -129,7 +128,6 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         return include_mask
 
     @classmethod
-    @full_key_decorator()
     def fetch_spike_data(
         cls,
         key: dict,
@@ -153,6 +151,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         list of np.ndarray
             list of spike times for each unit in the group
         """
+        key = cls.get_fully_defined_key(key)
+
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
             (

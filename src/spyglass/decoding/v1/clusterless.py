@@ -32,7 +32,6 @@ from spyglass.decoding.v1.waveform_features import (
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
-from spyglass.utils.dj_helper_fn import full_key_decorator
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("decoding_clusterless_v1")
@@ -317,7 +316,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
 
     @classmethod
-    @full_key_decorator(required_keys=["decoding_param_name"])
     def fetch_environments(cls, key):
         """Fetch the environments for the decoding model
 
@@ -331,6 +329,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         List[TrackGraph]
             list of track graphs in the trained model
         """
+        key = cls.get_fully_defined_key(
+            key, required_fields=["decoding_param_name"]
+        )
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
@@ -357,14 +358,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return classifier.environments
 
     @classmethod
-    @full_key_decorator(
-        required_keys=[
-            "nwb_file_name",
-            "position_group_name",
-            "encoding_interval",
-            "decoding_interval",
-        ]
-    )
     def fetch_position_info(cls, key):
         """Fetch the position information for the decoding model
 
@@ -378,6 +371,15 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         Tuple[pd.DataFrame, List[str]]
             The position information and the names of the position variables
         """
+        key = cls.get_fully_defined_key(
+            key,
+            required_fields=[
+                "nwb_file_name",
+                "position_group_name",
+                "encoding_interval",
+                "decoding_interval",
+            ],
+        )
         position_group_key = {
             "position_group_name": key["position_group_name"],
             "nwb_file_name": key["nwb_file_name"],
@@ -391,14 +393,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return position_info, position_variable_names
 
     @classmethod
-    @full_key_decorator(
-        required_keys=[
-            "nwb_file_name",
-            "position_group_name",
-            "encoding_interval",
-            "decoding_interval",
-        ]
-    )
     def fetch_linear_position_info(cls, key):
         """Fetch the position information and project it onto the track graph
 
@@ -412,6 +406,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         pd.DataFrame
             The linearized position information
         """
+        key = cls.get_fully_defined_key(
+            key,
+            required_fields=[
+                "nwb_file_name",
+                "position_group_name",
+                "encoding_interval",
+                "decoding_interval",
+            ],
+        )
+
         environment = ClusterlessDecodingV1.fetch_environments(key)[0]
 
         position_df = ClusterlessDecodingV1.fetch_position_info(key)[0]
@@ -435,9 +439,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         ).loc[min_time:max_time]
 
     @classmethod
-    @full_key_decorator(
-        required_keys=["nwb_file_name", "waveform_features_group_name"]
-    )
     def fetch_spike_data(cls, key, filter_by_interval=True):
         """Fetch the spike times for the decoding model
 
@@ -454,6 +455,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         list[np.ndarray]
             List of spike times for each unit in the model's spike group
         """
+        key = cls.get_fully_defined_key(
+            key,
+            required_fields=[
+                "nwb_file_name",
+                "waveform_features_group_name",
+            ],
+        )
+
         waveform_keys = (
             (
                 UnitWaveformFeaturesGroup.UnitFeatures

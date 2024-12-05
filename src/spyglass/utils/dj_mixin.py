@@ -137,6 +137,27 @@ class SpyglassMixin(ExportMixin):
             else nullcontext()
         )
 
+    @classmethod
+    def get_fully_defined_key(
+        cls, key: dict = None, required_fields: list[str] = None
+    ) -> dict:
+        if key is None:
+            key = dict()
+
+        required_fields = required_fields or cls.primary_key
+        if isinstance(key, (str, dict)):  # check is either keys or substrings
+            if not all(
+                field in key for field in required_fields
+            ):  # check if all required fields are in key
+                if not len(query := cls() & key) == 1:  # check if key is unique
+                    raise KeyError(
+                        f"Key {key} is neither fully specified nor a unique entry in"
+                        + f"{cls.full_table_name}"
+                    )
+                key = query.fetch1("KEY")
+
+        return key
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
