@@ -151,8 +151,9 @@ class SpyglassMixin(ExportMixin):
             ):  # check if all required fields are in key
                 if not len(query := cls() & key) == 1:  # check if key is unique
                     raise KeyError(
-                        f"Key {key} is neither fully specified nor a unique entry in"
-                        + f"{cls.full_table_name}"
+                        f"Key is neither fully specified nor a unique entry in"
+                        + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
+                        + f"Required fields: {required_fields}\n\tResult: {query}"
                     )
                 key = query.fetch1("KEY")
 
