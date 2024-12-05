@@ -9,12 +9,10 @@ plan future development of Spyglass.
 from typing import List, Union
 
 import datajoint as dj
-from datajoint import FreeTable
-from datajoint import config as dj_config
 from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import export_dir, test_mode
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import (
@@ -174,7 +172,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Return as a list of dicts: [{'file_path': x}]. Default True.
             If False, returns a list of strings without key.
         """
-        file_table = self * self.File & key
         unique_fp = {
             *[
                 AnalysisNwbfile().get_abs_path(p)
@@ -210,21 +207,26 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-        raw_tbl = self._externals["raw"]
-        raw_name = raw_tbl.full_table_name
-        raw_restr = (
-            "filepath in ('" + "','".join(self._list_raw_files(key)) + "')"
-        )
-        restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
 
-        analysis_tbl = self._externals["analysis"]
-        analysis_name = analysis_tbl.full_table_name
-        analysis_restr = (  # filepaths have analysis subdir. regexp substrings
-            "filepath REGEXP '" + "|".join(self._list_analysis_files(key)) + "'"
-        )  # regexp is slow, but we're only doing this once, and future-proof
-        restr_graph.graph.add_node(
-            analysis_name, ft=analysis_tbl, restr=analysis_restr
-        )
+        if raw_files := self._list_raw_files(key):
+            raw_tbl = self._externals["raw"]
+            raw_name = raw_tbl.full_table_name
+            raw_restr = "filepath in ('" + "','".join(raw_files) + "')"
+            restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
+            restr_graph.visited.add(raw_name)
+
+        if analysis_files := self._list_analysis_files(key):
+            analysis_tbl = self._externals["analysis"]
+            analysis_name = analysis_tbl.full_table_name
+            # to avoid issues with analysis subdir, we use REGEXP
+            # this is slow, but we're only doing this once, and future-proof
+            analysis_restr = (
+                "filepath REGEXP '" + "|".join(analysis_files) + "'"
+            )
+            restr_graph.graph.add_node(
+                analysis_name, ft=analysis_tbl, restr=analysis_restr
+            )
+            restr_graph.visited.add(analysis_name)
 
         restr_graph.visited.update({raw_name, analysis_name})
 

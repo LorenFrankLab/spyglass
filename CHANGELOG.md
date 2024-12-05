@@ -38,11 +38,14 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
+    - Add coverage of decoding pipeline to pytests #1155
 - Allow python \< 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
+- Allow part restriction `SpyglassMixinPart.delete` #1192
 - Move cleanup of `IntervalList` orphan entries to nightly cleanup #1195
+
 
 ### Pipelines
 
@@ -52,8 +55,11 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
     - Export fixes #1164
-        - Allow `get_abs_path` to add selection entry.
-        - Log restrictions and joins.
+        - Allow `get_abs_path` to add selection entry. #1164
+        - Log restrictions and joins. #1164
+        - Check if querying table inherits mixin in `fetch_nwb`. #1192
+        - Ensure externals entries before adding to export. #1192
+    - Error specificity in `LabMemberInfo` #1192
 
 - Decoding
 
@@ -74,6 +80,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
             `open-cv` #1168
         - `VideoMaker` class to process frames in multithreaded batches #1168, #1174
         - `TrodesPosVideo` updates for `matplotlib` processor #1174
+    - User prompt if ambiguous insert in `DLCModelSource` #1192
 
 - Spike Sorting
 
@@ -81,6 +88,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
     - Fix handling of waveform extraction sparse parameter #1132
+    - Limit Artifact detection intervals to valid times #1196
 
 ## [0.5.3] (August 27, 2024)
 
