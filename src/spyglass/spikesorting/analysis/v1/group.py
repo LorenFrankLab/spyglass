@@ -3,7 +3,6 @@ from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
-from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
