@@ -507,9 +507,6 @@ class SpyglassMixin(ExportMixin):
                 delete_external_files=True, display_progress=False
             )
 
-        if not self._test_mode:
-            _ = IntervalList().nightly_cleanup(dry_run=False)
-
     def delete(self, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
         self.cautious_delete(*args, **kwargs)

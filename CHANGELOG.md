@@ -44,7 +44,9 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
 - Allow part restriction `SpyglassMixinPart.delete` #1192
+- Move cleanup of `IntervalList` orphan entries to cron job cleanup process #1195
 - Add mixin method `get_fully_defined_key` #1198
+
 
 ### Pipelines
 
