@@ -280,6 +280,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.utils.dj_mixin import SpyglassMixin
+
     kwargs["as_dict"] = True  # force return as dictionary
 
     tbl, attr_name = nwb_master
@@ -301,8 +303,16 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), log_export=False
+        tbl.proj(nwb2load_filepath=attr_name), **arg
     )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
