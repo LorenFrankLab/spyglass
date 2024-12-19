@@ -1,18 +1,6 @@
 # Change Log
 
-## [0.5.4] (Unreleased)
-
-### Release Notes
-
-<!-- Running draft to be removed immediately prior to release. -->
-
-```python
-import datajoint as dj
-from spyglass.linearization.v1.main import TrackGraph
-
-TrackGraph.alter()  # Add edge map parameter
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-```
+## [0.5.4] (November 26, 2024)
 
 ### Infrastructure
 
