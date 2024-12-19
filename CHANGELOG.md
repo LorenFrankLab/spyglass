@@ -47,7 +47,6 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Move cleanup of `IntervalList` orphan entries to cron job cleanup process #1195
 - Add mixin method `get_fully_defined_key` #1198
 
-
 ### Pipelines
 
 - Common
@@ -58,7 +57,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Export fixes #1164
         - Allow `get_abs_path` to add selection entry. #1164
         - Log restrictions and joins. #1164
-        - Check if querying table inherits mixin in `fetch_nwb`. #1192
+        - Check if querying table inherits mixin in `fetch_nwb`. #1192, #1201
         - Ensure externals entries before adding to export. #1192
     - Error specificity in `LabMemberInfo` #1192
 
