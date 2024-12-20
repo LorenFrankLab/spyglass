@@ -686,6 +686,30 @@ def get_interval_list_name_from_epoch(nwb_file_name: str, epoch: int) -> str:
     return interval_names[0]
 
 
+def get_position_interval_epoch(
+    nwb_file_name: str, position_interval_name: str
+) -> int:
+    """Return the epoch number for a given position interval name."""
+    # look up the epoch
+    key = dict(
+        nwb_file_name=nwb_file_name,
+        position_interval_name=position_interval_name,
+    )
+    query = PositionIntervalMap * TaskEpoch & key
+    if query:
+        return query.fetch1("epoch")
+    # if no match, make sure all epoch interval names are mapped
+    for epoch_key in (TaskEpoch() & key).fetch(
+        "nwb_file_name", "interval_list_name", as_dict=True
+    ):
+        convert_epoch_interval_name_to_position_interval_name(epoch_key)
+    # try again
+    query = PositionIntervalMap * TaskEpoch & key
+    if query:
+        return query.fetch1("epoch")
+    return None
+
+
 def populate_position_interval_map_session(nwb_file_name: str):
     """Populate PositionIntervalMap for all epochs in a given NWB file."""
     # 1. remove redundancy in interval names

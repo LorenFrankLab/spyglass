@@ -70,75 +70,90 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
         ori_nwb = (DLCOrientation & key).fetch_nwb()[0]
 
-        pos_obj = pos_nwb["dlc_position"].spatial_series["position"]
-        vel_obj = pos_nwb["dlc_velocity"].time_series["velocity"]
-        vid_frame_obj = pos_nwb["dlc_velocity"].time_series["video_frame_ind"]
-        ori_obj = ori_nwb["dlc_orientation"].spatial_series["orientation"]
+        if isinstance(pos_nwb["dlc_position"], pd.DataFrame):
+            # Null entry case
+            key["analysis_file_name"] = AnalysisNwbfile().create(
+                nwb_file_name=key["nwb_file_name"]
+            )
+            obj_id = AnalysisNwbfile().add_nwb_object(
+                key["analysis_file_name"], pd.DataFrame()
+            )
+            key["position_object_id"] = obj_id
+            key["orientation_object_id"] = obj_id
+            key["velocity_object_id"] = obj_id
 
-        position = pynwb.behavior.Position()
-        orientation = pynwb.behavior.CompassDirection()
-        velocity = pynwb.behavior.BehavioralTimeSeries()
+        else:
+            pos_obj = pos_nwb["dlc_position"].spatial_series["position"]
+            vel_obj = pos_nwb["dlc_velocity"].time_series["velocity"]
+            vid_frame_obj = pos_nwb["dlc_velocity"].time_series[
+                "video_frame_ind"
+            ]
+            ori_obj = ori_nwb["dlc_orientation"].spatial_series["orientation"]
 
-        position.create_spatial_series(
-            name=pos_obj.name,
-            timestamps=np.asarray(pos_obj.timestamps),
-            conversion=pos_obj.conversion,
-            data=np.asarray(pos_obj.data),
-            reference_frame=pos_obj.reference_frame,
-            comments=pos_obj.comments,
-            description=pos_obj.description,
-        )
+            position = pynwb.behavior.Position()
+            orientation = pynwb.behavior.CompassDirection()
+            velocity = pynwb.behavior.BehavioralTimeSeries()
 
-        orientation.create_spatial_series(
-            name=ori_obj.name,
-            timestamps=np.asarray(ori_obj.timestamps),
-            conversion=ori_obj.conversion,
-            data=np.asarray(ori_obj.data),
-            reference_frame=ori_obj.reference_frame,
-            comments=ori_obj.comments,
-            description=ori_obj.description,
-        )
+            position.create_spatial_series(
+                name=pos_obj.name,
+                timestamps=np.asarray(pos_obj.timestamps),
+                conversion=pos_obj.conversion,
+                data=np.asarray(pos_obj.data),
+                reference_frame=pos_obj.reference_frame,
+                comments=pos_obj.comments,
+                description=pos_obj.description,
+            )
 
-        velocity.create_timeseries(
-            name=vel_obj.name,
-            timestamps=np.asarray(vel_obj.timestamps),
-            conversion=vel_obj.conversion,
-            unit=vel_obj.unit,
-            data=np.asarray(vel_obj.data),
-            comments=vel_obj.comments,
-            description=vel_obj.description,
-        )
+            orientation.create_spatial_series(
+                name=ori_obj.name,
+                timestamps=np.asarray(ori_obj.timestamps),
+                conversion=ori_obj.conversion,
+                data=np.asarray(ori_obj.data),
+                reference_frame=ori_obj.reference_frame,
+                comments=ori_obj.comments,
+                description=ori_obj.description,
+            )
 
-        velocity.create_timeseries(
-            name=vid_frame_obj.name,
-            timestamps=np.asarray(vid_frame_obj.timestamps),
-            unit=vid_frame_obj.unit,
-            data=np.asarray(vid_frame_obj.data),
-            description=vid_frame_obj.description,
-            comments=vid_frame_obj.comments,
-        )
+            velocity.create_timeseries(
+                name=vel_obj.name,
+                timestamps=np.asarray(vel_obj.timestamps),
+                conversion=vel_obj.conversion,
+                unit=vel_obj.unit,
+                data=np.asarray(vel_obj.data),
+                comments=vel_obj.comments,
+                description=vel_obj.description,
+            )
 
-        # Add to Analysis NWB file
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        key["analysis_file_name"] = analysis_file_name
-        nwb_analysis_file = AnalysisNwbfile()
+            velocity.create_timeseries(
+                name=vid_frame_obj.name,
+                timestamps=np.asarray(vid_frame_obj.timestamps),
+                unit=vid_frame_obj.unit,
+                data=np.asarray(vid_frame_obj.data),
+                description=vid_frame_obj.description,
+                comments=vid_frame_obj.comments,
+            )
 
-        key.update(
-            {
-                "analysis_file_name": analysis_file_name,
-                "position_object_id": nwb_analysis_file.add_nwb_object(
-                    analysis_file_name, position
-                ),
-                "orientation_object_id": nwb_analysis_file.add_nwb_object(
-                    analysis_file_name, orientation
-                ),
-                "velocity_object_id": nwb_analysis_file.add_nwb_object(
-                    analysis_file_name, velocity
-                ),
-            }
-        )
+            # Add to Analysis NWB file
+            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+            key["analysis_file_name"] = analysis_file_name
+            nwb_analysis_file = AnalysisNwbfile()
 
-        nwb_analysis_file.add(
+            key.update(
+                {
+                    "analysis_file_name": analysis_file_name,
+                    "position_object_id": nwb_analysis_file.add_nwb_object(
+                        analysis_file_name, position
+                    ),
+                    "orientation_object_id": nwb_analysis_file.add_nwb_object(
+                        analysis_file_name, orientation
+                    ),
+                    "velocity_object_id": nwb_analysis_file.add_nwb_object(
+                        analysis_file_name, velocity
+                    ),
+                }
+            )
+
+        AnalysisNwbfile().add(
             nwb_file_name=key["nwb_file_name"],
             analysis_file_name=analysis_file_name,
         )
@@ -216,6 +231,16 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         orientation_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_orientation"
         ]
+
+        # check for the null cohort case
+        if not (DLCSmoothInterpCohort.BodyPart & centroid_key) and not (
+            DLCSmoothInterpCohort.BodyPart & orientation_key
+        ):
+            return {}
+
+        centroid_bodyparts, centroid_si_params = (
+            DLCSmoothInterpCohort.BodyPart & centroid_key
+        ).fetch("bodypart", "dlc_si_params_name")
         orientation_bodyparts, orientation_si_params = (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ).fetch("bodypart", "dlc_si_params_name")
@@ -268,6 +293,27 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             for bodypart in bodyparts
         }
         return sub_thresh_percent_dict
+
+    def fetch_pose_dataframe(self):
+        """fetches the pose data from the pose estimation table
+
+        Returns
+        -------
+        pd.DataFrame
+            pose data
+        """
+        key = self.fetch1("KEY")
+        return (DLCPoseEstimation & key).fetch_dataframe()
+
+    def fetch_video_path(self):
+        """Return the video path for pose estimate
+
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        return (DLCPoseEstimationSelection & self).fetch1("video_path")
 
 
 @schema

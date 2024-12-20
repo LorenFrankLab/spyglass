@@ -7,6 +7,7 @@ import numpy as np
 from datajoint.utils import to_camel_case
 from pandas import DataFrame
 
+from spyglass.common import get_position_interval_epoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
@@ -250,6 +251,18 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
             self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
         )
 
+    def fetch_pose_dataframe(self):
+        raise NotImplementedError("No pose data for TrodesPosV1")
+
+    def fetch_video_path(self):
+        nwb_file_name, interval_list_name = self.fetch1(
+            "nwb_file_name", "interval_list_name"
+        )
+        epoch = get_position_interval_epoch(nwb_file_name, interval_list_name)
+        return get_video_info({"nwb_file_name": nwb_file_name, "epoch": epoch})[
+            0
+        ]
+
 
 @schema
 class TrodesPosVideo(SpyglassMixin, dj.Computed):
@@ -287,13 +300,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
+        epoch = get_position_interval_epoch(
+            key["nwb_file_name"], key["interval_list_name"]
         )
 
         (
