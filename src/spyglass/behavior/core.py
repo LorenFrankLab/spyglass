@@ -1,5 +1,5 @@
 from pathlib import Path
-from uuid import uuid4
+from typing import List
 
 import datajoint as dj
 import numpy as np
@@ -8,7 +8,7 @@ import pandas as pd
 from spyglass.position.position_merge import PositionOutput
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
 
-schema = dj.schema("behavior_core_v1")
+schema = dj.schema("behavior_v1_core")
 
 
 @schema
@@ -28,8 +28,8 @@ class PoseGroup(SpyglassMixin, dj.Manual):
     def create_group(
         self,
         group_name: str,
-        merge_ids: list[str],
-        bodyparts: list[str] = None,
+        merge_ids: List[str],
+        bodyparts: List[str] = None,
     ) -> None:
         """Create a group of pose information
 
@@ -37,9 +37,9 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         ----------
         group_name : str
             Name of the group
-        keys : list[dict]
+        keys : List[dict]
             list of keys from PoseOutput to include in the group
-        bodyparts : list[str], optional
+        bodyparts : List[str], optional
             body parts to include in the group, by default None includes all from every set
         """
         group_key = {
@@ -84,10 +84,9 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         bodyparts = (self & key).fetch1("bodyparts")
         datasets = {}
         for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id"):
-            video_name = (
-                Path((PositionOutput & merge_key).fetch_video_name()).stem
-                + ".mp4"
-            )
+            video_name = Path(
+                (PositionOutput & merge_key).fetch_video_name()
+            ).name
             bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
             if bodyparts is None:
                 bodyparts = (
@@ -109,7 +108,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
 
         Returns
         -------
-        list[Path]
+        List[Path]
             list of video paths
         """
         if key is None:
@@ -122,8 +121,8 @@ class PoseGroup(SpyglassMixin, dj.Manual):
 
 def format_dataset_for_moseq(
     datasets: dict[str, pd.DataFrame],
-    bodyparts: list[str],
-    coordinate_axes: list[str] = ["x", "y"],
+    bodyparts: List[str],
+    coordinate_axes: List[str] = ["x", "y"],
 ):
     """format pose datasets for MoSeq
 
@@ -131,8 +130,10 @@ def format_dataset_for_moseq(
     ----------
     datasets : dict[str, pd.DataFrame]
         dictionary of video name to pose dataset
-    bodyparts : list[str]
+    bodyparts : List[str]
         list of body parts to include in the pose
+    coordinate_axes : List[str], optional
+        list of coordinate axes to include, by default ["x", "y"]
 
     Returns
     -------
@@ -145,17 +146,12 @@ def format_dataset_for_moseq(
     confidences = {}
 
     for video_name, bodyparts_df in datasets.items():
-        coordinates_i = None
-        confidences_i = None
+        num_frames = len(bodyparts_df[bodyparts[0]])
+        coordinates_i = np.empty((num_frames, num_keypoints, num_dimensions))
+        confidences_i = np.empty((num_frames, num_keypoints))
+
         for i, bodypart in enumerate(bodyparts):
             part_df = bodyparts_df[bodypart]
-            print(len(part_df))
-            if coordinates_i is None:
-                num_frames = len(part_df)
-                coordinates_i = np.empty(
-                    (num_frames, num_keypoints, num_dimensions)
-                )
-                confidences_i = np.empty((num_frames, num_keypoints))
             coordinates_i[:, i, :] = part_df[coordinate_axes].values
             confidences_i[:, i] = part_df["likelihood"].values
         coordinates[video_name] = coordinates_i
@@ -164,7 +160,7 @@ def format_dataset_for_moseq(
 
 
 def results_to_df(results):
-    for key in results.keys():
+    for key in results:
         column_names, data = [], []
 
         if "syllable" in results[key].keys():

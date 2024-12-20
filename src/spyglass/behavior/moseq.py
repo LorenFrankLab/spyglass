@@ -6,7 +6,7 @@ import datajoint as dj
 import keypoint_moseq as kpms
 
 from spyglass.common import AnalysisNwbfile
-from spyglass.position.position_merge import PoseOutput
+from spyglass.position.position_merge import PositionOutput
 from spyglass.utils import SpyglassMixin
 
 from .core import PoseGroup, format_dataset_for_moseq, results_to_df
@@ -155,28 +155,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         model_name = self._make_model_name(key)
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
-            # fit pca of data
-            pca = kpms.fit_pca(**data, **config())
-            kpms.save_pca(pca, project_dir)
-
-            # create the model
-            model = kpms.init_model(data, pca=pca, **config())
-            # run the autoregressive fit on the model
-            num_ar_iters = model_params["num_ar_iters"]
-            model, model_name = kpms.fit_model(
-                model,
-                data,
-                metadata,
-                project_dir,
-                ar_only=True,
-                num_iters=num_ar_iters,
-                model_name=model_name + "_ar",
+            model, model_name = self._initialize_model(
+                data, metadata, project_dir, model_name, config, model_params
             )
-            epochs_trained = num_ar_iters
-            # load model checkpoint
-            # model, data, metadata, current_iter = kpms.load_checkpoint(
-            #     project_dir, model_name, iteration=num_ar_iters
-            # )
+            epochs_trained = model_params["num_ar_iters"]
 
         else:
             # begin training from an existing model
@@ -219,8 +201,36 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         if key is None:
             key = {}
         key = (MoseqModelSelection & key).fetch1("KEY")
-        key_string = "_".join(key.values())
-        return hashlib.sha1(key_string.encode("utf-8")).hexdigest()[:10]
+        return dj.hash.key_hash(key)
+
+    @staticmethod
+    def _initialize_model(
+        data, metadata, project_dir, model_name, config, model_params
+    ):
+        """Method to initialize a model. Creates model and runs initional ARHMM fit
+
+        Returns
+        -------
+        tuple
+            model, model_name
+        """
+        # fit pca of data
+        pca = kpms.fit_pca(**data, **config())
+        kpms.save_pca(pca, project_dir)
+
+        # create the model
+        model = kpms.init_model(data, pca=pca, **config())
+        # run the autoregressive fit on the model
+        num_ar_iters = model_params["num_ar_iters"]
+        return kpms.fit_model(
+            model,
+            data,
+            metadata,
+            project_dir,
+            ar_only=True,
+            num_iters=num_ar_iters,
+            model_name=model_name + "_ar",
+        )
 
     def analyze_pca(self, key: dict = None):
         """Method to analyze the PCA of a model
@@ -263,7 +273,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
 @schema
 class MoseqSyllableSelection(SpyglassMixin, dj.Manual):
     definition = """
-    -> PoseOutput.proj(pose_merge_id='merge_id')
+    -> PositionOutput.proj(pose_merge_id='merge_id')
     -> MoseqModel
     ---
     num_iters = 500: int
@@ -280,7 +290,7 @@ class MoseqSyllableSelection(SpyglassMixin, dj.Manual):
             return
         model_bodyparts = (PoseGroup & key).fetch1("bodyparts")
         merge_key = {"merge_id": key["pose_merge_id"]}
-        bodyparts_df = (PoseOutput & merge_key).fetch_dataframe()
+        bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
         data_bodyparts = bodyparts_df.keys().get_level_values(0).unique().values
         for bodypart in model_bodyparts:
             if bodypart not in data_bodyparts:
