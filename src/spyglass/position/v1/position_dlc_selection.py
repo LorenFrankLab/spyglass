@@ -305,7 +305,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         key = self.fetch1("KEY")
         return (DLCPoseEstimation & key).fetch_dataframe()
 
-    def fetch_video_name(self):
+    def fetch_video_path(self):
         """Return the video path for pose estimate
 
         Returns

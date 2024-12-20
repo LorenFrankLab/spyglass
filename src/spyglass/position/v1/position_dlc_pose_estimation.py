@@ -409,7 +409,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             axis=1,
         )
 
-    def fetch_video_name(self):
+    def fetch_video_path(self):
         """Return the video path for pose estimate
 
         Returns

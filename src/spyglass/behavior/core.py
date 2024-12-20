@@ -85,7 +85,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         datasets = {}
         for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id"):
             video_name = Path(
-                (PositionOutput & merge_key).fetch_video_name()
+                (PositionOutput & merge_key).fetch_video_path()
             ).name
             bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
             if bodyparts is None:
@@ -114,7 +114,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         if key is None:
             key = {}
         return [
-            Path((PositionOutput & merge_key).fetch_video_name())
+            Path((PositionOutput & merge_key).fetch_video_path())
             for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id")
         ]
 

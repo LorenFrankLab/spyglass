@@ -91,7 +91,7 @@ class PositionOutput(_Merge, SpyglassMixin):
         )
         return query.fetch_pose_dataframe()
 
-    def fetch_video_name(self):
+    def fetch_video_parh(self):
         key = self.merge_restrict(self.proj()).proj()
         query = (
             source_class_dict[
@@ -99,4 +99,4 @@ class PositionOutput(_Merge, SpyglassMixin):
             ]
             & key
         )
-        return query.fetch_video_name()
+        return query.fetch_video_path()

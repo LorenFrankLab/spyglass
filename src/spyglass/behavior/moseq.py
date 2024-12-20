@@ -322,7 +322,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         num_iters = (MoseqSyllableSelection & key).fetch1("num_iters")
 
         # load data and format for moseq
-        video_path = (PoseOutput & merge_key).fetch_video_name()
+        video_path = (PoseOutput & merge_key).fetch_video_path()
         video_name = Path(video_path).stem + ".mp4"
         bodyparts_df = (PoseOutput & merge_key).fetch_dataframe()
 
