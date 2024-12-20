@@ -1,4 +1,3 @@
-import hashlib
 import os
 from pathlib import Path
 
@@ -322,9 +321,9 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         num_iters = (MoseqSyllableSelection & key).fetch1("num_iters")
 
         # load data and format for moseq
-        video_path = (PoseOutput & merge_key).fetch_video_path()
+        video_path = (PositionOutput & merge_key).fetch_video_path()
         video_name = Path(video_path).stem + ".mp4"
-        bodyparts_df = (PoseOutput & merge_key).fetch_dataframe()
+        bodyparts_df = (PositionOutput & merge_key).fetch_pose_dataframe()
 
         if bodyparts is None:
             bodyparts = bodyparts_df.keys().get_level_values(0).unique().values
@@ -348,10 +347,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         results_df.index = bodyparts_df.index
 
         # save results into a nwbfile
-        nwb_file_name = PoseOutput.merge_get_parent(merge_key).fetch1(
-            "nwb_file_name"
-        )
-        nwb_file_name = PoseOutput.merge_get_parent(merge_key).fetch1(
+        nwb_file_name = PositionOutput.merge_get_parent(merge_key).fetch1(
             "nwb_file_name"
         )
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)

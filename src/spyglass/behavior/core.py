@@ -38,7 +38,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         group_name : str
             Name of the group
         keys : List[dict]
-            list of keys from PoseOutput to include in the group
+            list of keys from PositionOutput to include in the group
         bodyparts : List[str], optional
             body parts to include in the group, by default None includes all from every set
         """
