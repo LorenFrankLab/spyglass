@@ -1,18 +1,6 @@
 # Change Log
 
-## [0.5.4] (Unreleased)
-
-### Release Notes
-
-<!-- Running draft to be removed immediately prior to release. -->
-
-```python
-import datajoint as dj
-from spyglass.linearization.v1.main import TrackGraph
-
-TrackGraph.alter()  # Add edge map parameter
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-```
+## [0.5.4] (December 20, 2024)
 
 ### Infrastructure
 
@@ -44,7 +32,8 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
 - Allow part restriction `SpyglassMixinPart.delete` #1192
-- Move cleanup of `IntervalList` orphan entries to cron job cleanup process #1195
+- Move cleanup of `IntervalList` orphan entries to cron job cleanup process
+    #1195
 - Add mixin method `get_fully_defined_key` #1198
 
 ### Pipelines
