@@ -1,6 +1,5 @@
 import bottleneck
 import datajoint as dj
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pynwb
@@ -15,7 +14,11 @@ from position_tools import (
 from position_tools.core import gaussian_smooth
 from tqdm import tqdm_notebook as tqdm
 
-from spyglass.common.common_behav import RawPosition, VideoFile
+from spyglass.common.common_behav import (
+    RawPosition,
+    VideoFile,
+    get_position_interval_epoch,
+)
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, test_mode, video_dir
@@ -553,13 +556,8 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         ).fetch1_dataframe()
 
         logger.info("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
+        epoch = get_position_interval_epoch(
+            key["nwb_file_name"], key["interval_list_name"]
         )
         video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
         io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
