@@ -23,7 +23,11 @@ class MoseqModelParams(SpyglassMixin, dj.Manual):
     """
 
     def make_training_extension_params(
-        self, model_key:dict, num_epochs:int, new_name:str=None, skip_duplicates:bool=False
+        self,
+        model_key: dict,
+        num_epochs: int,
+        new_name: str = None,
+        skip_duplicates: bool = False,
     ):
         """Method to create a new set of model parameters for extending training
 
@@ -37,7 +41,7 @@ class MoseqModelParams(SpyglassMixin, dj.Manual):
             name for the new model parameters, by default None
         skip_duplicates : bool, optional
             whether to skip duplicates, by default False
-            
+
         Returns
         -------
         dict
