@@ -6,6 +6,8 @@
 reproducible analysis of neuroscience data and sharing of the results with
 collaborators and the broader community.
 
+## Features
+
 Features of Spyglass include:
 
 - **Standardized data storage** - Spyglass uses the open-source
@@ -48,7 +50,7 @@ Features of Spyglass include:
 
 ## Getting Started
 
-This site hosts both [installation instructions](./installation.md) and
+This site hosts both installation instructions as part of our
 [tutorials](./notebooks/index.md) to help you get started with Spyglass. We
 recommend running the notebooks yourself. They can be downloaded from GitHub
 [here](https://github.com/LorenFrankLab/spyglass).
@@ -56,22 +58,30 @@ recommend running the notebooks yourself. They can be downloaded from GitHub
 ## Diving Deeper
 
 The [API Reference](./api/index.md) provides a detailed description of all the
-tables and class functions in Spyglass via python docstrings. Potential
-contributors should also read the [Developer Guide](./contribute.md). Those
-interested in in hosting a Spyglass instance for their own data should read the
-[database management guide](./misc/database_management.md).
+tables and class functions in Spyglass via Python docstrings.
 
-We have a series of additional docs under the [misc](./misc/index.md) folder
-that may be helpful. Our [changelog](./CHANGELOG.md) highlights the changes that
-have been made to Spyglass over time and the [copyright](./LICENSE.md) page
-contains license information.
+To highlight some of the key features of Spyglass and some features added to
+DataJoint, we have a series of articles on Spyglass
+[features](./Features/index.md).
+
+Our [developer guide](./ForDevelopers/index.md) provides an overview of
+development practices for either contributing to the project itself or setting
+up custom pipelines for your own analysis.
+
+Our [changelog](./CHANGELOG.md) highlights the changes that have been made to
+Spyglass over time and the [copyright](./LICENSE.md) page contains license
+information.
 
 ## Citing Spyglass
 
-> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie, A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C., Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable neuroscience research. bioRxiv. [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295 ).
+> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie,
+> A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C.,
+> Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Tritt, A., Rübel, O.,
+> Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank,
+> L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable
+> neuroscience research. bioRxiv.
+> [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295).
 
 *\* Equal contribution*
 
 See paper related code [here](https://github.com/LorenFrankLab/spyglass-paper).
-
-<!-- TODO: Convert ccf file and insert here  -->

@@ -1,5 +1,6 @@
-"""Pipeline for decoding the animal's mental position and some category of interest
-from unclustered spikes and spike waveform features. See [1] for details.
+"""Pipeline for decoding the animal's mental position and some category of
+interest from unclustered spikes and spike waveform features. See [1] for
+details.
 
 References
 ----------
@@ -36,8 +37,16 @@ try:
     from replay_trajectory_classification.initial_conditions import (
         UniformInitialConditions,
     )
-except ImportError as e:
+except (ImportError, ModuleNotFoundError) as e:
+    (
+        _DEFAULT_CONTINUOUS_TRANSITIONS,
+        _DEFAULT_ENVIRONMENT,
+        _DEFAULT_SORTED_SPIKES_MODEL_KWARGS,
+        DiagonalDiscrete,
+        UniformInitialConditions,
+    ) = [None] * 5
     logger.warning(e)
+
 from tqdm.auto import tqdm
 
 from spyglass.common.common_behav import (
@@ -46,6 +55,7 @@ from spyglass.common.common_behav import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
+from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.decoding.v0.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -53,6 +63,10 @@ from spyglass.decoding.v0.core import (
 from spyglass.decoding.v0.dj_decoder_conversion import (
     convert_classes_to_dict,
     restore_classes,
+)
+from spyglass.decoding.v0.utils import (
+    get_time_bins_from_interval,
+    make_default_decoding_params,
 )
 from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
@@ -135,6 +149,15 @@ class UnitMarks(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarks table.
+
+        1. Fetch parameters, units, and recording from MarkParameters,
+            CuratedSpikeSorting, and CuratedRecording tables respectively.
+        2. Uses spikeinterface to extract waveforms for each unit.
+        3. Optionally calculates the peak amplitude of the waveform and
+            thresholds the waveform.
+        4. Saves the marks as a TimeSeries object in a new AnalysisNwbfile.
+        """
         # create a new AnalysisNwbfile and a timeseries for the marks and save
         key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
@@ -191,9 +214,10 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
             marks = np.concatenate(
                 [
-                    UnitMarks._get_peak_amplitude(
-                        waveform=waveform_extractor.get_waveforms(unit_id),
+                    _get_peak_amplitude(
+                        waveform_extractor=waveform_extractor,
                         peak_sign=peak_sign,
+                        unit_id=unit_id,
                         estimate_peak_time=estimate_peak_time,
                     )
                     for unit_id in nwb_units.index
@@ -230,6 +254,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
+        """Fetches the marks as a list of pandas dataframes"""
         return [self._convert_to_dataframe(data) for data in self.fetch_nwb()]
 
     @staticmethod
@@ -242,48 +267,6 @@ class UnitMarks(SpyglassMixin, dj.Computed):
             index=pd.Index(nwb_data["marks"].timestamps, name="time"),
             columns=columns,
         )
-
-    @staticmethod
-    def _get_peak_amplitude(
-        waveform: np.array,
-        peak_sign: str = "neg",
-        estimate_peak_time: bool = False,
-    ) -> np.array:
-        """Returns the amplitudes of all channels at the time of the peak.
-
-        Amplitude across channels.
-
-        Parameters
-        ----------
-        waveform : np.array
-            array-like, shape (n_spikes, n_time, n_channels)
-        peak_sign : str, optional
-            One of 'pos', 'neg', 'both'. Direction of the peak in the waveform
-        estimate_peak_time : bool, optional
-            Find the peak times for each spike because some spikesorters do not
-            align the spike time (at index n_time // 2) to the peak
-
-        Returns
-        -------
-        peak_amplitudes : np.array
-            array-like, shape (n_spikes, n_channels)
-
-        """
-        if estimate_peak_time:
-            if peak_sign == "neg":
-                peak_inds = np.argmin(np.min(waveform, axis=2), axis=1)
-            elif peak_sign == "pos":
-                peak_inds = np.argmax(np.max(waveform, axis=2), axis=1)
-            elif peak_sign == "both":
-                peak_inds = np.argmax(np.max(np.abs(waveform), axis=2), axis=1)
-
-            # Get mode of peaks to find the peak time
-            values, counts = np.unique(peak_inds, return_counts=True)
-            spike_peak_ind = values[counts.argmax()]
-        else:
-            spike_peak_ind = waveform.shape[1] // 2
-
-        return waveform[:, spike_peak_ind]
 
     @staticmethod
     def _threshold(
@@ -351,6 +334,11 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the UnitMarksIndicator table.
+
+        Bin spike times and associated spike waveform features according to the
+        sampling rate.
+        """
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 
@@ -360,7 +348,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
         marks_df = (UnitMarks & key).fetch1_dataframe()
 
-        time = self.get_time_bins_from_interval(interval_times, sampling_rate)
+        time = get_time_bins_from_interval(interval_times, sampling_rate)
 
         # Bin marks into time bins. No spike bins will have NaN
         marks_df = marks_df.loc[time.min() : time.max()]
@@ -388,16 +376,6 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
-
-    @staticmethod
-    def get_time_bins_from_interval(
-        interval_times: np.array, sampling_rate: int
-    ) -> np.array:
-        """Picks the superset of the interval"""
-        start_time, end_time = interval_times[0][0], interval_times[-1][-1]
-        n_samples = int(np.ceil((end_time - start_time) * sampling_rate)) + 1
-
-        return np.linspace(start_time, end_time, n_samples)
 
     @staticmethod
     def plot_all_marks(
@@ -501,72 +479,6 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
         )
 
 
-def make_default_decoding_parameters_cpu() -> tuple[dict, dict, dict]:
-    """Default parameters for decoding on CPU
-
-    Returns
-    -------
-    classifier_parameters : dict
-    fit_parameters : dict
-    predict_parameters : dict
-    """
-
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        clusterless_algorithm="multiunit_likelihood_integer",
-        clusterless_algorithm_params=_DEFAULT_CLUSTERLESS_MODEL_KWARGS,
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": False,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
-def make_default_decoding_parameters_gpu() -> tuple[dict, dict, dict]:
-    """Default parameters for decoding on GPU
-
-    Returns
-    -------
-    classifier_parameters : dict
-    fit_parameters : dict
-    predict_parameters : dict
-    """
-
-    classifier_parameters = dict(
-        environments=[_DEFAULT_ENVIRONMENT],
-        observation_models=None,
-        continuous_transition_types=_DEFAULT_CONTINUOUS_TRANSITIONS,
-        discrete_transition_type=DiagonalDiscrete(0.98),
-        initial_conditions_type=UniformInitialConditions(),
-        infer_track_interior=True,
-        clusterless_algorithm="multiunit_likelihood_integer_gpu",
-        clusterless_algorithm_params={
-            "mark_std": 24.0,
-            "position_std": 6.0,
-        },
-    )
-
-    predict_parameters = {
-        "is_compute_acausal": True,
-        "use_gpu": True,
-        "state_names": ["Continuous", "Fragmented"],
-    }
-
-    fit_parameters = dict()
-
-    return classifier_parameters, fit_parameters, predict_parameters
-
-
 @schema
 class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     """Decodes animal's mental position.
@@ -584,34 +496,12 @@ class ClusterlessClassifierParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self) -> None:
-        """Insert the default parameter set"""
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_cpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_cpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
-            skip_duplicates=True,
-        )
-
-        (
-            classifier_parameters,
-            fit_parameters,
-            predict_parameters,
-        ) = make_default_decoding_parameters_gpu()
-        self.insert1(
-            {
-                "classifier_param_name": "default_decoding_gpu",
-                "classifier_params": classifier_parameters,
-                "fit_params": fit_parameters,
-                "predict_params": predict_parameters,
-            },
+        """Insert the default parameter sets"""
+        self.insert(
+            [
+                make_default_decoding_params(clusterless=True),
+                make_default_decoding_params(clusterless=True, use_gpu=True),
+            ],
             skip_duplicates=True,
         )
 
@@ -646,27 +536,28 @@ def get_decoding_data_for_epoch(
     valid_slices : list[slice]
     """
 
-    valid_ephys_position_times_by_epoch = (
-        get_valid_ephys_position_times_by_epoch(nwb_file_name)
+    valid_slices = convert_valid_times_to_slice(
+        get_valid_ephys_position_times_by_epoch(nwb_file_name)[
+            interval_list_name
+        ]
     )
-    valid_ephys_position_times = valid_ephys_position_times_by_epoch[
-        interval_list_name
-    ]
-    valid_slices = convert_valid_times_to_slice(valid_ephys_position_times)
-    position_interval_name = (
-        convert_epoch_interval_name_to_position_interval_name(
+
+    # position interval
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    pos_interval_dict = dict(
+        nwb_dict,
+        interval_list_name=convert_epoch_interval_name_to_position_interval_name(
             {
-                "nwb_file_name": nwb_file_name,
+                **nwb_dict,
                 "interval_list_name": interval_list_name,
             }
-        )
+        ),
     )
 
     position_info = (
         IntervalPositionInfo()
         & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": position_interval_name,
+            **pos_interval_dict,
             "position_info_param_name": position_info_param_name,
         }
     ).fetch1_dataframe()
@@ -676,14 +567,7 @@ def get_decoding_data_for_epoch(
     )
 
     marks = (
-        (
-            UnitMarksIndicator()
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": position_interval_name,
-                **additional_mark_keys,
-            }
-        )
+        (UnitMarksIndicator() & {**pos_interval_dict, **additional_mark_keys})
     ).fetch_xarray()
 
     marks = xr.concat(
@@ -719,6 +603,7 @@ def get_data_for_multiple_epochs(
     environment_labels = []
 
     for epoch in epoch_names:
+        logger.info(epoch)
         data.append(
             get_decoding_data_for_epoch(
                 nwb_file_name,

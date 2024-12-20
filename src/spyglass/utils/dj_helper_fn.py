@@ -1,15 +1,17 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 
 import inspect
+import multiprocessing.pool
 import os
 from pathlib import Path
-from typing import List, Type, Union
+from typing import Iterable, List, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
 import h5py
 import numpy as np
-from datajoint.user_tables import UserTable
+from datajoint.table import Table
+from datajoint.user_tables import TableMeta, UserTable
 
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
@@ -30,6 +32,40 @@ PERIPHERAL_TABLES = [
     "`common_nwbfile`.`nwbfile_kachery`",
     "`common_nwbfile`.`nwbfile`",
 ]
+
+
+def ensure_names(
+    table: Union[str, Table, Iterable] = None, force_list: bool = False
+) -> Union[str, List[str], None]:
+    """Ensure table is a string.
+
+    Parameters
+    ----------
+    table : Union[str, Table, Iterable], optional
+        Table to ensure is a string, by default None. If passed as iterable,
+        will ensure all elements are strings.
+    force_list : bool, optional
+        Force the return to be a list, by default False, only used if input is
+        iterable.
+
+    Returns
+    -------
+    Union[str, List[str], None]
+        Table as a string or list of strings.
+    """
+    # is iterable (list, set, set) but not a table/string
+    is_collection = isinstance(table, Iterable) and not isinstance(
+        table, (Table, TableMeta, str)
+    )
+    if force_list and not is_collection:
+        return [ensure_names(table)]
+    if table is None:
+        return None
+    if isinstance(table, str):
+        return table
+    if is_collection:
+        return [ensure_names(t) for t in table]
+    return getattr(table, "full_table_name", None)
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -88,7 +124,7 @@ def _subclass_factory(
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):
-        logger.warn(
+        logger.warning(
             "Deprecation: this class has been moved out of "
             + f"{old_module}\n"
             + f"\t{old_name} -> {new_module}.{new_class.__name__}"
@@ -141,7 +177,7 @@ def dj_replace(original_table, new_values, key_column, replace_column):
     return original_table
 
 
-def get_fetching_table_from_stack(stack):
+def get_all_tables_in_stack(stack):
     """Get all classes from a stack of tables."""
     classes = set()
     for frame_info in stack:
@@ -152,11 +188,13 @@ def get_fetching_table_from_stack(stack):
             if (name := obj.full_table_name) in PERIPHERAL_TABLES:
                 continue  # skip common_nwbfile tables
             classes.add(name)
+    return classes
+
+
+def get_fetching_table_from_stack(stack):
+    """Get all classes from a stack of tables."""
+    classes = get_all_tables_in_stack(stack)
     if len(classes) > 1:
-        logger.warn(
-            f"Multiple classes found in stack: {classes}. "
-            "Please submit a bug report with the snippet used."
-        )
         classes = None  # predict only one but not sure, so return None
     return next(iter(classes)) if classes else None
 
@@ -185,6 +223,7 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         Function to get the absolute path to the NWB file.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
@@ -196,15 +235,25 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     }
     file_name_str, file_path_fn = tbl_map[which]
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
-        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
-    if which == "analysis":  # log access of analysis files to log table
-        AnalysisNwbfile().increment_access(
-            nwb_files, table=get_fetching_table_from_stack(inspect.stack())
-        )
+    # Disabled #1024
+    # if which == "analysis":  # log access of analysis files to log table
+    #     AnalysisNwbfile().increment_access(
+    #         nwb_files, table=get_fetching_table_from_stack(inspect.stack())
+    #     )
 
     return nwb_files, file_path_fn
 
@@ -231,6 +280,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.utils.dj_mixin import SpyglassMixin
+
     kwargs["as_dict"] = True  # force return as dictionary
 
     tbl, attr_name = nwb_master
@@ -252,7 +303,17 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+    query_table = query_expression.join(
+        tbl.proj(nwb2load_filepath=attr_name), **arg
+    )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
@@ -261,7 +322,10 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # skip the filepath checksum if streamed from Dandi
             rec_dict["nwb2load_filepath"] = file_path
             continue
-        rec_dict["nwb2load_filepath"] = (query_table & rec_dict).fetch1(
+
+        # Full dict caused issues with dlc tables using dicts in secondary keys
+        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
 
@@ -295,6 +359,7 @@ def _get_nwb_object(objects, object_id):
 
 
 def get_child_tables(table):
+    """Get all child tables of a given table."""
     table = table() if inspect.isclass(table) else table
     return [
         dj.FreeTable(
@@ -312,6 +377,7 @@ def get_child_tables(table):
 def update_analysis_for_dandi_standard(
     filepath: str,
     age: str = "P4M/P8M",
+    resolve_external_table: bool = True,
 ):
     """Function to resolve common nwb file format errors within the database
 
@@ -321,6 +387,9 @@ def update_analysis_for_dandi_standard(
         abs path to the file to edit
     age : str, optional
         age to assign animal if missing, by default "P4M/P8M"
+    resolve_external_table : bool, optional
+        whether to update the external table. Set False if editing file
+        outside the database, by default True
     """
     from spyglass.common import LabMember
 
@@ -331,7 +400,7 @@ def update_analysis_for_dandi_standard(
     # edit the file
     with h5py.File(filepath, "a") as file:
         sex_value = file["/general/subject/sex"][()].decode("utf-8")
-        if not sex_value in ["Female", "Male", "F", "M", "O", "U"]:
+        if sex_value not in ["Female", "Male", "F", "M", "O", "U"]:
             raise ValueError(f"Unexpected value for sex: {sex_value}")
 
         if len(sex_value) > 1:
@@ -345,18 +414,21 @@ def update_analysis_for_dandi_standard(
         species_value = file["/general/subject/species"][()].decode("utf-8")
         if species_value == "Rat":
             new_species_value = "Rattus norvegicus"
-            print(
-                f"Adjusting subject species from '{species_value}' to '{new_species_value}'."
+            logger.info(
+                f"Adjusting subject species from '{species_value}' to "
+                + f"'{new_species_value}'."
             )
             file["/general/subject/species"][()] = new_species_value
 
-        if not (
+        elif not (
             len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
         ):
             raise ValueError(
-                f"Dandi upload requires species either be in Latin binomial form (e.g., 'Mus musculus' and 'Homo sapiens')"
-                + "or be a NCBI taxonomy link (e.g., 'http://purl.obolibrary.org/obo/NCBITaxon_280675')."
-                + f"\n Please update species value of: {species_value}"
+                "Dandi upload requires species either be in Latin binomial form"
+                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
+                + "taxonomy link (e.g., "
+                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
+                + f"Please update species value of: {species_value}"
             )
 
         # add subject age dataset "P4M/P8M"
@@ -375,12 +447,15 @@ def update_analysis_for_dandi_standard(
         if experimenter_value != new_experimenter_value:
             new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
             logger.info(
-                f"Adjusting experimenter from {experimenter_value} to {new_experimenter_value}."
+                f"Adjusting experimenter from {experimenter_value} to "
+                + f"{new_experimenter_value}."
             )
             file["/general/experimenter"][:] = new_experimenter_value
 
     # update the datajoint external store table to reflect the changes
-    _resolve_external_table(filepath, file_name)
+    if resolve_external_table:
+        location = "raw" if filepath.endswith("_.nwb") else "analysis"
+        _resolve_external_table(filepath, file_name, location)
 
 
 def dandi_format_names(experimenter: List) -> List:
@@ -463,5 +538,63 @@ def make_file_obj_id_unique(nwb_path: str):
     new_id = str(uuid4())
     with h5py.File(nwb_path, "a") as f:
         f.attrs["object_id"] = new_id
-    _resolve_external_table(nwb_path, nwb_path.split("/")[-1])
+    location = "raw" if nwb_path.endswith("_.nwb") else "analysis"
+    _resolve_external_table(
+        nwb_path, nwb_path.split("/")[-1], location=location
+    )
     return new_id
+
+
+def populate_pass_function(value):
+    """Pass function for parallel populate.
+
+    Note: To avoid pickling errors, the table must be passed by class,
+        NOT by instance.
+    Note: This function must be defined in the global namespace.
+
+    Parameters
+    ----------
+    value : (table, key, kwargs)
+        Class of table to populate, key to populate, and kwargs for populate
+    """
+    table, key, kwargs = value
+    return table.populate(key, **kwargs)
+
+
+class NonDaemonPool(multiprocessing.pool.Pool):
+    """Non-daemonized pool for multiprocessing.
+
+    Used to create a pool of non-daemonized processes, which are required for
+    parallel populate operations in DataJoint.
+    """
+
+    # Explicitly set the start method to 'fork'
+    # Allows the pool to be used in MacOS, where the default start method is 'spawn'
+    multiprocessing.set_start_method("fork", force=True)
+
+    def Process(self, *args, **kwds):
+        """Return a non-daemonized process."""
+        proc = super(NonDaemonPool, self).Process(*args, **kwds)
+
+        class NonDaemonProcess(proc.__class__):
+            """Monkey-patch process to ensure it is never daemonized"""
+
+            @property
+            def daemon(self):
+                return False
+
+            @daemon.setter
+            def daemon(self, val):
+                pass
+
+        proc.__class__ = NonDaemonProcess
+        return proc
+
+
+def str_to_bool(value) -> bool:
+    """Return whether the provided string represents true. Otherwise false."""
+    # Due to distutils equivalent depreciation in 3.10
+    # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
+    if not value:
+        return False
+    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")

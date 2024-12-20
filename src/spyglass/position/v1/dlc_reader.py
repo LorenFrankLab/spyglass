@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import test_mode
 
 
@@ -20,6 +21,7 @@ class PoseEstimation:
         yml_path=None,
         filename_prefix="",
     ):
+        ActivityLog.deprecate_log("dlc_reader: PoseEstimation")
         if dlc_dir is None:
             assert pkl_path and h5_path and yml_path, (
                 'If "dlc_dir" is not provided, then pkl_path, h5_path, and yml_path '
@@ -111,13 +113,15 @@ class PoseEstimation:
 
     @property
     def pkl(self):
+        """Pickle object with metadata about the DLC run."""
         if self._pkl is None:
             with open(self.pkl_path, "rb") as f:
                 self._pkl = pickle.load(f)
         return self._pkl["data"]
 
     @property  # DLC aux_func has a read_config option, but it rewrites the proj path
-    def yml(self):
+    def yml(self) -> dict:
+        """Dictionary of the yaml file DLC metadata."""
         if self._yml is None:
             with open(self.yml_path, "rb") as f:
                 safe_yaml = yaml.YAML(typ="safe", pure=True)
@@ -126,26 +130,31 @@ class PoseEstimation:
 
     @property
     def rawdata(self):
+        """Pandas dataframe of the DLC output from the h5 file."""
         if self._rawdata is None:
             self._rawdata = pd.read_hdf(self.h5_path)
         return self._rawdata
 
     @property
-    def data(self):
+    def data(self) -> dict:
+        """Dictionary of the bodyparts and corresponding dataframe data."""
         if self._data is None:
             self._data = self.reformat_rawdata()
         return self._data
 
     @property
-    def df(self):
+    def df(self) -> pd.DataFrame:
+        """Pandas dataframe of the DLC output from the h5 file."""
         top_level = self.rawdata.columns.levels[0][0]
         return self.rawdata.get(top_level)
 
     @property
-    def body_parts(self):
+    def body_parts(self) -> list[str]:
+        """List of body parts in the DLC output."""
         return self.df.columns.levels[0]
 
-    def reformat_rawdata(self):
+    def reformat_rawdata(self) -> dict:
+        """Reformat the rawdata from the h5 file to a more useful dictionary."""
         error_message = (
             f"Total frames from .h5 file ({len(self.rawdata)}) differs "
             + f'from .pickle ({self.pkl["nframes"]})'

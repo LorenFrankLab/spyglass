@@ -1,4 +1,4 @@
-from time import time
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
@@ -8,15 +8,16 @@ import pynwb
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import (
     _key_to_smooth_func_dict,
+    file_log,
     get_span_start_stop,
+    infer_output_dir,
     interp_pos,
     validate_option,
     validate_smooth_params,
 )
+from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.settings import test_mode
-from spyglass.utils.dj_mixin import SpyglassMixin
-
-from .position_dlc_pose_estimation import DLCPoseEstimation
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_position")
 
@@ -34,11 +35,12 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         whether to smooth the dataset
     smoothing_params : dict
         smoothing_duration : float, default 0.05
-            number of frames to smooth over: sampling_rate*smoothing_duration = num_frames
+            number of frames to smooth over:
+            sampling_rate*smoothing_duration = num_frames
     interp_params : dict
         max_cm_to_interp : int, default 20
-            maximum distance between high likelihood points on either side of a NaN span
-            to interpolate over
+            maximum distance between high likelihood points on either side of a
+            NaN span to interpolate over
     likelihood_thresh : float, default 0.95
         likelihood below which to NaN and interpolate over
     """
@@ -51,6 +53,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_params(cls, params_name: str, params: dict, **kwargs):
+        """Insert parameters for smoothing and interpolation."""
         cls.insert1(
             {"dlc_si_params_name": params_name, "params": params},
             **kwargs,
@@ -58,6 +61,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @classmethod
     def insert_default(cls, **kwargs):
+        """Insert the default set of parameters."""
+
         default_params = {
             "smooth": True,
             "smoothing_params": {
@@ -78,7 +83,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def insert_nan_params(cls, **kwargs):
+    def insert_nan_params(cls, **kwargs) -> None:
+        """Insert parameters that only NaN the data."""
         nan_params = {
             "smooth": False,
             "interpolate": False,
@@ -91,7 +97,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Return the default set of parameters for smoothing calculation."""
         query = cls & {"dlc_si_params_name": "default"}
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -101,7 +108,8 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         return default
 
     @classmethod
-    def get_nan_params(cls):
+    def get_nan_params(cls) -> dict:
+        """Return the parameters that NaN the data."""
         query = cls & {"dlc_si_params_name": "just_nan"}
         if not len(query) > 0:
             cls().insert_nan_params(skip_duplicates=True)
@@ -112,9 +120,11 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def get_available_methods():
+        """Return the available smoothing methods."""
         return _key_to_smooth_func_dict.keys()
 
     def insert1(self, key, **kwargs):
+        """Override insert1 to validate params."""
         params = key.get("params")
         if not isinstance(params, dict):
             raise KeyError("'params' must be a dict in key")
@@ -127,7 +137,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         validate_option(
             params.get("likelihood_thresh"),
             name="likelihood_thresh",
-            types=(float),
+            types=float,
             val_range=(0, 1),
         )
 
@@ -139,8 +149,6 @@ class DLCSmoothInterpSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> DLCPoseEstimation.BodyPart
     -> DLCSmoothInterpParams
-    ---
-
     """
 
 
@@ -158,127 +166,131 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
     dlc_smooth_interp_position_object_id : varchar(80)
     dlc_smooth_interp_info_object_id : varchar(80)
     """
+    log_path = None
 
     def make(self, key):
-        from .dlc_utils import OutputLogger, infer_output_dir
+        """Populate the DLCSmoothInterp table.
 
+        Uses a decorator to log the output to a file.
+
+        1. Fetches the DLC output dataframe from DLCPoseEstimation
+        2. NaNs low likelihood points and interpolates across them
+        3. Optionally smooths and interpolates the data
+        4. Create position and video frame index NWB objects
+        5. Add NWB objects to AnalysisNwbfile
+        6. Insert the key into DLCSmoothInterp.
+        """
+        self.log_path = (
+            Path(infer_output_dir(key=key, makedir=False)) / "log.log"
+        )
+        self._logged_make(key)
+        logger.info("inserted entry into DLCSmoothInterp")
+
+    @file_log(logger, console=False)
+    def _logged_make(self, key):
         METERS_PER_CM = 0.01
 
-        output_dir = infer_output_dir(key=key, makedir=False)
-        with OutputLogger(
-            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
-            path=f"{output_dir.as_posix()}/log.log",
-            print_console=False,
-        ) as logger:
-            AnalysisNwbfile()._creation_times["pre_create_time"] = time()
-            logger.logger.info("-----------------------")
-            idx = pd.IndexSlice
-            # Get labels to smooth from Parameters table
-            params = (DLCSmoothInterpParams() & key).fetch1("params")
-            # Get DLC output dataframe
-            logger.logger.info("fetching Pose Estimation Dataframe")
+        logger.info("-----------------------")
+        idx = pd.IndexSlice
+        # Get labels to smooth from Parameters table
+        params = (DLCSmoothInterpParams() & key).fetch1("params")
+        # Get DLC output dataframe
+        logger.info("fetching Pose Estimation Dataframe")
 
-            bp_key = key.copy()
-            if test_mode:  # during testing, analysis_file not in BodyPart table
-                bp_key.pop("analysis_file_name", None)
+        bp_key = key.copy()
+        if test_mode:  # during testing, analysis_file not in BodyPart table
+            bp_key.pop("analysis_file_name", None)
 
-            dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
+        dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
+        dt = np.median(np.diff(dlc_df.index.to_numpy()))
+        logger.info("Identifying indices to NaN")
+        df_w_nans, bad_inds = nan_inds(
+            dlc_df.copy(),
+            max_dist_between=params["max_cm_between_pts"],
+            likelihood_thresh=params.pop("likelihood_thresh"),
+            inds_to_span=params["num_inds_to_span"],
+        )
+
+        nan_spans = get_span_start_stop(np.where(bad_inds)[0])
+
+        if interp_params := params.get("interpolate"):
+            logger.info("interpolating across low likelihood times")
+            interp_df = interp_pos(df_w_nans.copy(), nan_spans, **interp_params)
+        else:
+            interp_df = df_w_nans.copy()
+            logger.info("skipping interpolation")
+
+        if params.get("smooth"):
+            smooth_params = params.get("smoothing_params")
+            smooth_method = smooth_params.get("smooth_method")
+            smooth_func = _key_to_smooth_func_dict[smooth_method]
+
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
-            sampling_rate = 1 / dt
-            logger.logger.info("Identifying indices to NaN")
-            df_w_nans, bad_inds = nan_inds(
-                dlc_df.copy(),
-                params["max_cm_between_pts"],
-                likelihood_thresh=params.pop("likelihood_thresh"),
-                inds_to_span=params["num_inds_to_span"],
+            logger.info(f"Smoothing using method: {smooth_method}")
+            smooth_df = smooth_func(
+                interp_df,
+                smoothing_duration=smooth_params.get("smoothing_duration"),
+                sampling_rate=1 / dt,
+                **params["smoothing_params"],
             )
+        else:
+            smooth_df = interp_df.copy()
+            logger.info("skipping smoothing")
 
-            nan_spans = get_span_start_stop(np.where(bad_inds)[0])
-            if params["interpolate"]:
-                logger.logger.info("interpolating across low likelihood times")
-                interp_df = interp_pos(
-                    df_w_nans.copy(), nan_spans, **params["interp_params"]
-                )
-            else:
-                interp_df = df_w_nans.copy()
-                logger.logger.info("skipping interpolation")
-            if params["smooth"]:
-                if "smoothing_duration" in params["smoothing_params"]:
-                    smoothing_duration = params["smoothing_params"].pop(
-                        "smoothing_duration"
-                    )
-                dt = np.median(np.diff(dlc_df.index.to_numpy()))
-                sampling_rate = 1 / dt
-                logger.logger.info("smoothing position")
-                smooth_func = _key_to_smooth_func_dict[
-                    params["smoothing_params"]["smooth_method"]
-                ]
-                logger.logger.info(
-                    "Smoothing using method: %s",
-                    str(params["smoothing_params"]["smooth_method"]),
-                )
-                smooth_df = smooth_func(
-                    interp_df,
-                    smoothing_duration=smoothing_duration,
-                    sampling_rate=sampling_rate,
-                    **params["smoothing_params"],
-                )
-            else:
-                smooth_df = interp_df.copy()
-                logger.logger.info("skipping smoothing")
-            final_df = smooth_df.drop(["likelihood"], axis=1)
-            final_df = final_df.rename_axis("time").reset_index()
-            position_nwb_data = (
-                (DLCPoseEstimation.BodyPart() & bp_key)
-                .fetch_nwb()[0]["dlc_pose_estimation_position"]
-                .get_spatial_series()
-            )
-            key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
-                key["nwb_file_name"]
-            )
-            # Add dataframe to AnalysisNwbfile
-            nwb_analysis_file = AnalysisNwbfile()
-            position = pynwb.behavior.Position()
-            video_frame_ind = pynwb.behavior.BehavioralTimeSeries()
-            logger.logger.info("Creating NWB objects")
-            position.create_spatial_series(
-                name="position",
-                timestamps=final_df.time.to_numpy(),
-                conversion=METERS_PER_CM,
-                data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
-                reference_frame=position_nwb_data.reference_frame,
-                comments=position_nwb_data.comments,
-                description="x_position, y_position",
-            )
-            video_frame_ind.create_timeseries(
-                name="video_frame_ind",
-                timestamps=final_df.time.to_numpy(),
-                data=final_df.loc[:, idx["video_frame_ind"]].to_numpy(),
-                unit="index",
-                comments="no comments",
-                description="video_frame_ind",
-            )
-            key["dlc_smooth_interp_position_object_id"] = (
-                nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=position,
-                )
-            )
-            key["dlc_smooth_interp_info_object_id"] = (
-                nwb_analysis_file.add_nwb_object(
-                    analysis_file_name=key["analysis_file_name"],
-                    nwb_object=video_frame_ind,
-                )
-            )
-            nwb_analysis_file.add(
-                nwb_file_name=key["nwb_file_name"],
+        final_df = smooth_df.drop(["likelihood"], axis=1)
+        final_df = final_df.rename_axis("time").reset_index()
+        position_nwb_data = (
+            (DLCPoseEstimation.BodyPart() & bp_key)
+            .fetch_nwb()[0]["dlc_pose_estimation_position"]
+            .get_spatial_series()
+        )
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            key["nwb_file_name"]
+        )
+
+        # Add dataframe to AnalysisNwbfile
+        nwb_analysis_file = AnalysisNwbfile()
+        position = pynwb.behavior.Position()
+        video_frame_ind = pynwb.behavior.BehavioralTimeSeries()
+        logger.info("Creating NWB objects")
+        position.create_spatial_series(
+            name="position",
+            timestamps=final_df.time.to_numpy(),
+            conversion=METERS_PER_CM,
+            data=final_df.loc[:, idx[("x", "y")]].to_numpy(),
+            reference_frame=position_nwb_data.reference_frame,
+            comments=position_nwb_data.comments,
+            description="x_position, y_position",
+        )
+        video_frame_ind.create_timeseries(
+            name="video_frame_ind",
+            timestamps=final_df.time.to_numpy(),
+            data=final_df.loc[:, idx["video_frame_ind"]].to_numpy(),
+            unit="index",
+            comments="no comments",
+            description="video_frame_ind",
+        )
+        key["dlc_smooth_interp_position_object_id"] = (
+            nwb_analysis_file.add_nwb_object(
                 analysis_file_name=key["analysis_file_name"],
+                nwb_object=position,
             )
-            self.insert1(key)
-            logger.logger.info("inserted entry into DLCSmoothInterp")
-            AnalysisNwbfile().log(key, table=self.full_table_name)
+        )
+        key["dlc_smooth_interp_info_object_id"] = (
+            nwb_analysis_file.add_nwb_object(
+                analysis_file_name=key["analysis_file_name"],
+                nwb_object=video_frame_ind,
+            )
+        )
+        nwb_analysis_file.add(
+            nwb_file_name=key["nwb_file_name"],
+            analysis_file_name=key["analysis_file_name"],
+        )
+        self.insert1(key)
+        AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetch a single dataframe."""
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(
@@ -321,6 +333,7 @@ def nan_inds(
     likelihood_thresh: float,
     inds_to_span: int,
 ):
+    """Replace low likelihood points with NaNs and interpolate over them."""
     idx = pd.IndexSlice
 
     # Could either NaN sub-likelihood threshold inds here and then not consider
@@ -356,6 +369,7 @@ def nan_inds(
             start_point = good_start[int(len(good_start) // 2)]
         else:
             start_point = span[0] + int(span_length(span) // 2)
+
         for ind in range(start_point, span[0], -1):
             if subthresh_inds_mask[ind]:
                 continue
@@ -366,10 +380,11 @@ def nan_inds(
                     ~subthresh_inds_mask[ind + 1 : start_point],
                 )
             )[0]
-            if len(previous_good_inds) >= 1:
-                last_good_ind = ind + 1 + np.min(previous_good_inds)
-            else:
-                last_good_ind = start_point
+            last_good_ind = (
+                ind + 1 + np.min(previous_good_inds)
+                if len(previous_good_inds) > 0
+                else start_point
+            )
             good_x, good_y = dlc_df.loc[
                 idx[dlc_df.index[last_good_ind]], ["x", "y"]
             ]
@@ -437,43 +452,43 @@ def get_good_spans(bad_inds_mask, inds_to_span: int = 50):
     modified_spans : list
         spans that are amended to bridge up to inds_to_span consecutive bad indices
     """
-    good_spans = get_span_start_stop(
-        np.arange(len(bad_inds_mask))[~bad_inds_mask]
-    )
-    if len(good_spans) > 1:
-        modified_spans = []
-        for (start1, stop1), (start2, stop2) in zip(
-            good_spans[:-1], good_spans[1:]
-        ):
-            check_existing = [
-                entry
-                for entry in modified_spans
-                if start1
-                in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
-            ]
-            if len(check_existing) > 0:
-                modify_ind = modified_spans.index(check_existing[0])
-                if (start2 - stop1) <= inds_to_span:
-                    modified_spans[modify_ind] = (check_existing[0][0], stop2)
-                else:
-                    modified_spans[modify_ind] = (check_existing[0][0], stop1)
-                    modified_spans.append((start2, stop2))
-                continue
+    good = get_span_start_stop(np.arange(len(bad_inds_mask))[~bad_inds_mask])
+
+    if len(good) < 1:
+        return None, good
+    elif len(good) == 1:  # if all good, no need to modify
+        return good, good
+
+    modified_spans = []
+    for (start1, stop1), (start2, stop2) in zip(good[:-1], good[1:]):
+        check_existing = [
+            entry
+            for entry in modified_spans
+            if start1 in range(entry[0] - inds_to_span, entry[1] + inds_to_span)
+        ]
+        if len(check_existing) > 0:
+            modify_ind = modified_spans.index(check_existing[0])
             if (start2 - stop1) <= inds_to_span:
-                modified_spans.append((start1, stop2))
+                modified_spans[modify_ind] = (check_existing[0][0], stop2)
             else:
-                modified_spans.append((start1, stop1))
+                modified_spans[modify_ind] = (check_existing[0][0], stop1)
                 modified_spans.append((start2, stop2))
-        return good_spans, modified_spans
-    else:
-        return None, good_spans
+            continue
+        if (start2 - stop1) <= inds_to_span:
+            modified_spans.append((start1, stop2))
+        else:
+            modified_spans.append((start1, stop1))
+            modified_spans.append((start2, stop2))
+    return good, modified_spans
 
 
 def span_length(x):
+    """Return the length of a span."""
     return x[-1] - x[0]
 
 
 def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
+    """Return indices of subthresh points."""
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(
         ~np.isnan(dlc_df["likelihood"].where(df_filter))

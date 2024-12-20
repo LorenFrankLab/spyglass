@@ -14,5 +14,5 @@ def test_model_params_default(sgp):
 
 
 def test_model_input_assert(sgp):
-    with pytest.raises(AssertionError):
+    with pytest.raises(FileNotFoundError):
         sgp.v1.DLCModelInput().insert1({"config_path": "/fake/path/"})

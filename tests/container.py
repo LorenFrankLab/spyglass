@@ -190,7 +190,7 @@ class DockerMySQLManager:
             return None
 
     @property
-    def creds(self):
+    def credentials(self):
         """Datajoint credentials for this container."""
         return {
             "database.host": "localhost",
@@ -204,7 +204,7 @@ class DockerMySQLManager:
     @property
     def connected(self) -> bool:
         self.wait()
-        dj.config.update(self.creds)
+        dj.config.update(self.credentials)
         return dj.conn().is_connected
 
     def stop(self, remove=True) -> None:
@@ -215,9 +215,9 @@ class DockerMySQLManager:
             return
 
         container_name = self.container_name
-        self.container.stop()
-        self.logger.info(f"Container {container_name} stopped.")
+        self.container.stop()  # Logger I/O operations close during teardown
+        print(f"Container {container_name} stopped.")
 
         if remove:
             self.container.remove()
-            self.logger.info(f"Container {container_name} removed.")
+            print(f"Container {container_name} removed.")

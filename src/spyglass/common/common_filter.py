@@ -20,7 +20,7 @@ def _import_ghostipy():
         import ghostipy as gsp
 
         return gsp
-    except ImportError as e:
+    except (ImportError, ModuleNotFoundError) as e:
         raise ImportError(
             "You must install ghostipy to use filtering methods. Please note "
             "that to install ghostipy on an Mac M1, you must first install "
@@ -170,6 +170,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         ).fetch1()
 
     def plot_magnitude(self, filter_name, fs, return_fig=False):
+        """Plot the magnitude of the frequency response of the filter."""
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         w, h = signal.freqz(filter_dict["filter_coeff"], worN=65536)
@@ -185,6 +186,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             return plt.gcf()
 
     def plot_fir_filter(self, filter_name, fs, return_fig=False):
+        """Plot the filter."""
         filter_dict = self._filter_restrict(filter_name, fs)
         plt.figure()
         plt.clf()
@@ -197,6 +199,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             return plt.gcf()
 
     def filter_delay(self, filter_name, fs):
+        """Return the filter delay for the specified filter."""
         return self.calc_filter_delay(
             self._filter_restrict(filter_name, fs)["filter_coeff"]
         )
@@ -345,7 +348,6 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             io.write(nwbf)
 
         # Reload NWB file to get h5py objects for data/timestamps
-        # NOTE: CBroz - why io context within io context? Unindenting
         with pynwb.NWBHDF5IO(
             path=analysis_file_abs_path, mode="a", load_namespaces=True
         ) as io:

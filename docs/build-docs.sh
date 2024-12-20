@@ -14,12 +14,25 @@ mv ./docs/src/notebooks/README.md ./docs/src/notebooks/index.md
 cp -r ./notebook-images ./docs/src/notebooks/
 cp -r ./notebook-images ./docs/src/
 
-if [ -z "$MAJOR_VERSION" ]; then # Get version from file
-  version_line=$(grep "__version__ =" ./src/spyglass/_version.py)
-  version_string=$(echo "$version_line" | awk -F"[\"']" '{print $2}')
+# Function for checking major version format: #.#
+check_format() {
+    local version="$1"
+    if [[ $version =~ ^[0-9]+\.[0-9]+$ ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Check if the MAJOR_VERSION not defined or does not meet format criteria
+if [ -z "$MAJOR_VERSION" ] || ! check_format "$MAJOR_VERSION"; then
+  full_version=$(git describe --tags --abbrev=0)
   export MAJOR_VERSION="${version_string:0:3}"
 fi
-echo "$MAJOR_VERSION" # May be available as env var
+if ! check_format "$MAJOR_VERSION"; then
+  export MAJOR_VERSION="dev" # Fallback to dev if still not valid
+fi
+echo "$MAJOR_VERSION"
 
 # Get ahead of errors
 export JUPYTER_PLATFORM_DIRS=1

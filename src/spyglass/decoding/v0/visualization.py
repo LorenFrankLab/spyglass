@@ -28,6 +28,7 @@ def make_single_environment_movie(
     direction_name="head_orientation",
     vmax=0.07,
 ):
+    """Generate a movie of the decoding results for a single environment."""
     if marks.ndim > 2:
         multiunit_spikes = (np.any(~np.isnan(marks), axis=1)).astype(float)
     else:
@@ -235,6 +236,7 @@ def make_single_environment_movie(
 def setup_subplots(
     classifier, window_ind=None, rate=None, sampling_frequency=None
 ):
+    """Set up subplots for decoding movies."""
     env_names = [env.environment_name for env in classifier.environments]
 
     mosaic = []
@@ -305,6 +307,7 @@ def make_multi_environment_movie(
     direction_name="head_orientation",
     vmax=0.07,
 ):
+    """Generate a movie of the decoding results for multiple environments."""
     # Set up formatting for the movie files
     Writer = animation.writers["ffmpeg"]
     fps = sampling_frequency // video_slowdown
@@ -485,6 +488,7 @@ def create_interactive_1D_decoding_figurl(
     sampling_frequency: float = 500.0,
     view_height: int = 800,
 ):
+    """Create an interactive decoding visualization with FigURL."""
     decode_view = create_1D_decode_view(
         posterior=results[posterior_type].sum("state"),
         linear_position=linear_position_info[position_name],
@@ -575,6 +579,7 @@ def create_interactive_2D_decoding_figurl(
     sampling_frequency: float = 500.0,
     view_height: int = 800,
 ) -> vv.Box:
+    """Create an interactive 2D decoding visualization with FigURL."""
     decode_view = create_2D_decode_view(
         position_time=position_info.index,
         position=position_info[position_name],

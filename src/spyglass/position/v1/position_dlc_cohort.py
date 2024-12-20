@@ -1,13 +1,16 @@
+from pathlib import Path
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.position_dlc_pose_estimation import (  # noqa: F401
+from spyglass.position.v1.dlc_utils import file_log, infer_output_dir
+from spyglass.position.v1.position_dlc_pose_estimation import (
     DLCPoseEstimation,
-)
+)  # noqa: F401
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterp
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("position_v1_dlc_cohort")
 
@@ -37,8 +40,8 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
     # Need to ensure that nwb_file_name/epoch/interval list name endure as primary keys
     definition = """
     -> DLCSmoothInterpCohortSelection
-    ---
     """
+    log_path = None
 
     class BodyPart(SpyglassMixin, dj.Part):
         definition = """
@@ -50,7 +53,8 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         dlc_smooth_interp_info_object_id : varchar(80)
         """
 
-        def fetch1_dataframe(self):
+        def fetch1_dataframe(self) -> pd.DataFrame:
+            """Fetch a single dataframe."""
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -87,50 +91,55 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
             )
 
     def make(self, key):
-        from .dlc_utils import OutputLogger, infer_output_dir
+        """Populate DLCSmoothInterpCohort table with the combined bodyparts.
 
+        Calls _logged_make to log the process to a log.log file while...
+        1. Fetching the cohort selection and smooted interpolated data for each
+              bodypart.
+        2. Ensuring the number of bodyparts match across data and parameters.
+        3. Inserting the combined bodyparts into DLCSmoothInterpCohort.
+        """
         output_dir = infer_output_dir(key=key, makedir=False)
-        with OutputLogger(
-            name=f"{key['nwb_file_name']}_{key['epoch']}_{key['dlc_model_name']}_log",
-            path=f"{output_dir.as_posix()}/log.log",
-            print_console=False,
-        ) as logger:
-            logger.logger.info("-----------------------")
-            logger.logger.info("Bodypart Cohort")
-            self.insert1(key)
-            cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
-            table_entries = []
-            bodyparts_params_dict = cohort_selection.pop(
-                "bodyparts_params_dict"
+        self.log_path = Path(output_dir) / "log.log"
+        self._logged_make(key)
+        logger.info("Inserted entry into DLCSmoothInterpCohort")
+
+    @file_log(logger, console=False)
+    def _logged_make(self, key):
+        logger.info("-----------------------")
+        logger.info("Bodypart Cohort")
+
+        cohort_selection = (DLCSmoothInterpCohortSelection & key).fetch1()
+        table_entries = []
+        bp_params_dict = cohort_selection.pop("bodyparts_params_dict")
+        if len(bp_params_dict) == 0:
+            logger.logger.warn(
+                "No bodyparts specified in bodyparts_params_dict"
             )
-            if len(bodyparts_params_dict) == 0:
-                logger.logger.warn(
-                    "No bodyparts specified in bodyparts_params_dict"
-                )
-                return
-            temp_key = cohort_selection.copy()
-            for bodypart, params in bodyparts_params_dict.items():
-                temp_key["bodypart"] = bodypart
-                temp_key["dlc_si_params_name"] = params
-                table_entries.append((DLCSmoothInterp & temp_key).fetch())
-            assert len(table_entries) == len(
-                bodyparts_params_dict
-            ), "more entries found in DLCSmoothInterp than specified in bodyparts_params_dict"
-            table_column_names = list(table_entries[0].dtype.fields.keys())
+            self.insert1(key)
+            return
+        temp_key = cohort_selection.copy()
+        for bodypart, params in bp_params_dict.items():
+            temp_key["bodypart"] = bodypart
+            temp_key["dlc_si_params_name"] = params
+            table_entries.append((DLCSmoothInterp & temp_key).fetch())
 
-            if len(table_entries) == 0:
-                raise ValueError(
-                    f"No entries found in DLCSmoothInterp for {temp_key}"
-                )
+        if not len(table_entries) == len(bp_params_dict):
+            raise ValueError(
+                f"Mismatch: DLCSmoothInterp {len(table_entries)} vs "
+                + f"bodyparts_params_dict {len(bp_params_dict)}"
+            )
 
-            for table_entry in table_entries:
-                entry_key = {
-                    **{
-                        k: v for k, v in zip(table_column_names, table_entry[0])
-                    },
-                    **key,
-                }
-                DLCSmoothInterpCohort.BodyPart.insert1(
-                    entry_key, skip_duplicates=True
-                )
-        logger.logger.info("Inserted entry into DLCSmoothInterpCohort")
+        # TODO: change to DLCSmoothInterp.heading.names
+        table_column_names = list(table_entries[0].dtype.fields.keys())
+
+        part_keys = [
+            {
+                **{k: v for k, v in zip(table_column_names, table_entry[0])},
+                **key,
+            }
+            for table_entry in table_entries
+        ]
+
+        self.insert1(key)
+        self.BodyPart.insert(part_keys, skip_duplicates=True)

@@ -19,6 +19,7 @@ def prepare_spikesortingview_data(
     channel_neighborhood_size: int,
     output_file_name: str,
 ) -> str:
+    """Prepare data for the SpikeSortingView."""
     unit_ids = np.array(sorting.get_unit_ids()).astype(np.int32)
     channel_ids = np.array(recording.get_channel_ids()).astype(np.int32)
     sampling_frequency = recording.get_sampling_frequency()
@@ -27,6 +28,7 @@ def prepare_spikesortingview_data(
         segment_duration_sec * sampling_frequency
     )
     num_segments = math.ceil(num_frames / num_frames_per_segment)
+
     with h5py.File(output_file_name, "w") as f:
         f.create_dataset("unit_ids", data=unit_ids)
         f.create_dataset(
@@ -120,7 +122,9 @@ def prepare_spikesortingview_data(
                 )
             if peak_channel_id is None:
                 raise Exception(
-                    f"Peak channel not found for unit {unit_id}. This is probably because no spikes were found in any segment for this unit."
+                    f"Peak channel not found for unit {unit_id}. "
+                    + "This is probably because no spikes were found in any "
+                    + "segment for this unit."
                 )
             channel_neighborhood = unit_channel_neighborhoods[str(unit_id)]
             f.create_dataset(
@@ -161,7 +165,9 @@ def prepare_spikesortingview_data(
                     )
                 if peak_channel_id is None:
                     raise Exception(
-                        f"Peak channel not found for unit {unit_id}. This is probably because no spikes were found in any segment for this unit."
+                        f"Peak channel not found for unit {unit_id}. "
+                        + "This is probably because no spikes were found in any"
+                        + " segment for this unit."
                     )
                 spike_train = sorting.get_unit_spike_train(
                     unit_id=unit_id,
@@ -230,6 +236,7 @@ def get_channel_neighborhood(
     peak_channel_id: int,
     channel_neighborhood_size: int,
 ):
+    """Return the channel neighborhood for a peak channel."""
     channel_locations_by_id = {}
     for ii, channel_id in enumerate(channel_ids):
         channel_locations_by_id[channel_id] = channel_locations[ii]
@@ -247,6 +254,7 @@ def get_channel_neighborhood(
 
 
 def subsample(x: np.array, num: int):
+    """Subsample an array."""
     if num >= len(x):
         return x
     stride = math.floor(len(x) / num)
@@ -256,6 +264,7 @@ def subsample(x: np.array, num: int):
 def extract_spike_snippets(
     *, traces: np.ndarray, times: np.array, snippet_len: Tuple[int]
 ):
+    """Extract spike snippets."""
     a = snippet_len[0]
     b = snippet_len[1]
     T = a + b

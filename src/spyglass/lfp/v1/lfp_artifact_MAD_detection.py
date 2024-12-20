@@ -21,7 +21,8 @@ def mad_artifact_detector(
     mad_thresh : float, optional
         Threshold on the median absolute deviation scaled LFPs, defaults to 6.0
     proportion_above_thresh : float, optional
-        Proportion of electrodes that need to be above the threshold, defaults to 1.0
+        Proportion of electrodes that need to be above the threshold, defaults
+        to 1.0
     removal_window_ms : float, optional
         Width of the window in milliseconds to mask out per artifact
         (window/2 removed on each side of threshold crossing), defaults to 1 ms
@@ -31,10 +32,11 @@ def mad_artifact_detector(
     Returns
     -------
     artifact_removed_valid_times : np.ndarray
-        Intervals of valid times where artifacts were not detected, unit: seconds
+        Intervals of valid times where artifacts were not detected,
+        unit: seconds
     artifact_intervals : np.ndarray
-        Intervals in which artifacts are detected (including removal windows), unit: seconds
-
+        Intervals in which artifacts are detected (including removal windows),
+        unit: seconds
     """
 
     timestamps = np.asarray(recording.timestamps)
@@ -50,11 +52,13 @@ def mad_artifact_detector(
     half_removal_window_idx = int(half_removal_window_s * sampling_frequency)
     is_artifact = _extend_array_by_window(is_artifact, half_removal_window_idx)
 
-    artifact_intervals_s = _get_time_intervals_from_bool_array(
-        is_artifact, timestamps
+    artifact_intervals_s = np.array(
+        _get_time_intervals_from_bool_array(is_artifact, timestamps)
     )
 
-    valid_times = _get_time_intervals_from_bool_array(~is_artifact, timestamps)
+    valid_times = np.array(
+        _get_time_intervals_from_bool_array(~is_artifact, timestamps)
+    )
 
     return valid_times, artifact_intervals_s
 
@@ -82,7 +86,7 @@ def _is_above_proportion_thresh(
     mad_thresh: np.ndarray,
     proportion_above_thresh: float = 1.0,
 ) -> np.ndarray:
-    """Return whether each sample is above the threshold on the proportion of electrodes.
+    """Return array of bools for samples > thresh on proportion of electodes.
 
     Parameters
     ----------
@@ -96,7 +100,8 @@ def _is_above_proportion_thresh(
     Returns
     -------
     is_above_thresh : np.ndarray, shape (n_samples,)
-        Whether each sample is above the threshold on the proportion of electrodes
+        Whether each sample is above the threshold on the proportion of
+        electrodes
     """
 
     return (

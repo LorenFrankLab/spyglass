@@ -39,7 +39,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         -> LFPBandSelection # the LFP band selection
         -> LFPElectrodeGroup.LFPElectrode  # the LFP electrode to be filtered
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
-        ---
         """
 
     def set_lfp_band_electrodes(
@@ -174,11 +173,13 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
             key["nwb_file_name"]
         )
-        # get the NWB object with the lfp data; FIX: change to fetch with additional infrastructure
+        # get the NWB object with the lfp data;
+        # FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
         lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
 
@@ -293,12 +294,15 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             decimation,
         )
 
-        # now that the LFP is filtered, we create an electrical series for it and add it to the file
+        # now that the LFP is filtered, we create an electrical series for it
+        # and add it to the file
         with pynwb.NWBHDF5IO(
             path=lfp_band_file_abspath, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
-            # get the indices of the electrodes in the electrode table of the file to get the right values
+
+            # get the indices of the electrodes in the electrode table of the
+            # file to get the right values
             elect_index = get_electrode_indices(nwbf, lfp_band_elect_id)
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
@@ -325,8 +329,8 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         key["analysis_file_name"] = lfp_band_file_name
         key["lfp_band_object_id"] = lfp_band_object_id
 
-        # finally, we need to censor the valid times to account for the downsampling if this is the first time we've
-        # downsampled these data
+        # finally, censor the valid times to account for the downsampling if
+        # this is the first time we've downsampled these data
         key["interval_list_name"] = (
             interval_list_name
             + " lfp band "
@@ -378,7 +382,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
         """Computes the hilbert transform of a given LFPBand signal
 
-        Uses scipy.signal.hilbert to compute the hilbert transform of the signal
+        Uses scipy.signal.hilbert to compute the hilbert transform
 
         Parameters
         ----------
@@ -415,7 +419,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def compute_signal_phase(
         self, electrode_list: list[int] = None, **kwargs
     ) -> pd.DataFrame:
-        """Computes the phase of a given LFPBand signals using the hilbert transform
+        """Computes phase of LFPBand signals using the hilbert transform
 
         Parameters
         ----------
@@ -443,7 +447,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def compute_signal_power(
         self, electrode_list: list[int] = None, **kwargs
     ) -> pd.DataFrame:
-        """Computes the power of a given LFPBand signals using the hilbert transform
+        """Computes power LFPBand signals using the hilbert transform
 
         Parameters
         ----------

@@ -3,6 +3,7 @@ import copy
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
+from pandas import DataFrame
 from track_linearization import (
     get_linearized_position,
     make_track_graph,
@@ -43,14 +44,16 @@ class TrackGraph(SpyglassMixin, dj.Manual):
     definition = """
     track_graph_name : varchar(80)
     ----
-    environment : varchar(80)    # Type of Environment
-    node_positions : blob  # 2D position of track_graph nodes, shape (n_nodes, 2)
-    edges: blob                  # shape (n_edges, 2)
-    linear_edge_order : blob  # order of track graph edges in the linear space, shape (n_edges, 2)
-    linear_edge_spacing : blob  # amount of space between edges in the linear space, shape (n_edges,)
+    environment : varchar(80)  # Type of Environment
+    node_positions : blob      # 2D position of nodes, (n_nodes, 2)
+    edges: blob                # shape (n_edges, 2)
+    linear_edge_order : blob   # order of edges in linear space, (n_edges, 2)
+    linear_edge_spacing : blob # space btwn edges in linear space, (n_edges,)
+    edge_map = NULL : blob     # Maps one edge to another before linearization
     """
 
     def get_networkx_track_graph(self, track_graph_parameters=None):
+        """Get the track graph as a networkx graph."""
         if track_graph_parameters is None:
             track_graph_parameters = self.fetch1()
         return make_track_graph(
@@ -60,7 +63,9 @@ class TrackGraph(SpyglassMixin, dj.Manual):
 
     def plot_track_graph(self, ax=None, draw_edge_labels=False, **kwds):
         """Plot the track graph in 2D position space."""
-        track_graph = self.get_networkx_track_graph()
+        track_graph = self.get_networkx_track_graph(
+            track_graph_parameters=self.fetch1()
+        )
         plot_track_graph(
             track_graph, ax=ax, draw_edge_labels=draw_edge_labels, **kwds
         )
@@ -114,6 +119,16 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate LinearizedPositionV1 table with the linearized position.
+
+        The linearized position is computed from the position data in the
+        PositionOutput table. Parameters for linearization are specified in
+        LinearizationParameters and the track graph is specified in TrackGraph.
+        The linearization function is defined by the track_linearization
+        package. The resulting linearized position is stored in an
+        AnalysisNwbfile and added as an entry in the LinearizedPositionV1 and
+        LinearizedPositionOutput (Merge) tables.
+        """
         orig_key = copy.deepcopy(key)
         logger.info(f"Computing linear position for: {key}")
 
@@ -138,10 +153,9 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             TrackGraph() & {"track_graph_name": key["track_graph_name"]}
         ).fetch1()
 
-        track_graph = make_track_graph(
-            node_positions=track_graph_info["node_positions"],
-            edges=track_graph_info["edges"],
-        )
+        track_graph = (
+            TrackGraph & {"track_graph_name": key["track_graph_name"]}
+        ).get_networkx_track_graph()
 
         linear_position_df = get_linearized_position(
             position=position,
@@ -154,6 +168,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             ],
             sensor_std_dev=linearization_parameters["sensor_std_dev"],
             diagonal_bias=linearization_parameters["diagonal_bias"],
+            edge_map=track_graph_info["edge_map"],
         )
 
         linear_position_df["time"] = time
@@ -183,5 +198,6 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile().log(key, table=self.full_table_name)
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> DataFrame:
+        """Fetch a single dataframe."""
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

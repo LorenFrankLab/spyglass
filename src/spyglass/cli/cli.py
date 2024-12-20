@@ -4,7 +4,8 @@ import yaml
 
 try:
     import click
-except ImportError:
+except (ImportError, ModuleNotFoundError):
+    click = None
     raise ImportError(
         "spyglass.cli.cli requires the 'click' package. "
         "You can install it with 'pip install click'."
@@ -446,16 +447,6 @@ def list_spike_sortings(nwb_file_name: str):
     print(results)
 
 
-@click.command(help="Create spyglass view of a session group.")
-@click.argument("session_group_name")
-def create_spyglass_view(session_group_name: str):
-    import spyglass.common as sgc
-
-    F = sgc.SessionGroup.create_spyglass_view(session_group_name)
-    url = F.url(label=session_group_name)
-    print(url)
-
-
 cli.add_command(insert_session)
 cli.add_command(list_sessions)
 cli.add_command(insert_lab_team)
@@ -479,4 +470,3 @@ cli.add_command(insert_spike_sorter_parameters)
 cli.add_command(list_spike_sorter_parameters)
 cli.add_command(run_spike_sorting)
 cli.add_command(list_spike_sortings)
-cli.add_command(create_spyglass_view)

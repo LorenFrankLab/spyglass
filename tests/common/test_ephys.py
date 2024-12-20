@@ -25,10 +25,9 @@ def test_electrode_populate(common_ephys):
     assert len(common_ephys.Electrode()) == 128, "Electrode.populate failed"
 
 
-def test_egroup_populate(common_ephys):
-    common_ephys.ElectrodeGroup.populate()
+def test_elec_group_populate(pop_common_electrode_group):
     assert (
-        len(common_ephys.ElectrodeGroup()) == 32
+        len(pop_common_electrode_group) == 32
     ), "ElectrodeGroup.populate failed"
 
 
@@ -37,7 +36,7 @@ def test_raw_populate(common_ephys):
     assert len(common_ephys.Raw()) == 1, "Raw.populate failed"
 
 
-def test_samplecount_populate(common_ephys):
+def test_sample_count_populate(common_ephys):
     common_ephys.SampleCount.populate()
     assert len(common_ephys.SampleCount()) == 1, "SampleCount.populate failed"
 

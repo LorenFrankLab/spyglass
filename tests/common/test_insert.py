@@ -7,10 +7,10 @@ def test_insert_session(mini_insert, mini_content, mini_restr, common):
     subj_raw = mini_content.subject
     meta_raw = mini_content
 
-    sess_data = (common.Session & mini_restr).fetch1()
+    session_data = (common.Session & mini_restr).fetch1()
     assert (
-        sess_data["subject_id"] == subj_raw.subject_id
-    ), "Subjuect ID not match"
+        session_data["subject_id"] == subj_raw.subject_id
+    ), "Subject ID not match"
 
     attrs = [
         ("institution_name", "institution"),
@@ -20,37 +20,37 @@ def test_insert_session(mini_insert, mini_content, mini_restr, common):
         ("experiment_description", "experiment_description"),
     ]
 
-    for sess_attr, meta_attr in attrs:
-        assert sess_data[sess_attr] == getattr(
+    for session_attr, meta_attr in attrs:
+        assert session_data[session_attr] == getattr(
             meta_raw, meta_attr
-        ), f"Session table {sess_attr} not match raw data {meta_attr}"
+        ), f"Session table {session_attr} not match raw data {meta_attr}"
 
     time_attrs = [
         ("session_start_time", "session_start_time"),
         ("timestamps_reference_time", "timestamps_reference_time"),
     ]
-    for sess_attr, meta_attr in time_attrs:
+    for session_attr, meta_attr in time_attrs:
         # a. strip timezone info from meta_raw
         # b. convert to timestamp
         # c. compare precision to 1 second
-        assert sess_data[sess_attr].timestamp() == approx(
+        assert session_data[session_attr].timestamp() == approx(
             getattr(meta_raw, meta_attr).replace(tzinfo=None).timestamp(), abs=1
-        ), f"Session table {sess_attr} not match raw data {meta_attr}"
+        ), f"Session table {session_attr} not match raw data {meta_attr}"
 
 
 def test_insert_electrode_group(mini_insert, mini_content, common):
     group_name = "0"
-    egroup_data = (
+    elec_group_data = (
         common.ElectrodeGroup & {"electrode_group_name": group_name}
     ).fetch1()
-    egroup_raw = mini_content.electrode_groups.get(group_name)
+    elec_group_raw = mini_content.electrode_groups.get(group_name)
 
     assert (
-        egroup_data["description"] == egroup_raw.description
+        elec_group_data["description"] == elec_group_raw.description
     ), "ElectrodeGroup description not match"
 
-    assert egroup_data["region_id"] == (
-        common.BrainRegion & {"region_name": egroup_raw.location}
+    assert elec_group_data["region_id"] == (
+        common.BrainRegion & {"region_name": elec_group_raw.location}
     ).fetch1(
         "region_id"
     ), "Region ID does not match across raw data and BrainRegion table"
@@ -138,7 +138,7 @@ def test_insert_pos(
     assert data_obj_id == raw_obj_id, "PosObject insertion error"
 
 
-def test_fetch_posobj(
+def test_fetch_pos_obj(
     mini_insert, common, mini_pos, mini_pos_series, mini_pos_tbl
 ):
     pos_key = (

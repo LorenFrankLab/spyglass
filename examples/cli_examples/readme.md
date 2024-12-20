@@ -109,13 +109,6 @@ spyglass insert-spike-sorter-parameters parameters.yaml
 spyglass list-spike-sorter-parameters
 ```
 
-## Create a session group
-
-A session group is a collection of sessions that can be viewed via spyglassview.
-
-See [session_groups.md](../../docs/session_groups.md) and
-[create_session_group.py](./create_session_group.py).
-
 ## Create spyglass view
 
 ```bash

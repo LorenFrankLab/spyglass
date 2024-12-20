@@ -136,7 +136,7 @@ def _generate_url(
     )
 
     if initial_curation is not None:
-        logger.warn("found initial curation")
+        logger.warning("found initial curation")
         sorting_curation_uri = kcl.store_json(initial_curation)
     else:
         sorting_curation_uri = None

@@ -79,6 +79,10 @@ def single_transaction_make(
                 for parent in parents[1:]:
                     key_source *= parent.proj()
 
+            if table.__name__ == "PositionSource":
+                # PositionSource only uses nwb_file_name - full calls redundant
+                key_source = dj.U("nwb_file_name") & key_source
+
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
                     table().make(pop_key)

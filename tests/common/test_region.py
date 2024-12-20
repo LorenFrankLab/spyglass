@@ -29,4 +29,4 @@ def test_region_add(brain_region, region_dict):
     )
     assert (
         region_id == next_id
-    ), "Region.fetch_add() should autincrement region_id."
+    ), "Region.fetch_add() should autoincrement region_id."

@@ -84,6 +84,7 @@ class WaveformParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default waveform parameters."""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
@@ -129,10 +130,12 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default metric parameters."""
         cls.insert(cls.contents, skip_duplicates=True)
 
     @classmethod
     def show_available_metrics(self):
+        """Prints the available metrics and their descriptions."""
         for metric in _metric_name_to_func:
             metric_doc = _metric_name_to_func[metric].__doc__.split("\n")[0]
             logger.info(f"{metric} : {metric_doc}\n")
@@ -155,6 +158,7 @@ class MetricCurationParameters(SpyglassMixin, dj.Lookup):
 
     @classmethod
     def insert_default(cls):
+        """Insert default metric curation parameters."""
         cls.insert(cls.contents, skip_duplicates=True)
 
 
@@ -186,7 +190,7 @@ class MetricCurationSelection(SpyglassMixin, dj.Manual):
             key for the inserted row
         """
         if cls & key:
-            logger.warn("This row has already been inserted.")
+            logger.warning("This row has already been inserted.")
             return (cls & key).fetch1()
         key["metric_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
@@ -203,13 +207,33 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
+    _use_transaction, _allow_insert = False, True
+
     def make(self, key):
+        """Populate MetricCuration table.
+
+        1. Fetches...
+            - Waveform parameters from WaveformParameters
+            - Metric parameters from MetricParameters
+            - Label and merge parameters from MetricCurationParameters
+            - Sorting ID and curation ID from MetricCurationSelection
+        2. Loads the recording and sorting from CurationV1.
+        3. Optionally whitens the recording with spikeinterface
+        4. Extracts waveforms from the recording based on the sorting.
+        5. Optionally computes quality metrics for the units.
+        6. Applies curation based on the metrics, computing labels and merge
+            groups.
+        7. Saves the waveforms, metrics, labels, and merge groups to an
+            analysis NWB file and inserts into MetricCuration table.
+        """
+
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
         nwb_file_name = (
             SpikeSortingSelection * MetricCurationSelection & key
         ).fetch1("nwb_file_name")
 
+        # TODO: reduce fetch calls on same tables
         waveform_params = (
             WaveformParameters * MetricCurationSelection & key
         ).fetch1("waveform_params")
@@ -239,6 +263,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         os.makedirs(waveforms_dir, exist_ok=True)
 
         logger.info("Extracting waveforms...")
+
+        # Extract non-sparse waveforms by default
+        waveform_params.setdefault("sparse", False)
+
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
@@ -281,6 +309,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
     @classmethod
     def get_waveforms(cls):
+        """Returns waveforms identified by metric curation. Not implemented."""
         return NotImplementedError
 
     @classmethod

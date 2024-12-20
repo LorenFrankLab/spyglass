@@ -9,6 +9,7 @@ import pynwb
 import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.settings import temp_dir
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
@@ -19,8 +20,7 @@ schema = dj.schema("decoding_waveform_features")
 
 @schema
 class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
-    """Defines the types of spike waveform features computed for a given spike
-    time."""
+    """Defines types of waveform features computed for a given spike time."""
 
     definition = """
     features_param_name : varchar(80) # a name for this set of parameters
@@ -33,7 +33,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             "estimate_peak_time": False,
         }
     }
-    _default_waveform_extraction_params = {
+    _default_waveform_extract_params = {
         "ms_before": 0.5,
         "ms_after": 0.5,
         "max_spikes_per_unit": None,
@@ -45,7 +45,7 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
             "amplitude",
             {
                 "waveform_features_params": _default_waveform_feature_params,
-                "waveform_extraction_params": _default_waveform_extraction_params,
+                "waveform_extraction_params": _default_waveform_extract_params,
             },
         ],
         [
@@ -55,13 +55,14 @@ class WaveformFeaturesParams(SpyglassMixin, dj.Lookup):
                     "amplitude": _default_waveform_feature_params["amplitude"],
                     "spike_location": {},
                 },
-                "waveform_extraction_params": _default_waveform_extraction_params,
+                "waveform_extraction_params": _default_waveform_extract_params,
             },
         ],
     ]
 
     @classmethod
     def insert_default(cls):
+        """Insert default waveform features parameters"""
         cls.insert(cls.contents, skip_duplicates=True)
 
     @staticmethod
@@ -91,8 +92,9 @@ class UnitWaveformFeaturesSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
-    """For each spike time, compute a spike waveform feature associated with that
-    spike. Used for clusterless decoding.
+    """For each spike time, compute waveform feature associated with that spike.
+
+    Used for clusterless decoding.
     """
 
     definition = """
@@ -102,7 +104,10 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # the NWB object that stores the waveforms
     """
 
+    _parallel_make = True
+
     def make(self, key):
+        """Populate UnitWaveformFeatures table."""
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")
@@ -112,7 +117,8 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             params["waveform_features_params"]
         ):
             raise NotImplementedError(
-                f"Features {set(params['waveform_features_params'])} are not supported"
+                f"Features {set(params['waveform_features_params'])} are "
+                + "not supported"
             )
 
         merge_key = {"merge_id": key["spikesorting_merge_id"]}
@@ -148,9 +154,12 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
                 sorter,
             )
 
-        spike_times = SpikeSortingOutput().fetch_nwb(merge_key)[0][
-            analysis_nwb_key
-        ]["spike_times"]
+        nwb = SpikeSortingOutput().fetch_nwb(merge_key)[0]
+        spike_times = (
+            nwb[analysis_nwb_key]["spike_times"]
+            if analysis_nwb_key in nwb
+            else pd.DataFrame()
+        )
 
         (
             key["analysis_file_name"],
@@ -246,47 +255,6 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
         ]
 
 
-def _get_peak_amplitude(
-    waveform_extractor: si.WaveformExtractor,
-    unit_id: int,
-    peak_sign: str = "neg",
-    estimate_peak_time: bool = False,
-) -> np.ndarray:
-    """Returns the amplitudes of all channels at the time of the peak
-    amplitude across channels.
-
-    Parameters
-    ----------
-    waveform : array-like, shape (n_spikes, n_time, n_channels)
-    peak_sign : ('pos', 'neg', 'both'), optional
-        Direction of the peak in the waveform
-    estimate_peak_time : bool, optional
-        Find the peak times for each spike because some spikesorters do not
-        align the spike time (at index n_time // 2) to the peak
-
-    Returns
-    -------
-    peak_amplitudes : array-like, shape (n_spikes, n_channels)
-
-    """
-    waveforms = waveform_extractor.get_waveforms(unit_id)
-    if estimate_peak_time:
-        if peak_sign == "neg":
-            peak_inds = np.argmin(np.min(waveforms, axis=2), axis=1)
-        elif peak_sign == "pos":
-            peak_inds = np.argmax(np.max(waveforms, axis=2), axis=1)
-        elif peak_sign == "both":
-            peak_inds = np.argmax(np.max(np.abs(waveforms), axis=2), axis=1)
-
-        # Get mode of peaks to find the peak time
-        values, counts = np.unique(peak_inds, return_counts=True)
-        spike_peak_ind = values[counts.argmax()]
-    else:
-        spike_peak_ind = waveforms.shape[1] // 2
-
-    return waveforms[:, spike_peak_ind]
-
-
 def _get_full_waveform(
     waveform_extractor: si.WaveformExtractor, unit_id: int, **kwargs
 ) -> np.ndarray:
@@ -341,7 +309,7 @@ def _write_waveform_features_to_nwb(
     spike_times: pd.DataFrame,
     waveform_features: dict,
 ) -> tuple[str, str]:
-    """Save waveforms, metrics, labels, and merge groups to NWB in the units table.
+    """Save waveforms, metrics, labels, and merge groups to NWB units table.
 
     Parameters
     ----------
@@ -356,7 +324,8 @@ def _write_waveform_features_to_nwb(
     Returns
     -------
     analysis_nwb_file : str
-        name of analysis NWB file containing the sorting and curation information
+        name of analysis NWB file containing the sorting and curation
+        information
     object_id : str
         object_id of the units table in the analysis NWB file
     """
@@ -385,6 +354,8 @@ def _write_waveform_features_to_nwb(
                     metric_dict[unit_id] if unit_id in metric_dict else []
                     for unit_id in unit_ids
                 ]
+                if not metric_values:
+                    metric_values = np.array([]).astype(np.float32)
                 nwbf.add_unit_column(
                     name=metric,
                     description=metric,

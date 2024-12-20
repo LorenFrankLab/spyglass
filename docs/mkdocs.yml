@@ -42,19 +42,19 @@ theme:
 
 nav:
   - Home: index.md
-  - Installation: installation.md
   - Tutorials:
       - Overview: notebooks/index.md
       - Intro:
           - Setup: notebooks/00_Setup.ipynb
-          - Insert Data: notebooks/01_Insert_Data.ipynb
-          - Data Sync: notebooks/02_Data_Sync.ipynb
-          - Merge Tables: notebooks/03_Merge_Tables.ipynb
-          - Config Populate: notebooks/04_PopulateConfigFile.ipynb
+          - Concepts: notebooks/01_Concepts.ipynb
+          - Insert Data: notebooks/02_Insert_Data.ipynb
+          - Data Sync: notebooks/03_Data_Sync.ipynb
+          - Merge Tables: notebooks/04_Merge_Tables.ipynb
           - Export: notebooks/05_Export.ipynb
       - Spikes:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
+          - Spike Sorting Analysis: notebooks/11_Spike_Sorting_Analysis.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
@@ -69,18 +69,21 @@ nav:
           - Decoding Clusterless: notebooks/41_Decoding_Clusterless.ipynb
           - Decoding Sorted Spikes: notebooks/42_Decoding_SortedSpikes.ipynb
       - MUA Detection: notebooks/50_MUA_Detection.ipynb
-  - Miscellaneous:
-      - Overview: misc/index.md
-      - Common Errors: misc/common_errs.md
-      - Database Management: misc/database_management.md
-      - Export: misc/export.md
-      - FigURL: misc/figurl_views.md
-      - Insert Data: misc/insert_data.md
-      - Merge Tables: misc/merge_tables.md
-      - Mixin: misc/mixin.md
-      - Session Groups: misc/session_groups.md
+  - Features:
+    - Overview: Features/index.md
+    - FigURL: Features/FigURL.md
+    - Merge Tables: Features/Merge.md
+    - Export: Features/Export.md
+    - Centralized Code: Features/Mixin.md
+  - For Developers:
+    - Overview: ForDevelopers/index.md
+    - How to Contribute: ForDevelopers/Contribute.md
+    - Database Management: ForDevelopers/Management.md
+    - Code Reuse: ForDevelopers/Reuse.md
+    - Table Types: ForDevelopers/TableTypes.md
+    - Understanding a Schema: ForDevelopers/Schema.md
+    - Using NWB: ForDevelopers/UsingNWB.md
   - API Reference: api/ # defer to gen-files + literate-nav
-  - How to Contribute: contribute.md
   - Change Log: CHANGELOG.md
   - Copyright: LICENSE.md
 

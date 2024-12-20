@@ -1,18 +1,24 @@
 # spyglass
 
-[![Import test](https://github.com/LorenFrankLab/spyglass/actions/workflows/workflow.yml/badge.svg)](https://github.com/LorenFrankLab/spyglass/actions/workflows/workflow.yml)
+[![Tests](https://github.com/LorenFrankLab/spyglass/actions/workflows/test-conda.yml/badge.svg)](https://github.com/LorenFrankLab/spyglass/actions/workflows/test-conda.yml)
 [![PyPI version](https://badge.fury.io/py/spyglass-neuro.svg)](https://badge.fury.io/py/spyglass-neuro)
 
 ![Spyglass Figure](docs/src/images/fig1.png)
 
-[Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F01_Insert_Data.ipynb&branch=main) | [Installation](https://lorenfranklab.github.io/spyglass/latest/installation/) | [Docs](https://lorenfranklab.github.io/spyglass/) | [Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) | [Citation](#citation)
+[Demo](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F02_Insert_Data.ipynb&branch=main)
+|
+[Installation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+| [Docs](https://lorenfranklab.github.io/spyglass/) |
+[Tutorials](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks) |
+[Citation](#citation)
 
 `spyglass` is a data analysis framework that facilitates the storage, analysis,
 visualization, and sharing of neuroscience data to support reproducible
 research. It is designed to be interoperable with the NWB format and integrates
 open-source tools into a coherent framework.
 
-Try out a demo [here](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F01_Insert_Data.ipynb&branch=main)!
+Try out a demo
+[here](https://spyglass.hhmi.2i2c.cloud/hub/user-redirect/git-pull?repo=https%3A%2F%2Fgithub.com%2FLorenFrankLab%2Fspyglass-demo&urlpath=lab%2Ftree%2Fspyglass-demo%2Fnotebooks%2F02_Insert_Data.ipynb&branch=main)!
 
 Features of Spyglass include:
 
@@ -60,16 +66,16 @@ Documentation can be found at -
 ## Installation
 
 For installation instructions see -
-[https://lorenfranklab.github.io/spyglass/latest/installation/](https://lorenfranklab.github.io/spyglass/latest/installation/)
+[https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 
 Typical installation time is: 5-10 minutes
 
 ## Tutorials
 
-The tutorials for `spyglass` is currently in the form of Jupyter Notebooks and
+The tutorials for `spyglass` are currently in the form of Jupyter Notebooks and
 can be found in the
 [notebooks](https://github.com/LorenFrankLab/spyglass/tree/master/notebooks)
-directory. We strongly recommend opening them in the context of `jupyterlab`.
+directory. We strongly recommend running the notebooks yourself.
 
 ## Contributing
 
@@ -85,17 +91,31 @@ License and Copyright notice can be found at
 
 ## System requirements
 
-Spyglass has been tested on Linux Ubuntu 20.04 and MacOS 10.15. It has not been tested on Windows and likely will not work.
+Spyglass has been tested on Linux Ubuntu 20.04 and MacOS 10.15. It has not been
+tested on Windows and likely will not work.
 
-No specific hardware requirements are needed to run spyglass. However, the amount of data that can be stored and analyzed is limited by the available disk space and memory. GPUs are required for some of the analysis tools, such as DeepLabCut.
+No specific hardware requirements are needed to run spyglass. However, the
+amount of data that can be stored and analyzed is limited by the available disk
+space and memory. GPUs are required for some of the analysis tools, such as
+DeepLabCut.
 
-See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or [environment_dlc.yml](environment_dlc.yml) for software dependencies.
+See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or
+[environment_dlc.yml](environment_dlc.yml) for software dependencies.
 
-See [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt) for the conda environment used in the demo.
+See
+[spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)
+for the conda environment used in the demo.
 
 ## Citation
 
-> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie, A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C., Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Broyles, E., Shin, D., Chiang, S., Holobetz, C., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D., Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a data analysis framework for reproducible and shareable neuroscience research. bioRxiv. [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295).
+> Lee, K.H.\*, Denovellis, E.L.\*, Ly, R., Magland, J., Soules, J., Comrie,
+> A.E., Gramling, D.P., Guidera, J.A., Nevers, R., Adenekan, P., Brozdowski, C.,
+> Bray, S., Monroe, E., Bak, J.H., Coulter, M.E., Sun, X., Broyles, E., Shin,
+> D., Chiang, S., Holobetz, C., Tritt, A., Rübel, O., Nguyen, T., Yatsenko, D.,
+> Chu, J., Kemere, C., Garcia, S., Buccino, A., Frank, L.M., 2024. Spyglass: a
+> data analysis framework for reproducible and shareable neuroscience research.
+> bioRxiv.
+> [10.1101/2024.01.25.577295](https://doi.org/10.1101/2024.01.25.577295).
 
 *\* Equal contribution*
 

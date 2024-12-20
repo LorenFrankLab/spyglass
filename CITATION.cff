@@ -2,7 +2,7 @@
 # Visit https://bit.ly/cffinit to generate yours today!
 
 cff-version: 1.2.0
-title: spyglass
+title: 'Spyglass: a data analysis framework for reproducible and shareable neuroscience research'
 message: 'If you use this software, please cite it as below.'
 type: software
 authors:
@@ -84,18 +84,18 @@ authors:
     email: emrey.broyles@ucsf.edu
     affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0000-0001-5559-2910'
-  - given-names: Shin
-    family-names: Donghoon
+  - given-names: Donghoon
+    family-names: Shin
     email: donghoon.shin@ucsf.edu
     affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0009-0000-8916-7314'
-  - given-names: Chiang
-    family-names: Sharon
+  - given-names: Sharon
+    family-names: Chiang
     email: sharon.chiang@ucsf.edu
     affiliation: 'University of California, San Francisco'
     orcid: 'https://orcid.org/0000-0002-4548-4550'
-  - given-names: Holobetz
-    family-names: Cristofer
+  - given-names: Cristofer
+    family-names: Holobetz
     email: cristofer.holobetz.23@ucl.ac.uk
     affiliation: 'University College London'
     orcid: 'https://orcid.org/0009-0009-8567-3290'
@@ -166,5 +166,5 @@ keywords:
   - spike sorting
   - kachery
 license: MIT
-version: 0.5.2
-date-released: '2024-04-22'
+version: 0.5.4
+date-released: '2024-12-20'

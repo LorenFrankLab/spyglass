@@ -4,6 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
+from typing import List
 
 import numpy as np
 import pynwb
@@ -69,6 +70,14 @@ def get_nwb_file(nwb_file_path):
                 from ..common.common_dandi import DandiPath
 
                 dandi_key = {"filename": os.path.basename(nwb_file_path)}
+                if not DandiPath() & dandi_key:
+                    # Check if non-copied raw file is in Dandi
+                    dandi_key = {
+                        "filename": Path(nwb_file_path).name.replace(
+                            "_.nwb", ".nwb"
+                        )
+                    }
+
                 if not DandiPath & dandi_key:
                     # If not in Dandi, then we can't find the file
                     raise FileNotFoundError(
@@ -101,7 +110,19 @@ def file_from_dandi(filepath):
     return False
 
 
-def get_config(nwb_file_path):
+def get_linked_nwbs(path: str) -> List[str]:
+    """Return a paths linked in the given NWB file.
+
+    Given a NWB file path, open & read the file to find any linked NWB objects.
+    """
+    with pynwb.NWBHDF5IO(path, "r") as io:
+        # open the nwb file (opens externally linked files as well)
+        _ = io.read()
+        # get the linked files
+        return [x for x in io._HDF5IO__built if x != path]
+
+
+def get_config(nwb_file_path, calling_table=None):
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
 
@@ -122,8 +143,14 @@ def get_config(nwb_file_path):
     # NOTE use p.stem[:-1] to remove the underscore that was added to the file
     config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
     if not os.path.exists(config_path):
-        logger.info(f"No config found at file path {config_path}")
-        return dict()
+        from spyglass.settings import base_dir  # noqa: F401
+
+        rel_path = p.relative_to(base_dir)
+        table = f"{calling_table}: " if calling_table else ""
+        logger.info(f"{table}No config found at {rel_path}")
+        ret = dict()
+        __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
+        return ret
     with open(config_path, "r") as stream:
         d = yaml.safe_load(stream)
 
@@ -133,6 +160,7 @@ def get_config(nwb_file_path):
 
 
 def close_nwb_files():
+    """Close all open NWB files."""
     for io, _ in __open_nwb_files.values():
         io.close()
     __open_nwb_files.clear()
@@ -336,7 +364,7 @@ def get_valid_intervals(
 
     if total_time < min_valid_len:
         half_total_time = total_time / 2
-        logger.warn(f"Setting minimum valid interval to {half_total_time}")
+        logger.warning(f"Setting minimum valid interval to {half_total_time}")
         min_valid_len = half_total_time
 
     # get rid of NaN elements
@@ -542,6 +570,7 @@ def get_nwb_copy_filename(nwb_file_name):
 def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
+    """Change group permissions for specified subject ids in analysis dir."""
     logger.warning("DEPRECATED: This function will be removed in `0.6`.")
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)

@@ -1,4 +1,4 @@
-def test_dlcvideo_default(sgp):
+def test_dlc_video_default(sgp):
     expected_default = {
         "dlc_pos_video_params_name": "default",
         "params": {

@@ -46,9 +46,9 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
                 logger.warn("No units found in NWB file")
                 return
 
-        from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+        from spyglass.spikesorting.spikesorting_merge import (
             SpikeSortingOutput,
-        )
+        )  # noqa: F401
 
         key["object_id"] = nwbfile.units.object_id
 
@@ -61,12 +61,14 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
 
     @classmethod
     def get_recording(cls, key):
+        """Placeholder for merge table to call on all sources."""
         raise NotImplementedError(
             "Imported spike sorting does not have a `get_recording` method"
         )
 
     @classmethod
     def get_sorting(cls, key):
+        """Placeholder for merge table to call on all sources."""
         raise NotImplementedError(
             "Imported spike sorting does not have a `get_sorting` method"
         )

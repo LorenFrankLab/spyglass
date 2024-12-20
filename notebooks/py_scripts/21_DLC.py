@@ -756,6 +756,35 @@ sgp.DLCPosVideoSelection.insert1(
 
 sgp.DLCPosVideo().populate(dlc_key)
 
+# <details><summary>On editing parameters</summary>
+#
+# The presence of existing parameters in many tables makes it easy to tweak them
+# for your needs. You can fetch, edit, and re-insert new params - but the process
+# will look a little different if the table has a `=BLOB=` field.
+#
+# (These example assumes only one primary key. If multiple, `{'primary_key': 'x'}`
+# and `['primary_key']` will need to be adjusted accordingly.)
+#
+# No blob means that all parameters are fields in the table.
+#
+# ```python
+# existing_params = (MyParamsTable & {'primary_key':'x'}).fetch1()
+# new_params = {**existing_params, 'primary_key': 'y', 'my_variable': 'a', 'other_variable':'b'}
+# MyParamsTable.insert1(new_params)
+# ```
+#
+# A blob means that the params are stored as an embedded dictionary. We'll assume
+# this column is called `params`
+#
+# ```python
+# existing_params = (MyParamsTable & {'primary_key':'x'}).fetch1()
+# new_params = {**existing_params, 'primary_key': 'y'}
+# print(existing_params['params']) # check existing values
+# new_params['params'] = {**existing_params['params'], 'my_variable': 'a', 'other_variable':'b'}
+# ```
+#
+# </details>
+
 # #### [PositionOutput](#TableOfContents) <a id='PositionOutput1'></a>
 #
 
@@ -771,29 +800,6 @@ sgp.PositionOutput.merge_get_part(dlc_key)
 PositionOutput.DLCPosV1() & dlc_key
 
 (PositionOutput.DLCPosV1() & dlc_key).fetch1_dataframe()
-
-# #### [PositionVideo](#TableOfContents)<a id='PositionVideo1'></a>
-#
-
-# We can use the `PositionVideo` table to create a video that overlays just the
-# centroid and orientation on the video. This table uses the parameter `plot` to
-# determine whether to plot the entry deriving from the DLC arm or from the Trodes
-# arm of the position pipeline. This parameter also accepts 'all', which will plot
-# both (if they exist) in order to compare results.
-#
-
-sgp.PositionVideoSelection().insert1(
-    {
-        "nwb_file_name": "J1620210604_.nwb",
-        "interval_list_name": "pos 13 valid times",
-        "trodes_position_id": 0,
-        "dlc_position_id": 1,
-        "plot": "DLC",
-        "output_dir": "/home/dgramling/Src/",
-    }
-)
-
-sgp.PositionVideo.populate({"plot": "DLC"})
 
 # ### _CONGRATULATIONS!!_
 #

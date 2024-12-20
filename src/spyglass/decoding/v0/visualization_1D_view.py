@@ -4,24 +4,24 @@ import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
 
-
-def discretize_and_trim(series: xr.DataArray) -> xr.DataArray:
-    discretized = np.multiply(series, 255).astype(np.uint8)  # type: ignore
-    stacked = discretized.stack(unified_index=["time", "position"])
-    return stacked.where(stacked > 0, drop=True).astype(np.uint8)
+from spyglass.decoding.v0.utils import discretize_and_trim
 
 
 def get_observations_per_time(
     trimmed_posterior: xr.DataArray, base_data: xr.Dataset
 ) -> np.ndarray:
+    """Get the number of observations per time bin."""
     times, counts = np.unique(trimmed_posterior.time.values, return_counts=True)
     indexed_counts = xr.DataArray(counts, coords={"time": times})
-    _, good_counts = xr.align(base_data.time, indexed_counts, join="left", fill_value=0)  # type: ignore
+    _, good_counts = xr.align(
+        base_data.time, indexed_counts, join="left", fill_value=0
+    )  # type: ignore
 
     return good_counts.values.astype(np.uint8)
 
 
 def get_sampling_freq(times: np.ndarray) -> float:
+    """Get the sampling frequency of the data."""
     round_times = np.floor(1000 * times)
     median_delta_t_ms = np.median(np.diff(round_times)).item()
     return 1000 / median_delta_t_ms  # from time-delta to Hz
@@ -30,6 +30,7 @@ def get_sampling_freq(times: np.ndarray) -> float:
 def get_trimmed_bin_center_index(
     place_bin_centers: np.ndarray, trimmed_place_bin_centers: np.ndarray
 ) -> np.ndarray:
+    """Get the index of the trimmed bin centers in the full array."""
     return np.searchsorted(
         place_bin_centers, trimmed_place_bin_centers, side="left"
     ).astype(np.uint16)
@@ -57,7 +58,7 @@ def create_1D_decode_view(
     if linear_position is not None:
         linear_position = np.asarray(linear_position).squeeze()
 
-    trimmed_posterior = discretize_and_trim(posterior)
+    trimmed_posterior = discretize_and_trim(posterior, ndims=1)
     observations_per_time = get_observations_per_time(
         trimmed_posterior, posterior
     )

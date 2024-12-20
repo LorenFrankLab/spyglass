@@ -14,12 +14,6 @@ from position_tools import (
 )
 from position_tools.core import gaussian_smooth
 from tqdm import tqdm_notebook as tqdm
-from track_linearization import (
-    get_linearized_position,
-    make_track_graph,
-    plot_graph_as_1D,
-    plot_track_graph,
-)
 
 from spyglass.common.common_behav import RawPosition, VideoFile
 from spyglass.common.common_interval import IntervalList  # noqa F401
@@ -27,10 +21,11 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, test_mode, video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import deprecated_factory
+from spyglass.utils.position import convert_to_pixels, fill_nan
 
 try:
     from position_tools import get_centroid
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     logger.warning("Please update position_tools to >= 0.1.0")
     from position_tools import get_centriod as get_centroid
 
@@ -70,14 +65,15 @@ class IntervalPositionInfoSelection(SpyglassMixin, dj.Lookup):
     definition = """
     -> PositionInfoParameters
     -> IntervalList
-    ---
     """
 
 
 @schema
 class IntervalPositionInfo(SpyglassMixin, dj.Computed):
-    """Computes the smoothed head position, orientation and velocity for a given
-    interval."""
+    """Computes the smoothed data for a given interval.
+
+    Data includes head position, orientation and velocity
+    """
 
     definition = """
     -> IntervalPositionInfoSelection
@@ -89,6 +85,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Insert smoothed head position, orientation and velocity."""
         logger.info(f"Computing position for: {key}")
 
         analysis_file_name = AnalysisNwbfile().create(  # logged
@@ -128,10 +125,10 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     def generate_pos_components(
         spatial_series,
         position_info,
-        analysis_fname,
-        prefix="head_",
-        add_frame_ind=False,
-        video_frame_ind=None,
+        analysis_fname: str,
+        prefix: str = "head_",
+        add_frame_ind: bool = False,
+        video_frame_ind: int = None,
     ):
         """Generate position, orientation and velocity components."""
         METERS_PER_CM = 0.01
@@ -139,9 +136,6 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         position = pynwb.behavior.Position()
         orientation = pynwb.behavior.CompassDirection()
         velocity = pynwb.behavior.BehavioralTimeSeries()
-
-        # NOTE: CBroz1 removed a try/except ValueError that surrounded all
-        #       .create_X_series methods. dpeg22 could not recall purpose
 
         time_comments = dict(
             comments=spatial_series.comments,
@@ -317,8 +311,8 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         spatial_df: pd.DataFrame,
         meters_to_pixels: float,
         position_smoothing_duration,
-        led1_is_front,
-        is_upsampled,
+        led1_is_front: bool,
+        is_upsampled: bool,
         upsampling_sampling_rate,
         upsampling_interpolation_method,
         orient_smoothing_std_dev=None,
@@ -327,6 +321,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         max_plausible_speed=None,
         **kwargs,
     ):
+        """Calculates the smoothed position, orientation and velocity."""
         CM_TO_METERS = 100
 
         (
@@ -462,11 +457,14 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
             "speed": speed,
         }
 
-    def fetch1_dataframe(self):
+    def fetch1_dataframe(self) -> pd.DataFrame:
+        """Fetches the position data as a pandas dataframe."""
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod
-    def _data_to_df(data, prefix="head_", add_frame_ind=False):
+    def _data_to_df(
+        data: pd.DataFrame, prefix: str = "head_", add_frame_ind: bool = False
+    ):
         pos, ori, vel = [
             prefix + c for c in ["position", "orientation", "velocity"]
         ]
@@ -529,20 +527,26 @@ class PositionVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populates the PositionVideo table.
+
+        The video is created by overlaying the head position and orientation
+        on the video of the animal.
+        """
         M_TO_CM = 100
 
         logger.info("Loading position data...")
+
+        nwb_dict = dict(nwb_file_name=key["nwb_file_name"])
+
         raw_position_df = (
             RawPosition()
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-            }
+            & nwb_dict
+            & {"interval_list_name": key["interval_list_name"]}
         ).fetch1_dataframe()
         position_info_df = (
             IntervalPositionInfo()
             & {
-                "nwb_file_name": key["nwb_file_name"],
+                **nwb_dict,
                 "interval_list_name": key["interval_list_name"],
                 "position_info_param_name": key["position_info_param_name"],
             }
@@ -557,10 +561,7 @@ class PositionVideo(SpyglassMixin, dj.Computed):
             )
             + 1
         )
-        video_info = (
-            VideoFile()
-            & {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
-        ).fetch1()
+        video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
         io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")
         nwb_file = io.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
@@ -609,50 +610,22 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         )
         self.insert1(key)
 
-    @staticmethod
-    def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
-        """Converts from cm to pixels and flips the y-axis.
-        Parameters
-        ----------
-        data : ndarray, shape (n_time, 2)
-        frame_size : array_like, shape (2,)
-        cm_to_pixels : float
-
-        Returns
-        -------
-        converted_data : ndarray, shape (n_time, 2)
-        """
-        return data / cm_to_pixels
-
-    @staticmethod
-    def fill_nan(variable, video_time, variable_time):
-        video_ind = np.digitize(variable_time, video_time[1:])
-
-        n_video_time = len(video_time)
-        try:
-            n_variable_dims = variable.shape[1]
-            filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-        except IndexError:
-            filled_variable = np.full((n_video_time,), np.nan)
-        filled_variable[video_ind] = variable
-
-        return filled_variable
-
     def make_video(
         self,
-        video_filename,
+        video_filename: str,
         centroids,
-        head_position_mean,
-        head_orientation_mean,
+        head_position_mean: np.ndarray,
+        head_orientation_mean: np.ndarray,
         video_time,
         position_time,
-        output_video_filename="output.mp4",
-        cm_to_pixels=1.0,
-        disable_progressbar=False,
-        arrow_radius=15,
-        circle_radius=8,
-        truncate_data=False,  # reduce data to min length across all variables
+        output_video_filename: str = "output.mp4",
+        cm_to_pixels: float = 1.0,
+        disable_progressbar: bool = False,
+        arrow_radius: int = 15,
+        circle_radius: int = 8,
+        truncate_data: bool = False,  # reduce data to min len across all vars
     ):
+        """Generates a video with the head position and orientation overlaid."""
         import cv2  # noqa: F401
 
         RGB_PINK = (234, 82, 111)
@@ -689,13 +662,13 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         )
 
         centroids = {
-            color: self.fill_nan(data, video_time, position_time)
+            color: fill_nan(data, video_time, position_time)
             for color, data in centroids.items()
         }
-        head_position_mean = self.fill_nan(
+        head_position_mean = fill_nan(
             head_position_mean, video_time, position_time
         )
-        head_orientation_mean = self.fill_nan(
+        head_orientation_mean = fill_nan(
             head_orientation_mean, video_time, position_time
         )
 
@@ -710,8 +683,8 @@ class PositionVideo(SpyglassMixin, dj.Computed):
                 green_centroid = centroids["green"][time_ind]
 
                 head_position = head_position_mean[time_ind]
-                head_position = self.convert_to_pixels(
-                    head_position, frame_size, cm_to_pixels
+                head_position = convert_to_pixels(
+                    data=head_position, cm_to_pixels=cm_to_pixels
                 )
                 head_orientation = head_orientation_mean[time_ind]
 

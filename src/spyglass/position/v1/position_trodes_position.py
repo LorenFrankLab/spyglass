@@ -5,15 +5,17 @@ from pathlib import Path
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
-from tqdm import tqdm as tqdm
+from pandas import DataFrame
 
 from spyglass.common import PositionIntervalMap, TaskEpoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.position.v1.dlc_utils import check_videofile, get_video_path
+from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
+from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
+from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.position import fill_nan
 
 schema = dj.schema("position_v1_trodes_position")
 
@@ -31,11 +33,13 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
 
     @property
-    def default_pk(self):
+    def default_pk(self) -> dict:
+        """Return the default primary key for this table."""
         return {"trodes_pos_params_name": "default"}
 
     @property
-    def default_params(self):
+    def default_params(self) -> dict:
+        """Return the default parameters for this table."""
         return {
             "max_LED_separation": 9.0,
             "max_plausible_speed": 300.0,
@@ -49,7 +53,7 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         }
 
     @classmethod
-    def insert_default(cls, **kwargs):
+    def insert_default(cls, **kwargs) -> None:
         """
         Insert default parameter set for position determination
         """
@@ -59,7 +63,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         )
 
     @classmethod
-    def get_default(cls):
+    def get_default(cls) -> dict:
+        """Return the default set of parameters for position calculation"""
         query = cls & cls().default_pk
         if not len(query) > 0:
             cls().insert_default(skip_duplicates=True)
@@ -68,7 +73,8 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
         return query.fetch1()
 
     @classmethod
-    def get_accepted_params(cls):
+    def get_accepted_params(cls) -> list:
+        """Return a list of accepted parameters for position calculation"""
         return [k for k in cls().default_params.keys()]
 
 
@@ -159,6 +165,15 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Populate the table with position data.
+
+        1. Fetch the raw position data and parameters from the RawPosition
+            table and TrodesPosParams table, respectively.
+        2. Inherit methods from IntervalPositionInfo to calculate the position
+            and generate position components (position, orientation, velocity).
+        3. Generate AnalysisNwbfile and insert the key into the table.
+        4. Insert the key into the PositionOutput Merge table.
+        """
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
@@ -199,6 +214,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
         from ..position_merge import PositionOutput
 
+        # TODO: change to mixin camelize function
         part_name = to_camel_case(self.table_name.split("__")[-1])
 
         # TODO: The next line belongs in a merge table function
@@ -209,6 +225,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
+        """Generate position components from 2D spatial series."""
         return IntervalPositionInfo().generate_pos_components(*args, **kwargs)
 
     @staticmethod
@@ -216,7 +233,8 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         """Calculate position info from 2D spatial series."""
         return IntervalPositionInfo().calculate_position_info(*args, **kwargs)
 
-    def fetch1_dataframe(self, add_frame_ind=True):
+    def fetch1_dataframe(self, add_frame_ind=True) -> DataFrame:
+        """Fetch the position data as a pandas DataFrame."""
         pos_params = self.fetch1("trodes_pos_params_name")
         if (
             add_frame_ind
@@ -249,7 +267,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """Creates a video of the computed head position and orientation as well as
     the original LED positions overlaid on the video of the animal.
 
-    Use for debugging the effect of position extraction parameters."""
+    Use for debugging the effect of position extraction parameters.
+    """
 
     definition = """
     -> TrodesPosV1
@@ -258,17 +277,25 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
+        """Generate a video with overlaid position data.
+
+        Fetches...
+            - Raw position data from the RawPosition table
+            - Position data from the TrodesPosV1 table
+            - Video data from the VideoFile table
+        Generates a video using VideoMaker class.
+        """
         M_TO_CM = 100
 
         logger.info("Loading position data...")
-        raw_position_df = (
+        raw_df = (
             RawPosition.PosObject
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch1_dataframe()
-        position_info_df = (TrodesPosV1() & key).fetch1_dataframe()
+        pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
         epoch = (
@@ -285,230 +312,112 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             video_filename,
             meters_per_pixel,
             video_time,
-        ) = get_video_path(
+        ) = get_video_info(
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
 
+        # Check if video exists
         if not video_path:
             self.insert1(dict(**key, has_video=False))
             return
 
-        video_dir = os.path.dirname(video_path) + "/"
-        video_path = check_videofile(
-            video_path=video_dir, video_filename=video_filename
-        )[0].as_posix()
-        nwb_base_filename = key["nwb_file_name"].replace(".nwb", "")
-        current_dir = Path(os.getcwd())
-        output_video_filename = (
-            f"{current_dir.as_posix()}/{nwb_base_filename}_"
-            f"{epoch:02d}_{key['trodes_pos_params_name']}.mp4"
-        )
-        red_cols = (
-            ["xloc", "yloc"]
-            if "xloc" in raw_position_df.columns
-            else ["xloc1", "yloc1"]
-        )
-        centroids = {
-            "red": np.asarray(raw_position_df[red_cols]),
-            "green": np.asarray(raw_position_df[["xloc2", "yloc2"]]),
-        }
-        position_mean = np.asarray(
-            position_info_df[["position_x", "position_y"]]
-        )
-        orientation_mean = np.asarray(position_info_df[["orientation"]])
-        position_time = np.asarray(position_info_df.index)
-        cm_per_pixel = meters_per_pixel * M_TO_CM
-
-        logger.info("Making video...")
-        self.make_video(
-            video_path,
-            centroids,
-            position_mean,
-            orientation_mean,
-            video_time,
-            position_time,
-            output_video_filename=output_video_filename,
-            cm_to_pixels=cm_per_pixel,
-            disable_progressbar=False,
-        )
-        self.insert1(dict(**key, has_video=True))
-
-    @staticmethod
-    def convert_to_pixels(data, frame_size, cm_to_pixels=1.0):
-        """Converts from cm to pixels and flips the y-axis.
-        Parameters
-        ----------
-        data : ndarray, shape (n_time, 2)
-        frame_size : array_like, shape (2,)
-        cm_to_pixels : float
-
-        Returns
-        -------
-        converted_data : ndarray, shape (n_time, 2)
-        """
-        return data / cm_to_pixels
-
-    @staticmethod
-    def fill_nan(variable, video_time, variable_time, truncate_data=False):
-        """Fill in missing values in variable with nans at video_time.
-
-        Parameters
-        ----------
-        variable : ndarray, shape (n_time,) or (n_time, n_dims)
-            The variable to fill in.
-        video_time : ndarray, shape (n_video_time,)
-            The time points of the video.
-        variable_time : ndarray, shape (n_variable_time,)
-            The time points of the variable.
-        """
-        # TODO: Reduce duplication across dlc_utils and common_position
-
-        video_ind = np.digitize(variable_time, video_time[1:])
-        n_video_time = len(video_time)
-
-        try:
-            n_variable_dims = variable.shape[1]
-            filled_variable = np.full((n_video_time, n_variable_dims), np.nan)
-        except IndexError:
-            filled_variable = np.full((n_video_time,), np.nan)
-
-        filled_variable[video_ind] = variable
-
-        return filled_variable
-
-    def make_video(
-        self,
-        video_filename,
-        centroids,
-        position_mean,
-        orientation_mean,
-        video_time,
-        position_time,
-        output_video_filename="output.mp4",
-        cm_to_pixels=1.0,
-        disable_progressbar=False,
-        arrow_radius=15,
-        circle_radius=8,
-        truncate_data=False,  # reduce data to min length across all variables
-    ):
-        import cv2
-
-        RGB_PINK = (234, 82, 111)
-        RGB_YELLOW = (253, 231, 76)
-        RGB_WHITE = (255, 255, 255)
-
-        video = cv2.VideoCapture(video_filename)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        frame_size = (int(video.get(3)), int(video.get(4)))
-        frame_rate = video.get(5)
-        n_frames = int(orientation_mean.shape[0])
-        logger.info(f"video filepath: {output_video_filename}")
-        out = cv2.VideoWriter(
-            output_video_filename, fourcc, frame_rate, frame_size, True
-        )
-
-        if test_mode or truncate_data:
-            # pytest video data has mismatched shapes in some cases
-            #   centroid (267, 2), video_time (270, 2), position_time (5193,)
-            min_len = min(
-                n_frames,
-                len(video_time),
-                len(position_time),
-                len(position_mean),
-                len(orientation_mean),
-                min(len(v) for v in centroids.values()),
+        # Check timepoints overlap
+        if not set(video_time).intersection(set(pos_df.index)):
+            raise ValueError(
+                "No overlapping time points between video and position data"
             )
-            n_frames = min_len
+
+        params_pk = "trodes_pos_params_name"
+        params = (TrodesPosParams() & {params_pk: key[params_pk]}).fetch1(
+            "params"
+        )
+
+        # Check if upsampled
+        if params["is_upsampled"]:
+            logger.error(
+                "Upsampled position data not supported for video creation\n"
+                + "Please submit a feature request via GitHub if needed."
+            )
+            self.insert1(dict(**key, has_video=False))  # Null insert
+            return
+
+        video_path = find_mp4(
+            video_path=os.path.dirname(video_path) + "/",
+            video_filename=video_filename,
+        )
+
+        output_video_filename = (
+            key["nwb_file_name"].replace(".nwb", "")
+            + f"_{epoch:02d}_"
+            + f"{key[params_pk]}.mp4"
+        )
+
+        adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
+
+        limit = params.get("limit", None)
+
+        if limit and not test_mode:
+            params["debug"] = True
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
+        elif test_mode:
+            limit = 10
+
+        if limit:
+            # pytest video data has mismatched shapes in some cases
+            min_len = limit or min(len(adj_df), len(pos_df), len(video_time))
+            adj_df = adj_df.head(min_len)
+            pos_df = pos_df.head(min_len)
             video_time = video_time[:min_len]
-            position_time = position_time[:min_len]
-            position_mean = position_mean[:min_len]
-            orientation_mean = orientation_mean[:min_len]
-            for color, data in centroids.items():
-                centroids[color] = data[:min_len]
 
         centroids = {
-            color: self.fill_nan(
+            "red": np.asarray(adj_df[["xloc", "yloc"]]),
+            "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
+        }
+        position_mean = np.asarray(pos_df[["position_x", "position_y"]])
+        orientation_mean = np.asarray(pos_df[["orientation"]])
+        position_time = np.asarray(pos_df.index)
+
+        ind_col = (
+            pos_df["video_frame_ind"]
+            if "video_frame_ind" in pos_df.columns
+            else pos_df.index
+        )
+        video_frame_inds = ind_col.astype(int).to_numpy()
+
+        centroids = {
+            color: fill_nan(
                 variable=data,
                 video_time=video_time,
                 variable_time=position_time,
             )
             for color, data in centroids.items()
         }
-        position_mean = self.fill_nan(position_mean, video_time, position_time)
-        orientation_mean = self.fill_nan(
-            orientation_mean, video_time, position_time
+        position_mean = fill_nan(
+            variable=position_mean,
+            video_time=video_time,
+            variable_time=position_time,
+        )
+        orientation_mean = fill_nan(
+            variable=orientation_mean,
+            video_time=video_time,
+            variable_time=position_time,
         )
 
-        for time_ind in tqdm(
-            range(n_frames - 1), desc="frames", disable=disable_progressbar
-        ):
-            is_grabbed, frame = video.read()
-            if is_grabbed:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        vid_maker = make_video(
+            video_filename=video_path,
+            video_frame_inds=video_frame_inds,
+            centroids=centroids,
+            video_time=video_time,
+            position_mean=position_mean,
+            orientation_mean=orientation_mean,
+            position_time=position_time,
+            output_video_filename=output_video_filename,
+            cm_to_pixels=meters_per_pixel * M_TO_CM,
+            key_hash=dj.hash.key_hash(key),
+            **params,
+        )
 
-                red_centroid = centroids["red"][time_ind]
-                green_centroid = centroids["green"][time_ind]
+        if limit and not test_mode:
+            return vid_maker
 
-                position = position_mean[time_ind]
-                position = self.convert_to_pixels(
-                    position, frame_size, cm_to_pixels
-                )
-                orientation = orientation_mean[time_ind]
-
-                if np.all(~np.isnan(red_centroid)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(red_centroid.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_YELLOW,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                if np.all(~np.isnan(green_centroid)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(green_centroid.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_PINK,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                if np.all(~np.isnan(position)) & np.all(~np.isnan(orientation)):
-                    arrow_tip = (
-                        int(position[0] + arrow_radius * np.cos(orientation)),
-                        int(position[1] + arrow_radius * np.sin(orientation)),
-                    )
-                    cv2.arrowedLine(
-                        img=frame,
-                        pt1=tuple(position.astype(int)),
-                        pt2=arrow_tip,
-                        color=RGB_WHITE,
-                        thickness=4,
-                        line_type=8,
-                        shift=cv2.CV_8U,
-                        tipLength=0.25,
-                    )
-
-                if np.all(~np.isnan(position)):
-                    cv2.circle(
-                        img=frame,
-                        center=tuple(position.astype(int)),
-                        radius=circle_radius,
-                        color=RGB_WHITE,
-                        thickness=-1,
-                        shift=cv2.CV_8U,
-                    )
-
-                frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                out.write(frame)
-            else:
-                break
-
-        video.release()
-        out.release()
-        try:
-            cv2.destroyAllWindows()
-        except cv2.error:  # if cv is already closed or does not have func
-            pass
+        self.insert1(dict(**key, has_video=True))

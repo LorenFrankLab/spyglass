@@ -7,7 +7,7 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.nwb_helper_fn import get_nwb_file
+from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
 schema = dj.schema("common_task")
 
@@ -23,7 +23,7 @@ class Task(SpyglassMixin, dj.Manual):
      """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf: pynwb.NWBFile):
         """Insert tasks from an NWB file.
 
         Parameters
@@ -33,14 +33,14 @@ class Task(SpyglassMixin, dj.Manual):
         """
         tasks_mod = nwbf.processing.get("tasks")
         if tasks_mod is None:
-            logger.warn(f"No tasks processing module found in {nwbf}\n")
+            logger.warning(f"No tasks processing module found in {nwbf}\n")
             return
         for task in tasks_mod.data_interfaces.values():
             if cls.check_task_table(task):
                 cls.insert_from_task_table(task)
 
     @classmethod
-    def insert_from_task_table(cls, task_table):
+    def insert_from_task_table(cls, task_table: pynwb.core.DynamicTable):
         """Insert tasks from a pynwb DynamicTable containing task metadata.
 
         Duplicate tasks will not be added.
@@ -51,19 +51,23 @@ class Task(SpyglassMixin, dj.Manual):
             The table representing task metadata.
         """
         taskdf = task_table.to_dataframe()
-        for task_entry in taskdf.iterrows():
-            task_dict = dict()
-            task_dict["task_name"] = task_entry[1].task_name
-            task_dict["task_description"] = task_entry[1].task_description
-            cls.insert1(task_dict, skip_duplicates=True)
+
+        task_dicts = taskdf.apply(
+            lambda row: dict(
+                task_name=row.task_name,
+                task_description=row.task_description,
+            ),
+            axis=1,
+        ).tolist()
+
+        cls.insert(task_dicts, skip_duplicates=True)
 
     @classmethod
-    def check_task_table(cls, task_table):
-        """Check whether the pynwb DynamicTable containing task metadata conforms to the expected format.
+    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+        """Check format of pynwb DynamicTable containing task metadata.
 
-
-        The table should be an instance of pynwb.core.DynamicTable and contain the columns 'task_name' and
-        'task_description'.
+        The table should be an instance of pynwb.core.DynamicTable and contain
+        the columns 'task_name' and 'task_description'.
 
         Parameters
         ----------
@@ -73,7 +77,8 @@ class Task(SpyglassMixin, dj.Manual):
         Returns
         -------
         bool
-            Whether the DynamicTable conforms to the expected format for loading data into the Task table.
+            Whether the DynamicTable conforms to the expected format for loading
+            data into the Task table.
         """
         return (
             isinstance(task_table, pynwb.core.DynamicTable)
@@ -97,9 +102,11 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      """
 
     def make(self, key):
+        """Populate TaskEpoch from the processing module in the NWB file."""
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
         camera_names = dict()
 
         # the tasks refer to the camera_id which is unique for the NWB file but
@@ -111,13 +118,27 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 # get the camera ID
                 camera_id = int(str.split(device.name)[1])
                 camera_names[camera_id] = device.camera_name
+        if device_list := config.get("CameraDevice"):
+            for device in device_list:
+                camera_names.update(
+                    {
+                        name: id
+                        for name, id in zip(
+                            device.get("camera_name"),
+                            device.get("camera_id", -1),
+                        )
+                    }
+                )
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
 
         tasks_mod = nwbf.processing.get("tasks")
-        if tasks_mod is None:
-            logger.warn(f"No tasks processing module found in {nwbf}\n")
+        config_tasks = config.get("Tasks", [])
+        if tasks_mod is None and (not config_tasks):
+            logger.warning(
+                f"No tasks processing module found in {nwbf} or config\n"
+            )
             return
 
         task_inserts = []
@@ -142,7 +163,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         for camera_id in valid_camera_ids
                     ]
                 else:
-                    logger.warn(
+                    logger.warning(
                         f"No camera device found with ID {camera_ids} in NWB "
                         + f"file {nwbf}\n"
                     )
@@ -160,21 +181,73 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 for epoch in task.task_epochs[0]:
                     # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
                     # so epoch would be an int
-
                     key["epoch"] = epoch
-                    target_interval = str(epoch).zfill(2)
-                    for interval in session_intervals:
-                        if (
-                            target_interval in interval
-                        ):  # TODO this is not true for the beans file
-                            break
-                    # TODO case when interval is not found is not handled
-                    key["interval_list_name"] = interval
+                    target_interval = self.get_epoch_interval_name(
+                        epoch, session_intervals
+                    )
+                    if target_interval is None:
+                        logger.warning("Skipping epoch.")
+                        continue
+                    key["interval_list_name"] = target_interval
                     task_inserts.append(key.copy())
+
+        # Add tasks from config
+        for task in config_tasks:
+            new_key = {
+                **key,
+                "task_name": task.get("task_name"),
+                "task_environment": task.get("task_environment", None),
+            }
+            # add cameras
+            camera_ids = task.get("camera_id", [])
+            valid_camera_ids = [
+                camera_id
+                for camera_id in camera_ids
+                if camera_id in camera_names.keys()
+            ]
+            if valid_camera_ids:
+                new_key["camera_names"] = [
+                    {"camera_name": camera_names[camera_id]}
+                    for camera_id in valid_camera_ids
+                ]
+            session_intervals = (
+                IntervalList() & {"nwb_file_name": nwb_file_name}
+            ).fetch("interval_list_name")
+            for epoch in task.get("task_epochs", []):
+                new_key["epoch"] = epoch
+                target_interval = self.get_epoch_interval_name(
+                    epoch, session_intervals
+                )
+                if target_interval is None:
+                    logger.warning("Skipping epoch.")
+                    continue
+                new_key["interval_list_name"] = target_interval
+                task_inserts.append(key.copy())
+
         self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
-    def update_entries(cls, restrict={}):
+    def get_epoch_interval_name(cls, epoch, session_intervals):
+        """Get the interval name for a given epoch based on matching number"""
+        target_interval = str(epoch).zfill(2)
+        possible_targets = [
+            interval
+            for interval in session_intervals
+            if target_interval in interval
+        ]
+        if not possible_targets:
+            logger.warning(f"Interval not found for epoch {epoch}.")
+        elif len(possible_targets) > 1:
+            logger.warning(
+                f"Multiple intervals found for epoch {epoch}. "
+                + f"matches are {possible_targets}."
+            )
+        else:
+            return possible_targets[0]
+
+    @classmethod
+    def update_entries(cls, restrict=True):
+        """Update entries in the TaskEpoch table based on a restriction."""
         existing_entries = (cls & restrict).fetch("KEY")
         for row in existing_entries:
             if (cls & row).fetch1("camera_names"):
@@ -185,9 +258,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             cls.update1(row=row)
 
     @classmethod
-    def check_task_table(cls, task_table) -> bool:
-        """Check whether the pynwb DynamicTable containing task metadata
-        conforms to the expected format.
+    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+        """Check format of pynwb DynamicTable containing task metadata.
 
         The table should be an instance of pynwb.core.DynamicTable and contain
         the columns 'task_name', 'task_description', 'camera_id', 'and

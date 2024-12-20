@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Union
+from typing import Any, List, Union
 
 import datajoint as dj
 import kachery_cloud as kcl
@@ -6,6 +6,7 @@ import sortingview.views as vv
 import spikeinterface as si
 from sortingview.SpikeSortingView import SpikeSortingView
 
+from spyglass.spikesorting.utils import _reformat_metrics
 from spyglass.spikesorting.v0.spikesorting_curation import Curation
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
@@ -191,21 +192,3 @@ def _generate_the_figurl(
     label = f"{recording_label} {sorting_label}"
     url = view.url(label=label, state=url_state)
     return url
-
-
-def _reformat_metrics(metrics: Dict[str, Dict[str, float]]) -> List[Dict]:
-    for metric_name in metrics:
-        metrics[metric_name] = {
-            str(unit_id): metric_value
-            for unit_id, metric_value in metrics[metric_name].items()
-        }
-    new_external_metrics = [
-        {
-            "name": metric_name,
-            "label": metric_name,
-            "tooltip": metric_name,
-            "data": metric,
-        }
-        for metric_name, metric in metrics.items()
-    ]
-    return new_external_metrics

@@ -30,23 +30,14 @@ def schema_test(teardown, dj_conn):
 
 
 @pytest.fixture(scope="module")
-def chains(Nwbfile):
-    """Return example TableChains object from Nwbfile."""
-    from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
+def chain(Nwbfile):
+    """Return example TableChain object from chains."""
     from spyglass.linearization.merge import (
         LinearizedPositionOutput,
     )  # noqa: F401
-    from spyglass.position.position_merge import PositionOutput  # noqa: F401
+    from spyglass.utils.dj_graph import TableChain
 
-    _ = LFPOutput, LinearizedPositionOutput, PositionOutput
-
-    yield Nwbfile._get_chain("linear")
-
-
-@pytest.fixture(scope="module")
-def chain(chains):
-    """Return example TableChain object from chains."""
-    yield chains[0]
+    yield TableChain(Nwbfile, LinearizedPositionOutput)
 
 
 @pytest.fixture(scope="module")
@@ -242,7 +233,6 @@ def graph_schema(SpyglassMixin, _Merge):
 
 @pytest.fixture(scope="module")
 def graph_tables(dj_conn, graph_schema):
-
     schema = dj.Schema(context=graph_schema)
 
     for table in graph_schema.values():
@@ -253,14 +243,16 @@ def graph_tables(dj_conn, graph_schema):
     # Merge inserts after declaring tables
     merge_keys = graph_schema["PkNode"].fetch("KEY", offset=1, as_dict=True)
     graph_schema["MergeOutput"].insert(merge_keys, skip_duplicates=True)
-    merge_child_keys = graph_schema["MergeOutput"].merge_fetch(
-        True, "merge_id", offset=1
+    merge_child_keys = graph_schema["MergeOutput"]().merge_fetch(
+        "merge_id", restriction=True, offset=1
     )
     merge_child_inserts = [
         (i, j, k + 10)
         for i, j, k in zip(merge_child_keys, range(4), range(10, 15))
     ]
-    graph_schema["MergeChild"].insert(merge_child_inserts, skip_duplicates=True)
+    graph_schema["MergeChild"]().insert(
+        merge_child_inserts, skip_duplicates=True
+    )
 
     yield graph_schema
 

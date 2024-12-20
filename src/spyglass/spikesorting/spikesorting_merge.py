@@ -7,8 +7,8 @@ from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     CuratedSpikeSorting,
 )
-from spyglass.spikesorting.v1 import (  # noqa: F401
-    ArtifactDetectionSelection,
+from spyglass.spikesorting.v1 import ArtifactDetectionSelection  # noqa: F401
+from spyglass.spikesorting.v1 import (
     CurationV1,
     MetricCurationSelection,
     SpikeSortingRecordingSelection,
@@ -17,6 +17,7 @@ from spyglass.spikesorting.v1 import (  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.logging import logger
+from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
 schema = dj.schema("spikesorting_merge")
 
@@ -82,6 +83,8 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         merge_ids : list
             list of merge ids from the restricted sources
         """
+        # TODO: replace with long-distance restrictions
+
         merge_ids = []
 
         if "v1" in sources:
@@ -184,6 +187,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         return part_table * sort_group_info  # join the info with merge id's
 
     def get_spike_times(self, key):
+        """Get spike times for the group"""
         spike_times = []
         for nwb_file in self.fetch_nwb(key):
             # V1 uses 'object_id', V0 uses 'units'
@@ -193,9 +197,23 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def get_spike_indicator(cls, key, time):
+        """Get spike indicator matrix for the group
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the spike indicator matrix
+
+        Returns
+        -------
+        np.ndarray
+            spike indicator matrix with shape (len(time), n_units)
+        """
         time = np.asarray(time)
         min_time, max_time = time[[0, -1]]
-        spike_times = cls.fetch_spike_data(key)
+        spike_times = (cls & key).get_spike_times(key)
         spike_indicator = np.zeros((len(time), len(spike_times)))
 
         for ind, times in enumerate(spike_times):
@@ -205,24 +223,43 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
                 minlength=time.shape[0],
             )
 
-        return spike_indicator
-
-    @classmethod
-    def get_firing_rate(cls, key, time, multiunit=False):
-        spike_indicator = cls.get_spike_indicator(key, time)
         if spike_indicator.ndim == 1:
             spike_indicator = spike_indicator[:, np.newaxis]
 
-        sampling_frequency = 1 / np.median(np.diff(time))
+        return spike_indicator
 
-        if multiunit:
-            spike_indicator = spike_indicator.sum(axis=1, keepdims=True)
-        return np.stack(
-            [
-                get_multiunit_population_firing_rate(
-                    indicator[:, np.newaxis], sampling_frequency
-                )
-                for indicator in spike_indicator.T
-            ],
-            axis=1,
+    @classmethod
+    def get_firing_rate(
+        cls,
+        key: dict,
+        time: np.array,
+        multiunit: bool = False,
+        smoothing_sigma: float = 0.015,
+    ):
+        """Get time-dependent firing rate for units in the group
+
+
+        Parameters
+        ----------
+        key : dict
+            key to identify the group
+        time : np.ndarray
+            time vector for which to calculate the firing rate
+        multiunit : bool, optional
+            if True, return the multiunit firing rate for units in the group.
+            Default False
+        smoothing_sigma : float, optional
+            standard deviation of gaussian filter to smooth firing rates in
+            seconds. Default 0.015
+
+        Returns
+        -------
+        np.ndarray
+            time-dependent firing rate with shape (len(time), n_units)
+        """
+        return firing_rate_from_spike_indicator(
+            spike_indicator=cls.get_spike_indicator(key, time),
+            time=time,
+            multiunit=multiunit,
+            smoothing_sigma=smoothing_sigma,
         )

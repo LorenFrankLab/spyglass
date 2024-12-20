@@ -15,11 +15,12 @@ SHARED_MODULES = [
     "spikesorting",
     "decoding",
     "position",
-    "position_linearization",
+    "linearization",
     "ripple",
     "lfp",
     "waveform",
     "mua",
+    "sharing",
 ]
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
@@ -185,6 +186,7 @@ class DatabaseSettings:
             )
 
     def add_user_by_role(self, role, check_exists=False):
+        """Add a user to the database with the specified role"""
         add_func = {
             "guest": self.add_guest,
             "user": self.add_user,

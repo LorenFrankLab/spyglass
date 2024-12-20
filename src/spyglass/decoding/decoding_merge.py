@@ -3,7 +3,6 @@ from pathlib import Path
 
 import datajoint as dj
 import numpy as np
-from datajoint.utils import to_camel_case
 from non_local_detector.visualization.figurl_1D import create_1D_decode_view
 from non_local_detector.visualization.figurl_2D import create_2D_decode_view
 
@@ -85,52 +84,47 @@ class DecodingOutput(_Merge, SpyglassMixin):
 
     @classmethod
     def fetch_results(cls, key):
-        return cls().merge_get_parent_class(key).fetch_results()
+        """Fetch the decoding results for a given key."""
+        return cls().merge_restrict_class(key).fetch_results()
 
     @classmethod
     def fetch_model(cls, key):
-        return cls().merge_get_parent_class(key).fetch_model()
+        """Fetch the decoding model for a given key."""
+        return cls().merge_restrict_class(key).fetch_model()
 
     @classmethod
     def fetch_environments(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        return (
-            cls()
-            .merge_get_parent_class(key)
-            .fetch_environments(decoding_selection_key)
-        )
+        """Fetch the decoding environments for a given key."""
+        restr_parent = cls().merge_restrict_class(key)
+        decoding_selection_key = restr_parent.fetch1("KEY")
+        return restr_parent.fetch_environments(decoding_selection_key)
 
     @classmethod
     def fetch_position_info(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        return (
-            cls()
-            .merge_get_parent_class(key)
-            .fetch_position_info(decoding_selection_key)
-        )
+        """Fetch the decoding position info for a given key."""
+        restr_parent = cls().merge_restrict_class(key)
+        decoding_selection_key = restr_parent.fetch1("KEY")
+        return restr_parent.fetch_position_info(decoding_selection_key)
 
     @classmethod
     def fetch_linear_position_info(cls, key):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        return (
-            cls()
-            .merge_get_parent_class(key)
-            .fetch_linear_position_info(decoding_selection_key)
-        )
+        """Fetch the decoding linear position info for a given key."""
+        restr_parent = cls().merge_restrict_class(key)
+        decoding_selection_key = restr_parent.fetch1("KEY")
+        return restr_parent.fetch_linear_position_info(decoding_selection_key)
 
     @classmethod
     def fetch_spike_data(cls, key, filter_by_interval=True):
-        decoding_selection_key = cls.merge_get_parent(key).fetch1("KEY")
-        return (
-            cls()
-            .merge_get_parent_class(key)
-            .fetch_linear_position_info(
-                decoding_selection_key, filter_by_interval=filter_by_interval
-            )
+        """Fetch the decoding spike data for a given key."""
+        restr_parent = cls().merge_restrict_class(key)
+        decoding_selection_key = restr_parent.fetch1("KEY")
+        return restr_parent.fetch_spike_data(
+            decoding_selection_key, filter_by_interval=filter_by_interval
         )
 
     @classmethod
     def create_decoding_view(cls, key, head_direction_name="head_orientation"):
+        """Create a decoding view for a given key."""
         results = cls.fetch_results(key)
         posterior = (
             results.squeeze()
@@ -161,11 +155,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
                 head_dir=position_info[head_direction_name],
             )
         else:
-            (
-                position_info,
-                position_variable_names,
-            ) = cls.fetch_linear_position_info(key)
             return create_1D_decode_view(
                 posterior=posterior,
-                linear_position=position_info["linear_position"],
+                linear_position=cls.fetch_linear_position_info(key),
             )

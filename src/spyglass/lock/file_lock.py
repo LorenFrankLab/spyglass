@@ -37,9 +37,11 @@ class AnalysisNwbfileLock(SpyglassMixin, dj.Manual):
     """
 
     def populate_from_lock_file(self):
-        """Reads from the ANALYSIS_LOCK_FILE (defined by an environment variable), adds the entries to this schema, and
-        then removes the file
+        """Reads/inserts from lock file, then removes lock file.
+
+        Requires ANALYSIS_LOCK_FILE environment variable.
         """
+
         if os.path.exists(os.getenv("ANALYSIS_LOCK_FILE")):
             lock_file = open(os.getenv("ANALYSIS_LOCK_FILE"), "r")
             for line in lock_file:

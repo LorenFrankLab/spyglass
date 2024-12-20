@@ -1,8 +1,10 @@
 # https://github.com/DavidAnson/markdownlint
 # https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
-MD007: false # permit indenting 4 spaces instead of 2
+MD007: # permit indenting 4 spaces instead of 2
+  indent: 4
+  start_indent: 4
 MD013:
-    line_length: "80" # Line length limits
+    line_length: 80 # Line length limits
     tables: false # disable for tables
     code_blocks: false # disable for code blocks
 MD025: false # permit adjacent headings

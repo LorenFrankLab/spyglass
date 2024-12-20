@@ -9,7 +9,7 @@
 name: spyglass
 channels:
   - conda-forge
-  - defaults
+  # - defaults # deprecated
   - franklab
   - edeno
   # - pytorch # dlc-only
@@ -23,13 +23,13 @@ dependencies:
   # - libgcc # dlc-only
   - matplotlib
   - non_local_detector
-  - numpy<1.24
+  - numpy
   - pip
   - position_tools
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
-  - python>=3.9,<3.10
+  - python>=3.9,<3.13
   - pytorch<1.12.0
   - ripple_detection
   - seaborn

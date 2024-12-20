@@ -4,68 +4,6 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def common_position(common):
-    yield common.common_position
-
-
-@pytest.fixture(scope="session")
-def interval_position_info(common_position):
-    yield common_position.IntervalPositionInfo
-
-
-@pytest.fixture(scope="session")
-def default_param_key():
-    yield {"position_info_param_name": "default"}
-
-
-@pytest.fixture(scope="session")
-def interval_key(common):
-    yield (common.IntervalList & "interval_list_name LIKE 'pos 0%'").fetch1(
-        "KEY"
-    )
-
-
-@pytest.fixture(scope="session")
-def param_table(common_position, default_param_key, teardown):
-    param_table = common_position.PositionInfoParameters()
-    param_table.insert1(default_param_key, skip_duplicates=True)
-    yield param_table
-    if teardown:
-        param_table.delete(safemode=False)
-
-
-@pytest.fixture(scope="session")
-def upsample_position(
-    common,
-    common_position,
-    param_table,
-    default_param_key,
-    teardown,
-    interval_key,
-):
-    params = (param_table & default_param_key).fetch1()
-    upsample_param_key = {"position_info_param_name": "upsampled"}
-    param_table.insert1(
-        {
-            **params,
-            **upsample_param_key,
-            "is_upsampled": 1,
-            "max_separation": 80,
-            "upsampling_sampling_rate": 500,
-        },
-        skip_duplicates=True,
-    )
-    interval_pos_key = {**interval_key, **upsample_param_key}
-    common_position.IntervalPositionInfoSelection.insert1(
-        interval_pos_key, skip_duplicates=True
-    )
-    common_position.IntervalPositionInfo.populate(interval_pos_key)
-    yield interval_pos_key
-    if teardown:
-        (param_table & upsample_param_key).delete(safemode=False)
-
-
-@pytest.fixture(scope="session")
 def interval_pos_key(upsample_position):
     yield upsample_position
 
@@ -77,16 +15,17 @@ def test_interval_position_info_insert(common_position, interval_pos_key):
 @pytest.fixture(scope="session")
 def upsample_position_error(
     upsample_position,
-    default_param_key,
-    param_table,
+    default_interval_pos_param_key,
+    pos_info_param,
     common,
     common_position,
     teardown,
-    interval_key,
+    interval_keys,
 ):
-    params = (param_table & default_param_key).fetch1()
+    interval_key = interval_keys[0]
+    params = (pos_info_param & default_interval_pos_param_key).fetch1()
     upsample_param_key = {"position_info_param_name": "upsampled error"}
-    param_table.insert1(
+    pos_info_param.insert1(
         {
             **params,
             **upsample_param_key,
@@ -101,8 +40,10 @@ def upsample_position_error(
         interval_pos_key, skip_duplicates=not teardown
     )
     yield interval_pos_key
-    if teardown:
-        (param_table & upsample_param_key).delete(safemode=False)
+
+    (common_position.IntervalPositionInfoSelection & interval_pos_key).delete(
+        safemode=False
+    )
 
 
 def test_interval_position_info_insert_error(
@@ -156,14 +97,15 @@ def position_video(common_position):
 
 def test_position_video(position_video, upsample_position):
     _ = position_video.populate()
-    assert len(position_video) == 1, "Failed to populate PositionVideo table."
+    assert len(position_video) == 2, "Failed to populate PositionVideo table."
 
 
-def test_convert_to_pixels(position_video):
+def test_convert_to_pixels():
+    from spyglass.utils.position import convert_to_pixels
 
     data = np.array([[2, 4], [6, 8]])
     expect = np.array([[1, 2], [3, 4]])
-    output = position_video.convert_to_pixels(data, "junk", 2)
+    output = convert_to_pixels(data, "junk", 2)
 
     assert np.array_equal(output, expect), "Failed to convert to pixels."
 
@@ -182,7 +124,6 @@ def rename_default_cols(common_position):
     ],
 )
 def test_rename_columns(rename_default_cols, col_type, cols):
-
     _fix_col_names, defaults = rename_default_cols
     df = pd.DataFrame([range(len(cols) + 1)], columns=["junk"] + cols)
     result = _fix_col_names(df).columns.tolist()

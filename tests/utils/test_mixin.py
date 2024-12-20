@@ -8,10 +8,11 @@ from tests.conftest import TEARDOWN, VERBOSE
 def Mixin():
     from spyglass.utils import SpyglassMixin
 
-    class Mixin(SpyglassMixin, dj.Manual):
+    class Mixin(SpyglassMixin, dj.Lookup):
         definition = """
         id : int
         """
+        contents = [(0,), (1,)]
 
     yield Mixin
 
@@ -21,7 +22,7 @@ def Mixin():
     reason="Error only on verbose or new declare.",
 )
 def test_bad_prefix(caplog, dj_conn, Mixin):
-    schema_bad = dj.Schema("badprefix", {}, connection=dj_conn)
+    schema_bad = dj.Schema("bad_prefix", {}, connection=dj_conn)
     schema_bad(Mixin)
     assert "Schema prefix not in SHARED_MODULES" in caplog.text
 
@@ -32,64 +33,108 @@ def test_nwb_table_missing(schema_test, Mixin):
         Mixin().fetch_nwb()
 
 
-def test_merge_detect(Nwbfile, pos_merge_tables):
-    """Test that the mixin can detect merge children of merge."""
-    merges_found = set(Nwbfile._merge_chains.keys())
-    merges_expected = set([t.full_table_name for t in pos_merge_tables])
-    assert merges_expected.issubset(
-        merges_found
-    ), "Merges not detected by mixin."
+def test_auto_increment(schema_test, Mixin):
+    schema_test(Mixin)
+    ret = Mixin()._auto_increment(key={}, pk="id")
+    assert ret["id"] == 2, "Auto increment not working."
 
 
-def test_merge_chain_join(
-    Nwbfile, pos_merge_tables, lin_v1, lfp_merge_key, populate_dlc
-):
-    """Test that the mixin can join merge chains.
-
-    NOTE: This will change if more data is added to merge tables."""
-    _ = lin_v1, lfp_merge_key, populate_dlc  # merge tables populated
-
-    all_chains = [
-        chains.cascade(True, direction="down")
-        for chains in Nwbfile._merge_chains.values()
-    ]
-    end_len = [len(chain) for chain in all_chains]
-
-    assert sum(end_len) == 4, "Merge chains not joined correctly."
+def test_good_file_like(common):
+    common.Session().file_like("min")
+    assert len(common.Session()) > 0, "file_like not working."
 
 
-def test_get_chain(Nwbfile, pos_merge_tables):
-    """Test that the mixin can get the chain of a merge."""
-    lin_parts = Nwbfile._get_chain("linear").part_names
-    lin_output = pos_merge_tables[1]
-    assert lin_parts == lin_output.parts(), "Chain not found."
+def test_null_file_like(schema_test, Mixin):
+    schema_test(Mixin)
+    ret = Mixin().file_like(None)
+    assert len(ret) == len(Mixin()), "Null file_like not working."
 
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_ddm_warning(Nwbfile, caplog):
-    """Test that the mixin warns on empty delete_downstream_merge."""
-    (Nwbfile.file_like("BadName")).delete_downstream_merge(
-        reload_cache=True, disable_warnings=False
-    )
-    assert "No merge deletes found" in caplog.text, "No warning issued."
+def test_bad_file_like(caplog, schema_test, Mixin):
+    schema_test(Mixin)
+    Mixin().file_like("BadName")
+    assert "No file_like field" in caplog.text, "No warning issued."
 
 
-def test_ddm_dry_run(Nwbfile, common, sgp, pos_merge_tables, lin_v1):
-    """Test that the mixin can dry run delete_downstream_merge."""
-    _ = lin_v1  # merge tables populated
-    pos_output_name = pos_merge_tables[0].full_table_name
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_insert_fail(caplog, common, mini_dict):
+    this_key = dict(mini_dict, interval_list_name="BadName")
+    common.PositionSource().find_insert_fail(this_key)
+    assert "IntervalList: MISSING" in caplog.text, "No warning issued."
 
-    param_field = "trodes_pos_params_name"
-    trodes_params = sgp.v1.TrodesPosParams()
 
-    rft = (trodes_params & f'{param_field} LIKE "%ups%"').ddm(
-        reload_cache=True, dry_run=True, return_parts=False
-    )[pos_output_name][0]
-    assert len(rft) == 1, "ddm did not return restricted table."
+def test_exp_summary(Nwbfile):
+    fields = Nwbfile._get_exp_summary().heading.names
+    expected = ["nwb_file_name", "lab_member_name"]
+    assert fields == expected, "Exp summary fields not as expected."
 
-    table_name = [p for p in pos_merge_tables[0].parts() if "trode" in p][0]
-    assert table_name == rft.full_table_name, "ddm didn't grab right table."
 
+def test_exp_summary_no_link(schema_test, Mixin):
+    schema_test(Mixin)
+    assert Mixin()._get_exp_summary() is None, "Exp summary not None."
+
+
+def test_exp_summary_auto_link(common):
+    lab_member = common.LabMember()
+    summary_names = lab_member._get_exp_summary().heading.names
+    join_names = (lab_member * common.Session.Experimenter).heading.names
+    assert summary_names == join_names, "Auto link not working."
+
+
+def test_cautious_del_dry_run(Nwbfile, frequent_imports):
+    _ = frequent_imports  # part of cascade, need import
+    ret = Nwbfile.cautious_delete(dry_run=True)[1].full_table_name
     assert (
-        rft.fetch1(param_field) == "single_led_upsampled"
-    ), "ddm didn't grab right row."
+        ret == "`common_nwbfile`.`~external_raw`"
+    ), "Dry run delete not working."
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_empty_cautious_del(caplog, schema_test, Mixin):
+    schema_test(Mixin)
+    Mixin().cautious_delete(safemode=False)
+    Mixin().cautious_delete(safemode=False)
+    assert "empty" in caplog.text, "No warning issued."
+
+
+def test_super_delete(schema_test, Mixin, common):
+    schema_test(Mixin)
+    Mixin().insert1((0,), skip_duplicates=True)
+    Mixin().super_delete(safemode=False)
+    assert len(Mixin()) == 0, "Super delete not working."
+
+    logged_dels = common.common_usage.CautiousDelete & 'restriction LIKE "Sup%"'
+    assert len(logged_dels) > 0, "Super delete not logged."
+
+
+def test_compare_versions(common):
+    # Does nothing in test_mode
+    compare_func = common.Nwbfile().compare_versions
+    compare_func("0.1.0", "0.1.1")
+
+
+@pytest.fixture
+def custom_table():
+    """Custom table on user prefix for testing load_shared_schemas."""
+    db, table = dj.config["database.user"] + "_test", "custom"
+    dj.conn().query(f"CREATE DATABASE IF NOT EXISTS {db};")
+    dj.conn().query(f"USE {db};")
+    dj.conn().query(
+        f"CREATE TABLE IF NOT EXISTS {table} ( "
+        + "`merge_id` binary(16) NOT NULL COMMENT ':uuid:', "
+        + "`unit_id` int NOT NULL, "
+        + "PRIMARY KEY (`merge_id`), "
+        + "CONSTRAINT `unit_annotation_ibfk_1` FOREIGN KEY (`merge_id`)  "
+        + "REFERENCES `spikesorting_merge`.`spike_sorting_output` (`merge_id`) "
+        + "ON DELETE RESTRICT ON UPDATE CASCADE);"
+    )
+    yield f"`{db}`.`{table}`"
+
+
+def test_load_shared_schemas(common, custom_table):
+    # from spyglass.common import Nwbfile
+
+    common.Nwbfile().load_shared_schemas(additional_prefixes=["test"])
+    nodes = common.Nwbfile().connection.dependencies.nodes
+    assert custom_table in nodes, "Custom table not loaded."

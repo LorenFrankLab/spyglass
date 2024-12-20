@@ -51,13 +51,13 @@ class Nwbfile(SpyglassMixin, dj.Manual):
     nwb_file_abs_path: filepath@raw
     INDEX (nwb_file_abs_path)
     """
-    # NOTE the INDEX above is implicit from filepath@... above but needs to be explicit
-    # so that alter() can work
+    # NOTE the INDEX above is implicit from filepath@... above but needs to be
+    # explicit so that alter() can work
 
     # NOTE: See #630, #664. Excessive key length.
 
     @classmethod
-    def insert_from_relative_file_name(cls, nwb_file_name):
+    def insert_from_relative_file_name(cls, nwb_file_name: str) -> None:
         """Insert a new session from an existing NWB file.
 
         Parameters
@@ -95,7 +95,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
 
     @classmethod
-    def get_abs_path(cls, nwb_file_name, new_file=False) -> str:
+    def get_abs_path(cls, nwb_file_name: str, new_file: bool = False) -> str:
         """Return absolute path for a stored raw NWB file given file name.
 
         The SPYGLASS_BASE_DIR must be set, either as an environment or part of
@@ -120,42 +120,44 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         return raw_dir + "/" + cls._get_file_name(nwb_file_name)
 
     @staticmethod
-    def add_to_lock(nwb_file_name):
-        """Add the specified NWB file to the file with the list of NWB files to be locked.
+    def add_to_lock(nwb_file_name: str) -> None:
+        """Add the specified NWB file to the list of locked items.
 
-        The NWB_LOCK_FILE environment variable must be set.
+        The NWB_LOCK_FILE environment variable must be set to the path of the
+        lock file, listing locked NWB files.
 
         Parameters
         ----------
         nwb_file_name : str
-            The name of an NWB file that has been inserted into the Nwbfile() schema.
+            The name of an NWB file in the Nwbfile table.
         """
-        key = {"nwb_file_name": nwb_file_name}
-        # check to make sure the file exists
-        assert (
-            len((Nwbfile() & key).fetch()) > 0
-        ), f"Error adding {nwb_file_name} to lock file, not in Nwbfile() schema"
+        if not (Nwbfile() & {"nwb_file_name": nwb_file_name}):
+            raise FileNotFoundError(
+                f"File not found in Nwbfile table. Cannot lock {nwb_file_name}"
+            )
 
-        lock_file = open(os.getenv("NWB_LOCK_FILE"), "a+")
-        lock_file.write(f"{nwb_file_name}\n")
-        lock_file.close()
+        with open(os.getenv("NWB_LOCK_FILE"), "a+") as lock_file:
+            lock_file.write(f"{nwb_file_name}\n")
 
     @staticmethod
-    def cleanup(delete_files=False):
+    def cleanup(delete_files: bool = False) -> None:
         """Remove the filepath entries for NWB files that are not in use.
 
-        This does not delete the files themselves unless delete_files=True is specified
-        Run this after deleting the Nwbfile() entries themselves.
+        This does not delete the files themselves unless delete_files=True is
+        specified. Run this after deleting the Nwbfile() entries themselves.
         """
         schema.external["raw"].delete(delete_external_files=delete_files)
 
 
-# TODO: add_to_kachery will not work because we can't update the entry after it's been used in another table.
-# We therefore need another way to keep track of the
+# TODO: add_to_kachery will not work because we can't update the entry after
+# it's been used in another table. We therefore need another way to keep track
+# of the file here
+
+
 @schema
 class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
-    # Table for holding the NWB files that contain results of analysis, such as spike sorting.
+    # Table for NWB files that contain results of analysis.
     analysis_file_name: varchar(64)                # name of the file
     ---
     -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
@@ -172,10 +174,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     _creation_times = {}
 
-    def create(self, nwb_file_name):
-        """Open the NWB file, create a copy, write the copy to disk and return the name of the new file.
+    def create(self, nwb_file_name: str) -> str:
+        """Open the NWB file, create copy, write to disk and return new name.
 
-        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
+        Note that this does NOT add the file to the schema; that needs to be
+        done after data are written to it.
 
         Parameters
         ----------
@@ -188,7 +191,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         # To allow some times to occur before create
-        creation_time = self._creation_times.pop("pre_create_time", time())
+        # creation_time = self._creation_times.pop("pre_create_time", time())
 
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         alter_source_script = False
@@ -225,25 +228,25 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             self._alter_spyglass_version(analysis_file_abs_path)
 
         # create a new object id for the file
-        with h5py.File(nwb_file_abspath, "a") as f:
+        with h5py.File(analysis_file_abs_path, "a") as f:
             f.attrs["object_id"] = str(uuid4())
 
         # change the permissions to only allow owner to write
         permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
         os.chmod(analysis_file_abs_path, permissions)
 
-        self._creation_times[analysis_file_name] = creation_time
+        # self._creation_times[analysis_file_name] = creation_time
 
         return analysis_file_name
 
     @staticmethod
-    def _alter_spyglass_version(nwb_file_path):
+    def _alter_spyglass_version(nwb_file_path: str) -> None:
         """Change the source script to the current version of spyglass"""
         with h5py.File(nwb_file_path, "a") as f:
             f["/general/source_script"][()] = f"spyglass={sg_version}"
 
     @classmethod
-    def __get_new_file_name(cls, nwb_file_name):
+    def __get_new_file_name(cls, nwb_file_name: str) -> str:
         # each file ends with a random string of 10 digits, so we generate that
         # string and redo if by some miracle it's already there
         file_in_table = True
@@ -262,15 +265,16 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         return analysis_file_name
 
     @classmethod
-    def __get_analysis_file_dir(cls, analysis_file_name: str):
-        # strip off everything after and including the final underscore and return the result
+    def __get_analysis_file_dir(cls, analysis_file_name: str) -> str:
+        """Strip off final underscore and remaining chars, return the result."""
         return analysis_file_name[0 : analysis_file_name.rfind("_")]
 
     @classmethod
-    def copy(cls, nwb_file_name):
+    def copy(cls, nwb_file_name: str):
         """Make a copy of an analysis NWB file.
 
-        Note that this does NOT add the file to the schema; that needs to be done after data are written to it.
+        Note that this does NOT add the file to the schema; that needs to be
+        done after data are written to it.
 
         Parameters
         ----------
@@ -304,7 +308,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         return analysis_file_name
 
-    def add(self, nwb_file_name, analysis_file_name):
+    def add(self, nwb_file_name: str, analysis_file_name: str) -> None:
         """Add the specified file to AnalysisNWBfile table.
 
         Parameters
@@ -325,15 +329,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self.insert1(key)
 
     @classmethod
-    def get_abs_path(cls, analysis_nwb_file_name):
-        """Return the absolute path for a stored analysis NWB file given just the file name.
+    def get_abs_path(cls, analysis_nwb_file_name: str) -> str:
+        """Return the absolute path for an analysis NWB file given the name.
 
         The spyglass config from settings.py must be set.
 
         Parameters
         ----------
         analysis_nwb_file_name : str
-            The name of the NWB file that has been inserted into the AnalysisNwbfile() schema
+            The name of the NWB file in AnalysisNwbfile.
 
         Returns
         -------
@@ -345,7 +349,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         if cls & file_key:
             try:
                 # runs if file exists locally
-                return (cls & file_key).fetch1("analysis_file_abs_path")
+                return (cls & file_key).fetch1(
+                    "analysis_file_abs_path", log_export=False
+                )
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message
@@ -367,11 +373,16 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             return str(analysis_file_base_path / analysis_nwb_file_name)
 
     def add_nwb_object(
-        self, analysis_file_name, nwb_object, table_name="pandas_table"
+        self,
+        analysis_file_name: str,
+        nwb_object: pynwb.core.NWBDataInterface,
+        table_name: str = "pandas_table",
     ):
         # TODO: change to add_object with checks for object type and a name
         # parameter, which should be specified if it is not an NWB container
-        """Add an NWB object to the analysis file in the scratch area and returns the NWB object ID
+        """Add an NWB object to the analysis file and return the NWB object ID
+
+        Adds object to the scratch space of the NWB file.
 
         Parameters
         ----------
@@ -379,8 +390,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the analysis NWB file.
         nwb_object : pynwb.core.NWBDataInterface
             The NWB object created by PyNWB.
-        table_name : str (optional, defaults to 'pandas_table')
-            The name of the DynamicTable made from a dataframe.
+        table_name : str, optional
+            The name of the DynamicTable made from a dataframe. Defaults to
+            'pandas_table'.
 
         Returns
         -------
@@ -394,26 +406,22 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ) as io:
             nwbf = io.read()
             if isinstance(nwb_object, pd.DataFrame):
-                dt_object = DynamicTable.from_dataframe(
+                nwb_object = DynamicTable.from_dataframe(
                     name=table_name, df=nwb_object
                 )
-                nwbf.add_scratch(dt_object)
-                io.write(nwbf)
-                return dt_object.object_id
-            else:
-                nwbf.add_scratch(nwb_object)
-                io.write(nwbf)
-                return nwb_object.object_id
+            nwbf.add_scratch(nwb_object)
+            io.write(nwbf)
+            return nwb_object.object_id
 
     def add_units(
         self,
-        analysis_file_name,
-        units,
-        units_valid_times,
-        units_sort_interval,
-        metrics=None,
-        units_waveforms=None,
-        labels=None,
+        analysis_file_name: str,
+        units: dict,
+        units_valid_times: dict,
+        units_sort_interval: dict,
+        metrics: dict = None,
+        units_waveforms: dict = None,
+        labels: dict = None,
     ):
         """Add units to analysis NWB file
 
@@ -437,7 +445,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         Returns
         -------
         units_object_id, waveforms_object_id : str, str
-            The NWB object id of the Units object and the object id of the waveforms object ('' if None)
+            The NWB object id of the Units object and the object id of the
+            waveforms object ('' if None)
         """
         with pynwb.NWBHDF5IO(
             path=self.get_abs_path(analysis_file_name),
@@ -446,82 +455,83 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ) as io:
             nwbf = io.read()
             sort_intervals = list()
-            if len(units.keys()):
-                # Add spike times and valid time range for the sort
-                for id in units.keys():
-                    nwbf.add_unit(
-                        spike_times=units[id],
-                        id=id,
-                        # waveform_mean = units_templates[id],
-                        obs_intervals=units_valid_times[id],
-                    )
-                    sort_intervals.append(units_sort_interval[id])
-                # Add a column for the sort interval (subset of valid time)
-                nwbf.add_unit_column(
-                    name="sort_interval",
-                    description="the interval used for spike sorting",
-                    data=sort_intervals,
-                )
-                # If metrics were specified, add one column per metric
-                if metrics is not None:
-                    for metric in metrics:
-                        if metrics[metric]:
-                            unit_ids = np.array(list(metrics[metric].keys()))
-                            metric_values = np.array(
-                                list(metrics[metric].values())
-                            )
 
-                            # sort by unit_ids and apply that sorting to values
-                            # to ensure that things go in the right order
-
-                            metric_values = metric_values[np.argsort(unit_ids)]
-                            logger.info(
-                                f"Adding metric {metric} : {metric_values}"
-                            )
-                            nwbf.add_unit_column(
-                                name=metric,
-                                description=f"{metric} metric",
-                                data=metric_values,
-                            )
-                if labels is not None:
-                    unit_ids = np.array(list(units.keys()))
-                    for unit in unit_ids:
-                        if unit not in labels:
-                            labels[unit] = ""
-                    label_values = np.array(list(labels.values()))
-                    label_values = label_values[np.argsort(unit_ids)].tolist()
-                    nwbf.add_unit_column(
-                        name="label",
-                        description="label given during curation",
-                        data=label_values,
-                    )
-                # If the waveforms were specified, add them as a dataframe to scratch
-                waveforms_object_id = ""
-                if units_waveforms is not None:
-                    waveforms_df = pd.DataFrame.from_dict(
-                        units_waveforms, orient="index"
-                    )
-                    waveforms_df.columns = ["waveforms"]
-                    nwbf.add_scratch(
-                        waveforms_df,
-                        name="units_waveforms",
-                        notes="spike waveforms for each unit",
-                    )
-                    waveforms_object_id = nwbf.scratch[
-                        "units_waveforms"
-                    ].object_id
-
-                io.write(nwbf)
-                return nwbf.units.object_id, waveforms_object_id
-            else:
+            if not len(units.keys()):
                 return ""
+
+            # Add spike times and valid time range for the sort
+            for id in units.keys():
+                nwbf.add_unit(
+                    spike_times=units[id],
+                    id=id,
+                    # waveform_mean = units_templates[id],
+                    obs_intervals=units_valid_times[id],
+                )
+                sort_intervals.append(units_sort_interval[id])
+
+            # Add a column for the sort interval (subset of valid time)
+            nwbf.add_unit_column(
+                name="sort_interval",
+                description="the interval used for spike sorting",
+                data=sort_intervals,
+            )
+
+            # If metrics were specified, add one column per metric
+            metrics = metrics or []  # do nothing if metrics is None
+            for metric in metrics:
+                if not metrics.get(metric):
+                    continue
+
+                unit_ids = np.array(list(metrics[metric].keys()))
+                metric_values = np.array(list(metrics[metric].values()))
+
+                # sort by unit_ids and apply that sorting to values
+                # to ensure that things go in the right order
+
+                metric_values = metric_values[np.argsort(unit_ids)]
+                logger.info(f"Adding metric {metric} : {metric_values}")
+                nwbf.add_unit_column(
+                    name=metric,
+                    description=f"{metric} metric",
+                    data=metric_values,
+                )
+
+            if labels is not None:
+                unit_ids = np.array(list(units.keys()))
+                labels.update(
+                    {unit: "" for unit in unit_ids if unit not in labels}
+                )
+                label_values = np.array(list(labels.values()))
+                label_values = label_values[np.argsort(unit_ids)].tolist()
+                nwbf.add_unit_column(
+                    name="label",
+                    description="label given during curation",
+                    data=label_values,
+                )
+
+            # If the waveforms were specified, add them as a df to scratch
+            waveforms_object_id = ""
+            if units_waveforms is not None:
+                waveforms_df = pd.DataFrame.from_dict(
+                    units_waveforms, orient="index"
+                )
+                waveforms_df.columns = ["waveforms"]
+                nwbf.add_scratch(
+                    waveforms_df,
+                    name="units_waveforms",
+                    notes="spike waveforms for each unit",
+                )
+                waveforms_object_id = nwbf.scratch["units_waveforms"].object_id
+
+            io.write(nwbf)
+            return nwbf.units.object_id, waveforms_object_id
 
     def add_units_waveforms(
         self,
-        analysis_file_name,
+        analysis_file_name: str,
         waveform_extractor: si.WaveformExtractor,
-        metrics=None,
-        labels=None,
+        metrics: dict = None,
+        labels: dict = None,
     ):
         """Add units to analysis NWB file along with the waveforms
 
@@ -562,9 +572,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 )
 
             # The following is a rough sketch of AnalysisNwbfile().add_waveforms
-            # analysis_file_name = AnalysisNwbfile().create(key['nwb_file_name'])
-            # or
-            # nwbfile = pynwb.NWBFile(...)
+            # analysis_file_name =
+            #   AnalysisNwbfile().create(key['nwb_file_name'])
+            #   or
+            #   nwbfile = pynwb.NWBFile(...)
             # (channels, spikes, samples)
             # wfs = [
             #         [     # elec 1
@@ -584,8 +595,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             #             [1, 2, 3]   # spike 4
             #         ]
             # ]
-            # elecs = ... # DynamicTableRegion referring to three electrodes (rows) of the electrodes table
-            # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs, waveforms=wfs)
+            # elecs = ... # DynamicTableRegion referring to three electrodes
+            #               (rows) of the electrodes table
+            # nwbfile.add_unit(spike_times=[1, 2, 3], electrodes=elecs,
+            #                  waveforms=wfs)
 
             # If metrics were specified, add one column per metric
             if metrics is not None:
@@ -607,14 +620,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             io.write(nwbf)
             return nwbf.units.object_id
 
-    def add_units_metrics(self, analysis_file_name, metrics):
+    def add_units_metrics(self, analysis_file_name: str, metrics: dict):
         """Add units to analysis NWB file along with the waveforms
 
         Parameters
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        metrics : dict, optional
+        metrics : dict
             Cluster metrics.
 
         Returns
@@ -644,8 +657,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             return nwbf.units.object_id
 
     @classmethod
-    def get_electrode_indices(cls, analysis_file_name, electrode_ids):
-        """Given an analysis NWB file name, returns the indices of the specified electrode_ids.
+    def get_electrode_indices(
+        cls, analysis_file_name: str, electrode_ids: np.array
+    ):
+        """Returns indices of the specified electrode_ids for an analysis file.
 
         Parameters
         ----------
@@ -657,7 +672,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         Returns
         -------
         electrode_indices : numpy array
-            Array of indices in the electrodes table for the given electrode IDs.
+            Array of indices in the electrodes table for the given electrode
+            IDs.
         """
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
@@ -666,8 +682,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def cleanup(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
-        Does not delete the files themselves unless delete_files=True is specified.
-        Run this after deleting the Nwbfile() entries themselves.
+        Does not delete the files themselves unless delete_files=True is
+        specified. Run this after deleting the Nwbfile() entries themselves.
 
         Parameters
         ----------
@@ -678,6 +694,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def nightly_cleanup():
+        """Clean up orphaned AnalysisNwbfile entries and external files."""
         child_tables = get_child_tables(AnalysisNwbfile)
         (AnalysisNwbfile - child_tables).delete_quick()
 
@@ -685,7 +702,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         # during times when no other transactions are in progress.
         AnalysisNwbfile.cleanup(True)
 
-    def log(self, analysis_file_name, table=None):
+    def log(self, *args, **kwargs):
+        """Null log method. Revert to _disabled_log to turn back on."""
+        logger.debug("Logging disabled.")
+
+    def _disabled_log(self, analysis_file_name, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if isinstance(analysis_file_name, dict):
             analysis_file_name = analysis_file_name["analysis_file_name"]
@@ -699,7 +720,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             table=table,
         )
 
-    def increment_access(self, keys, table=None):
+    def increment_access(self, *args, **kwargs):
+        """Null method. Revert to _disabled_increment_access to turn back on."""
+        logger.debug("Incrementing access disabled.")
+
+    def _disabled_increment_access(self, keys, table=None):
         """Passthrough to the AnalysisNwbfileLog table. Avoid new imports."""
         if not isinstance(keys, list):
             key = [keys]
@@ -737,13 +762,14 @@ class AnalysisNwbfileLog(dj.Manual):
         analysis_file_name : str
             The name of the analysis NWB file.
         """
+
         self.insert1(
             {
                 "dj_user": dj.config["database.user"],
                 "analysis_file_name": analysis_file_name,
                 "time_delta": time_delta,
                 "file_size": file_size,
-                "table": table,
+                "table": table[:64],
             }
         )
 

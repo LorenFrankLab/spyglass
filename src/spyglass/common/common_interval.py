@@ -5,10 +5,11 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pynwb import NWBFile
 
+from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
-
-from .common_session import Session  # noqa: F401
+from spyglass.utils.dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_interval")
 
@@ -23,13 +24,13 @@ class IntervalList(SpyglassMixin, dj.Manual):
     interval_list_name: varchar(170)  # descriptive name of this interval list
     ---
     valid_times: longblob  # numpy array with start/end times for each interval
-    pipeline = "": varchar(64)  # type of interval list (e.g. 'position', 'spikesorting_recording_v1')
+    pipeline = "": varchar(64)  # type of interval list
     """
 
     # See #630, #664. Excessive key length.
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, *, nwb_file_name):
+    def insert_from_nwbfile(cls, nwbf: NWBFile, *, nwb_file_name: str):
         """Add each entry in the NWB file epochs table to the IntervalList.
 
         The interval list name for each epoch is set to the first tag for the
@@ -53,22 +54,26 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         epochs = nwbf.epochs.to_dataframe()
 
-        for _, epoch_data in epochs.iterrows():
-            epoch_dict = {
+        # Create a list of dictionaries to insert
+        epoch_inserts = epochs.apply(
+            lambda epoch_data: {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": (
                     epoch_data.tags[0]
                     if epoch_data.tags
-                    else f"interval_{epoch_data[0]}"
+                    else f"interval_{epoch_data.name}"
                 ),
                 "valid_times": np.asarray(
                     [[epoch_data.start_time, epoch_data.stop_time]]
                 ),
-            }
+            },
+            axis=1,
+        ).tolist()
 
-            cls.insert1(epoch_dict, skip_duplicates=True)
+        cls.insert(epoch_inserts, skip_duplicates=True)
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
+        """Plot the intervals in the interval list."""
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=figsize)
         interval_count = 0
@@ -90,6 +95,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             return fig
 
     def plot_epoch_pos_raw_intervals(self, figsize=(20, 5), return_fig=False):
+        """Plot an epoch's position, raw data, and valid times intervals."""
         interval_list = pd.DataFrame(self)
         fig, ax = plt.subplots(figsize=(30, 3))
 
@@ -151,6 +157,13 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ax.grid(True)
         if return_fig:
             return fig
+
+    def cleanup(self, dry_run=True):
+        """Clean up orphaned IntervalList entries."""
+        orphans = self - get_child_tables(self)
+        if dry_run:
+            return orphans
+        orphans.super_delete(warn=False)
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
@@ -241,6 +254,7 @@ def interval_list_excludes(interval_list, timestamps):
 
 
 def consolidate_intervals(interval_list):
+    """Consolidate overlapping intervals in an interval list."""
     if interval_list.ndim == 1:
         interval_list = np.expand_dims(interval_list, 0)
     else:

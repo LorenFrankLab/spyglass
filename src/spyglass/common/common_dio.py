@@ -38,7 +38,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             nwbf, "behavioral_events", pynwb.behavior.BehavioralEvents
         )
         if behav_events is None:
-            logger.warn(
+            logger.warning(
                 "No conforming behavioral events data interface found in "
                 + f"{nwb_file_name}\n"
             )

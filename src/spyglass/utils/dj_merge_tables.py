@@ -3,7 +3,7 @@ from itertools import chain as iter_chain
 from pprint import pprint
 from re import sub as re_sub
 from time import time
-from typing import Union
+from typing import List, Union
 
 import datajoint as dj
 from datajoint.condition import make_condition
@@ -13,6 +13,7 @@ from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.export import ExportMixin
 
 RESERVED_PRIMARY_KEY = "merge_id"
 RESERVED_SECONDARY_KEY = "source"
@@ -29,7 +30,7 @@ def is_merge_table(table):
     def trim_def(definition):
         return re_sub(
             r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        )
+        ).replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
@@ -49,11 +50,11 @@ def is_merge_table(table):
     ] and table.heading.secondary_attributes == [RESERVED_SECONDARY_KEY]
 
 
-class Merge(dj.Manual):
+class Merge(ExportMixin, dj.Manual):
     """Adds funcs to support standard Merge table operations.
 
     Many methods have the @classmethod decorator to permit MergeTable.method()
-    symtax. This makes access to instance attributes (e.g., (MergeTable &
+    syntax. This makes access to instance attributes (e.g., (MergeTable &
     "example='restriction'").restriction) harder, but these attributes have
     limited utility when the user wants to, for example, restrict the merged
     view rather than the master table itself.
@@ -65,14 +66,14 @@ class Merge(dj.Manual):
         self._reserved_sk = RESERVED_SECONDARY_KEY
         if not self.is_declared:
             if not is_merge_table(self):  # Check definition
-                logger.warn(
+                logger.warning(
                     "Merge table with non-default definition\n"
                     + f"Expected:\n{MERGE_DEFINITION.strip()}\n"
                     + f"Actual  :\n{self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    logger.warn(  # PK is only 'merge_id' in parts, no others
+                    logger.warning(  # PK is only 'merge_id' in parts, no others
                         f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
@@ -348,7 +349,7 @@ class Merge(dj.Manual):
                         )
                     key = keys[0]
                     if part & key:
-                        print(f"Key already in part {part_name}: {key}")
+                        logger.info(f"Key already in part {part_name}: {key}")
                         continue
                     master_sk = {cls()._reserved_sk: part_name}
                     uuid = dj.hash.key_hash(key | master_sk)
@@ -374,7 +375,8 @@ class Merge(dj.Manual):
 
         Otherwise parts returns none
         """
-        dj.conn.connection.dependencies.load()
+        if not dj.conn.connection.dependencies._loaded:
+            dj.conn.connection.dependencies.load()
 
     def insert(self, rows: list, **kwargs):
         """Merges table specific insert, ensuring data exists in part parents.
@@ -506,6 +508,8 @@ class Merge(dj.Manual):
         restriction: str = None,
         multi_source=False,
         disable_warning=False,
+        return_merge_ids=False,
+        log_export=True,
         *attrs,
         **kwargs,
     ):
@@ -520,12 +524,46 @@ class Merge(dj.Manual):
             Restriction to apply to parents before running fetch. Default True.
         multi_source: bool
             Return from multiple parents. Default False.
+        return_merge_ids: bool
+            Default False. Return merge_ids with nwb files.
+        log_export: bool
+            Default True. During export, log this fetch an export event.
+
+        Notes
+        -----
+        Nwb files not strictly returned in same order as self
         """
         if isinstance(self, dict):
             raise ValueError("Try replacing Merge.method with Merge().method")
         restriction = restriction or self.restriction or True
+        merge_restriction = self.extract_merge_id(restriction)
 
-        return self.merge_restrict_class(restriction).fetch_nwb()
+        sources = set(
+            (self & merge_restriction).fetch(
+                self._reserved_sk, log_export=False
+            )
+        )
+        nwb_list = []
+        merge_ids = []
+        for source in sources:
+            source_restr = (
+                self
+                & dj.AndList([{self._reserved_sk: source}, merge_restriction])
+            ).fetch("KEY", log_export=False)
+            nwb_list.extend(
+                (self & source_restr)
+                .merge_restrict_class(
+                    restriction,
+                    permit_multiple_rows=True,
+                    add_invalid_restrict=False,
+                )
+                .fetch_nwb()
+            )
+            if return_merge_ids:
+                merge_ids.extend([k[self._reserved_pk] for k in source_restr])
+        if return_merge_ids:
+            return nwb_list, merge_ids
+        return nwb_list
 
     @classmethod
     def merge_get_part(
@@ -661,6 +699,7 @@ class Merge(dj.Manual):
 
     @property
     def source_class_dict(self) -> dict:
+        """Dictionary of part names and their respective classes."""
         # NOTE: fails if table is aliased in dj.Part but not merge script
         # i.e., must import aliased table as part name
         if not self._source_class_dict:
@@ -682,7 +721,7 @@ class Merge(dj.Manual):
                 raise ValueError(f"Unable to find source for {source}")
             source = fetched_source[0]
             if len(fetched_source) > 1:
-                logger.warn(f"Multiple sources. Selecting first: {source}.")
+                logger.warning(f"Multiple sources. Selecting first: {source}.")
         if isinstance(source, dj.Table):
             source = self._part_name(source)
         if isinstance(source, dict):
@@ -698,6 +737,8 @@ class Merge(dj.Manual):
         source: Union[str, dict, dj.Table]
             Accepts a CamelCase name of the source, or key as a dict, or a part
             table.
+        init: bool, optional
+            Default False. If True, returns an instance of the class.
 
         Returns
         -------
@@ -713,21 +754,30 @@ class Merge(dj.Manual):
             )
         return ret
 
-    def merge_restrict_class(self, key: dict) -> dj.Table:
+    def merge_restrict_class(
+        self,
+        key: dict,
+        permit_multiple_rows: bool = False,
+        add_invalid_restrict=True,
+    ) -> dj.Table:
         """Returns native parent class, restricted with key."""
-        parent_key = self.merge_get_parent(key).fetch("KEY", as_dict=True)
+        parent = self.merge_get_parent(
+            key, add_invalid_restrict=add_invalid_restrict
+        )
+        parent_key = parent.fetch("KEY", as_dict=True)
 
-        if len(parent_key) > 1:
+        if not permit_multiple_rows and len(parent_key) > 1:
             raise ValueError(
                 f"Ambiguous entry. Data has mult rows in parent:\n\tData:{key}"
                 + f"\n\t{parent_key}"
             )
 
-        parent_class = self.merge_get_parent_class(key)
+        parent_class = self.merge_get_parent_class(parent)
         return parent_class & parent_key
 
-    @classmethod
-    def merge_fetch(self, restriction: str = True, *attrs, **kwargs) -> list:
+    def merge_fetch(
+        self, *attrs, restriction: str = True, log_export=True, **kwargs
+    ) -> list:
         """Perform a fetch across all parts. If >1 result, return as a list.
 
         Parameters
@@ -735,6 +785,8 @@ class Merge(dj.Manual):
         restriction: str
             Optional restriction to apply before determining parent to return.
             Default True.
+        log_export: bool
+            Default True. During export, log this fetch an export event.
         attrs, kwargs
             arguments passed to DataJoint `fetch` call
 
@@ -743,8 +795,17 @@ class Merge(dj.Manual):
         Union[ List[np.array], List[dict], List[pd.DataFrame] ]
             Table contents, with type determined by kwargs
         """
+        restriction = self.restriction or restriction
+
+        if log_export and self.export_id:
+            self._log_fetch(  # Transforming restriction to merge_id
+                restriction=self.merge_restrict(restriction).fetch(
+                    RESERVED_PRIMARY_KEY, as_dict=True
+                )
+            )
+
         results = []
-        parts = self()._merge_restrict_parts(
+        parts = self._merge_restrict_parts(
             restriction=restriction,
             as_objects=True,
             return_empties=False,
@@ -755,7 +816,7 @@ class Merge(dj.Manual):
             try:
                 results.extend(part.fetch(*attrs, **kwargs))
             except DataJointError as e:
-                logger.warn(
+                logger.warning(
                     f"{e.args[0]} Skipping "
                     + to_camel_case(part.table_name.split("__")[-1])
                 )
@@ -784,7 +845,10 @@ class Merge(dj.Manual):
         self.insert(successes)
 
     def delete(self, force_permission=False, *args, **kwargs):
-        """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
+        """Alias for cautious_delete, overwrites datajoint.table.Table.delete
+
+        Delete all relevant part entries from self.restriction.
+        """
         if not (
             parts := self.merge_get_part(
                 restriction=self.restriction,
@@ -794,8 +858,18 @@ class Merge(dj.Manual):
         ):
             return
 
+        _ = kwargs.pop("force_masters", None)  # Part not accept this kwarg
         for part in parts:
-            part.delete(force_permission=force_permission, *args, **kwargs)
+            part.delete(
+                force_permission=force_permission,
+                force_parts=True,
+                *args,
+                **kwargs,
+            )
+
+        # Delete orphaned master entries, no prompt
+        kwargs["safemode"] = False
+        (self - self.parts(as_objects=True)).super_delete(*args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
@@ -806,6 +880,49 @@ class Merge(dj.Manual):
             logger.warning("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
+
+    @classmethod
+    def extract_merge_id(cls, restriction) -> Union[dict, list]:
+        """Utility function to extract merge_id from a restriction
+
+        Removes all other restricted attributes, and defaults to a
+        universal set (either empty dict or True) when there is no
+        merge_id present in the input, relying on parent func to
+        restrict on secondary or part-parent key(s).
+
+        Assumes that a valid set of merge_id keys should have OR logic
+        to allow selection of an entries.
+
+        Parameters
+        ----------
+        restriction : str, dict, or dj.condition.AndList
+            A datajoint restriction
+
+        Returns
+        -------
+        restriction
+            A restriction containing only the merge_id key
+        """
+        if restriction is None:
+            return None
+        if isinstance(restriction, dict):
+            if merge_id := restriction.get("merge_id"):
+                return {"merge_id": merge_id}
+            else:
+                return {}
+        merge_restr = []
+        if isinstance(restriction, dj.condition.AndList) or isinstance(
+            restriction, List
+        ):
+            merge_id_list = [cls.extract_merge_id(r) for r in restriction]
+            merge_restr = [x for x in merge_id_list if x is not None]
+        elif isinstance(restriction, str):
+            parsed = [x.split(")")[0] for x in restriction.split("(") if x]
+            merge_restr = [x for x in parsed if "merge_id" in x]
+
+        if len(merge_restr) == 0:
+            return True
+        return merge_restr
 
 
 _Merge = Merge
@@ -820,17 +937,17 @@ def delete_downstream_merge(
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
-    Passthrough to SpyglassMixin.delete_downstream_merge
+    Passthrough to SpyglassMixin.delete_downstream_parts
     """
-    logger.warning(
-        "DEPRECATED: This function will be removed in `0.6`. "
-        + "Use AnyTable().delete_downstream_merge() instead."
-    )
-
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        "delete_downstream_merge. Use Table.delete_downstream_merge"
+    )
 
     if not isinstance(table, SpyglassMixin):
         raise ValueError("Input must be a Spyglass Table.")
     table = table if isinstance(table, dj.Table) else table()
 
-    return table.delete_downstream_merge(**kwargs)
+    return table.delete_downstream_parts(**kwargs)

@@ -11,24 +11,18 @@ import warnings
 from contextlib import nullcontext
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from time import sleep as tsleep
 
 import datajoint as dj
 import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
+from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
-
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-warnings.filterwarnings("ignore", module="tensorflow")
-warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
-warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -109,16 +103,34 @@ def pytest_configure(config):
     )
 
     DOWNLOADS = DataDownloader(
-        nwb_file_name=TEST_FILE,
         base_dir=BASE_DIR,
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
     )
 
+    warnings.filterwarnings("ignore", module="tensorflow")
+    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+    warnings.filterwarnings(
+        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    )
+    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+    warnings.filterwarnings(
+        "ignore", category=PerformanceWarning, module="pandas"
+    )
+    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+    warnings.simplefilter("ignore", category=ResourceWarning)
+    warnings.simplefilter("ignore", category=DeprecationWarning)
+
 
 def pytest_unconfigure(config):
+    from spyglass.utils.nwb_helper_fn import close_nwb_files
+
+    close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
+        analysis_dir = BASE_DIR / "analysis"
+        for file in analysis_dir.glob("*.nwb"):
+            file.unlink()
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -171,18 +183,18 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_creds(server):
-    yield server.creds
+def server_credentials(server):
+    yield server.credentials
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_creds, verbose, teardown):
+def dj_conn(request, server_credentials, verbose, teardown):
     """Fixture for datajoint connection."""
     config_file = "dj_local_conf.json_test"
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server_creds)
+    dj.config.update(server_credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
@@ -210,34 +222,25 @@ def raw_dir(base_dir):
 @pytest.fixture(scope="session")
 def mini_path(raw_dir):
     path = raw_dir / TEST_FILE
+    DOWNLOADS.wait_for(TEST_FILE)  # wait for wget download to finish
 
-    # wait for wget download to finish
-    if (nwb_download := DOWNLOADS.file_downloads.get(TEST_FILE)) is not None:
-        nwb_download.wait()
-
-    # wait for download to finish
-    timeout, wait, found = 60, 5, False
-    for _ in range(timeout // wait):
-        if path.exists():
-            found = True
-            break
-        tsleep(wait)
-
-    if not found:
+    if not path.exists():
         raise ConnectionError("Download failed.")
 
     yield path
 
 
 @pytest.fixture(scope="session")
-def nodlc(request):
+def no_dlc(request):
     yield NO_DLC
 
 
 @pytest.fixture(scope="session")
-def skipif_nodlc(request):
+def skipif_no_dlc(request):
     if NO_DLC:
         yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
+    else:
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -286,18 +289,16 @@ def mini_insert(
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
 
-    LabMember().insert1(
-        ["Root User", "Root", "User"], skip_duplicates=not teardown
-    )
+    LabMember().insert1(["Root User", "Root", "User"], skip_duplicates=True)
     LabMember.LabMemberInfo().insert1(
-        ["Root User", "email", "root", 1], skip_duplicates=not teardown
+        ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
     dj_logger.info("Inserting test data.")
@@ -395,15 +396,40 @@ def populate_exception():
     yield PopulateException
 
 
+@pytest.fixture(scope="session")
+def frequent_imports():
+    """Often needed for graph cascade."""
+    from spyglass.decoding.v0.clusterless import UnitMarksIndicatorSelection
+    from spyglass.decoding.v0.sorted_spikes import (
+        SortedSpikesIndicatorSelection,
+    )
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.lfp.analysis.v1 import LFPBandSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1.ripple import RippleTimesV1
+    from spyglass.spikesorting.analysis.v1.unit_annotation import UnitAnnotation
+    from spyglass.spikesorting.v0.figurl_views import SpikeSortingRecordingView
+
+    return (
+        LFPBandSelection,
+        MuaEventsV1,
+        PositionGroup,
+        RippleTimesV1,
+        SortedSpikesIndicatorSelection,
+        SpikeSortingRecordingView,
+        UnitAnnotation,
+        UnitMarksIndicatorSelection,
+    )
+
+
 # -------------------------- FIXTURES, COMMON TABLES --------------------------
 
 
 @pytest.fixture(scope="session")
 def video_keys(common, base_dir):
-    for file, download in DOWNLOADS.file_downloads.items():
-        if file.endswith(".h264") and download is not None:
-            download.wait()  # wait for videos to finish downloading
-    DOWNLOADS.rename_files()
+    for file in DOWNLOADS.file_downloads:
+        if file.endswith(".h264"):
+            DOWNLOADS.wait_for(file)
 
     return common.VideoFile().fetch(as_dict=True)
 
@@ -453,8 +479,6 @@ def trodes_params(trodes_params_table, teardown):
         [v for k, v in paramsets.items()], skip_duplicates=True
     )
     yield paramsets
-    if teardown:
-        trodes_params_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -468,6 +492,65 @@ def pos_interval_key(sgp, mini_copy_name, pos_interval):
 
 
 @pytest.fixture(scope="session")
+def common_position(common):
+    yield common.common_position
+
+
+@pytest.fixture(scope="session")
+def interval_position_info(common_position):
+    yield common_position.IntervalPositionInfo
+
+
+@pytest.fixture(scope="session")
+def default_interval_pos_param_key():
+    yield {"position_info_param_name": "default"}
+
+
+@pytest.fixture(scope="session")
+def interval_keys(common):
+    yield (common.IntervalList & "interval_list_name LIKE 'pos %'").fetch("KEY")
+
+
+@pytest.fixture(scope="session")
+def pos_info_param(common_position, default_interval_pos_param_key, teardown):
+    pos_info_param = common_position.PositionInfoParameters()
+    pos_info_param.insert1(default_interval_pos_param_key, skip_duplicates=True)
+    yield pos_info_param
+
+
+@pytest.fixture(scope="session")
+def upsample_position(
+    common,
+    common_position,
+    pos_info_param,
+    default_interval_pos_param_key,
+    teardown,
+    interval_keys,
+):
+    params = (pos_info_param & default_interval_pos_param_key).fetch1()
+    upsample_param_key = {"position_info_param_name": "upsampled"}
+    pos_info_param.insert1(
+        {
+            **params,
+            **upsample_param_key,
+            "is_upsampled": 1,
+            "max_separation": 80,
+            "upsampling_sampling_rate": 500,
+        },
+        skip_duplicates=True,
+    )
+    interval_pos_keys = [
+        {**interval_key, **upsample_param_key} for interval_key in interval_keys
+    ]
+    common_position.IntervalPositionInfoSelection.insert(
+        interval_pos_keys, skip_duplicates=True
+    )
+    common_position.IntervalPositionInfo.populate(interval_pos_keys)
+
+    yield interval_pos_keys[0]
+
+
+@pytest.fixture(scope="session")
 def trodes_sel_keys(
     teardown, trodes_sel_table, pos_interval_key, trodes_params
 ):
@@ -476,8 +559,6 @@ def trodes_sel_keys(
     ]
     trodes_sel_table.insert(keys, skip_duplicates=True)
     yield keys
-    if teardown:
-        trodes_sel_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -485,8 +566,6 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
     v1 = sgp.v1.TrodesPosV1()
     v1.populate(trodes_sel_keys)
     yield v1
-    if teardown:
-        v1.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -597,8 +676,6 @@ def track_graph(teardown, sgpl, track_graph_key):
     )
 
     yield sgpl.TrackGraph & {"track_graph_name": "6 arm"}
-    if teardown:
-        sgpl.TrackGraph().delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -633,8 +710,6 @@ def lin_sel(teardown, sgpl, lin_sel_key):
     sel_table = sgpl.LinearizationSelection()
     sel_table.insert1(lin_sel_key, skip_duplicates=True)
     yield sel_table
-    if teardown:
-        sel_table.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -642,8 +717,6 @@ def lin_v1(teardown, sgpl, lin_sel):
     v1 = sgpl.LinearizedPositionV1()
     v1.populate()
     yield v1
-    if teardown:
-        v1.delete(safemode=False)
 
 
 @pytest.fixture(scope="session")
@@ -804,12 +877,21 @@ def dlc_project_name():
 
 
 @pytest.fixture(scope="session")
+def team_name(common):
+    team_name = "sc_eb"
+    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    yield team_name
+
+
+@pytest.fixture(scope="session")
 def insert_project(
     verbose_context,
     teardown,
+    video_keys,  # wait for video downloads
     dlc_project_name,
     dlc_project_tbl,
     common,
+    team_name,
     bodyparts,
     mini_copy_name,
 ):
@@ -818,18 +900,30 @@ def insert_project(
 
     from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 
-    team_name = "sc_eb"
-    common.LabTeam.insert1({"team_name": team_name}, skip_duplicates=True)
+    from spyglass.decoding.v1.core import PositionGroup
+    from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v1 import LinearizationSelection
+    from spyglass.mua.v1.mua import MuaEventsV1
+    from spyglass.ripple.v1 import RippleTimesV1
+
+    _ = (
+        PositionGroup,
+        LinearizedPositionOutput,
+        LinearizationSelection,
+        MuaEventsV1,
+        RippleTimesV1,
+    )
+
+    video_list = common.VideoFile().fetch(
+        "nwb_file_name", "epoch", as_dict=True
+    )[:2]
     with verbose_context:
         project_key = dlc_project_tbl.insert_new_project(
             project_name=dlc_project_name,
             bodyparts=bodyparts,
             lab_team=team_name,
             frames_per_video=100,
-            video_list=[
-                {"nwb_file_name": mini_copy_name, "epoch": 0},
-                {"nwb_file_name": mini_copy_name, "epoch": 1},
-            ],
+            video_list=video_list,
             skip_duplicates=True,
         )
     config_path = (dlc_project_tbl & project_key).fetch1("config_path")
@@ -855,7 +949,6 @@ def insert_project(
     yield project_key, cfg, config_path
 
     if teardown:
-        (dlc_project_tbl & project_key).delete(safemode=False)
         shutil_rmtree(str(Path(config_path).parent))
 
 
@@ -904,23 +997,8 @@ def labeled_vid_dir(extract_frames):
 
 
 @pytest.fixture(scope="session")
-def fix_downloaded(labeled_vid_dir, project_dir):
-    """Grabs CollectedData and img files from project_dir, moves to labeled"""
-    for file in project_dir.parent.parent.glob("*"):
-        if file.is_dir():
-            continue
-        dest = labeled_vid_dir / file.name
-        if dest.exists():
-            dest.unlink()
-        dest.write_bytes(file.read_bytes())
-        # TODO: revert to rename before merge
-        # file.rename(labeled_vid_dir / file.name)
-
-    yield
-
-
-@pytest.fixture(scope="session")
-def add_training_files(dlc_project_tbl, project_key, fix_downloaded):
+def add_training_files(dlc_project_tbl, project_key, labeled_vid_dir):
+    DOWNLOADS.move_dlc_items(labeled_vid_dir)
     dlc_project_tbl.add_training_files(project_key, skip_duplicates=True)
     yield
 
@@ -970,18 +1048,23 @@ def model_train_key(sgp, project_key, training_params_key):
 
 
 @pytest.fixture(scope="session")
-def populate_training(sgp, fix_downloaded, model_train_key, add_training_files):
+def populate_training(
+    sgp, model_train_key, add_training_files, labeled_vid_dir
+):
     train_tbl = sgp.v1.DLCModelTraining
     if len(train_tbl & model_train_key) == 0:
         _ = add_training_files
-        _ = fix_downloaded
-        sgp.v1.DLCModelTraining.populate(model_train_key)
+        DOWNLOADS.move_dlc_items(labeled_vid_dir)
+    sgp.v1.DLCModelTraining().populate(model_train_key)
     yield model_train_key
 
 
 @pytest.fixture(scope="session")
 def model_source_key(sgp, model_train_key, populate_training):
-    yield (sgp.v1.DLCModelSource & model_train_key).fetch1("KEY")
+
+    _ = populate_training
+
+    yield (sgp.v1.DLCModelSource & model_train_key).fetch("KEY")[0]
 
 
 @pytest.fixture(scope="session")
@@ -1004,7 +1087,7 @@ def populate_model(sgp, model_key):
 
 @pytest.fixture(scope="session")
 def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
-    yield sgp.v1.DLCPoseEstimationSelection.insert_estimation_task(
+    yield sgp.v1.DLCPoseEstimationSelection().insert_estimation_task(
         {
             "nwb_file_name": mini_copy_name,
             "epoch": 1,
@@ -1094,13 +1177,10 @@ def cohort_selection(sgp, si_key, si_params_name):
 
 
 @pytest.fixture(scope="session")
-def cohort_key(sgp, cohort_selection):
-    yield cohort_selection.copy()
-
-
-@pytest.fixture(scope="session")
-def populate_cohort(sgp, cohort_selection, populate_si):
-    sgp.v1.DLCSmoothInterpCohort.populate(cohort_selection)
+def cohort_key(sgp, cohort_selection, populate_si):
+    cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
+    cohort_tbl.populate(cohort_selection)
+    yield cohort_tbl.fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
@@ -1130,7 +1210,7 @@ def centroid_params(sgp):
 
 
 @pytest.fixture(scope="session")
-def centroid_selection(sgp, cohort_key, populate_cohort, centroid_params):
+def centroid_selection(sgp, cohort_key, centroid_params):
     centroid_key = cohort_key.copy()
     centroid_key = {
         key: val
@@ -1194,7 +1274,10 @@ def populate_orient(sgp, orient_selection):
 
 
 @pytest.fixture(scope="session")
-def dlc_selection(sgp, centroid_key, orient_key, populate_orient):
+def dlc_selection(
+    sgp, centroid_key, orient_key, populate_orient, populate_centroid
+):
+    _ = populate_orient, populate_centroid
     dlc_key = {
         key: val
         for key, val in centroid_key.items()
@@ -1226,3 +1309,187 @@ def dlc_key(sgp, dlc_selection):
 def populate_dlc(sgp, dlc_key):
     sgp.v1.DLCPosV1().populate(dlc_key)
     yield
+
+
+# ----------------------- FIXTURES, SPIKESORTING TABLES -----------------------
+# ------------------------ Note: Used in decoding tests ------------------------
+
+
+@pytest.fixture(scope="session")
+def spike_v1(common):
+    from spyglass.spikesorting import v1
+
+    yield v1
+
+
+@pytest.fixture(scope="session")
+def pop_rec(spike_v1, mini_dict, team_name):
+    spike_v1.SortGroup.set_group_by_shank(**mini_dict)
+    key = {
+        **mini_dict,
+        "sort_group_id": 0,
+        "preproc_param_name": "default",
+        "interval_list_name": "01_s1",
+        "team_name": team_name,
+    }
+    spike_v1.SpikeSortingRecordingSelection.insert_selection(key)
+    ssr_pk = (
+        (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
+    )
+    spike_v1.SpikeSortingRecording.populate(ssr_pk)
+
+    yield ssr_pk
+
+
+@pytest.fixture(scope="session")
+def pop_art(spike_v1, mini_dict, pop_rec):
+    key = {
+        "recording_id": pop_rec["recording_id"],
+        "artifact_param_name": "default",
+    }
+    spike_v1.ArtifactDetectionSelection.insert_selection(key)
+    spike_v1.ArtifactDetection.populate()
+
+    yield spike_v1.ArtifactDetection().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def spike_merge(spike_v1):
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    yield SpikeSortingOutput()
+
+
+@pytest.fixture(scope="session")
+def sorter_dict():
+    return {"sorter": "mountainsort4"}
+
+
+@pytest.fixture(scope="session")
+def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
+    pre = spike_v1.SpikeSorting().fetch("KEY", as_dict=True)
+
+    key = {
+        **mini_dict,
+        **sorter_dict,
+        "recording_id": pop_rec["recording_id"],
+        "interval_list_name": str(pop_art["artifact_id"]),
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+    }
+    spike_v1.SpikeSortingSelection.insert_selection(key)
+    spike_v1.SpikeSorting.populate()
+
+    yield (spike_v1.SpikeSorting() - pre).fetch(
+        "KEY", as_dict=True, order_by="time_of_sort desc"
+    )[0]
+
+
+@pytest.fixture(scope="session")
+def sorting_objs(spike_v1, pop_sort):
+    sort_nwb = (spike_v1.SpikeSorting & pop_sort).fetch_nwb()
+    sort_si = spike_v1.SpikeSorting.get_sorting(pop_sort)
+    yield sort_nwb, sort_si
+
+
+@pytest.fixture(scope="session")
+def pop_curation(spike_v1, pop_sort):
+
+    parent_curation_id = -1
+    has_sort = spike_v1.CurationV1 & {"sorting_id": pop_sort["sorting_id"]}
+    if has_sort:
+        parent_curation_id = has_sort.fetch1("curation_id")
+
+    spike_v1.CurationV1.insert_curation(
+        sorting_id=pop_sort["sorting_id"],
+        description="testing sort",
+        parent_curation_id=parent_curation_id,
+    )
+
+    yield (spike_v1.CurationV1() & {"parent_curation_id": -1}).fetch(
+        "KEY", as_dict=True
+    )[0]
+
+
+@pytest.fixture(scope="session")
+def pop_metric(spike_v1, pop_sort, pop_curation):
+    _ = pop_curation  # make sure this happens first
+    key = {
+        "sorting_id": pop_sort["sorting_id"],
+        "curation_id": 0,
+        "waveform_param_name": "default_not_whitened",
+        "metric_param_name": "franklab_default",
+        "metric_curation_param_name": "default",
+    }
+
+    spike_v1.MetricCurationSelection.insert_selection(key)
+    spike_v1.MetricCuration.populate(key)
+
+    yield spike_v1.MetricCuration().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def metric_objs(spike_v1, pop_metric):
+    key = {"metric_curation_id": pop_metric["metric_curation_id"]}
+    labels = spike_v1.MetricCuration.get_labels(key)
+    merge_groups = spike_v1.MetricCuration.get_merge_groups(key)
+    metrics = spike_v1.MetricCuration.get_metrics(key)
+    yield labels, merge_groups, metrics
+
+
+@pytest.fixture(scope="session")
+def pop_curation_metric(spike_v1, pop_metric, metric_objs):
+    labels, merge_groups, metrics = metric_objs
+    desc_dict = dict(description="after metric curation")
+    spike_v1.CurationV1.insert_curation(
+        sorting_id=(
+            spike_v1.MetricCurationSelection
+            & {"metric_curation_id": pop_metric["metric_curation_id"]}
+        ).fetch1("sorting_id"),
+        parent_curation_id=0,
+        labels=labels,
+        merge_groups=merge_groups,
+        metrics=metrics,
+        **desc_dict,
+    )
+
+    yield (spike_v1.CurationV1 & desc_dict).fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def pop_spike_merge(
+    spike_v1, pop_curation_metric, spike_merge, mini_dict, sorter_dict
+):
+    # TODO: add figurl fixtures when kachery_cloud is initialized
+
+    spike_merge.insert([pop_curation_metric], part_name="CurationV1")
+
+    yield (spike_merge << pop_curation_metric).fetch1("KEY")
+
+
+@pytest.fixture(scope="session")
+def spike_v1_group():
+    from spyglass.spikesorting.analysis.v1 import group
+
+    yield group
+
+
+@pytest.fixture(scope="session")
+def group_name():
+    yield "test_group"
+
+
+@pytest.fixture(scope="session")
+def pop_spikes_group(
+    group_name, spike_v1_group, spike_merge, mini_dict, pop_spike_merge
+):
+
+    _ = pop_spike_merge  # make sure this happens first
+
+    spike_v1_group.UnitSelectionParams().insert_default()
+    spike_v1_group.SortedSpikesGroup().create_group(
+        **mini_dict,
+        group_name=group_name,
+        keys=spike_merge.proj(spikesorting_merge_id="merge_id").fetch("KEY"),
+        unit_filter_params_name="default_exclusion",
+    )
+    yield spike_v1_group.SortedSpikesGroup().fetch("KEY", as_dict=True)[0]

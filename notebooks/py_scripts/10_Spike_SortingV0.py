@@ -5,14 +5,18 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.0
 #   kernelspec:
 #     display_name: Python 3.10.5 64-bit
 #     language: python
 #     name: python3
 # ---
 
-# # Spike Sorting
+# # Spike Sorting V0
+#
+# _Note_: This notebook explains the first version of the spike sorting pipeline
+# and is preserved for using existing data. New users should use
+# [V1](./10_Spike_SortingV1.ipynb).
 #
 
 # ## Overview

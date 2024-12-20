@@ -57,7 +57,7 @@ def populate_from_yaml(yaml_path: str):
                 if k in table_cls.primary_key
             }
             if not primary_key_values:
-                logger.warn(
+                logger.warning(
                     f"Populate: No primary key provided in data {entry_dict} "
                     + f"for table {table_cls.__name__}"
                 )
@@ -77,10 +77,11 @@ def populate_from_yaml(yaml_path: str):
                 )
 
 
-def _get_table_cls(table_name):
+def _get_table_cls(table_name: str):
     """Get the spyglass.common class associated with a given table name.
 
-    Also works for part tables one level deep."""
+    Also works for part tables one level deep.
+    """
 
     if "." in table_name:  # part table
         master_table_name = table_name[0 : table_name.index(".")]

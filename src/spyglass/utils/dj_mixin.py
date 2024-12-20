@@ -1,38 +1,37 @@
-from atexit import register as exit_register
-from atexit import unregister as exit_unregister
-from collections import OrderedDict
 from contextlib import nullcontext
 from functools import cached_property
-from inspect import stack as inspect_stack
-from os import environ
 from time import time
-from typing import Dict, List, Union
+from typing import List
 
 import datajoint as dj
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
-from datajoint.logging import logger as dj_logger
 from datajoint.table import Table
-from datajoint.utils import get_master, to_camel_case, user_choice
-from networkx import NetworkXError
+from datajoint.utils import to_camel_case
+from packaging.version import parse as version_parse
+from pandas import DataFrame
 from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
-from spyglass.utils.dj_merge_tables import RESERVED_PRIMARY_KEY as MERGE_PK
+from spyglass.utils.dj_helper_fn import (
+    NonDaemonPool,
+    ensure_names,
+    fetch_nwb,
+    get_nwb_table,
+    populate_pass_function,
+)
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.export import ExportMixin
 
 try:
     import pynapple  # noqa F401
-except ImportError:
+except (ImportError, ModuleNotFoundError):
     pynapple = None
 
-EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 
-
-class SpyglassMixin:
+class SpyglassMixin(ExportMixin):
     """Mixin for Spyglass DataJoint tables.
 
     Provides methods for fetching NWBFile objects and checking user permission
@@ -45,14 +44,6 @@ class SpyglassMixin:
         Fetch NWBFile object from relevant table. Uses either a foreign key to
         a NWBFile table (including AnalysisNwbfile) or a _nwb_table attribute to
         determine which table to use.
-    delte_downstream_merge(restriction=None, dry_run=True, reload_cache=False)
-        Delete downstream merge table entries associated with restriction.
-        Requires caching of merge tables and links, which is slow on first call.
-        `restriction` can be set to a string to restrict the delete. `dry_run`
-        can be set to False to commit the delete. `reload_cache` can be set to
-        True to reload the merge cache.
-    ddm(*args, **kwargs)
-        Alias for delete_downstream_merge.
     cautious_delete(force_permission=False, *args, **kwargs)
         Check user permissions before deleting table rows. Permission is granted
         to users listed as admin in LabMember table or to users on a team with
@@ -61,8 +52,6 @@ class SpyglassMixin:
         delete continues. If the Session has no experimenter, or if the user is
         not on a team with the Session experimenter(s), a PermissionError is
         raised. `force_permission` can be set to True to bypass permission check.
-    cdel(*args, **kwargs)
-        Alias for cautious_delete.
     """
 
     # _nwb_table = None # NWBFile table class, defined at the table level
@@ -72,6 +61,9 @@ class SpyglassMixin:
     _member_pk = None  # LabMember primary key. Mixin ambivalent table structure
 
     _banned_search_tables = set()  # Tables to avoid in restrict_by
+    _parallel_make = False  # Tables that use parallel processing in make
+
+    _use_transaction = True  # Use transaction in populate.
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
@@ -111,16 +103,30 @@ class SpyglassMixin:
     def file_like(self, name=None, **kwargs):
         """Convenience method for wildcard search on file name fields."""
         if not name:
-            return self & True
+            return self
         attr = None
         for field in self.heading.names:
             if "file" in field:
                 attr = field
                 break
         if not attr:
-            logger.error(f"No file-like field found in {self.full_table_name}")
+            logger.error(f"No file_like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+    def find_insert_fail(self, key):
+        """Find which parent table is causing an IntergrityError on insert."""
+        rets = []
+        for parent in self.parents(as_objects=True):
+            parent_key = {
+                k: v for k, v in key.items() if k in parent.heading.names
+            }
+            parent_name = to_camel_case(parent.table_name)
+            if query := parent & parent_key:
+                rets.append(f"{parent_name}:\n{query}")
+            else:
+                rets.append(f"{parent_name}: MISSING")
+        logger.info("\n".join(rets))
 
     @classmethod
     def _safe_context(cls):
@@ -131,6 +137,28 @@ class SpyglassMixin:
             else nullcontext()
         )
 
+    @classmethod
+    def get_fully_defined_key(
+        cls, key: dict = None, required_fields: list[str] = None
+    ) -> dict:
+        if key is None:
+            key = dict()
+
+        required_fields = required_fields or cls.primary_key
+        if isinstance(key, (str, dict)):  # check is either keys or substrings
+            if not all(
+                field in key for field in required_fields
+            ):  # check if all required fields are in key
+                if not len(query := cls() & key) == 1:  # check if key is unique
+                    raise KeyError(
+                        f"Key is neither fully specified nor a unique entry in"
+                        + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
+                        + f"Required fields: {required_fields}\n\tResult: {query}"
+                    )
+                key = query.fetch1("KEY")
+
+        return key
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
@@ -139,10 +167,10 @@ class SpyglassMixin:
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -178,27 +206,9 @@ class SpyglassMixin:
         """
         table, tbl_attr = self._nwb_table_tuple
 
-        if self.export_id and "analysis" in tbl_attr:
-            tbl_pk = "analysis_file_name"
-            fnames = (self * table).fetch(tbl_pk)
-            logger.debug(
-                f"Export {self.export_id}: fetch_nwb {self.table_name}, {fnames}"
-            )
-            self._export_table.File.insert(
-                [
-                    {"export_id": self.export_id, tbl_pk: fname}
-                    for fname in fnames
-                ],
-                skip_duplicates=True,
-            )
-            self._export_table.Table.insert1(
-                dict(
-                    export_id=self.export_id,
-                    table_name=self.full_table_name,
-                    restriction=make_condition(self, self.restriction, set()),
-                ),
-                skip_duplicates=True,
-            )
+        log_export = kwargs.pop("log_export", True)
+        if log_export and self.export_id and "analysis" in tbl_attr:
+            self._log_fetch_nwb(table, tbl_attr)
 
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 
@@ -239,217 +249,71 @@ class SpyglassMixin:
             for file_name in nwb_files
         ]
 
-    # ------------------------ delete_downstream_merge ------------------------
+    # ------------------------ delete_downstream_parts ------------------------
 
-    def _import_merge_tables(self):
-        """Import all merge tables downstream of self."""
-        from spyglass.decoding.decoding_merge import DecodingOutput  # noqa F401
-        from spyglass.lfp.lfp_merge import LFPOutput  # noqa F401
-        from spyglass.linearization.merge import (
-            LinearizedPositionOutput,
-        )  # noqa F401
-        from spyglass.position.position_merge import PositionOutput  # noqa F401
-        from spyglass.spikesorting.spikesorting_merge import (  # noqa F401
-            SpikeSortingOutput,
-        )
-
-        _ = (
-            DecodingOutput(),
-            LFPOutput(),
-            LinearizedPositionOutput(),
-            PositionOutput(),
-            SpikeSortingOutput(),
-        )
-
-    @cached_property
-    def _merge_tables(self) -> Dict[str, dj.FreeTable]:
-        """Dict of merge tables downstream of self: {full_table_name: FreeTable}.
-
-        Cache of items in parents of self.descendants(as_objects=True). Both
-        descendant and parent must have the reserved primary key 'merge_id'.
-        """
-        self.connection.dependencies.load()
-        merge_tables = {}
-        visited = set()
-
-        def search_descendants(parent):
-            for desc in parent.descendants(as_objects=True):
-                if (
-                    MERGE_PK not in desc.heading.names
-                    or not (master_name := get_master(desc.full_table_name))
-                    or master_name in merge_tables
-                ):
-                    continue
-                master_ft = dj.FreeTable(self.connection, master_name)
-                if is_merge_table(master_ft):
-                    merge_tables[master_name] = master_ft
-                if master_name not in visited:
-                    visited.add(master_name)
-                    search_descendants(master_ft)
-
-        try:
-            _ = search_descendants(self)
-        except NetworkXError:
-            try:  # Attempt to import missing table
-                self._import_merge_tables()
-                _ = search_descendants(self)
-            except NetworkXError as e:
-                table_name = "".join(e.args[0].split("`")[1:4])
-                raise ValueError(f"Please import {table_name} and try again.")
-
-        logger.info(
-            f"Building merge cache for {self.camel_name}.\n\t"
-            + f"Found {len(merge_tables)} downstream merge tables"
-        )
-
-        return merge_tables
-
-    @cached_property
-    def _merge_chains(self) -> OrderedDict[str, List[dj.FreeTable]]:
-        """Dict of chains to merges downstream of self
-
-        Format: {full_table_name: TableChains}.
-
-        For each merge table found in _merge_tables, find the path from self to
-        merge via merge parts. If the path is valid, add it to the dict. Cache
-        prevents need to recompute whenever delete_downstream_merge is called
-        with a new restriction. To recompute, add `reload_cache=True` to
-        delete_downstream_merge call.
-        """
-        from spyglass.utils.dj_graph import TableChains  # noqa F401
-
-        merge_chains = {}
-        for name, merge_table in self._merge_tables.items():
-            chains = TableChains(self, merge_table)
-            if len(chains):
-                merge_chains[name] = chains
-
-        # This is ordered by max_len of chain from self to merge, which assumes
-        # that the merge table with the longest chain is the most downstream.
-        # A more sophisticated approach would order by length from self to
-        # each merge part independently, but this is a good first approximation.
-
-        return OrderedDict(
-            sorted(
-                merge_chains.items(), key=lambda x: x[1].max_len, reverse=True
-            )
-        )
-
-    def _get_chain(self, substring):
-        """Return chain from self to merge table with substring in name."""
-        for name, chain in self._merge_chains.items():
-            if substring.lower() in name:
-                return chain
-        raise ValueError(f"No chain found with '{substring}' in name.")
-
-    def _commit_merge_deletes(
-        self, merge_join_dict: Dict[str, List[QueryExpression]], **kwargs
-    ) -> None:
-        """Commit merge deletes.
+    def load_shared_schemas(self, additional_prefixes: list = None) -> None:
+        """Load shared schemas to include in graph traversal.
 
         Parameters
         ----------
-        merge_join_dict : Dict[str, List[QueryExpression]]
-            Dictionary of merge tables and their joins. Uses 'merge_id' primary
-            key to restrict delete.
-
-        Extracted for use in cautious_delete and delete_downstream_merge."""
-        for table_name, part_restr in merge_join_dict.items():
-            table = self._merge_tables[table_name]
-            keys = [part.fetch(MERGE_PK, as_dict=True) for part in part_restr]
-            (table & keys).delete(**kwargs)
-
-    def delete_downstream_merge(
-        self,
-        restriction: str = None,
-        dry_run: bool = True,
-        reload_cache: bool = False,
-        disable_warning: bool = False,
-        return_parts: bool = True,
-        **kwargs,
-    ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
-        """Delete downstream merge table entries associated with restriction.
-
-        Requires caching of merge tables and links, which is slow on first call.
-
-        Parameters
-        ----------
-        restriction : str, optional
-            Restriction to apply to merge tables. Default None. Will attempt to
-            use table restriction if None.
-        dry_run : bool, optional
-            If True, return list of merge part entries to be deleted. Default
-            True.
-        reload_cache : bool, optional
-            If True, reload merge cache. Default False.
-        disable_warning : bool, optional
-            If True, do not warn if no merge tables found. Default False.
-        return_parts : bool, optional
-            If True, return list of merge part entries to be deleted. Default
-            True. If False, return dictionary of merge tables and their joins.
-        **kwargs : Any
-            Passed to datajoint.table.Table.delete.
+        additional_prefixes : list, optional
+            Additional prefixes to load. Default None.
         """
-        if reload_cache:
-            for attr in ["_merge_tables", "_merge_chains"]:
-                _ = self.__dict__.pop(attr, None)
+        all_shared = [
+            *SHARED_MODULES,
+            dj.config["database.user"],
+            "file",
+            "sharing",
+        ]
 
-        restriction = restriction or self.restriction or True
+        if additional_prefixes:
+            all_shared.extend(additional_prefixes)
 
-        merge_join_dict = {}
-        for name, chain in self._merge_chains.items():
-            if join := chain.cascade(restriction, direction="down"):
-                merge_join_dict[name] = join
-
-        if not merge_join_dict and not disable_warning:
-            logger.warning(
-                f"No merge deletes found w/ {self.camel_name} & "
-                + f"{restriction}.\n\tIf this is unexpected, try importing "
-                + " Merge table(s) and running with `reload_cache`."
-            )
-
-        if dry_run:
-            return merge_join_dict.values() if return_parts else merge_join_dict
-
-        self._commit_merge_deletes(merge_join_dict, **kwargs)
-
-    def ddm(
-        self,
-        restriction: str = None,
-        dry_run: bool = True,
-        reload_cache: bool = False,
-        disable_warning: bool = False,
-        return_parts: bool = True,
-        *args,
-        **kwargs,
-    ) -> Union[List[QueryExpression], Dict[str, List[QueryExpression]]]:
-        """Alias for delete_downstream_merge."""
-        return self.delete_downstream_merge(
-            restriction=restriction,
-            dry_run=dry_run,
-            reload_cache=reload_cache,
-            disable_warning=disable_warning,
-            return_parts=return_parts,
-            *args,
-            **kwargs,
+        # Get a list of all shared schemas in spyglass
+        schemas = dj.conn().query(
+            "SELECT DISTINCT table_schema "  # Unique schemas
+            + "FROM information_schema.key_column_usage "
+            + "WHERE"
+            + '    table_name not LIKE "~%%"'  # Exclude hidden
+            + "    AND constraint_name='PRIMARY'"  # Only primary keys
+            + "AND ("  # Only shared schemas
+            + " OR ".join([f"table_schema LIKE '{s}_%%'" for s in all_shared])
+            + ") "
+            + "ORDER BY table_schema;"
         )
+
+        # Load the dependencies for all shared schemas
+        for schema in schemas:
+            dj.schema(schema[0]).connection.dependencies.load()
 
     # ---------------------------- cautious_delete ----------------------------
 
     @cached_property
     def _delete_deps(self) -> List[Table]:
-        """List of tables required for delete permission check.
+        """List of tables required for delete permission and orphan checks.
 
         LabMember, LabTeam, and Session are required for delete permission.
+        common_nwbfile.schema.external is required for deleting orphaned
+        external files. IntervalList is required for deleting orphaned interval
+        lists.
 
         Used to delay import of tables until needed, avoiding circular imports.
         Each of these tables inheits SpyglassMixin.
         """
-        from spyglass.common import LabMember, LabTeam, Session  # noqa F401
+        from spyglass.common import LabMember  # noqa F401
+        from spyglass.common import IntervalList, LabTeam, Session
+        from spyglass.common.common_nwbfile import schema  # noqa F401
 
         self._session_pk = Session.primary_key[0]
         self._member_pk = LabMember.primary_key[0]
-        return [LabMember, LabTeam, Session]
+        return [LabMember, LabTeam, Session, schema.external, IntervalList]
+
+    @cached_property
+    def _graph_deps(self) -> list:
+        from spyglass.utils.dj_graph import RestrGraph  # noqa #F401
+        from spyglass.utils.dj_graph import TableChain
+
+        return [TableChain, RestrGraph]
 
     def _get_exp_summary(self):
         """Get summary of experimenters for session(s), including NULL.
@@ -461,11 +325,14 @@ class SpyglassMixin:
 
         Returns
         -------
-        str
-            Summary of experimenters for session(s).
+        Union[QueryExpression, None]
+            dj.Union object Summary of experimenters for session(s). If no link
+            to Session, return None.
         """
+        if not self._session_connection.has_link:
+            return None
 
-        Session = self._delete_deps[-1]
+        Session = self._delete_deps[2]
         SesExp = Session.Experimenter
 
         # Not called in delete permission check, only bare _get_exp_summary
@@ -486,10 +353,9 @@ class SpyglassMixin:
     @cached_property
     def _session_connection(self):
         """Path from Session table to self. False if no connection found."""
-        from spyglass.utils.dj_graph import TableChain  # noqa F401
+        TableChain = self._graph_deps[0]
 
-        connection = TableChain(parent=self._delete_deps[-1], child=self)
-        return connection if connection.has_link else False
+        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
 
     @cached_property
     def _test_mode(self) -> bool:
@@ -514,7 +380,7 @@ class SpyglassMixin:
             Permission denied because (a) Session has no experimenter, or (b)
             user is not on a team with Session experimenter(s).
         """
-        LabMember, LabTeam, Session = self._delete_deps
+        LabMember, LabTeam, Session, _, _ = self._delete_deps
 
         dj_user = dj.config["database.user"]
         if dj_user in LabMember().admin:  # bypass permission check for admin
@@ -524,14 +390,20 @@ class SpyglassMixin:
             not self._session_connection  # Table has no session
             or self._member_pk in self.heading.names  # Table has experimenter
         ):
-            logger.warn(  # Permit delete if no session connection
+            logger.warning(  # Permit delete if no session connection
                 "Could not find lab team associated with "
                 + f"{self.__class__.__name__}."
                 + "\nBe careful not to delete others' data."
             )
             return
 
-        sess_summary = self._get_exp_summary()
+        if not (sess_summary := self._get_exp_summary()):
+            logger.warning(
+                f"Could not find a connection from {self.camel_name} "
+                + "to Session.\n Be careful not to delete others' data."
+            )
+            return
+
         experimenters = sess_summary.fetch(self._member_pk)
         if None in experimenters:
             raise PermissionError(
@@ -556,17 +428,10 @@ class SpyglassMixin:
                 )
         logger.info(f"Queueing delete for session(s):\n{sess_summary}")
 
-    @cached_property
-    def _usage_table(self):
-        """Temporary inclusion for usage tracking."""
+    def _log_delete(self, start, del_blob=None, super_delete=False):
+        """Log use of super_delete."""
         from spyglass.common.common_usage import CautiousDelete
 
-        return CautiousDelete()
-
-    def _log_delete(self, start, merge_deletes=None, super_delete=False):
-        """Log use of cautious_delete."""
-        if isinstance(merge_deletes, QueryExpression):
-            merge_deletes = merge_deletes.fetch(as_dict=True)
         safe_insert = dict(
             duration=time() - start,
             dj_user=dj.config["database.user"],
@@ -575,21 +440,29 @@ class SpyglassMixin:
         restr_str = "Super delete: " if super_delete else ""
         restr_str += "".join(self.restriction) if self.restriction else "None"
         try:
-            self._usage_table.insert1(
+            CautiousDelete().insert1(
                 dict(
                     **safe_insert,
                     restriction=restr_str[:255],
-                    merge_deletes=merge_deletes,
+                    merge_deletes=del_blob,
                 )
             )
         except (DataJointError, DataError):
-            self._usage_table.insert1(
-                dict(**safe_insert, restriction="Unknown")
-            )
+            CautiousDelete().insert1(dict(**safe_insert, restriction="Unknown"))
 
-    # TODO: Intercept datajoint delete confirmation prompt for merge deletes
-    def cautious_delete(self, force_permission: bool = False, *args, **kwargs):
-        """Delete table rows after checking user permission.
+    @cached_property
+    def _has_updated_dj_version(self):
+        """Return True if DataJoint version is up to date."""
+        target_dj = version_parse("0.14.2")
+        ret = version_parse(dj.__version__) >= target_dj
+        if not ret:
+            logger.warning(f"Please update DataJoint to {target_dj} or later.")
+        return ret
+
+    def cautious_delete(
+        self, force_permission: bool = False, dry_run=False, *args, **kwargs
+    ):
+        """Permission check, then delete potential orphans and table rows.
 
         Permission is granted to users listed as admin in LabMember table or to
         users on a team with with the Session experimenter(s). If the table
@@ -601,52 +474,42 @@ class SpyglassMixin:
         ----------
         force_permission : bool, optional
             Bypass permission check. Default False.
+        dry_run : bool, optional
+            Default False. If True, return items to be deleted as
+            Tuple[Upstream, Downstream, externals['raw'], externals['analysis']]
+            If False, delete items.
         *args, **kwargs : Any
             Passed to datajoint.table.Table.delete.
         """
-        start = time()
+        if len(self) == 0:
+            logger.warning(f"Table is empty. No need to delete.\n{self}")
+            return
 
-        if not force_permission:
+        if self._has_updated_dj_version and not isinstance(self, dj.Part):
+            kwargs["force_masters"] = True
+
+        external, IntervalList = self._delete_deps[3], self._delete_deps[4]
+
+        if not force_permission or dry_run:
             self._check_delete_permission()
 
-        merge_deletes = self.delete_downstream_merge(
-            dry_run=True,
-            disable_warning=True,
-            return_parts=False,
-        )
+        if dry_run:
+            return (
+                IntervalList(),  # cleanup func relies on downstream deletes
+                external["raw"].unused(),
+                external["analysis"].unused(),
+            )
 
-        safemode = (
-            dj.config.get("safemode", True)
-            if kwargs.get("safemode") is None
-            else kwargs["safemode"]
-        )
+        super().delete(*args, **kwargs)  # Confirmation here
 
-        if merge_deletes:
-            for table, content in merge_deletes.items():
-                count = sum([len(part) for part in content])
-                dj_logger.info(f"Merge: Deleting {count} rows from {table}")
-            if (
-                not self._test_mode
-                or not safemode
-                or user_choice("Commit deletes?", default="no") == "yes"
-            ):
-                self._commit_merge_deletes(merge_deletes, **kwargs)
-            else:
-                logger.info("Delete aborted.")
-                self._log_delete(start)
-                return
+        for ext_type in ["raw", "analysis"]:
+            external[ext_type].delete(
+                delete_external_files=True, display_progress=False
+            )
 
-        super().delete(*args, **kwargs)  # Additional confirm here
-
-        self._log_delete(start=start, merge_deletes=merge_deletes)
-
-    def cdel(self, force_permission=False, *args, **kwargs):
-        """Alias for cautious_delete."""
-        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
-
-    def delete(self, force_permission=False, *args, **kwargs):
+    def delete(self, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
-        self.cautious_delete(force_permission=force_permission, *args, **kwargs)
+        self.cautious_delete(*args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
@@ -655,128 +518,118 @@ class SpyglassMixin:
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
-    # ------------------------------- Export Log -------------------------------
+    # -------------------------------- populate --------------------------------
 
-    @cached_property
-    def _spyglass_version(self):
-        """Get Spyglass version from dj.config."""
-        from spyglass import __version__ as sg_version
+    def _hash_upstream(self, keys):
+        """Hash upstream table keys for no transaction populate.
 
-        return ".".join(sg_version.split(".")[:3])  # Major.Minor.Patch
+        Uses a RestrGraph to capture all upstream tables, restrict them to
+        relevant entries, and hash the results. This is used to check if
+        upstream tables have changed during a no-transaction populate and avoid
+        the following data-integrity error:
 
-    @cached_property
-    def _export_table(self):
-        """Lazy load export selection table."""
-        from spyglass.common.common_usage import ExportSelection
+        1. User A starts no-transaction populate.
+        2. User B deletes and repopulates an upstream table, changing contents.
+        3. User A finishes populate, inserting data that is now invalid.
 
-        return ExportSelection()
-
-    @property
-    def export_id(self):
-        """ID of export in progress.
-
-        NOTE: User of an env variable to store export_id may not be thread safe.
-        Exports must be run in sequence, not parallel.
+        Parameters
+        ----------
+        keys : list
+            List of keys for populating table.
         """
+        RestrGraph = self._graph_deps[1]
+        if not (parents := self.parents(as_objects=True, primary=True)):
+            # Should not happen, as this is only called from populated tables
+            raise RuntimeError("No upstream tables found for upstream hash.")
 
-        return int(environ.get(EXPORT_ENV_VAR, 0))
+        if isinstance(keys, dict):
+            keys = [keys]  # case for single population key
+        leaves = {  # Restriction on each primary parent
+            p.full_table_name: [
+                {k: v for k, v in key.items() if k in p.heading.names}
+                for key in keys
+            ]
+            for p in parents
+        }
 
-    @export_id.setter
-    def export_id(self, value):
-        """Set ID of export using `table.export_id = X` notation."""
-        if self.export_id != 0 and self.export_id != value:
-            raise RuntimeError("Export already in progress.")
-        environ[EXPORT_ENV_VAR] = str(value)
-        exit_register(self._export_id_cleanup)  # End export on exit
+        return RestrGraph(seed_table=self, leaves=leaves, cascade=True).hash
 
-    @export_id.deleter
-    def export_id(self):
-        """Delete ID of export using `del table.export_id` notation."""
-        self._export_id_cleanup()
+    def populate(self, *restrictions, **kwargs):
+        """Populate table in parallel, with or without transaction protection.
 
-    def _export_id_cleanup(self):
-        """Cleanup export ID."""
-        if environ.get(EXPORT_ENV_VAR):
-            del environ[EXPORT_ENV_VAR]
-        exit_unregister(self._export_id_cleanup)  # Remove exit hook
+        Supersedes datajoint.table.Table.populate for classes with that
+        spawn processes in their make function and always use transactions.
 
-    def _start_export(self, paper_id, analysis_id):
-        """Start export process."""
-        if self.export_id:
-            logger.info(f"Export {self.export_id} in progress. Starting new.")
-            self._stop_export(warn=False)
+        `_use_transaction` class attribute can be set to False to disable
+        transaction protection for a table. This is not recommended for tables
+        with short processing times. A before-and-after hash check is performed
+        to ensure upstream tables have not changed during populate, and may
+        be a more time-consuming process. To permit the `make` to insert without
+        populate, set `_allow_insert` to True.
+        """
+        processes = kwargs.pop("processes", 1)
 
-        self.export_id = self._export_table.insert1_return_pk(
-            dict(
-                paper_id=paper_id,
-                analysis_id=analysis_id,
-                spyglass_version=self._spyglass_version,
-            )
-        )
-
-    def _stop_export(self, warn=True):
-        """End export process."""
-        if not self.export_id and warn:
-            logger.warning("Export not in progress.")
-        del self.export_id
-
-    def _log_fetch(self, *args, **kwargs):
-        """Log fetch for export."""
-        if not self.export_id or self.database == "common_usage":
-            return
-
-        banned = [
-            "head",  # Prevents on Table().head() call
-            "tail",  # Prevents on Table().tail() call
-            "preview",  # Prevents on Table() call
-            "_repr_html_",  # Prevents on Table() call in notebook
-            "cautious_delete",  # Prevents add on permission check during delete
-            "get_abs_path",  # Assumes that fetch_nwb will catch file/table
-        ]
-        called = [i.function for i in inspect_stack()]
-        if set(banned) & set(called):  # if called by any in banned, return
-            return
-
-        logger.debug(f"Export {self.export_id}: fetch()   {self.table_name}")
-
-        restr = self.restriction or True
-        limit = kwargs.get("limit")
-        offset = kwargs.get("offset")
-        if limit or offset:  # Use result as restr if limit/offset
-            restr = self.restrict(restr).fetch(
-                log_fetch=False, as_dict=True, limit=limit, offset=offset
-            )
-
-        restr_str = make_condition(self, restr, set())
-
-        if isinstance(restr_str, str) and len(restr_str) > 2048:
+        # Decide if using transaction protection
+        use_transact = kwargs.pop("use_transaction", None)
+        if use_transact is None:  # if user does not specify, use class default
+            use_transact = self._use_transaction
+            if self._use_transaction is False:  # If class default is off, warn
+                logger.warning(
+                    "Turning off transaction protection this table by default. "
+                    + "Use use_transation=True to re-enable.\n"
+                    + "Read more about transactions:\n"
+                    + "https://docs.datajoint.io/python/definition/05-Transactions.html\n"
+                    + "https://github.com/LorenFrankLab/spyglass/issues/1030"
+                )
+        if use_transact is False and processes > 1:
             raise RuntimeError(
-                "Export cannot handle restrictions > 2048.\n\t"
-                + "If required, please open an issue on GitHub.\n\t"
-                + f"Restriction: {restr_str}"
+                "Must use transaction protection with parallel processing.\n"
+                + "Call with use_transation=True.\n"
+                + f"Table default transaction use: {self._use_transaction}"
             )
-        self._export_table.Table.insert1(
-            dict(
-                export_id=self.export_id,
-                table_name=self.full_table_name,
-                restriction=restr_str,
-            ),
-            skip_duplicates=True,
-        )
 
-    def fetch(self, *args, log_fetch=True, **kwargs):
-        """Log fetch for export."""
-        ret = super().fetch(*args, **kwargs)
-        if log_fetch:
-            self._log_fetch(*args, **kwargs)
-        return ret
+        # Get keys, needed for no-transact or multi-process w/_parallel_make
+        keys = [True]
+        if use_transact is False or (processes > 1 and self._parallel_make):
+            keys = (self._jobs_to_do(restrictions) - self.target).fetch(
+                "KEY", limit=kwargs.get("limit", None)
+            )
 
-    def fetch1(self, *args, log_fetch=True, **kwargs):
-        """Log fetch1 for export."""
-        ret = super().fetch1(*args, **kwargs)
-        if log_fetch:
-            self._log_fetch(*args, **kwargs)
-        return ret
+        if use_transact is False:
+            upstream_hash = self._hash_upstream(keys)
+            if kwargs:  # Warn of ignoring populate kwargs, bc using `make`
+                logger.warning(
+                    "Ignoring kwargs when not using transaction protection."
+                )
+
+        if processes == 1 or not self._parallel_make:
+            if use_transact:  # Pass single-process populate to super
+                kwargs["processes"] = processes
+                return super().populate(*restrictions, **kwargs)
+            else:  # No transaction protection, use bare make
+                for key in keys:
+                    self.make(key)
+                if upstream_hash != self._hash_upstream(keys):
+                    (self & keys).delete(safemode=False)
+                    logger.error(
+                        "Upstream tables changed during non-transaction "
+                        + "populate. Please try again."
+                    )
+                return
+
+        # If parallel in both make and populate, use non-daemon processes
+        # package the call list
+        call_list = [(type(self), key, kwargs) for key in keys]
+
+        # Create a pool of non-daemon processes to populate a single entry each
+        pool = NonDaemonPool(processes=processes)
+        try:
+            pool.map(populate_pass_function, call_list)
+        except Exception as e:
+            raise e
+        finally:
+            pool.close()
+            pool.terminate()
 
     # ------------------------------ Restrict by ------------------------------
 
@@ -802,20 +655,15 @@ class SpyglassMixin:
         """
         return self.restrict_by(restriction, direction="down")
 
-    def _ensure_names(self, tables) -> List[str]:
-        """Ensure table is a string in a list."""
-        if not isinstance(tables, (list, tuple, set)):
-            tables = [tables]
-        for table in tables:
-            return [getattr(table, "full_table_name", table) for t in tables]
-
     def ban_search_table(self, table):
         """Ban table from search in restrict_by."""
-        self._banned_search_tables.update(self._ensure_names(table))
+        self._banned_search_tables.update(ensure_names(table, force_list=True))
 
     def unban_search_table(self, table):
         """Unban table from search in restrict_by."""
-        self._banned_search_tables.difference_update(self._ensure_names(table))
+        self._banned_search_tables.difference_update(
+            ensure_names(table, force_list=True)
+        )
 
     def see_banned_tables(self):
         """Print banned tables."""
@@ -856,11 +704,11 @@ class SpyglassMixin:
 
         Returns
         -------
-        Union[QueryExpression, FindKeyGraph]
-            Restricted version of present table or FindKeyGraph object. If
+        Union[QueryExpression, TableChain]
+            Restricted version of present table or TableChain object. If
             return_graph, use all_ft attribute to see all tables in cascade.
         """
-        from spyglass.utils.dj_graph import TableChain  # noqa: F401
+        TableChain = self._graph_deps[0]
 
         if restriction is True:
             return self
@@ -868,6 +716,8 @@ class SpyglassMixin:
         try:
             ret = self.restrict(restriction)  # Save time trying first
             if len(ret) < len(self):
+                # If it actually restricts, if not it might by a dict that
+                # is not a valid restriction, returned as True
                 logger.warning("Restriction valid for this table. Using as is.")
                 return ret
         except DataJointError:
@@ -887,32 +737,148 @@ class SpyglassMixin:
             direction=direction,
             search_restr=restriction,
             banned_tables=list(self._banned_search_tables),
-            allow_merge=True,
             cascade=True,
             verbose=verbose,
             **kwargs,
         )
 
+        if not graph.found_restr:
+            return None
+
         if return_graph:
             return graph
 
         ret = self & graph._get_restr(self.full_table_name)
-        if len(ret) == len(self) or len(ret) == 0:
-            logger.warning(
-                f"Failed to restrict with path: {graph.path_str}\n\t"
-                + "See `help(YourTable.restrict_by)`"
-            )
+        warn_text = (
+            f" after restrict with path: {graph.path_str}\n\t "
+            + "See `help(YourTable.restrict_by)`"
+        )
+        if len(ret) == len(self):
+            logger.warning("Same length" + warn_text)
+        elif len(ret) == 0:
+            logger.warning("No entries" + warn_text)
 
         return ret
+
+    # ------------------------------ Check locks ------------------------------
+
+    def exec_sql_fetchall(self, query):
+        """
+        Execute the given query and fetch the results.    Parameters
+        ----------
+        query : str
+            The SQL query to execute.    Returns
+        -------
+        list of tuples
+            The results of the query.
+        """
+        results = dj.conn().query(query).fetchall()
+        return results  # Check if performance schema is enabled
+
+    def check_threads(self, detailed=False, all_threads=False) -> DataFrame:
+        """Check for locked threads in the database.
+
+        Parameters
+        ----------
+        detailed : bool, optional
+            Show all columns in the metadata_locks table. Default False, show
+            summary.
+        all_threads : bool, optional
+            Show all threads, not just those related to this table.
+            Default False.
+
+
+        Returns
+        -------
+        DataFrame
+            A DataFrame containing the metadata locks.
+        """
+        performance__status = self.exec_sql_fetchall(
+            "SHOW VARIABLES LIKE 'performance_schema';"
+        )
+        if performance__status[0][1] == "OFF":
+            raise RuntimeError(
+                "Database does not monitor threads. "
+                + "Please ask you administrator to enable performance schema."
+            )
+
+        metadata_locks_query = """
+        SELECT
+            ml.OBJECT_SCHEMA, -- Table schema
+            ml.OBJECT_NAME, -- Table name
+            ml.OBJECT_TYPE, -- What is locked
+            ml.LOCK_TYPE, -- Type of lock
+            ml.LOCK_STATUS, -- Lock status
+            ml.OWNER_THREAD_ID, -- Thread ID of the lock owner
+            t.PROCESSLIST_ID, -- User connection ID
+            t.PROCESSLIST_USER, -- User
+            t.PROCESSLIST_HOST, -- User machine
+            t.PROCESSLIST_TIME, -- Time in seconds
+            t.PROCESSLIST_DB, -- Thread database
+            t.PROCESSLIST_COMMAND, -- Likely Query
+            t.PROCESSLIST_STATE, -- Waiting for lock, sending data, or locked
+            t.PROCESSLIST_INFO -- Actual query
+        FROM performance_schema.metadata_locks AS ml
+        JOIN performance_schema.threads AS t
+        ON ml.OWNER_THREAD_ID = t.THREAD_ID
+        """
+
+        where_clause = (
+            f"WHERE ml.OBJECT_SCHEMA = '{self.database}' "
+            + f"AND ml.OBJECT_NAME = '{self.table_name}'"
+        )
+        metadata_locks_query += ";" if all_threads else where_clause
+
+        df = DataFrame(
+            self.exec_sql_fetchall(metadata_locks_query),
+            columns=[
+                "Schema",  # ml.OBJECT_SCHEMA -- Table schema
+                "Table Name",  # ml.OBJECT_NAME -- Table name
+                "Locked",  # ml.OBJECT_TYPE -- What is locked
+                "Lock Type",  # ml.LOCK_TYPE -- Type of lock
+                "Lock Status",  # ml.LOCK_STATUS -- Lock status
+                "Thread ID",  # ml.OWNER_THREAD_ID -- Thread ID of the lock owner
+                "Connection ID",  # t.PROCESSLIST_ID -- User connection ID
+                "User",  # t.PROCESSLIST_USER -- User
+                "Host",  # t.PROCESSLIST_HOST -- User machine
+                "Process Database",  # t.PROCESSLIST_DB -- Thread database
+                "Time (s)",  # t.PROCESSLIST_TIME -- Time in seconds
+                "Process",  # t.PROCESSLIST_COMMAND -- Likely Query
+                "State",  # t.PROCESSLIST_STATE
+                "Query",  # t.PROCESSLIST_INFO -- Actual query
+            ],
+        )
+
+        df["Name"] = df["User"].apply(self._delete_deps[0]().get_djuser_name)
+
+        keep_cols = []
+        if all_threads:
+            keep_cols.append("Table")
+            df["Table"] = df["Schema"] + "." + df["Table Name"]
+        df = df.drop(columns=["Schema", "Table Name"])
+
+        if not detailed:
+            keep_cols.extend(["Locked", "Name", "Time (s)", "Process", "State"])
+            df = df[keep_cols]
+
+        return df
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
     """
     A part table for Spyglass Group tables. Assists in propagating
-    delete calls from upstreeam tables to downstream tables.
+    delete calls from upstream tables to downstream tables.
     """
+
+    # TODO: See #1163
 
     def delete(self, *args, **kwargs):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()
-        (self.master & restriction).delete(*args, **kwargs)
+
+        try:  # try restriction on master
+            restricted = self.master & restriction
+        except DataJointError:  # if error, assume restr of self
+            restricted = self & restriction
+
+        restricted.delete(*args, **kwargs)

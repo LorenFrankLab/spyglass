@@ -4,6 +4,8 @@ import numpy as np
 import sortingview.views.franklab as vvf
 import xarray as xr
 
+from spyglass.decoding.v0.utils import discretize_and_trim
+
 
 def create_static_track_animation(
     *,
@@ -15,6 +17,7 @@ def create_static_track_animation(
     compute_real_time_rate: bool = False,
     head_dir=None,
 ):
+    """Create a static track animation object."""
     # float32 gives about 7 digits of decimal precision; we want 3 digits right
     # of the decimal. So need to compress-store the timestamp if the start is
     # greater than say 5000.
@@ -51,6 +54,7 @@ def create_static_track_animation(
 
 
 def get_base_track_information(base_probabilities: xr.Dataset):
+    """Get the base track information."""
     x_count = len(base_probabilities.x_position)
     y_count = len(base_probabilities.y_position)
     x_min = np.min(base_probabilities.x_position).item()
@@ -76,6 +80,7 @@ def memo_linearize(
     y_min: float,
     y_width: float,
 ):
+    """Memoized linearize function."""
     (_, y, x) = t
     my_tuple = (x, y)
     if my_tuple not in location_lookup:
@@ -94,6 +99,7 @@ def generate_linearization_function(
     y_min: float,
     y_width: float,
 ):
+    """Generate a linearization function."""
     args = {
         "location_lookup": location_lookup,
         "x_count": x_count,
@@ -109,21 +115,16 @@ def generate_linearization_function(
     return inner
 
 
-def discretize_and_trim(base_slice: xr.DataArray):
-    i = np.multiply(base_slice, 255).astype(np.uint8)
-    i_stack = i.stack(unified_index=["time", "y_position", "x_position"])
-
-    return i_stack.where(i_stack > 0, drop=True).astype(np.uint8)
-
-
 def get_positions(
     i_trim: xr.Dataset, linearization_fn: Callable[[Tuple[float, float]], int]
 ):
+    """Get the positions from a linearization func."""
     linearizer_map = map(linearization_fn, i_trim.unified_index.values)
     return np.array(list(linearizer_map), dtype=np.uint16)
 
 
 def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
+    """Get the observations per frame."""
     (times, time_counts_np) = np.unique(i_trim.time.values, return_counts=True)
     time_counts = xr.DataArray(time_counts_np, coords={"time": times})
     raw_times = base_slice.time
@@ -137,7 +138,8 @@ def get_observations_per_frame(i_trim: xr.DataArray, base_slice: xr.DataArray):
 def extract_slice_data(
     base_slice: xr.DataArray, location_fn: Callable[[Tuple[float, float]], int]
 ):
-    i_trim = discretize_and_trim(base_slice)
+    """Extract slice data from a location function."""
+    i_trim = discretize_and_trim(base_slice, ndims=2)
 
     positions = get_positions(i_trim, location_fn)
     observations_per_frame = get_observations_per_frame(i_trim, base_slice)
@@ -145,6 +147,8 @@ def extract_slice_data(
 
 
 def process_decoded_data(posterior: xr.DataArray):
+    """Process the decoded data."""
+
     frame_step_size = 100_000
     location_lookup = {}
 
@@ -163,10 +167,14 @@ def process_decoded_data(posterior: xr.DataArray):
     total_frame_count = len(posterior.time)
     final_frame_bounds = np.zeros(total_frame_count, dtype=np.uint8)
     # intentionally oversized preallocation--will trim later
-    # Note: By definition there can't be more than 255 observations per frame (since we drop any observation
-    # lower than 1/255 and the probabilities for any frame sum to 1). However, this preallocation may be way
-    # too big for memory for long recordings. We could use a smaller one, but would need to include logic
-    # to expand the length of the array if its actual allocated bounds are exceeded.
+
+    # Note: By definition there can't be more than 255 observations per frame
+    # (since we drop any observation lower than 1/255 and the probabilities for
+    # any frame sum to 1). However, this preallocation may be way too big for
+    # memory for long recordings. We could use a smaller one, but would need to
+    # include logic to expand the length of the array if its actual allocated
+    # bounds are exceeded.
+
     final_values = np.zeros(total_frame_count * 255, dtype=np.uint8)
     final_locations = np.zeros(total_frame_count * 255, dtype=np.uint16)
 
@@ -190,7 +198,10 @@ def process_decoded_data(posterior: xr.DataArray):
         ] = positions
         total_observations += len(observations)
         frames_done += frame_step_size
-    # These were intentionally oversized in preallocation; trim to the number of actual values.
+
+    # These were intentionally oversized in preallocation; trim to the number
+    # of actual values.
+
     final_values.resize(total_observations)
     final_locations.resize(total_observations)
 
@@ -210,6 +221,7 @@ def process_decoded_data(posterior: xr.DataArray):
 
 
 def create_track_animation_object(*, static_track_animation: any):
+    """Create a track animation object."""
     if "decodedData" in static_track_animation:
         decoded_data = static_track_animation["decodedData"]
         decoded_data_obj = vvf.DecodedPositionData(
@@ -257,6 +269,7 @@ def create_track_animation_object(*, static_track_animation: any):
 
 
 def get_ul_corners(width: float, height: float, centers):
+    """Get the upper left corners."""
     ul = np.subtract(centers, (width / 2, -height / 2))
 
     # Reshape so we have an x array and a y array
@@ -301,8 +314,11 @@ def create_2D_decode_view(
 
     track_bin_width = place_bin_size[0]
     track_bin_height = place_bin_size[1]
+
     # NOTE: We expect caller to have converted from fortran ordering already
-    # i.e. somewhere upstream, centers = env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
+    # i.e. somewhere upstream, centers =
+    # env.place_bin_centers_[env.is_track_interior_.ravel(order="F")]
+
     upper_left_points = get_ul_corners(
         track_bin_width, track_bin_height, interior_place_bin_centers
     )

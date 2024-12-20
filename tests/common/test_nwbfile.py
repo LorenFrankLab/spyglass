@@ -30,7 +30,7 @@ def test_add_to_lock(common_nwbfile, lockfile, mini_copy_name):
     with lockfile.open("r") as f:
         assert mini_copy_name in f.read()
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(FileNotFoundError):
         common_nwbfile.Nwbfile.add_to_lock("non-existent-file.nwb")
 
 

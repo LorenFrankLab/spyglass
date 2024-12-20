@@ -22,7 +22,6 @@ from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     MetricParameters,
     MetricSelection,
     QualityMetrics,
-    UnitInclusionParameters,
     WaveformParameters,
     Waveforms,
     WaveformSelection,

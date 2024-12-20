@@ -6,9 +6,9 @@ def pos_est_sel(sgp):
     yield sgp.v1.position_dlc_pose_estimation.DLCPoseEstimationSelection()
 
 
-@pytest.mark.usefixtures("skipif_nodlc")
+@pytest.mark.usefixtures("skipif_no_dlc")
 def test_rename_non_default_columns(sgp, common, pos_est_sel, video_keys):
-    vid_path, vid_name, _, _ = sgp.v1.dlc_utils.get_video_path(video_keys[0])
+    vid_path, vid_name, _, _ = sgp.v1.dlc_utils.get_video_info(video_keys[0])
 
     input = "0, 10, 0, 1000"
     output = pos_est_sel.get_video_crop(vid_path + vid_name, input)

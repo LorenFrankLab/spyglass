@@ -36,7 +36,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert data acquisition devices from an NWB file.
 
         Note that this does not link the DataAcquisitionDevices with a Session.
@@ -50,11 +50,10 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
         """
+        config = config or dict()
         _, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
 
         for device_name in ndx_devices:
-            new_device_dict = dict()
-
             # read device properties into new_device_dict from PyNWB extension
             # device object
             nwb_device_obj = ndx_devices[device_name]
@@ -74,12 +73,14 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             if adc_circuit.title() == "Intan":
                 adc_circuit = "Intan"
 
-            new_device_dict["data_acquisition_device_name"] = name
-            new_device_dict["data_acquisition_device_system"] = system
-            new_device_dict["data_acquisition_device_amplifier"] = amplifier
-            new_device_dict["adc_circuit"] = adc_circuit
-
-            cls._add_device(new_device_dict)
+            cls._add_device(
+                dict(
+                    data_acquisition_device_name=name,
+                    data_acquisition_device_system=system,
+                    data_acquisition_device_amplifier=amplifier,
+                    adc_circuit=adc_circuit,
+                )
+            )
 
         if ndx_devices:
             logger.info(
@@ -87,7 +88,9 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 + f"{ndx_devices.keys()}"
             )
         else:
-            logger.warn("No conforming data acquisition device metadata found.")
+            logger.warning(
+                "No conforming data acquisition device metadata found."
+            )
 
     @classmethod
     def get_all_device_names(cls, nwbf, config) -> tuple:
@@ -108,6 +111,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         device_name_list : tuple
             List of data acquisition object names found in the NWB file.
         """
+        config = config or dict()
         # make a dict mapping device name to PyNWB device object for all devices
         # in the NWB file that are of type ndx_franklab_novela.DataAcqDevice and
         # thus have the required metadata
@@ -252,23 +256,26 @@ class CameraDevice(SpyglassMixin, dj.Manual):
     """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert camera devices from an NWB file
 
         Parameters
         ----------
         nwbf : pynwb.NWBFile
             The source NWB file object.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
 
         Returns
         -------
         device_name_list : list
             List of camera device object names found in the NWB file.
         """
+        config = config or dict()
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
-                device_dict = dict()
                 # TODO ideally the ID is not encoded in the name formatted in a
                 # particular way device.name must have the form "[any string
                 # without a space, usually camera] [int]"
@@ -282,10 +289,25 @@ class CameraDevice(SpyglassMixin, dj.Manual):
                 }
                 cls.insert1(device_dict, skip_duplicates=True)
                 device_name_list.append(device_dict["camera_name"])
+        # Append devices from config file
+        if device_list := config.get("CameraDevice"):
+            device_inserts = [
+                {
+                    "camera_id": device.get("camera_id", -1),
+                    "camera_name": device.get("camera_name"),
+                    "manufacturer": device.get("manufacturer"),
+                    "model": device.get("model"),
+                    "lens": device.get("lens"),
+                    "meters_per_pixel": device.get("meters_per_pixel", 0),
+                }
+                for device in device_list
+            ]
+            cls.insert(device_inserts, skip_duplicates=True)
+            device_name_list.extend([d["camera_name"] for d in device_inserts])
         if device_name_list:
             logger.info(f"Inserted camera devices {device_name_list}")
         else:
-            logger.warn("No conforming camera device metadata found.")
+            logger.warning("No conforming camera device metadata found.")
         return device_name_list
 
 
@@ -339,7 +361,7 @@ class Probe(SpyglassMixin, dj.Manual):
         """
 
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config):
+    def insert_from_nwbfile(cls, nwbf, config=None):
         """Insert probe devices from an NWB file.
 
         Parameters
@@ -355,7 +377,10 @@ class Probe(SpyglassMixin, dj.Manual):
         device_name_list : list
             List of probe device types found in the NWB file.
         """
-        all_probes_types, ndx_probes, _ = cls.get_all_probe_names(nwbf, config)
+        config = config or dict()
+        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
+            nwbf, config
+        )
 
         for probe_type in all_probes_types:
             new_probe_type_dict = dict()
@@ -376,6 +401,17 @@ class Probe(SpyglassMixin, dj.Manual):
                     elect_dict,
                 )
 
+            elif probe_type in config_probes:
+                cls._read_config_probe_data(
+                    config,
+                    config_probes,
+                    probe_type,
+                    new_probe_type_dict,
+                    new_probe_dict,
+                    shank_dict,
+                    elect_dict,
+                )
+
             # check that number of shanks is consistent
             num_shanks = new_probe_type_dict["num_shanks"]
             assert num_shanks == 0 or num_shanks == len(
@@ -384,8 +420,6 @@ class Probe(SpyglassMixin, dj.Manual):
 
             # if probe id already exists, do not overwrite anything or create
             # new Shanks and Electrodes
-            # TODO: test whether the Shanks and Electrodes in the NWB file match
-            # the ones in the database
             query = Probe & {"probe_id": new_probe_dict["probe_id"]}
             if len(query) > 0:
                 logger.info(
@@ -393,6 +427,31 @@ class Probe(SpyglassMixin, dj.Manual):
                     " the database. Spyglass will use that and not create a new"
                     " Probe, Shanks, or Electrodes."
                 )
+                # Test whether the Shanks and Electrodes in the NWB file match
+                # the existing database entries
+                existing_shanks = query * cls.Shank()
+                bad_shanks = [
+                    shank
+                    for shank in shank_dict.values()
+                    if len(existing_shanks & shank) != 1
+                ]
+                if bad_shanks:
+                    raise ValueError(
+                        "Mismatch between nwb file and existing database "
+                        + f"entry for shanks: {bad_shanks}"
+                    )
+
+                existing_electrodes = query * cls.Electrode()
+                bad_electrodes = [
+                    electrode
+                    for electrode in elect_dict.values()
+                    if len(existing_electrodes & electrode) != 1
+                ]
+                if bad_electrodes:
+                    raise ValueError(
+                        f"Mismatch between nwb file and existing database "
+                        f"entry for electrodes: {bad_electrodes}"
+                    )
                 continue
 
             cls.insert1(new_probe_dict, skip_duplicates=True)
@@ -405,7 +464,7 @@ class Probe(SpyglassMixin, dj.Manual):
         if all_probes_types:
             logger.info(f"Inserted probes {all_probes_types}")
         else:
-            logger.warn("No conforming probe metadata found.")
+            logger.warning("No conforming probe metadata found.")
 
         return all_probes_types
 
@@ -503,6 +562,67 @@ class Probe(SpyglassMixin, dj.Manual):
                 }
 
     @classmethod
+    def _read_config_probe_data(
+        cls,
+        config,
+        config_probes,
+        probe_type,
+        new_probe_type_dict,
+        new_probe_dict,
+        shank_dict,
+        elect_dict,
+    ):
+
+        # get the list of shank keys for the probe
+        shank_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Shank", []
+        )
+        for i in shank_list:
+            shank_dict[str(i)] = {"probe_id": probe_type, "probe_shank": int(i)}
+
+        # get the list of electrode keys for the probe
+        elect_dict_list = config["Probe"][config_probes.index(probe_type)].get(
+            "Electrode", []
+        )
+        for i, e in enumerate(elect_dict_list):
+            elect_dict[str(i)] = {
+                "probe_id": probe_type,
+                "probe_shank": e["probe_shank"],
+                "probe_electrode": e["probe_electrode"],
+                "contact_size": e.get("contact_size"),
+                "rel_x": e.get("rel_x"),
+                "rel_y": e.get("rel_y"),
+                "rel_z": e.get("rel_z"),
+            }
+
+        # make the probe type if not in database
+        new_probe_type_dict.update(
+            {
+                "manufacturer": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("manufacturer"),
+                "probe_type": probe_type,
+                "probe_description": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("probe_description"),
+                "num_shanks": len(shank_list),
+            }
+        )
+
+        cls._add_probe_type(new_probe_type_dict)
+
+        # make the probe dictionary
+        new_probe_dict.update(
+            {
+                "probe_type": probe_type,
+                "probe_id": probe_type,
+                "contact_side_numbering": config["Probe"][
+                    config_probes.index(probe_type)
+                ].get("contact_side_numbering"),
+            }
+        )
+
+    @classmethod
     def _add_probe_type(cls, new_probe_type_dict):
         """Check the probe type value against the values in the database.
 
@@ -591,7 +711,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         query = ProbeType & {"probe_type": probe_type}
         if len(query) == 0:
-            logger.warn(
+            logger.warning(
                 f"No ProbeType found with probe_type '{probe_type}'. Aborting."
             )
             return
@@ -617,45 +737,41 @@ class Probe(SpyglassMixin, dj.Manual):
 
             # only look at electrodes where the associated device is the one
             # specified
-            if eg_device_name == nwb_device_name:
-                device_found = True
+            if eg_device_name != nwb_device_name:
+                continue
 
-                # if a Shank has not yet been created from the electrode group,
-                # then create it
-                if electrode_group.name not in created_shanks:
-                    shank_index = len(created_shanks)
-                    created_shanks[electrode_group.name] = shank_index
+            device_found = True
 
-                    # build the dictionary of Probe.Shank data
-                    shank_dict[shank_index] = {
-                        "probe_id": new_probe_dict["probe_id"],
-                        "probe_shank": shank_index,
-                    }
+            # if a Shank has not yet been created from the electrode group,
+            # then create it
+            if electrode_group.name not in created_shanks:
+                shank_index = len(created_shanks)
+                created_shanks[electrode_group.name] = shank_index
 
-                # get the probe shank index associated with this Electrode
-                probe_shank = created_shanks[electrode_group.name]
-
-                # build the dictionary of Probe.Electrode data
-                elect_dict[elec_index] = {
+                # build the dictionary of Probe.Shank data
+                shank_dict[shank_index] = {
                     "probe_id": new_probe_dict["probe_id"],
-                    "probe_shank": probe_shank,
-                    "probe_electrode": elec_index,
+                    "probe_shank": shank_index,
                 }
-                if "rel_x" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_x"] = nwbfile.electrodes[
-                        elec_index, "rel_x"
-                    ]
-                if "rel_y" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_y"] = nwbfile.electrodes[
-                        elec_index, "rel_y"
-                    ]
-                if "rel_z" in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index]["rel_z"] = nwbfile.electrodes[
-                        elec_index, "rel_z"
+
+            # get the probe shank index associated with this Electrode
+            probe_shank = created_shanks[electrode_group.name]
+
+            # build the dictionary of Probe.Electrode data
+            elect_dict[elec_index] = {
+                "probe_id": new_probe_dict["probe_id"],
+                "probe_shank": probe_shank,
+                "probe_electrode": elec_index,
+            }
+
+            for dim in ["rel_x", "rel_y", "rel_z"]:
+                if dim in nwbfile.electrodes[elec_index]:
+                    elect_dict[elec_index][dim] = nwbfile.electrodes[
+                        elec_index, dim
                     ]
 
         if not device_found:
-            logger.warn(
+            logger.warning(
                 "No electrodes in the NWB file were associated with a device "
                 + f"named '{nwb_device_name}'."
             )
@@ -703,6 +819,8 @@ def prompt_insert(
 
     if table_type:
         table_type += " "
+    else:
+        table_type = ""
 
     logger.info(
         f"{table}{table_type} '{name}' was not found in the"
