@@ -137,6 +137,28 @@ class SpyglassMixin(ExportMixin):
             else nullcontext()
         )
 
+    @classmethod
+    def get_fully_defined_key(
+        cls, key: dict = None, required_fields: list[str] = None
+    ) -> dict:
+        if key is None:
+            key = dict()
+
+        required_fields = required_fields or cls.primary_key
+        if isinstance(key, (str, dict)):  # check is either keys or substrings
+            if not all(
+                field in key for field in required_fields
+            ):  # check if all required fields are in key
+                if not len(query := cls() & key) == 1:  # check if key is unique
+                    raise KeyError(
+                        f"Key is neither fully specified nor a unique entry in"
+                        + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
+                        + f"Required fields: {required_fields}\n\tResult: {query}"
+                    )
+                key = query.fetch1("KEY")
+
+        return key
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
@@ -145,10 +167,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -484,9 +506,6 @@ class SpyglassMixin(ExportMixin):
             external[ext_type].delete(
                 delete_external_files=True, display_progress=False
             )
-
-        if not self._test_mode:
-            _ = IntervalList().nightly_cleanup(dry_run=False)
 
     def delete(self, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""
@@ -857,4 +876,9 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()
 
-        (self.master & restriction).delete(*args, **kwargs)
+        try:  # try restriction on master
+            restricted = self.master & restriction
+        except DataJointError:  # if error, assume restr of self
+            restricted = self & restriction
+
+        restricted.delete(*args, **kwargs)

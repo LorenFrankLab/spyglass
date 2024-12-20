@@ -133,9 +133,11 @@ class LabMember(SpyglassMixin, dj.Manual):
         )
 
         if len(query) != 1:
+            remedy = f"delete {len(query)-1}" if len(query) > 1 else "add one"
             raise ValueError(
-                f"Could not find name for datajoint user {dj_user}"
-                + f" in common.LabMember.LabMemberInfo: {query}"
+                f"Could not find exactly 1 datajoint user {dj_user}"
+                + " in common.LabMember.LabMemberInfo. "
+                + f"Please {remedy}: {query}"
             )
 
         return query[0]

@@ -31,6 +31,9 @@
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181
+- Allow part restriction `SpyglassMixinPart.delete` #1192
+- Move cleanup of `IntervalList` orphan entries to cron job cleanup process #1195
+- Add mixin method `get_fully_defined_key` #1198
 
 ### Pipelines
 
@@ -40,12 +43,17 @@
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
     - Export fixes #1164
-        - Allow `get_abs_path` to add selection entry.
-        - Log restrictions and joins.
+        - Allow `get_abs_path` to add selection entry. #1164
+        - Log restrictions and joins. #1164
+        - Check if querying table inherits mixin in `fetch_nwb`. #1192, #1201
+        - Ensure externals entries before adding to export. #1192
+    - Error specificity in `LabMemberInfo` #1192
 
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+    - Allow fetch of partial key from `DecodingParameters` #1198
+    - Allow data fetching with partial but unique key #1198
 
 - Linearization
 
@@ -62,6 +70,7 @@
             `open-cv` #1168
         - `VideoMaker` class to process frames in multithreaded batches #1168, #1174
         - `TrodesPosVideo` updates for `matplotlib` processor #1174
+    - User prompt if ambiguous insert in `DLCModelSource` #1192
 
 - Spike Sorting
 

@@ -3,7 +3,6 @@ from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
-from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
@@ -127,9 +126,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             include_mask[ind] = True
         return include_mask
 
-    @staticmethod
+    @classmethod
     def fetch_spike_data(
-        key: dict, time_slice: list[float] = None, return_unit_ids: bool = False
+        cls,
+        key: dict,
+        time_slice: list[float] = None,
+        return_unit_ids: bool = False,
     ) -> Union[list[np.ndarray], Optional[list[dict]]]:
         """fetch spike times for units in the group
 
@@ -148,6 +150,8 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         list of np.ndarray
             list of spike times for each unit in the group
         """
+        key = cls.get_fully_defined_key(key)
+
         # get merge_ids for SpikeSortingOutput
         merge_ids = (
             (
