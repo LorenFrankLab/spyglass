@@ -3,10 +3,7 @@ from datajoint.utils import to_camel_case
 from pandas import DataFrame
 
 from spyglass.common.common_position import IntervalPositionInfo as CommonPos
-from spyglass.position.v1.position_dlc_pose_estimation import (
-    DLCPoseEstimation,
-    DLCPoseEstimationSelection,
-)
+from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
 from spyglass.position.v1.position_trodes_position import TrodesPosV1
 from spyglass.utils import SpyglassMixin, _Merge
@@ -91,7 +88,7 @@ class PositionOutput(_Merge, SpyglassMixin):
         )
         return query.fetch_pose_dataframe()
 
-    def fetch_video_parh(self):
+    def fetch_video_path(self):
         key = self.merge_restrict(self.proj()).proj()
         query = (
             source_class_dict[

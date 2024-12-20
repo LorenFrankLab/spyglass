@@ -114,10 +114,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
 
         # set up the project and config
         project_dir = (
-            "/home/sambray/Documents/moseq_test_proj2"  # TODO: make this better
+            "/home/sambray/Documents/moseq_test_proj3"  # TODO: make this better
         )
         video_dir = (
-            "/home/sambray/Documents/moseq_test_vids2"  # TODO: make this better
+            "/home/sambray/Documents/moseq_test_vids3"  # TODO: make this better
         )
         # make symlinks to the videos in a single directory
         os.makedirs(video_dir, exist_ok=True)
@@ -289,12 +289,12 @@ class MoseqSyllableSelection(SpyglassMixin, dj.Manual):
             return
         model_bodyparts = (PoseGroup & key).fetch1("bodyparts")
         merge_key = {"merge_id": key["pose_merge_id"]}
-        bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
+        bodyparts_df = (PositionOutput & merge_key).fetch_pose_dataframe()
         data_bodyparts = bodyparts_df.keys().get_level_values(0).unique().values
         for bodypart in model_bodyparts:
             if bodypart not in data_bodyparts:
                 raise ValueError(
-                    f"Error in row {row}: " + f"Bodypart {bodypart} not in data"
+                    f"Error in row {key}: " + f"Bodypart {bodypart} not in data"
                 )
 
 

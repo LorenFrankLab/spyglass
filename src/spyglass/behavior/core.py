@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from typing import List
 
@@ -45,6 +46,11 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         group_key = {
             "pose_group_name": group_name,
         }
+        if self & group_key:
+            warnings.warn(
+                f"Pose group {group_name} already exists. Skipping insertion."
+            )
+            return
         self.insert1(
             {
                 **group_key,
@@ -87,7 +93,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             video_name = Path(
                 (PositionOutput & merge_key).fetch_video_path()
             ).name
-            bodyparts_df = (PositionOutput & merge_key).fetch_dataframe()
+            bodyparts_df = (PositionOutput & merge_key).fetch_pose_dataframe()
             if bodyparts is None:
                 bodyparts = (
                     bodyparts_df.keys().get_level_values(0).unique().values
