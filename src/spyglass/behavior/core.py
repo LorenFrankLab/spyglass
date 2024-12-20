@@ -30,13 +30,13 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         group_name: str,
         merge_ids: list[str],
         bodyparts: list[str] = None,
-    ):
-        """create a group of pose information
+    ) -> None:
+        """Create a group of pose information
 
         Parameters
         ----------
         group_name : str
-            name of the group
+            Name of the group
         keys : list[dict]
             list of keys from PoseOutput to include in the group
         bodyparts : list[str], optional
@@ -114,11 +114,10 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         """
         if key is None:
             key = {}
-        video_paths = [
+        return [
             Path((PositionOutput & merge_key).fetch_video_name())
             for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id")
         ]
-        return video_paths
 
 
 def format_dataset_for_moseq(
@@ -184,7 +183,7 @@ def results_to_df(results):
         if "latent_state" in results[key].keys():
             latent_dim = results[key]["latent_state"].shape[1]
             column_names.append(
-                [f"latent_state {i}" for i in range(latent_dim)]
+                [f"latent_state_{i}" for i in range(latent_dim)]
             )
             data.append(results[key]["latent_state"])
 

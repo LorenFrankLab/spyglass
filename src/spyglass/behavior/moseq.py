@@ -23,7 +23,7 @@ class MoseqModelParams(SpyglassMixin, dj.Manual):
     """
 
     def make_training_extension_params(
-        self, model_key, num_epochs, new_name=None, skip_duplicates=False
+        self, model_key:dict, num_epochs:int, new_name:str=None, skip_duplicates:bool=False
     ):
         """Method to create a new set of model parameters for extending training
 
@@ -37,6 +37,7 @@ class MoseqModelParams(SpyglassMixin, dj.Manual):
             name for the new model parameters, by default None
         skip_duplicates : bool, optional
             whether to skip duplicates, by default False
+            
         Returns
         -------
         dict
@@ -224,11 +225,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         ----------
         key : dict
             key to a single MoseqModel table entry
-
-        Raises
-        ------
-        NotImplementedError
-            This method is not implemented yet.
         """
         if key is None:
             key = {}
@@ -254,11 +250,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         """
         if key is None:
             key = {}
-        model = kpms.load_checkpoint(
+        return kpms.load_checkpoint(
             (self & key).fetch1("project_dir"),
             (self & key).fetch1("model_name"),
         )[0]
-        return model
 
 
 @schema
