@@ -1,5 +1,16 @@
 # Change Log
 
+## [0.5.4] (Unreleased)
+
+### Infrastructure
+
+- Add common method `get_position_interval_epoch` #1056
+
+### Pipelines
+
+- Behavior
+    - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+
 ## [0.5.4] (December 20, 2024)
 
 ### Infrastructure
