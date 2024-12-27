@@ -107,10 +107,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         key : dict
             key to a single MoseqModelSelection table entry
         """
-        # TODO: make config a method
-        # TODO: set kappa during ARHMM
-        # TODO: make pca components settable
-
         model_params = (MoseqModelParams & key).fetch1("model_params")
 
         # set up the project and config
@@ -136,7 +132,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             posterior_bodyparts=posterior_bodyparts,
         )
 
-        config = lambda: kpms.load_config(project_dir)
+        config = self._config_func(project_dir)
 
         # fetch the data and format it for moseq
         coordinates, confidences = PoseGroup().fetch_pose_datasets(
@@ -189,6 +185,9 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             }
         )
 
+    def _config_func(self, project_dir):
+        return lambda: kpms.load_config(project_dir)
+
     def _make_model_name(self, key: dict = None):
         # make a unique model name based on the key
         if key is None:
@@ -237,7 +236,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             key = {}
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
-        config = lambda: kpms.load_config(project_dir)
+        config = self._config_func(project_dir)
         kpms.print_dims_to_explain_variance(pca, 0.9)
         kpms.plot_scree(pca, project_dir=project_dir)
         kpms.plot_pcs(pca, project_dir=project_dir, **config())
@@ -323,13 +322,10 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
     def make(self, key):
         model = MoseqModel().fetch_model(key)
         project_dir = (MoseqModel & key).fetch1("project_dir")
-        # video_dir = (
-        #     "/home/sambray/Documents/moseq_test_vids2"  # TODO: make this better
-        # )
 
         merge_key = {"merge_id": key["pose_merge_id"]}
         bodyparts = (PoseGroup & key).fetch1("bodyparts")
-        config = lambda: kpms.load_config(project_dir)
+        config = MoseqModel()._config_func(project_dir)
         model_name = (MoseqModel & key).fetch1("model_name")
         num_iters = (MoseqSyllableSelection & key).fetch1("num_iters")
 
