@@ -82,6 +82,10 @@ class SpyglassConfig:
                 "video": "video",
                 "output": "output",
             },
+            "moseq": {
+                "project": "projects",
+                "video": "video",
+            },
         }
         self.dj_defaults = {
             "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
@@ -139,6 +143,7 @@ class SpyglassConfig:
         dj_spyglass = dj_custom.get("spyglass_dirs", {})
         dj_kachery = dj_custom.get("kachery_dirs", {})
         dj_dlc = dj_custom.get("dlc_dirs", {})
+        dj_moseq = dj_custom.get("moseq_dirs", {})
 
         self._debug_mode = dj_custom.get("debug_mode", False)
         self._test_mode = kwargs.get("test_mode") or dj_custom.get(
@@ -174,9 +179,20 @@ class SpyglassConfig:
         )
         Path(self._dlc_base).mkdir(exist_ok=True)
 
+        self._moseq_base = (
+            dj_moseq.get("base")
+            or os.environ.get("MOSEQ_BASE_DIR")
+            or str(Path(resolved_base) / "moseq")
+        )
+        Path(self._moseq_base).mkdir(exist_ok=True)
+
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         for prefix, dirs in self.relative_dirs.items():
-            this_base = self._dlc_base if prefix == "dlc" else resolved_base
+            this_base = (
+                self._dlc_base
+                if prefix == "dlc"
+                else (self._moseq_base if prefix == "moseq" else resolved_base)
+            )
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
@@ -185,12 +201,14 @@ class SpyglassConfig:
                     if not self.supplied_base_dir
                     else None
                 )
-
-                source_config = (
-                    dj_dlc
-                    if prefix == "dlc"
-                    else dj_kachery if prefix == "kachery" else dj_spyglass
-                )
+                if prefix == "dlc":
+                    source_config = dj_dlc
+                elif prefix == "moseq":
+                    source_config = dj_moseq
+                elif prefix == "kachery":
+                    source_config = dj_kachery
+                else:
+                    source_config = dj_spyglass
                 dir_location = (
                     source_config.get(dir)
                     or env_loc
@@ -482,6 +500,11 @@ class SpyglassConfig:
                     "video": self.dlc_video_dir,
                     "output": self.dlc_output_dir,
                 },
+                "moseq_dirs": {
+                    "base": self._moseq_base,
+                    "project": self.moseq_project_dir,
+                    "video": self.moseq_video_dir,
+                },
                 "kachery_zone": "franklab.default",
             }
         }
@@ -567,6 +590,16 @@ class SpyglassConfig:
         """DLC output directory as a string."""
         return self.config.get(self.dir_to_var("output", "dlc"))
 
+    @property
+    def moseq_project_dir(self) -> str:
+        """Moseq project directory as a string."""
+        return self.config.get(self.dir_to_var("project", "moseq"))
+
+    @property
+    def moseq_video_dir(self) -> str:
+        """Moseq video directory as a string."""
+        return self.config.get(self.dir_to_var("video", "moseq"))
+
 
 sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
@@ -588,6 +621,8 @@ if sg_config.load_failed:  # Failed to load
     dlc_project_dir = None
     dlc_video_dir = None
     dlc_output_dir = None
+    moseq_project_dir = None
+    moseq_video_dir = None
 else:
     config = sg_config.config
     base_dir = sg_config.base_dir
@@ -605,3 +640,5 @@ else:
     dlc_project_dir = sg_config.dlc_project_dir
     dlc_video_dir = sg_config.dlc_video_dir
     dlc_output_dir = sg_config.dlc_output_dir
+    moseq_project_dir = sg_config.moseq_project_dir
+    moseq_video_dir = sg_config.moseq_video_dir

@@ -6,6 +6,7 @@ import keypoint_moseq as kpms
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
+from spyglass.settings import moseq_project_dir, moseq_video_dir
 from spyglass.utils import SpyglassMixin
 
 from .core import PoseGroup, format_dataset_for_moseq, results_to_df
@@ -113,15 +114,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         model_params = (MoseqModelParams & key).fetch1("model_params")
 
         # set up the project and config
-        project_dir = (
-            "/home/sambray/Documents/moseq_test_proj3"  # TODO: make this better
-        )
-        video_dir = (
-            "/home/sambray/Documents/moseq_test_vids3"  # TODO: make this better
-        )
+        project_dir, video_dir = moseq_project_dir, moseq_video_dir
         # make symlinks to the videos in a single directory
-        os.makedirs(video_dir, exist_ok=True)
-        # os.makedirs(project_dir, exist_ok=True)
         video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
             destination = os.path.join(video_dir, os.path.basename(video))
