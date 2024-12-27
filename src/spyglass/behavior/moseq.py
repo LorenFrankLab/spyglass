@@ -125,7 +125,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
             destination = os.path.join(video_dir, os.path.basename(video))
-            if not os.path.exists(destination):
+            if not os.path.lexists(destination):
                 os.symlink(video, destination)
         bodyparts = (PoseGroup & key).fetch1("bodyparts")
         skeleton = model_params["skeleton"]
@@ -267,6 +267,25 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             (self & key).fetch1("project_dir"),
             (self & key).fetch1("model_name"),
         )[0]
+
+    def get_training_progress_path(self, key: dict = None):
+        """Method to get the paths to the training progress plots
+
+        Parameters
+        ----------
+        key : dict
+            key to a single MoseqModel table entry
+
+        Returns
+        -------
+        List[str]
+            list of paths to the training progress plots
+        """
+        if key is None:
+            key = {}
+        project_dir = (self & key).fetch1("project_dir")
+        model_name = (self & key).fetch1("model_name")
+        return f"{project_dir}/{model_name}/fitting_progress.pdf"
 
 
 @schema
