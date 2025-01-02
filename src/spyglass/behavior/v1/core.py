@@ -14,6 +14,8 @@ schema = dj.schema("behavior_v1_core")
 
 @schema
 class PoseGroup(SpyglassMixin, dj.Manual):
+    """Groups one or more entries of keypoint pose information"""
+
     definition = """
     pose_group_name: varchar(80)
     ----
@@ -43,9 +45,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         bodyparts : List[str], optional
             body parts to include in the group, by default None includes all from every set
         """
-        group_key = {
-            "pose_group_name": group_name
-        }
+        group_key = {"pose_group_name": group_name}
         if self & group_key:
             warnings.warn(
                 f"Pose group {group_name} already exists. Skipping insertion."

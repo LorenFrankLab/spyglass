@@ -16,6 +16,16 @@ schema = dj.schema("moseq_v1")
 
 @schema
 class MoseqModelParams(SpyglassMixin, dj.Lookup):
+    """Parameters for training a moseq model
+    Relevant parameters (keys in model_params):
+    - skeleton: list of tuples of bodyparts to connect
+    - num_ar_iters: number of iterations to run the autoregressive model
+    - kappa: moseq hyperparameter, higher value = longer syllables
+    - num_epochs: number of epochs to train the model
+    - anterior_bodyparts: used to define orientation
+    - posterior_bodyparts: used to define orientation
+    """
+
     definition = """
     model_params_name: varchar(80)
     ---
@@ -49,7 +59,9 @@ class MoseqModelParams(SpyglassMixin, dj.Lookup):
         """
         model_key = (MoseqModel & model_key).fetch1("KEY")
         model_params = (self & model_key).fetch1("model_params")
-        model_params.update({"num_epochs":num_epochs, "initial_model":model_key})
+        model_params.update(
+            {"num_epochs": num_epochs, "initial_model": model_key}
+        )
         # increment param name
         if new_name is None:
             # increment the extension number
@@ -76,21 +88,17 @@ class MoseqModelParams(SpyglassMixin, dj.Lookup):
 @schema
 class MoseqModelSelection(SpyglassMixin, dj.Manual):
     """Pairing of PoseGroup and moseq model params for training"""
+
     definition = """
     -> PoseGroup
     -> MoseqModelParams
     """
-    # relevant parameters:
-    # - skeleton
-    # - num_ar_iters
-    # - kappa
-    # - num_epochs
-    # - anterior_bodyparts
-    # - posterior_bodyparts
 
 
 @schema
 class MoseqModel(SpyglassMixin, dj.Computed):
+    """Table to train and store moseq models"""
+
     definition = """
     -> MoseqModelSelection
     ---
@@ -302,7 +310,7 @@ class MoseqSyllableSelection(SpyglassMixin, dj.Manual):
         merge_key = {"merge_id": key["pose_merge_id"]}
         bodyparts_df = (PositionOutput & merge_key).fetch_pose_dataframe()
         data_bodyparts = bodyparts_df.keys().get_level_values(0).unique().values
-        
+
         missing = [bp for bp in model_bodyparts if bp not in data_bodyparts]
         if missing:
             raise ValueError(
@@ -321,7 +329,9 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         model = MoseqModel().fetch_model(key)
-        project_dir, model_name = (MoseqModel & key).fetch1("project_dir", "model_name")
+        project_dir, model_name = (MoseqModel & key).fetch1(
+            "project_dir", "model_name"
+        )
 
         merge_key = {"merge_id": key["pose_merge_id"]}
         bodyparts = (PoseGroup & key).fetch1("bodyparts")
