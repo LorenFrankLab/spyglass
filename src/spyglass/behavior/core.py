@@ -44,7 +44,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             body parts to include in the group, by default None includes all from every set
         """
         group_key = {
-            "pose_group_name": group_name,
+            "pose_group_name": group_name
         }
         if self & group_key:
             warnings.warn(
@@ -55,16 +55,14 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             {
                 **group_key,
                 "bodyparts": bodyparts,
-            },
-            skip_duplicates=True,
+            }
         )
         for merge_id in merge_ids:
             self.Pose.insert1(
                 {
                     **group_key,
                     "pose_merge_id": merge_id,
-                },
-                skip_duplicates=True,
+                }
             )
 
     def fetch_pose_datasets(
