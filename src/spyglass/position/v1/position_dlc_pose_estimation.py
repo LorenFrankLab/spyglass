@@ -409,15 +409,20 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             axis=1,
         )
 
-    def fetch_video_path(self):
+    def fetch_video_path(self, key: dict = dict()) -> str:
         """Return the video path for pose estimate
 
+        Parameters
+        ----------
+        key : dict, optional
+            DataJoint key, by default dict()
         Returns
         -------
         str
             absolute path to video file
         """
-        return (DLCPoseEstimationSelection & self).fetch1("video_path")
+        key = (self & key).fetch1("KEY")
+        return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
 def convert_to_cm(df, meters_to_pixels):

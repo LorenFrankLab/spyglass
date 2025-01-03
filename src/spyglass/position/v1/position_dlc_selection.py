@@ -311,15 +311,20 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         key = self.fetch1("KEY")
         return (DLCPoseEstimation & key).fetch_dataframe()
 
-    def fetch_video_path(self):
+    def fetch_video_path(self, key: dict = dict()) -> str:
         """Return the video path for pose estimate
 
+        Parameters
+        ----------
+        key : dict, optional
+            key of entry within the table instance, by default dict()
         Returns
         -------
         str
             absolute path to video file
         """
-        return (DLCPoseEstimationSelection & self).fetch1("video_path")
+        key = (self & key).fetch1("KEY")
+        return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
 @schema
