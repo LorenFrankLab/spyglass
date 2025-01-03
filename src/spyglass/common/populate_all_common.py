@@ -20,6 +20,7 @@ from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.utils import logger
+from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 
 
 def log_insert_error(
@@ -116,6 +117,8 @@ def populate_all_common(
         A list of keys for InsertError entries if any errors occurred.
     """
     from spyglass.spikesorting.imported import ImportedSpikeSorting
+
+    declare_all_merge_tables()
 
     error_constants = dict(
         dj_user=dj.config["database.user"],
