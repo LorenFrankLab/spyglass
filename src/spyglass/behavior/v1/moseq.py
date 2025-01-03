@@ -123,8 +123,11 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
             destination = os.path.join(video_dir, os.path.basename(video))
-            if not os.path.lexists(destination):
-                os.symlink(video, destination)
+            if os.path.exists(destination):
+                continue  # skip if the symlink already exists
+            if os.path.lexists(destination):
+                os.remove(destination)  # remove if it's a broken symlink
+            os.symlink(video, destination)
         bodyparts = (PoseGroup & key).fetch1("bodyparts")
         skeleton = model_params["skeleton"]
         anterior_bodyparts = model_params.get("anterior_bodyparts", None)
