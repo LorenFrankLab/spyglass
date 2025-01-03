@@ -128,19 +128,16 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             if os.path.lexists(destination):
                 os.remove(destination)  # remove if it's a broken symlink
             os.symlink(video, destination)
-        bodyparts = (PoseGroup & key).fetch1("bodyparts")
-        skeleton = model_params["skeleton"]
-        anterior_bodyparts = model_params.get("anterior_bodyparts", None)
-        posterior_bodyparts = model_params.get("posterior_bodyparts", None)
 
+        bodyparts = (PoseGroup & key).fetch1("bodyparts")
         kpms.setup_project(
             str(project_dir),
             video_dir=str(video_dir),
             bodyparts=bodyparts,
-            skeleton=skeleton,
+            skeleton=model_params["skeleton"],
             use_bodyparts=bodyparts,
-            anterior_bodyparts=anterior_bodyparts,
-            posterior_bodyparts=posterior_bodyparts,
+            anterior_bodyparts=model_params.get("anterior_bodyparts", None),
+            posterior_bodyparts=model_params.get("posterior_bodyparts", None),
         )
 
         config = self._config_func(project_dir)
