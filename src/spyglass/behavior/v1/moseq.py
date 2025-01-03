@@ -140,13 +140,13 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             posterior_bodyparts=model_params.get("posterior_bodyparts", None),
         )
 
-        config = self._config_func(project_dir)
+        config = kpms.load_config(project_dir)
 
         # fetch the data and format it for moseq
         coordinates, confidences = PoseGroup().fetch_pose_datasets(
             key, format_for_moseq=True
         )
-        data, metadata = kpms.format_data(coordinates, confidences, **config())
+        data, metadata = kpms.format_data(coordinates, confidences, **config)
 
         # either initialize a new model or load an existing one
         model_name = self._make_model_name(key)
@@ -193,9 +193,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             }
         )
 
-    def _config_func(self, project_dir):
-        return lambda: kpms.load_config(project_dir)
-
     def _make_model_name(self, key: dict = None):
         # make a unique model name based on the key
         if key is None:
@@ -215,11 +212,11 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model, model_name
         """
         # fit pca of data
-        pca = kpms.fit_pca(**data, **config())
+        pca = kpms.fit_pca(**data, **config)
         kpms.save_pca(pca, project_dir)
 
         # create the model
-        model = kpms.init_model(data, pca=pca, **config())
+        model = kpms.init_model(data, pca=pca, **config)
         # run the autoregressive fit on the model
         num_ar_iters = model_params["num_ar_iters"]
         return kpms.fit_model(
@@ -244,10 +241,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             key = {}
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
-        config = self._config_func(project_dir)
+        config = kpms.load_config(project_dir)
         kpms.print_dims_to_explain_variance(pca, 0.9)
         kpms.plot_scree(pca, project_dir=project_dir)
-        kpms.plot_pcs(pca, project_dir=project_dir, **config())
+        kpms.plot_pcs(pca, project_dir=project_dir, **config)
 
     def fetch_model(self, key: dict = None):
         """Method to fetch the model from the MoseqModel table
@@ -335,7 +332,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
 
         merge_key = {"merge_id": key["pose_merge_id"]}
         bodyparts = (PoseGroup & key).fetch1("bodyparts")
-        config = MoseqModel()._config_func(project_dir)
+        config = kpms.load_config(project_dir)
         num_iters = (MoseqSyllableSelection & key).fetch1("num_iters")
 
         # load data and format for moseq
@@ -348,7 +345,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
             bodyparts = bodyparts_df.keys().get_level_values(0).unique().values
         datasets = {video_name: bodyparts_df[bodyparts]}
         coordinates, confidences = format_dataset_for_moseq(datasets, bodyparts)
-        data, metadata = kpms.format_data(coordinates, confidences, **config())
+        data, metadata = kpms.format_data(coordinates, confidences, **config)
 
         # apply model
         results = kpms.apply_model(
@@ -357,7 +354,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
             metadata,
             project_dir,
             model_name,
-            **config(),
+            **config,
             num_iters=num_iters,
         )
 
