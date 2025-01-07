@@ -1,5 +1,14 @@
 # Change Log
 
+## [0.5.5] (Unreleased)
+
+### Infrastructure
+
+### Pipelines
+
+- Position
+    - Allow population of missing `PositionIntervalMap` entries during population of `DLCPoseEstimation` #1208
+
 ## [0.5.4] (December 20, 2024)
 
 ### Infrastructure
