@@ -114,6 +114,13 @@ class SpyglassMixin(ExportMixin):
             return
         return self & f"{attr} LIKE '%{name}%'"
 
+    def restrict_by_list(self, field: str, values: list) -> QueryExpression:
+        """Restrict a field by list of values."""
+        if field not in self.heading.attributes:
+            raise KeyError(f"Field '{field}' not in {self.camel_name}.")
+        quoted_vals = '"' + '","'.join(map(str, values)) + '"'
+        return self & f"{field} IN ({quoted_vals})"
+
     def find_insert_fail(self, key):
         """Find which parent table is causing an IntergrityError on insert."""
         rets = []
