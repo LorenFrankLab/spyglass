@@ -291,6 +291,8 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> SpikeSortingRecordingSelection
     ---

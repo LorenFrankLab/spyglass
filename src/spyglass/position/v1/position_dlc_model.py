@@ -98,16 +98,24 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
             dj.conn(), full_table_name=part_table.parents()[-1]
         ) & {"project_name": project_name}
 
-        if cls._test_mode:  # temporary fix for #1105
-            project_path = table_query.fetch(limit=1)[0]
-        else:
-            project_path = table_query.fetch1("project_path")
+        n_found = len(table_query)
+        if n_found != 1:
+            logger.warning(
+                f"Found {len(table_query)} entries found for project "
+                + f"{project_name}:\n{table_query}"
+            )
+
+        choice = "y"
+        if n_found > 1 and not cls._test_mode:
+            choice = dj.utils.user_choice("Use first entry?")[0]
+        if n_found == 0 or choice != "y":
+            return
 
         part_table.insert1(
             {
                 "dlc_model_name": dlc_model_name,
                 "project_name": project_name,
-                "project_path": project_path,
+                "project_path": table_query.fetch("project_path", limit=1)[0],
                 **key,
             },
             **kwargs,

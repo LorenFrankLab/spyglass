@@ -158,7 +158,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if return_fig:
             return fig
 
-    def nightly_cleanup(self, dry_run=True):
+    def cleanup(self, dry_run=True):
         """Clean up orphaned IntervalList entries."""
         orphans = self - get_child_tables(self)
         if dry_run:

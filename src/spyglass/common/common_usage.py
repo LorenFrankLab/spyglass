@@ -9,19 +9,14 @@ plan future development of Spyglass.
 from typing import List, Union
 
 import datajoint as dj
-from datajoint import FreeTable
-from datajoint import config as dj_config
 from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import export_dir, test_mode
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_graph import RestrGraph
-from spyglass.utils.dj_helper_fn import (
-    make_file_obj_id_unique,
-    unique_dicts,
-    update_analysis_for_dandi_standard,
-)
+from spyglass.utils.dj_helper_fn import (make_file_obj_id_unique, unique_dicts,
+                                         update_analysis_for_dandi_standard)
 from spyglass.utils.nwb_helper_fn import get_linked_nwbs
 from spyglass.utils.sql_helper_fn import SQLDumpHelper
 
@@ -174,7 +169,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Return as a list of dicts: [{'file_path': x}]. Default True.
             If False, returns a list of strings without key.
         """
-        file_table = self * self.File & key
         unique_fp = {
             *[
                 AnalysisNwbfile().get_abs_path(p)

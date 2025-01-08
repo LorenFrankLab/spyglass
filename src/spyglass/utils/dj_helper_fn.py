@@ -223,6 +223,7 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         Function to get the absolute path to the NWB file.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
@@ -234,11 +235,18 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     }
     file_name_str, file_path_fn = tbl_map[which]
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
-        query_expression.join(
-            tbl.proj(nwb2load_filepath=attr_name), log_export=False
-        )
+        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -272,6 +280,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.utils.dj_mixin import SpyglassMixin
+
     kwargs["as_dict"] = True  # force return as dictionary
 
     tbl, attr_name = nwb_master
@@ -296,8 +306,16 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # get from kachery/dandi, store in cache
             get_nwb_file(file_path)
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), log_export=False
+        tbl.proj(nwb2load_filepath=attr_name), **arg
     )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local

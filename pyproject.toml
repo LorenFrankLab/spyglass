@@ -130,7 +130,7 @@ addopts = [
     # "--sw", # stepwise: resume with next test after failure
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
-    "--no-teardown", # don't teardown the database after tests
+    # "--no-teardown", # don't teardown the database after tests
     # "--quiet-spy",   # don't show logging from spyglass
     # "--no-dlc",      # don't run DLC tests
     "--show-capture=no",
@@ -148,6 +148,12 @@ env = [
     "TF_ENABLE_ONEDNN_OPTS = 0",   # TF disable approx calcs
     "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
 ]
+filterwarnings = [
+  "ignore::ResourceWarning:.*",
+  "ignore::DeprecationWarning:.*",
+  "ignore::UserWarning:.*",
+  "ignore::MissingRequiredBuildWarning:.*",
+]
 
 [tool.coverage.run]
 source = ["*/src/spyglass/*"]
@@ -157,7 +163,8 @@ omit = [ # which submodules have no tests
     "*/cli/*",
     # "*/common/*",
     "*/data_import/*",
-    "*/decoding/*",
+    "*/decoding/v0/*",
+    # "*/decoding/*",
     "*/figurl_views/*",
     # "*/lfp/*",
     # "*/linearization/*",
