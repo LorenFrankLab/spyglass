@@ -176,12 +176,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     file_hash='': varchar(32) # Hash of the NWB file
     """
 
-    # QUESTION: Should this file_hash be a (hidden) attr of AnalysisNwbfile?
-    #           Hidden would require the pre-release datajoint version.
-    #           Adding it there would centralize recompute abilities, but maybe
-    #           that's excessive if we only plan recompute for a handful of
-    #           tables.
-
     def make(self, key):
         """Populate SpikeSortingRecording.
 
@@ -216,7 +210,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     @classmethod
-    def _make_file(cls, key: dict = None, recompute_file_name: str = None):
+    def _make_file(
+        cls,
+        key: dict = None,
+        recompute_file_name: str = None,
+        force: bool = False,
+    ):
         """Preprocess recording and write to NWB file.
 
         All `_make_file` methods should exit early if the file already exists.
@@ -249,6 +248,20 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             key, recompute_object_id, recompute_electrodes_id, file_hash = (
                 query.fetch1("KEY", "object_id", "electrodes_id", "file_hash")
             )
+        elif force:
+            # print("force")
+            elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
+            analysis_path = (
+                Path("/stelmo/nwb/analysis")
+                / key["analysis_file_name"].split("_")[0]
+                / key["analysis_file_name"]
+            )
+            if not analysis_path.exists():
+                raise FileNotFoundError(f"File {analysis_path} not found.")
+            with H5File(analysis_path, "r") as f:
+                elect_id = f[elect_attr].attrs["object_id"]
+            obj_id = (cls & key).fetch1("object_id")
+            recompute_object_id, recompute_electrodes_id = obj_id, elect_id
         else:
             recompute_object_id, recompute_electrodes_id = None, None
 
@@ -263,12 +276,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         )
 
-        if recompute:
-            AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
-        else:
-            file_hash = AnalysisNwbfile().get_hash(
-                recording_nwb_file_name, from_schema=False
-            )
+        # if recompute:
+        #     pass
+        #     # AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
+        # else:
+        file_hash = AnalysisNwbfile().get_hash(
+            recording_nwb_file_name, from_schema=True  # REVERT TO FALSE?
+        )
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
@@ -523,6 +537,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         return dict(recording=recording, timestamps=np.asarray(timestamps))
 
+        return obj_id, elect_id
+
     def update_ids(self):
         """Update electrodes_id, and file_hash in SpikeSortingRecording table.
 
@@ -687,7 +703,7 @@ def _write_recording_to_nwb(
         io.write(nwbfile)
 
     if recompute_object_id:
-        logger.info(f"Recomputed {recompute_file_name}, fixing object IDs.")
+        # logger.info(f"Recomputed {recompute_file_name}, fixing object IDs.")
         with H5File(analysis_nwb_file_abs_path, "a") as f:
             f[series_attr].attrs["object_id"] = recompute_object_id
             f[elect_attr].attrs["object_id"] = recompute_electrodes_id

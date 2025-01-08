@@ -210,23 +210,26 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-        raw_tbl = self._externals["raw"]
-        raw_name = raw_tbl.full_table_name
-        raw_restr = (
-            "filepath in ('" + "','".join(self._list_raw_files(key)) + "')"
-        )
-        restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
+        # only add items if found respective file types
+        if raw_files := self._list_raw_files(key):
+            raw_tbl = self._externals["raw"]
+            raw_name = raw_tbl.full_table_name
+            raw_restr = "filepath in ('" + "','".join(raw_files) + "')"
+            restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
+            restr_graph.visited.add(raw_name)
 
-        analysis_tbl = self._externals["analysis"]
-        analysis_name = analysis_tbl.full_table_name
-        analysis_restr = (  # filepaths have analysis subdir. regexp substrings
-            "filepath REGEXP '" + "|".join(self._list_analysis_files(key)) + "'"
-        )  # regexp is slow, but we're only doing this once, and future-proof
-        restr_graph.graph.add_node(
-            analysis_name, ft=analysis_tbl, restr=analysis_restr
-        )
-
-        restr_graph.visited.update({raw_name, analysis_name})
+        if analysis_files := self._list_analysis_files(key):
+            analysis_tbl = self._externals["analysis"]
+            analysis_name = analysis_tbl.full_table_name
+            # to avoid issues with analysis subdir, we use REGEXP
+            # this is slow, but we're only doing this once, and future-proof
+            analysis_restr = (
+                "filepath REGEXP '" + "|".join(analysis_files) + "'"
+            )
+            restr_graph.graph.add_node(
+                analysis_name, ft=analysis_tbl, restr=analysis_restr
+            )
+            restr_graph.visited.add(analysis_name)
 
         return restr_graph
 

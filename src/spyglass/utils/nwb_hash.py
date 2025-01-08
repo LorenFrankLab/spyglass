@@ -1,15 +1,24 @@
 import atexit
 import json
+import re
 from hashlib import md5
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Dict, Union
 
 import h5py
 import numpy as np
+import pynwb
+from hdmf.build import TypeMap
+from hdmf.spec import NamespaceCatalog
+from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
 DEFAULT_BATCH_SIZE = 4095
-IGNORED_KEYS = ["version"]
+IGNORED_KEYS = [
+    "version",
+    "object_id",  # TODO: remove
+]
+PRECISION_LOOKUP = dict(ProcessedElectricalSeries=8)
 
 
 class DirectoryHasher:
@@ -101,9 +110,22 @@ class NwbfileHasher:
         self,
         path: Union[str, Path],
         batch_size: int = DEFAULT_BATCH_SIZE,
+        precision_lookup: Dict[str, int] = PRECISION_LOOKUP,
+        source_script_version: bool = False,
         verbose: bool = True,
     ):
-        """Hashes the contents of an NWB file, limiting to partial data.
+        """Hashes the contents of an NWB file.
+
+        Iterates through all objects in the NWB file, hashing the names, attrs,
+        and data of each object. Ignores NWB specifications, and only considers
+        NWB version.
+
+        Uses a batch size to limit the amount of data hashed at once for large
+        datasets. Rounds data to n decimal places for specific dataset names,
+        as provided in the data_rounding dict.
+
+        Version numbers stored in '/general/source_script' are ignored by
+        default per the source_script_version flag.
 
         Parameters
         ----------
@@ -111,12 +133,23 @@ class NwbfileHasher:
             Path to the NWB file.
         batch_size  : int, optional
             Limit of data to hash for large datasets, by default 4095.
+        data_rounding : Dict[str, int], optional
+            Round data to n decimal places for specific datasets (i.e.,
+            {dataset_name: n}). Default is to round ProcessedElectricalSeries
+            to 10 significant digits via np.round(chunk, n).
+        source_script_version : bool, optional
+            Include version numbers from the source_script in the hash, by
+            default False. If false, uses regex pattern to censor version
+            numbers from this field.
         verbose : bool, optional
             Display progress bar, by default True.
         """
+        self.path = Path(path)
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
 
+        self.source_ver = source_script_version
+        self.precision = precision_lookup
         self.batch_size = batch_size
         self.verbose = verbose
         self.hashed = md5("".encode())
@@ -128,15 +161,28 @@ class NwbfileHasher:
     def cleanup(self):
         self.file.close()
 
+    def remove_version(self, key: str) -> bool:
+        version_pattern = (
+            r"\d+\.\d+\.\d+"  # Major.Minor.Patch
+            + r"(?:-alpha|-beta|a\d+)?"  # Optional alpha or beta, -alpha
+            + r"(?:\.dev\d+)?"  # Optional dev build, .dev01
+            + r"(?:\+[a-z0-9]{9})?"  # Optional commit hash, +abcdefghi
+            + r"(?:\.d\d{8})?"  # Optional date, dYYYYMMDD
+        )
+        return re.sub(version_pattern, "VERSION", key)
+
     def collect_names(self, file):
         """Collects all object names in the file."""
 
         def collect_items(name, obj):
+            if "specifications" in name:
+                return  # Ignore specifications, because we hash namespaces
             items_to_process.append((name, obj))
 
         items_to_process = []
         file.visititems(collect_items)
         items_to_process.sort(key=lambda x: x[0])
+
         return items_to_process
 
     def serialize_attr_value(self, value: Any):
@@ -158,21 +204,30 @@ class NwbfileHasher:
             return value.astype(str).tobytes()  # must be 'astype(str)'
         elif isinstance(value, (str, int, float)):
             return str(value).encode()
-        return repr(value).encode()  # For other data types, use repr
+        return repr(value).encode()  # For other, use repr
 
     def hash_dataset(self, dataset: h5py.Dataset):
         _ = self.hash_shape_dtype(dataset)
 
         if dataset.shape == ():
-            self.hashed.update(self.serialize_attr_value(dataset[()]))
+            raw_scalar = str(dataset[()])
+            if "source_script" in dataset.name and not self.source_ver:
+                raw_scalar = self.remove_version(raw_scalar)
+            self.hashed.update(self.serialize_attr_value(raw_scalar))
             return
+
+        dataset_name = dataset.parent.name.split("/")[-1]
+        precision = self.precision.get(dataset_name, None)
 
         size = dataset.shape[0]
         start = 0
 
         while start < size:
             end = min(start + self.batch_size, size)
-            self.hashed.update(self.serialize_attr_value(dataset[start:end]))
+            data = dataset[start:end]
+            if precision:
+                data = np.round(data, precision)
+            self.hashed.update(self.serialize_attr_value(data))
             start = end
 
     def hash_shape_dtype(self, obj: [h5py.Dataset, np.ndarray]) -> str:
@@ -180,9 +235,23 @@ class NwbfileHasher:
             return
         self.hashed.update(str(obj.shape).encode() + str(obj.dtype).encode())
 
+    @property
+    def all_namespaces(self) -> bytes:
+        """Encoded string of all NWB namespace specs."""
+        catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
+        pynwb.NWBHDF5IO.load_namespaces(catalog, self.path)
+        name_cat = TypeMap(catalog).namespace_catalog
+        ret = ""
+        for ns_name in name_cat.namespaces:
+            ret += ns_name
+            ret += name_cat.get_namespace(ns_name)["version"]
+        return ret.encode()
+
     def compute_hash(self) -> str:
         """Hashes the NWB file contents, limiting to partal data where large."""
         # Dev note: fallbacks if slow: 1) read_direct_chunk, 2) read from offset
+
+        self.hashed.update(self.all_namespaces)
 
         for name, obj in tqdm(
             self.collect_names(self.file),
@@ -192,6 +261,8 @@ class NwbfileHasher:
             self.hashed.update(name.encode())
 
             for attr_key in sorted(obj.attrs):
+                if attr_key in IGNORED_KEYS:
+                    continue
                 attr_value = obj.attrs[attr_key]
                 _ = self.hash_shape_dtype(attr_value)
                 self.hashed.update(attr_key.encode())

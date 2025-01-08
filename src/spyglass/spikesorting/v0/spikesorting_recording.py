@@ -315,6 +315,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
+        # recording_dir = Path("/home/cbroz/wrk/temp_ssr0/")
+
         # Path to files that will hold the recording extractors
         recording_path = str(recording_dir / Path(recording_name))
         if os.path.exists(recording_path):
@@ -351,6 +353,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 key["sort_interval_name"],
                 str(key["sort_group_id"]),
                 key["preproc_params_name"],
+                # key["team_name"], # TODO: add team name, reflect PK structure
             ]
         )
 

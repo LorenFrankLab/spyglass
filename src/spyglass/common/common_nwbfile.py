@@ -221,11 +221,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             # write the new file
             if not recompute_file_name:
                 logger.info(f"Writing new NWB file {analysis_file_name}")
+
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-                analysis_file_name
+                analysis_file_name, from_schema=bool(recompute_file_name)
             )
 
             # export the new NWB file
+            parent_path = Path(analysis_file_abs_path).parent
+            if not parent_path.exists():
+                parent_path.mkdir(parents=True)
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
             ) as export_io:
