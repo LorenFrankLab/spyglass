@@ -358,11 +358,16 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        if from_schema:  # Skips checksum and file existence checks
-            return f"{analysis_dir}/" + (
+        if from_schema:  # Skips checksum check
+            query = (
                 schema.external["analysis"]
-                & f'filepath LIKE "%{analysis_nwb_file_name}"'
-            ).fetch1("filepath")
+                & f"filepath LIKE '%{analysis_nwb_file_name}'"
+            )
+            if len(query) != 1:
+                raise FileNotFoundError(
+                    f"Found {len(query)} files for: {analysis_nwb_file_name}"
+                )
+            return f"{analysis_dir}/" + query.fetch1("filepath")
 
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
