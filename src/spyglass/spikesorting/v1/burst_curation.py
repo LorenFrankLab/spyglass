@@ -12,17 +12,19 @@ from spikeinterface.postprocessing.correlograms import (
 )
 
 from spyglass.decoding.utils import _get_peak_amplitude
-from spyglass.spikesorting.v0.spikesorting_curation import (
-    CuratedSpikeSorting,
-    CuratedSpikeSortingSelection,
-    Curation,
-    Waveforms,
-    WaveformSelection,
-)
-from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
+
+# from spyglass.spikesorting.v0.spikesorting_curation import (
+#     CuratedSpikeSorting,
+#     CuratedSpikeSortingSelection,
+#     Curation,
+#     Waveforms,
+#     WaveformSelection,
+# )
+# from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
+from spyglass.spikesorting.v1.metric_curation import MetricCuration
 from spyglass.utils import logger
 
-schema = dj.schema("burst_v0")  # TODO: rename to spikesorting_burst
+schema = dj.schema("burst_v1")  # TODO: rename to spikesorting_burst_v1
 
 
 @schema
@@ -70,46 +72,26 @@ class BurstPairParams(dj.Lookup):
 @schema
 class BurstPairSelection(dj.Manual):
     definition = """
-    -> CuratedSpikeSorting
+    -> MetricCuration
     -> BurstPairParams
     """
 
-    def insert_by_sort_group_ids(
+    def insert_by_curation_id(
         self,
-        nwb_file_name: str,
-        session_name: str,
-        sort_group_ids: List[int] = None,
-        sorter: str = "mountainsort4",
-        curation_id: int = 1,
+        metric_curation_id: str,
         burst_params_name: str = "default",
         **kwargs,
     ) -> None:
-        """Insert BurstPairSelection entries by sort_group_ids
+        """Insert BurstPairSelection entries by metric_curation_id
 
         Parameters
         ----------
-        nwb_file_name : str
-            name of the NWB file copy with '_' suffix
-        session_name : str
-            name of the session, used as CuratedSpikeSorting.sort_interval_name
-        sort_group_ids : list of int, optional
-            list of sort_group_ids to restrict the selection to. If none, all
-        sorter : str, optional
-            name of the spike sorter, default "mountainsort4"
-        curation_id : int, optional
-            curation_id, default 1
+        metric_curation_id : str
+            id of the MetricCuration entry, primary key uuid
         burst_params_name : str, optional
             name of the BurstPairParams entry, default "default"
         """
-        query = CuratedSpikeSorting() & {
-            "nwb_file_name": nwb_file_name,
-            "sorter": sorter,
-            "sort_interval_name": session_name,
-            "curation_id": curation_id,
-        }
-
-        if sort_group_ids:  # restrict by passed sort_group_ids
-            query &= f'sort_group_id IN ({",".join(map(str, sort_group_ids))})'
+        query = MetricCuration & {"metric_curation_id": metric_curation_id}
 
         # Skip duplicates unless specified otherwise
         kwargs["skip_duplicates"] = kwargs.get("skip_duplicates", True)
@@ -142,7 +124,6 @@ class BurstPair(dj.Computed):
     # TODO: Should these be caches or master table blobs?
     _peak_amp_cache = {}
     _xcorrel_cache = {}
-    _waves_cache = {}
 
     def _null_insert(self, key, msg="No units found for") -> None:
         """Insert a null entry with a warning message"""
@@ -150,24 +131,11 @@ class BurstPair(dj.Computed):
         logger.warning(f"{msg}: {pk}")  # simplify printed key
         self.insert1(key)
 
-    def _get_waves(self, key: dict) -> WaveformExtractor:
-        """Get waveforms for a key, caching the result"""
-        key_hash = dj.hash.key_hash(key)
-        if cached := self._waves_cache.get(key_hash):
-            return cached
-        sg_key = {  # necessary?
-            k: key[k]
-            for k in [
-                "nwb_file_name",
-                "sorter",
-                "sort_interval_name",
-                "sort_group_id",
-                "curation_id",
-            ]
-        }
-        waves = Waveforms.load_waveforms(Waveforms, sg_key)
-        self._waves_cache[key_hash] = waves
-        return waves
+    def _curation_key(self, key):
+        """Get the CurationV1 key for a given BurstPair key"""
+        return (
+            (self & key).proj() * MetricCurationSelection * CurationV1
+        ).fetch1("curation_id", "sorting_id", as_dict=True)
 
     @staticmethod
     def _get_peak_amps1(
@@ -204,16 +172,19 @@ class BurstPair(dj.Computed):
         if cached := self._peak_amp_cache.get(key_hash):
             return cached
 
-        waves = self._get_waves(key)
+        waves = MetricCuration().get_waveforms(key, overwrite=False)
 
-        nwb_units = (CuratedSpikeSorting & key).fetch_nwb()[0].get("units")
-        if nwb_units is None or nwb_units.index.size < 1:
+        curation_key = self._curation_key(key)
+        sorting = CurationV1.get_sorting(curation_key, as_dataframe=True)
+        unit_ids = getattr(sorting, "index", None)
+
+        if unit_ids is None or len(unit_ids) == 0:
             self._peak_amp_cache[key_hash] = {}, {}
             return {}, {}
 
         peak_amps, peak_timestamps = {}, {}
-        for unit_id in nwb_units.index:
-            timestamp = np.asarray(nwb_units["spike_times"][unit_id])
+        for unit_id in unit_ids:
+            timestamp = np.asarray(sortong["spike_times"][unit_id])
             timestamp_ind = np.argsort(timestamp)
             peak_amps[unit_id] = self._get_peak_amps1(
                 waves, unit_id, timestamp_ind
@@ -281,8 +252,11 @@ class BurstPair(dj.Computed):
         if not params:
             params = BurstPairParams().get_params(key)
 
+        curation_key = self._curation_key(key)
+        merged_sorting = CurationV1.get_merged_sorting(curation_key)
+
         ccgs, bins = compute_correlograms(
-            waveform_or_sorting_extractor=Curation.get_curated_sorting(key),
+            waveform_or_sorting_extractor=merged_sorting,
             load_if_exists=False,
             window_ms=params.get("correl_window_ms", 100.0),
             bin_ms=params.get("correl_bin_ms", 5.0),
@@ -304,9 +278,10 @@ class BurstPair(dj.Computed):
             return
 
         # mean waveforms in a dict: each one is of spike number x 4
+        waves = MetricCuration().get_waveforms(key)
         waves_mean_1d = {
             u: np.reshape(
-                np.mean(self._get_waves(key).get_waveforms(u), axis=0).T,
+                np.mean(waves.get_waveforms(u), axis=0).T,
                 (1, -1),
             ).ravel()
             for u in units

@@ -184,21 +184,21 @@ class CurationV1(SpyglassMixin, dj.Manual):
         return recording
 
     @classmethod
-    def get_sorting(cls, key: dict) -> si.BaseSorting:
+    def get_sorting(cls, key: dict, as_dataframe=False) -> si.BaseSorting:
         """Get sorting in the analysis NWB file as spikeinterface BaseSorting
 
         Parameters
         ----------
         key : dict
             primary key of CurationV1 table
+        as_dataframe : bool, optional
+            whether to return the sorting as a pandas DataFrame, by default False
 
         Returns
         -------
         sorting : si.BaseSorting
 
         """
-        recording = cls.get_recording(key)
-        sampling_frequency = recording.get_sampling_frequency()
         analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
@@ -208,6 +208,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
+
+        if as_dataframe:
+            return units
+
+        recording = cls.get_recording(key)
+        sampling_frequency = recording.get_sampling_frequency()
+
         units_dict_list = [
             {
                 unit_id: np.searchsorted(recording.get_times(), spike_times)

@@ -284,26 +284,22 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    def get_waveforms(self, key: dict):
+    def get_waveforms(self, key: dict, overwrite: bool = True):
         """Returns waveforms identified by metric curation."""
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
             return cached
 
-        sort_key = (MetricCurationSelection & key).fetch(
-            "sorting_id", "curation_id", as_dict=True
-        )
-        if len(sort_key) > 1:
-            raise ValueError(
-                f"More than MetricCurationSelecti entry for key: {key}"
-            )
-        sort_key = sort_key[0]
+        query = (self & key) * MetricCurationSelection * WaveformParameters
+        if len(query) != 1:
+            raise ValueError(f"Found {len(query)} entries for: {key}")
 
+        sort_key = query.fetch("sorting_id", "curation_id", as_dict=True)[0]
         recording = CurationV1.get_recording(sort_key)
         sorting = CurationV1.get_sorting(sort_key)
 
         # extract waveforms
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
+        waveform_params = query.fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
                 recording = sp.whiten(recording, dtype=np.float64)
@@ -317,7 +313,8 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             recording=recording,
             sorting=sorting,
             folder=waveforms_dir,
-            overwrite=True,
+            overwrite=overwrite,
+            load_if_exists=not overwrite,
             **waveform_params,
         )
 
