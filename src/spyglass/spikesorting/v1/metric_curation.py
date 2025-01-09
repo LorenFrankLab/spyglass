@@ -284,7 +284,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    def get_waveforms(key: dict):
+    def get_waveforms(self, key: dict):
         """Returns waveforms identified by metric curation."""
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
