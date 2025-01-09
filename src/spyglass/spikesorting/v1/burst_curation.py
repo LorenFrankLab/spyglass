@@ -12,16 +12,7 @@ from spikeinterface.postprocessing.correlograms import (
 )
 
 from spyglass.decoding.utils import _get_peak_amplitude
-
-# from spyglass.spikesorting.v0.spikesorting_curation import (
-#     CuratedSpikeSorting,
-#     CuratedSpikeSortingSelection,
-#     Curation,
-#     Waveforms,
-#     WaveformSelection,
-# )
-# from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
-from spyglass.spikesorting.v1.metric_curation import MetricCuration
+from spyglass.spikesorting.v1.metric_curation import CurationV1, MetricCuration
 from spyglass.utils import logger
 
 schema = dj.schema("burst_v1")  # TODO: rename to spikesorting_burst_v1
