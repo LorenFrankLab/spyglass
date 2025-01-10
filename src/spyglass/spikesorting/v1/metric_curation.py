@@ -1,5 +1,6 @@
 import os
 import uuid
+from pathlib import Path
 from time import time
 from typing import Any, Dict, List, Union
 
@@ -305,7 +306,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 recording = sp.whiten(recording, dtype=np.float64)
 
         waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
-        os.makedirs(waveforms_dir, exist_ok=True)
+        wf_dir_obj = Path(waveforms_dir)
+        wf_dir_obj.mkdir(parents=True, exist_ok=True)
+        if not any(wf_dir_obj.iterdir()):  # if the directory is empty
+            overwrite = True
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)

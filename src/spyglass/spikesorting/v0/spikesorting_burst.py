@@ -425,6 +425,8 @@ class BurstPair(dj.Computed):
 
     def _validate_pairs(self, key, pairs):
         query = self.BurstPairUnit & key
+        if isinstance(pairs, tuple) and len(pairs) == 2:
+            pairs = [pairs]
         valid_pairs = []
         for p in pairs:
             if valid_pair := self._validate_pair(query, *p):

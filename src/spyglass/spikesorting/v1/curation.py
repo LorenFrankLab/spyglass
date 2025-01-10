@@ -261,15 +261,15 @@ class CurationV1(SpyglassMixin, dj.Manual):
         ) as io:
             nwbfile = io.read()
             nwb_sorting = nwbfile.objects[curation_key["object_id"]]
-            merge_groups = nwb_sorting["merge_groups"][:]
+            merge_groups = nwb_sorting.get("merge_groups")
 
-        if merge_groups:
-            units_to_merge = _merge_dict_to_list(merge_groups)
+        if merge_groups:  # bumped slice down to here for case w/o merge_groups
+            units_to_merge = _merge_dict_to_list(merge_groups[:])
             return sc.MergeUnitsSorting(
                 parent_sorting=si_sorting, units_to_merge=units_to_merge
             )
-        else:
-            return si_sorting
+
+        return si_sorting
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> dj.Table:
