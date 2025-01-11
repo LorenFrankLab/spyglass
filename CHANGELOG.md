@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.5.5] (TBD)
+
+### Infrastructure
+
+- Update URL for DANDI Docs #1210
+
 ## [0.5.4] (December 20, 2024)
 
 ### Infrastructure
