@@ -156,7 +156,10 @@ class BurstPair(dj.Computed):
 
     def _truncate_to_shortest(self, msg="", *args):
         """Truncate all arrays to the shortest length"""
-        if msg and not all([len(a) == len(args[0]) for a in args]):
+        mismatch = not all([len(a) == len(args[0]) for a in args])
+        if not mismatch:
+            return args
+        if msg and mismatch:
             logger.warning(f"Truncating arrays to shortest length: {msg}")
         min_len = min([len(a) for a in args])
         return [a[:min_len] for a in args]
@@ -183,7 +186,9 @@ class BurstPair(dj.Computed):
         if cached := self._peak_amp_cache.get(key_hash):
             return cached
 
-        waves = MetricCuration().get_waveforms(key, overwrite=False)
+        waves = MetricCuration().get_waveforms(
+            key, overwrite=False, fetch_all=True
+        )
 
         curation_key = self._curation_key(key)
         sorting = CurationV1.get_sorting(curation_key, as_dataframe=True)
@@ -550,6 +555,7 @@ class BurstPair(dj.Computed):
             )
 
         # PROBLEM: example key showed sub_ind larger than voltages
+        # SOLVED: fetch waveforms with "max_spikes_per_unit" as None
         def select_voltages(voltages, sub_ind):
             if len(sub_ind) > len(voltages):
                 sub_ind = sub_ind[: len(voltages)]
