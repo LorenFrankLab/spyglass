@@ -304,7 +304,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         if cached := self._waves_cache.get(key_hash):
             return cached
 
-        query = (self & key) * MetricCurationSelection * WaveformParameters
+        query = (MetricCurationSelection & key) * WaveformParameters
         if len(query) != 1:
             raise ValueError(f"Found {len(query)} entries for: {key}")
 
