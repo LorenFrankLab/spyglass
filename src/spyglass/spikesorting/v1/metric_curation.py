@@ -281,8 +281,21 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    def get_waveforms(self, key: dict, overwrite: bool = True):
-        """Returns waveforms identified by metric curation."""
+    def get_waveforms(
+        self, key: dict, overwrite: bool = True, fetch_all: bool = False
+    ):
+        """Returns waveforms identified by metric curation.
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCuration
+        overwrite : bool, optional
+            whether to overwrite existing waveforms, by default True
+        fetch_all : bool, optional
+            fetch all spikes for units, by default False. Overrides
+            max_spikes_per_unit in waveform_params
+        """
         key_hash = dj.hash.key_hash(key)
         if cached := self._waves_cache.get(key_hash):
             return cached
@@ -306,6 +319,10 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         wf_dir_obj.mkdir(parents=True, exist_ok=True)
         if not any(wf_dir_obj.iterdir()):  # if the directory is empty
             overwrite = True
+
+        if fetch_all:
+            waveform_params["max_spikes_per_unit"] = None
+            waveforms_dir += "_all"  # TODO: would it be better to overwrite?
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)
