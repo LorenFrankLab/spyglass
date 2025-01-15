@@ -1,4 +1,3 @@
-import os
 import uuid
 from pathlib import Path
 from time import time
@@ -241,12 +240,9 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         ).fetch1()
 
         nwb_file_name = upstream["nwb_file_name"]
-        waveform_params = upstream["waveform_params"]
         metric_params = upstream["metric_params"]
         label_params = upstream["label_params"]
         merge_params = upstream["merge_params"]
-        sorting_id = upstream["sorting_id"]
-        curation_id = upstream["curation_id"]
 
         # DO
         logger.info("Extracting waveforms...")
@@ -291,7 +287,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         if cached := self._waves_cache.get(key_hash):
             return cached
 
-        query = (self & key) * MetricCurationSelection * WaveformParameters
+        query = (MetricCurationSelection & key) * WaveformParameters
         if len(query) != 1:
             raise ValueError(f"Found {len(query)} entries for: {key}")
 

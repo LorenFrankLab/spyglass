@@ -29,6 +29,17 @@ from .data_downloader import DataDownloader
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
+warnings.filterwarnings("ignore", module="tensorflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+warnings.filterwarnings(
+    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+)
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
+warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+warnings.simplefilter("ignore", category=ResourceWarning)
+warnings.simplefilter("ignore", category=DeprecationWarning)
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -107,19 +118,6 @@ def pytest_configure(config):
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
     )
-
-    warnings.filterwarnings("ignore", module="tensorflow")
-    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-    warnings.filterwarnings(
-        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
-    )
-    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-    warnings.filterwarnings(
-        "ignore", category=PerformanceWarning, module="pandas"
-    )
-    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-    warnings.simplefilter("ignore", category=ResourceWarning)
-    warnings.simplefilter("ignore", category=DeprecationWarning)
 
 
 def pytest_unconfigure(config):
@@ -1367,8 +1365,6 @@ def sorter_dict():
 
 @pytest.fixture(scope="session")
 def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
-    pre = spike_v1.SpikeSorting().fetch("KEY", as_dict=True)
-
     key = {
         **mini_dict,
         **sorter_dict,
@@ -1379,7 +1375,7 @@ def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
     spike_v1.SpikeSortingSelection.insert_selection(key)
     spike_v1.SpikeSorting.populate()
 
-    yield (spike_v1.SpikeSorting() - pre).fetch(
+    yield spike_v1.SpikeSorting().fetch(
         "KEY", as_dict=True, order_by="time_of_sort desc"
     )[0]
 
