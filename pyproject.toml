@@ -65,6 +65,17 @@ dlc = [
     "ffmpeg",
     "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
 ]
+moseq-gpu = [
+    "jax[cuda12]==0.3.22",
+    "jax-moseq[cuda12]",
+    "keypoint-moseq",
+]
+moseq-cpu = [
+    "jax[cpu]==0.3.22",
+    "jax-moseq",
+    "keypoint-moseq",
+]
+
 test = [
     "click",                  # for CLI subpackage only
     "docker",                 # for tests in a container
