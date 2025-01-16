@@ -254,7 +254,9 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
     def fetch_pose_dataframe(self):
         raise NotImplementedError("No pose data for TrodesPosV1")
 
-    def fetch_video_path(self):
+    def fetch_video_path(self, key=dict()):
+        """Fetch the video path for the position data."""
+        key = (self & key).fetch1("KEY")
         nwb_file_name, interval_list_name = self.fetch1(
             "nwb_file_name", "interval_list_name"
         )

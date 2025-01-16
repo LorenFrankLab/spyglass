@@ -514,8 +514,9 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
     def fetch_pose_datframe(self):
         raise NotImplementedError("No Pose data available for this table")
 
-    def fetch_video_path(self):
-        return self.fetch_nwb()[0]["head_position"].get_comments()
+    def fetch_video_path(self, key=dict()):
+        key = (self & key).fetch1("KEY")
+        return (self & key).fetch_nwb()[0]["head_position"].get_comments()
 
 
 @schema
