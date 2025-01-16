@@ -23,7 +23,7 @@
 # > **Model Training**
 # > - Define training data in `PoseGroup`
 # >  - Define Moseq model and training parameters in `MoseqModelParams`
-# >  - Combine a set of training parmaters and training data in `MoseqModelSelection`
+# >  - Combine a set of training paramaters and training data in `MoseqModelSelection`
 # >  - Populate `MoseqModel` to train
 # >
 # > **Convert pose data to behavioral syllables**
@@ -37,7 +37,7 @@
 #  # Accessing the keypoint (pose) data
 #
 # In the spyglass architecture, keypoint tracking is performed in the `Position` module,
-# and can be accesed through `PositionOutput.fetch_pose_dataframe()`. In this tutorial,
+# and can be accessed through `PositionOutput.fetch_pose_dataframe()`. In this tutorial,
 # we are using a set of unpublished data from the Frank lab. For a tutorial on
 # running keypoint extraction in spyglass, see [the DLC tutorial notebook](21_DLC.ipynb).
 #
@@ -276,7 +276,7 @@ MoseqModel().populate(new_model_key)
 # training an initial model for each. Looking at the results above, we see a shorter
 # median distribution (~3 frames = 100ms) than we would like
 # ([recommended ~400ms](https://keypoint-moseq.readthedocs.io/en/latest/FAQs.html#modeling))
-# . We will therfore try several parameter sets with larger kappa values.
+# . We will therefore try several parameter sets with larger kappa values.
 #
 #
 
