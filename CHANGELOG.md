@@ -1,8 +1,12 @@
 # Change Log
 
+
 ## [0.5.5] (Unreleased)
 
 ### Infrastructure
+
+- Ensure merge tables are declared during file insertion #1205
+- Update URL for DANDI Docs #1210
 
 ### Pipelines
 
