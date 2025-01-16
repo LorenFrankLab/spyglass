@@ -23,7 +23,7 @@
 # > **Model Training**
 # > - Define training data in `PoseGroup`
 # >  - Define Moseq model and training parameters in `MoseqModelParams`
-# >  - Combine a set of training paramaters and training data in `MoseqModelSelection`
+# >  - Combine a set of training parameters and training data in `MoseqModelSelection`
 # >  - Populate `MoseqModel` to train
 # >
 # > **Convert pose data to behavioral syllables**
