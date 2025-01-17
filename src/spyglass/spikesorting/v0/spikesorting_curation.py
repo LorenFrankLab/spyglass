@@ -604,11 +604,12 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
 
         is_nn_iso = metric_name == "nn_isolation"
         is_nn_overlap = metric_name == "nn_noise_overlap"
+        is_num_spikes = metric_name == "num_spikes"
         min_spikes = metric_params.get("min_spikes", 10)
 
         for unit_id in waveform_extractor.sorting.get_unit_ids():
             # checks to avoid bug in spikeinterface 0.98.2
-            if num_spikes[unit_id] < min_spikes:
+            if num_spikes[unit_id] < min_spikes and not is_num_spikes:
                 if is_nn_iso:
                     metric[str(unit_id)] = (np.nan, np.nan)
                 elif is_nn_overlap:
