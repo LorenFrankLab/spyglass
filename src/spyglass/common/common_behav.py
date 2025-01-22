@@ -197,7 +197,7 @@ class RawPosition(SpyglassMixin, dj.Imported):
             id_rp = [(n["id"], n["raw_position"]) for n in self.fetch_nwb()]
 
             if len(set(rp.interval for _, rp in id_rp)) > 1:
-                logger.warn("Loading DataFrame with multiple intervals.")
+                logger.warning("Loading DataFrame with multiple intervals.")
 
             df_list = [
                 pd.DataFrame(
@@ -395,7 +395,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
         )
 
         if videos is None:
-            logger.warn(f"No video data interface found in {nwb_file_name}\n")
+            logger.warning(
+                f"No video data interface found in {nwb_file_name}\n"
+            )
             return
         else:
             videos = videos.time_series
@@ -534,6 +536,9 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         EPSILON = 0.51  # tolerated time diff in bounds across epoch/pos
         no_pop_msg = "CANNOT POPULATE PositionIntervalMap"
 
+        # Strip extra info from key if not passed via populate call
+        key = {k: v for k, v in key.items() if k in self.primary_key}
+
         nwb_file_name = key["nwb_file_name"]
         pos_intervals = get_pos_interval_list_names(nwb_file_name)
         null_key = dict(key, position_interval_name="")
@@ -541,7 +546,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            logger.error(f"NO POS INTERVALS FOR {key}; {no_pop_msg}")
+            logger.error(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
             self.insert1(null_key, **insert_opts)
             return
 

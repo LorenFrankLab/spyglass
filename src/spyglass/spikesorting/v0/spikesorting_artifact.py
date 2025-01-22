@@ -263,7 +263,7 @@ def _get_artifact_times(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        logger.warn("No artifacts detected.")
+        logger.warning("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     # convert indices to intervals
@@ -276,7 +276,10 @@ def _get_artifact_times(
     for interval_idx, interval in enumerate(artifact_intervals):
         artifact_intervals_s[interval_idx] = [
             valid_timestamps[interval[0]] - half_removal_window_s,
-            valid_timestamps[interval[1]] + half_removal_window_s,
+            np.minimum(
+                valid_timestamps[interval[1]] + half_removal_window_s,
+                valid_timestamps[-1],
+            ),
         ]
     # make the artifact intervals disjoint
     if len(artifact_intervals_s) > 1:

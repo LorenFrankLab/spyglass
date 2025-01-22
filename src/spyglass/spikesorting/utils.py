@@ -108,7 +108,7 @@ def get_group_by_shank(
             if omit_ref_electrode_group and (
                 str(e_group) == str(ref_elec_group)
             ):
-                logger.warn(
+                logger.warning(
                     f"Omitting electrode group {e_group} from sort groups "
                     + "because contains reference."
                 )
@@ -117,7 +117,7 @@ def get_group_by_shank(
 
             # omit unitrodes if indicated
             if omit_unitrode and len(shank_elect) == 1:
-                logger.warn(
+                logger.warning(
                     f"Omitting electrode group {e_group}, shank {shank} "
                     + "from sort groups because unitrode."
                 )

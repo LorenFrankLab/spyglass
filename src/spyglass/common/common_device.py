@@ -88,7 +88,9 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 + f"{ndx_devices.keys()}"
             )
         else:
-            logger.warn("No conforming data acquisition device metadata found.")
+            logger.warning(
+                "No conforming data acquisition device metadata found."
+            )
 
     @classmethod
     def get_all_device_names(cls, nwbf, config) -> tuple:
@@ -305,7 +307,7 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         if device_name_list:
             logger.info(f"Inserted camera devices {device_name_list}")
         else:
-            logger.warn("No conforming camera device metadata found.")
+            logger.warning("No conforming camera device metadata found.")
         return device_name_list
 
 
@@ -402,6 +404,7 @@ class Probe(SpyglassMixin, dj.Manual):
             elif probe_type in config_probes:
                 cls._read_config_probe_data(
                     config,
+                    config_probes,
                     probe_type,
                     new_probe_type_dict,
                     new_probe_dict,
@@ -461,7 +464,7 @@ class Probe(SpyglassMixin, dj.Manual):
         if all_probes_types:
             logger.info(f"Inserted probes {all_probes_types}")
         else:
-            logger.warn("No conforming probe metadata found.")
+            logger.warning("No conforming probe metadata found.")
 
         return all_probes_types
 
@@ -562,6 +565,7 @@ class Probe(SpyglassMixin, dj.Manual):
     def _read_config_probe_data(
         cls,
         config,
+        config_probes,
         probe_type,
         new_probe_type_dict,
         new_probe_dict,
@@ -707,7 +711,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         query = ProbeType & {"probe_type": probe_type}
         if len(query) == 0:
-            logger.warn(
+            logger.warning(
                 f"No ProbeType found with probe_type '{probe_type}'. Aborting."
             )
             return
@@ -767,7 +771,7 @@ class Probe(SpyglassMixin, dj.Manual):
                     ]
 
         if not device_found:
-            logger.warn(
+            logger.warning(
                 "No electrodes in the NWB file were associated with a device "
                 + f"named '{nwb_device_name}'."
             )

@@ -808,13 +808,14 @@ class RestrGraph(AbstractGraph):
         directly by the user.
         """
         self.cascade()
-        return [
-            self.analysis_file_tbl.get_abs_path(file)
-            for file in set(
-                [f for files in self.file_dict.values() for f in files]
-            )
-            if file is not None
-        ]
+
+        files = {
+            file
+            for table in self.visited
+            for file in self._get_node(table).get("files", [])
+        }
+
+        return [self.analysis_file_tbl.get_abs_path(file) for file in files]
 
 
 class TableChain(RestrGraph):

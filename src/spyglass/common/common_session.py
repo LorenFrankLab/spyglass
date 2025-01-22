@@ -152,7 +152,7 @@ class Session(SpyglassMixin, dj.Imported):
                 "data_acquisition_device_name": device_name
             }
             if len(query) == 0:
-                logger.warn(
+                logger.warning(
                     "Cannot link Session with DataAcquisitionDevice.\n"
                     + f"DataAcquisitionDevice does not exist: {device_name}"
                 )
@@ -180,7 +180,7 @@ class Session(SpyglassMixin, dj.Imported):
             # ensure that the foreign key exists and do nothing if not
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
-                logger.warn(
+                logger.warning(
                     "Cannot link Session with LabMember. "
                     + f"LabMember does not exist: {name}"
                 )

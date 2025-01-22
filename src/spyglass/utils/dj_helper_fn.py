@@ -68,6 +68,20 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
+def declare_all_merge_tables():
+    """Ensures all merge tables in the spyglass core package are declared.
+    - Prevents circular imports
+    - Prevents errors from table declaration within a transaction
+    - Run during nwb insertion
+    """
+    from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
+    from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
+    from spyglass.position.position_merge import PositionOutput  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+        SpikeSortingOutput,
+    )
+
+
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
     """Given lists of items/names, return item at index or by substring."""
     if isinstance(index, int):
@@ -124,7 +138,7 @@ def _subclass_factory(
 
     # Define the __call__ method for the new class
     def init_override(self, *args, **kwargs):
-        logger.warn(
+        logger.warning(
             "Deprecation: this class has been moved out of "
             + f"{old_module}\n"
             + f"\t{old_name} -> {new_module}.{new_class.__name__}"
@@ -223,6 +237,7 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         Function to get the absolute path to the NWB file.
     """
     from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.utils.dj_mixin import SpyglassMixin
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
@@ -234,9 +249,18 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     }
     file_name_str, file_path_fn = tbl_map[which]
 
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+
     # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
-        query_expression * tbl.proj(nwb2load_filepath=attr_name)
+        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -270,6 +294,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.utils.dj_mixin import SpyglassMixin
+
     kwargs["as_dict"] = True  # force return as dictionary
 
     tbl, attr_name = nwb_master
@@ -291,7 +317,17 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             # This also opens the file and stores the file object
             get_nwb_file(file_path)
 
-    query_table = query_expression * tbl.proj(nwb2load_filepath=attr_name)
+    # logging arg only if instanced table inherits Mixin
+    inst = (  # instancing may not be necessary
+        query_expression()
+        if isinstance(query_expression, type)
+        and issubclass(query_expression, dj.Table)
+        else query_expression
+    )
+    arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+    query_table = query_expression.join(
+        tbl.proj(nwb2load_filepath=attr_name), **arg
+    )
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
