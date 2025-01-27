@@ -116,9 +116,14 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             key to a single MoseqModelSelection table entry
         """
         model_params = (MoseqModelParams & key).fetch1("model_params")
+        model_name = self._make_model_name(key)
 
         # set up the project and config
         project_dir, video_dir = moseq_project_dir, moseq_video_dir
+        project_dir = os.path.join(project_dir, model_name)
+        video_dir = os.path.join(video_dir, model_name)
+        # os.makedirs(project_dir, exist_ok=True)
+        os.makedirs(video_dir, exist_ok=True)
         # make symlinks to the videos in a single directory
         video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
@@ -149,7 +154,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         data, metadata = kpms.format_data(coordinates, confidences, **config)
 
         # either initialize a new model or load an existing one
-        model_name = self._make_model_name(key)
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
             model, model_name = self._initialize_model(
