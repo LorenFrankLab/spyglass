@@ -44,8 +44,8 @@
 # We can access an example set of keypoint pose data here:
 
 # +
-# # %load_ext autoreload
-# # %autoreload 2
+# %load_ext autoreload
+# %autoreload 2
 from spyglass.position.position_merge import PositionOutput
 
 # Key defining the DLC data we are using
@@ -73,7 +73,7 @@ pose_df
 # merge ids to `create_group`
 
 # +
-from spyglass.behavior.core import PoseGroup
+from spyglass.behavior.v1.core import PoseGroup
 
 # Define the group name and bodyparts to include in the Moseq model
 group_name = "tutorial_group"
@@ -111,7 +111,7 @@ PoseGroup() & group_key
 # ** Note: All bodyparts in the `PoseGroup` entry will be used in the model
 
 # +
-from spyglass.behavior.moseq import (
+from spyglass.behavior.v1.moseq import (
     MoseqModel,
     MoseqModelParams,
     MoseqModelSelection,
@@ -191,7 +191,7 @@ table.analyze_pca()
 # +
 # %load_ext autoreload
 # %autoreload 2
-from spyglass.behavior.moseq import MoseqSyllableSelection, MoseqSyllable
+from spyglass.behavior.v1.moseq import MoseqSyllableSelection, MoseqSyllable
 
 # Make a selection table entry defining the pose data and moseq model to use
 pose_key = (
@@ -287,6 +287,7 @@ new_params_key_list = []
 for i in [5, 6, 7, 8]:
     new_params = original_params.copy()
     new_params["kappa"] = 10**i
+    new_params["num_epochs"] = 100
     new_model_params_name = f"tutorial_kappa{i}_mini"
     new_params_key = {
         "model_params_name": new_model_params_name,
