@@ -251,7 +251,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model_name=model_name + "_ar",
         )
 
-    def analyze_pca(self, key: dict, explained_variace: float = 0.9):
+    def analyze_pca(self, key: dict = dict(), explained_variace: float = 0.9):
         """Method to analyze the PCA of a model
 
         Parameters
