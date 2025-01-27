@@ -188,6 +188,7 @@ omit = [ # which submodules have no tests
     # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",
+    "*/moseq/*",
 ]
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
