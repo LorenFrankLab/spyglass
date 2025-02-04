@@ -1,6 +1,7 @@
 import atexit
 import json
 import re
+from functools import cached_property
 from hashlib import md5
 from pathlib import Path
 from typing import Any, Dict, Union
@@ -14,11 +15,38 @@ from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
 DEFAULT_BATCH_SIZE = 4095
-IGNORED_KEYS = [
-    "version",
-    "object_id",  # TODO: remove
-]
-PRECISION_LOOKUP = dict(ProcessedElectricalSeries=8)
+IGNORED_KEYS = ["version"]
+PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
+
+
+def get_file_namespaces(
+    file_path: Union[str, Path], replace_hypens: bool = True
+) -> dict:
+    """Get all namespace versions from an NWB file.
+
+    WARNING: This function falsely reports core <= 2.6.0 as 2.6.0-alpha
+
+    Parameters
+    ----------
+    file_path : Union[str, Path]
+        Path to the NWB file.
+    replace_hypens : bool, optional
+        Replace hyphens with underscores for DJ compatibility, by default True.
+    """
+    catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
+    pynwb.NWBHDF5IO.load_namespaces(catalog, file_path)
+    name_cat = TypeMap(catalog).namespace_catalog
+
+    ret = {
+        ns_name: name_cat.get_namespace(ns_name).get("version", None)
+        for ns_name in name_cat.namespaces
+    }
+
+    return (
+        {k.replace("-", "_"): v for k, v in ret.items()}
+        if replace_hypens
+        else ret
+    )
 
 
 class DirectoryHasher:
@@ -111,7 +139,7 @@ class NwbfileHasher:
         path: Union[str, Path],
         batch_size: int = DEFAULT_BATCH_SIZE,
         precision_lookup: Dict[str, int] = PRECISION_LOOKUP,
-        source_script_version: bool = False,
+        keep_obj_hash: bool = False,
         verbose: bool = True,
     ):
         """Hashes the contents of an NWB file.
@@ -124,8 +152,10 @@ class NwbfileHasher:
         datasets. Rounds data to n decimal places for specific dataset names,
         as provided in the data_rounding dict.
 
-        Version numbers stored in '/general/source_script' are ignored by
-        default per the source_script_version flag.
+        Version numbers stored in '/general/source_script' are ignored.
+
+        Keeps each object hash as a dictionary, if keep_obj_hash is True. This
+        is useful for debugging, but not recommended for large files.
 
         Parameters
         ----------
@@ -137,10 +167,8 @@ class NwbfileHasher:
             Round data to n decimal places for specific datasets (i.e.,
             {dataset_name: n}). Default is to round ProcessedElectricalSeries
             to 10 significant digits via np.round(chunk, n).
-        source_script_version : bool, optional
-            Include version numbers from the source_script in the hash, by
-            default False. If false, uses regex pattern to censor version
-            numbers from this field.
+        keep_obj_hash : bool, optional
+            Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
             Display progress bar, by default True.
         """
@@ -148,10 +176,14 @@ class NwbfileHasher:
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
 
-        self.source_ver = source_script_version
+        if isinstance(precision_lookup, int):
+            precision_lookup = dict(ProcessedElectricalSeries=precision_lookup)
+
         self.precision = precision_lookup
         self.batch_size = batch_size
         self.verbose = verbose
+        self.keep_obj_hash = keep_obj_hash
+        self.objs = {}
         self.hashed = md5("".encode())
         self.hash = self.compute_hash()
 
@@ -207,13 +239,13 @@ class NwbfileHasher:
         return repr(value).encode()  # For other, use repr
 
     def hash_dataset(self, dataset: h5py.Dataset):
-        _ = self.hash_shape_dtype(dataset)
+        this_hash = md5(self.hash_shape_dtype(dataset))
 
         if dataset.shape == ():
             raw_scalar = str(dataset[()])
-            if "source_script" in dataset.name and not self.source_ver:
+            if "source_script" in dataset.name:
                 raw_scalar = self.remove_version(raw_scalar)
-            self.hashed.update(self.serialize_attr_value(raw_scalar))
+            this_hash.update(self.serialize_attr_value(raw_scalar))
             return
 
         dataset_name = dataset.parent.name.split("/")[-1]
@@ -227,59 +259,78 @@ class NwbfileHasher:
             data = dataset[start:end]
             if precision:
                 data = np.round(data, precision)
-            self.hashed.update(self.serialize_attr_value(data))
+            this_hash.update(self.serialize_attr_value(data))
             start = end
+
+        return this_hash.hexdigest()
 
     def hash_shape_dtype(self, obj: [h5py.Dataset, np.ndarray]) -> str:
         if not hasattr(obj, "shape") or not hasattr(obj, "dtype"):
-            return
-        self.hashed.update(str(obj.shape).encode() + str(obj.dtype).encode())
+            return "".encode()
+        return str(obj.shape).encode() + str(obj.dtype).encode()
 
-    @property
-    def all_namespaces(self) -> bytes:
+    @cached_property
+    def namespaces(self) -> dict:
         """Encoded string of all NWB namespace specs."""
-        catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
-        pynwb.NWBHDF5IO.load_namespaces(catalog, self.path)
-        name_cat = TypeMap(catalog).namespace_catalog
-        ret = ""
-        for ns_name in name_cat.namespaces:
-            ret += ns_name
-            ret += name_cat.get_namespace(ns_name)["version"]
-        return ret.encode()
+        return get_file_namespaces(self.path)
+
+    @cached_property
+    def namespaces_str(self) -> str:
+        """String representation of all NWB namespace specs."""
+        return json.dumps(self.namespaces, sort_keys=True).encode()
+
+    def add_to_cache(self, name: str, obj: Any, digest: str = None):
+        """Add object to the cache.
+
+        Centralizes conditional logic for adding objects to the cache.
+        """
+        if self.keep_obj_hash:
+            self.objs[name] = (obj, digest)
 
     def compute_hash(self) -> str:
-        """Hashes the NWB file contents, limiting to partal data where large."""
+        """Hashes the NWB file contents."""
         # Dev note: fallbacks if slow: 1) read_direct_chunk, 2) read from offset
 
-        self.hashed.update(self.all_namespaces)
+        self.hashed.update(self.namespaces_str)
+
+        self.add_to_cache("namespaces", self.namespaces, None)
 
         for name, obj in tqdm(
             self.collect_names(self.file),
             desc=self.file.filename.split("/")[-1].split(".")[0],
             disable=not self.verbose,
         ):
-            self.hashed.update(name.encode())
+            this_hash = md5(name.encode())
 
             for attr_key in sorted(obj.attrs):
                 if attr_key in IGNORED_KEYS:
                     continue
                 attr_value = obj.attrs[attr_key]
-                _ = self.hash_shape_dtype(attr_value)
-                self.hashed.update(attr_key.encode())
-                self.hashed.update(self.serialize_attr_value(attr_value))
+                this_hash.update(self.hash_shape_dtype(attr_value))
+                this_hash.update(attr_key.encode())
+                this_hash.update(self.serialize_attr_value(attr_value))
 
             if isinstance(obj, h5py.Dataset):
                 _ = self.hash_dataset(obj)
             elif isinstance(obj, h5py.SoftLink):
-                self.hashed.update(obj.path.encode())
+                this_hash.update(obj.path.encode())
             elif isinstance(obj, h5py.Group):
                 for k, v in obj.items():
-                    self.hashed.update(k.encode())
-                    self.hashed.update(self.serialize_attr_value(v))
+                    this_hash.update(k.encode())
+                    obj_value = self.serialize_attr_value(v)
+                    this_hash.update(obj_value)
+                    self.add_to_cache(
+                        f"{name}/k", v, md5(obj_value).hexdigest()
+                    )
             else:
                 raise TypeError(
                     f"Unknown object type: {type(obj)}\n"
                     + "Please report this an issue on GitHub."
                 )
+
+            this_digest = this_hash.hexdigest()
+            self.hashed.update(this_digest.encode())
+
+            self.add_to_cache(name, obj, this_digest)
 
         return self.hashed.hexdigest()

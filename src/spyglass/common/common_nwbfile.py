@@ -3,6 +3,7 @@ import random
 import stat
 import string
 from pathlib import Path
+from typing import Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -175,7 +176,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     # See #630, #664. Excessive key length.
 
     def create(
-        self, nwb_file_name: str, recompute_file_name: str = None
+        self,
+        nwb_file_name: str,
+        recompute_file_name: str = None,
+        alternate_dir: Union[str, Path] = None,
     ) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
@@ -188,6 +192,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of an NWB file to be copied.
         recompute_file_name : str, optional
             The name of the file to be regenerated. Defaults to None.
+        alternate_dir : Union[str, Path], Optional
+            An alternate directory to store the file. Defaults to analysis_dir.
 
         Returns
         -------
@@ -225,6 +231,12 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
                 analysis_file_name, from_schema=bool(recompute_file_name)
             )
+
+            if alternate_dir:  # override the default analysis_dir for recompute
+                relative = Path(analysis_file_abs_path).relative_to(
+                    analysis_dir
+                )
+                analysis_file_abs_path = Path(alternate_dir) / relative
 
             # export the new NWB file
             parent_path = Path(analysis_file_abs_path).parent
@@ -296,6 +308,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the new NWB file.
         """
         nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
+
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
         ) as io:

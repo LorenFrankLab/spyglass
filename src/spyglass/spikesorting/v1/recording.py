@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
+import hdmf
 import numpy as np
 import probeinterface as pi
 import pynwb
@@ -21,12 +22,12 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_nwbfile import schema as nwb_schema
-from spyglass.settings import test_mode
+from spyglass.settings import temp_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -174,6 +175,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the processed recording in NWB file
     electrodes_id='': varchar(40) # Object ID for the processed electrodes
     file_hash='': varchar(32) # Hash of the NWB file
+    dependencies=null: blob # dict of dependencies (pynwb, hdmf, spikeinterface)
     """
 
     def make(self, key):
@@ -207,6 +209,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             skip_duplicates=True,  # for recompute
         )
         AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
+
         self.insert1(key)
 
     @classmethod
@@ -214,7 +217,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         cls,
         key: dict = None,
         recompute_file_name: str = None,
-        force: bool = False,
+        save_to: Union[str, Path] = None,
     ):
         """Preprocess recording and write to NWB file.
 
@@ -230,35 +233,43 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             primary key of SpikeSortingRecordingSelection table
         recompute_file_name : str, Optional
             If specified, recompute this file. Use as resulting file name.
-            If none, generate a new file name.
+            If none, generate a new file name. Used for recomputation after
+            typical deletion.
+        save_to : Union[str,Path], Optional
+            Default None, save to analysis directory. If provided, save to
+            specified path. Used for recomputation prior to deletion.
         """
-        file_hash = None
         if not key and not recompute_file_name:
             raise ValueError(
                 "Either key or recompute_file_name must be specified."
             )
-        elif recompute := bool(recompute_file_name and not key):
-            file_path = AnalysisNwbfile.get_abs_path(
-                recompute_file_name, from_schema=True
-            )
-            if Path(file_path).exists():
+
+        file_hash = None
+        recompute = recompute_file_name and not key and not save_to
+        file_path = AnalysisNwbfile.get_abs_path(
+            recompute_file_name, from_schema=True
+        )
+        if recompute:
+            if Path(file_path).exists():  # No need to recompute
                 return
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
+            # Use deleted file's ids and hash for recompute
             key, recompute_object_id, recompute_electrodes_id, file_hash = (
                 query.fetch1("KEY", "object_id", "electrodes_id", "file_hash")
             )
-        elif force:
-            # print("force")
+        elif save_to:  # recompute prior to deletion
             elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-            analysis_path = (
-                Path("/stelmo/nwb/analysis")
-                / key["analysis_file_name"].split("_")[0]
-                / key["analysis_file_name"]
-            )
-            if not analysis_path.exists():
+            if not Path(file_path).exists():
                 raise FileNotFoundError(f"File {analysis_path} not found.")
-            with H5File(analysis_path, "r") as f:
+
+            # ensure partial objects are present in existing file
+            with H5File(file_path, "r") as f:
+                elect_parts = elect_attr.split("/")
+                for i in range(len(elect_parts)):
+                    mid_path = "/".join(elect_parts[: i + 1])
+                    if mid_path not in f.keys():
+                        raise KeyError(f"{mid_path} MISSING {analysis_path}")
                 elect_id = f[elect_attr].attrs["object_id"]
             obj_id = (cls & key).fetch1("object_id")
             recompute_object_id, recompute_electrodes_id = obj_id, elect_id
@@ -273,13 +284,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 recompute_file_name=recompute_file_name,
                 recompute_object_id=recompute_object_id,
                 recompute_electrodes_id=recompute_electrodes_id,
+                save_to=save_to,
             )
         )
 
+        # TODO: uncomment after review. Commented to avoid impacting database
         # if recompute:
-        #     pass
         #     # AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
-        # else:
         file_hash = AnalysisNwbfile().get_hash(
             recording_nwb_file_name, from_schema=True  # REVERT TO FALSE?
         )
@@ -289,6 +300,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             object_id=recording_object_id,
             electrodes_id=electrodes_id,
             file_hash=file_hash,
+            dependencies=dict(
+                pynwb=pynwb.__version__,
+                hdmf=hdmf.__version__,
+                spikeinterface=si.__version__,
+            ),
         )
 
     @classmethod
@@ -411,27 +427,21 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
         all_channel_ids = np.unique(np.append(channel_ids, ref_channel_id))
 
+        # Electrode's fk to probe is nullable, so we need to check if present
+        query = Electrode * Probe & {"nwb_file_name": nwb_file_name}
+        if len(query) == 0:
+            raise ValueError(f"No probe info found for {nwb_file_name}.")
+
         probe_type_by_channel = []
         electrode_group_by_channel = []
         for channel_id in channel_ids:
-            probe_type_by_channel.append(
-                (
-                    Electrode * Probe
-                    & {
-                        "nwb_file_name": nwb_file_name,
-                        "electrode_id": channel_id,
-                    }
-                ).fetch1("probe_type")
-            )
+            # TODO: limit to one unique fetch. use set
+            c_query = query & {"electrode_id": channel_id}
+            probe_type_by_channel.append(c_query.fetch1("probe_type"))
             electrode_group_by_channel.append(
-                (
-                    Electrode
-                    & {
-                        "nwb_file_name": nwb_file_name,
-                        "electrode_id": channel_id,
-                    }
-                ).fetch1("electrode_group_name")
+                c_query.fetch1("electrode_group_name")
             )
+
         probe_type = np.unique(probe_type_by_channel)
         filter_params = (
             SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
@@ -558,6 +568,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
             self.update1(key)
 
+    def recompute(self, key: dict):
+        """Recompute the processed recording.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecording table
+        """
+        raise NotImplementedError("Recompute not implemented.")
+
 
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
@@ -620,6 +640,7 @@ def _write_recording_to_nwb(
     recompute_file_name: Optional[str] = None,
     recompute_object_id: Optional[str] = None,
     recompute_electrodes_id: Optional[str] = None,
+    save_to: Union[str, Path] = None,
 ):
     """Write a recording in NWB format
 
@@ -637,6 +658,9 @@ def _write_recording_to_nwb(
     recompute_electrodes_id : str, optional
         object ID for recomputed electrodes sub-object,
         acquisition/ProcessedElectricalSeries/electrodes.
+    save_to : Union[str, Path], optional
+        Default None, save to analysis directory. If provided, save to specified
+        path. For use in recompute prior to deletion.
 
     Returns
     -------
@@ -662,11 +686,17 @@ def _write_recording_to_nwb(
     analysis_nwb_file = AnalysisNwbfile().create(
         nwb_file_name=nwb_file_name,
         recompute_file_name=recompute_file_name,
+        alternate_dir=save_to,
     )
     analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
         analysis_nwb_file,
         from_schema=recompute,
     )
+
+    abs_obj = Path(analysis_nwb_file_abs_path)
+    if save_to and abs_obj.is_relative_to(analysis_dir):
+        relative = abs_obj.relative_to(analysis_dir)
+        analysis_nwb_file_abs_path = Path(save_to) / relative
 
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
