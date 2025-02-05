@@ -461,12 +461,12 @@ class Probe(SpyglassMixin, dj.Manual):
             for electrode in elect_dict.values():
                 cls.Electrode.insert1(electrode, skip_duplicates=True)
 
-        if all_probes_types:
-            logger.info(f"Inserted probes {all_probes_types}")
+        if all_probes_descriptions:
+            logger.info(f"Inserted probes {all_probes_descriptions}")
         else:
             logger.warning("No conforming probe metadata found.")
 
-        return all_probes_types
+        return all_probes_descriptions
 
     @classmethod
     def get_all_probe_names(cls, nwbf, config):
