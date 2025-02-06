@@ -297,17 +297,24 @@ class Raw(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         raw_interval_name = "raw data valid times"
 
-        # get the acquisition object
-        try:
-            # TODO this assumes there is a single item in NWBFile.acquisition
-            rawdata = nwbf.get_acquisition()
-            assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
-        except (ValueError, AssertionError):
+        # get the ElectricalSeries acquisition object
+        eseries_aquisitions = []
+        for obj_name, obj in nwbf.acquisition.items():
+            if isinstance(obj, pynwb.ecephys.ElectricalSeries):
+                eseries_aquisitions.append(obj)
+        if len(eseries_aquisitions) == 0:
             warnings.warn(
                 f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
                 + f"Skipping entry in {self.full_table_name}"
             )
             return
+        elif len(eseries_aquisitions) > 1:
+            warnings.warn(
+                f"Multiple ElectricalSeries objects found in: {nwb_file_abspath}\n\t"
+                + f"Inserting only first entry in {self.full_table_name}\n\t"
+                + "See issue #396 for more details."
+            )
+        rawdata = eseries_aquisitions[0]
 
         if rawdata.rate is not None:
             key["sampling_rate"] = rawdata.rate
