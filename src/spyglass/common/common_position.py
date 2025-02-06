@@ -511,7 +511,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
         return df
 
-    def fetch_pose_datframe(self):
+    def fetch_pose_dataframe(self):
         raise NotImplementedError("No Pose data available for this table")
 
     def fetch_video_path(self, key=dict()):
