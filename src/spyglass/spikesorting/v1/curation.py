@@ -184,21 +184,21 @@ class CurationV1(SpyglassMixin, dj.Manual):
         return recording
 
     @classmethod
-    def get_sorting(cls, key: dict) -> si.BaseSorting:
+    def get_sorting(cls, key: dict, as_dataframe=False) -> si.BaseSorting:
         """Get sorting in the analysis NWB file as spikeinterface BaseSorting
 
         Parameters
         ----------
         key : dict
             primary key of CurationV1 table
+        as_dataframe : bool, optional
+            whether to return the sorting as a pandas DataFrame, by default False
 
         Returns
         -------
         sorting : si.BaseSorting
 
         """
-        recording = cls.get_recording(key)
-        sampling_frequency = recording.get_sampling_frequency()
         analysis_file_name = (CurationV1 & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
@@ -208,6 +208,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
+
+        if as_dataframe:
+            return units
+
+        recording = cls.get_recording(key)
+        sampling_frequency = recording.get_sampling_frequency()
+
         units_dict_list = [
             {
                 unit_id: np.searchsorted(recording.get_times(), spike_times)
@@ -254,15 +261,15 @@ class CurationV1(SpyglassMixin, dj.Manual):
         ) as io:
             nwbfile = io.read()
             nwb_sorting = nwbfile.objects[curation_key["object_id"]]
-            merge_groups = nwb_sorting["merge_groups"][:]
+            merge_groups = nwb_sorting.get("merge_groups")
 
-        if merge_groups:
-            units_to_merge = _merge_dict_to_list(merge_groups)
+        if merge_groups:  # bumped slice down to here for case w/o merge_groups
+            units_to_merge = _merge_dict_to_list(merge_groups[:])
             return sc.MergeUnitsSorting(
                 parent_sorting=si_sorting, units_to_merge=units_to_merge
             )
-        else:
-            return si_sorting
+
+        return si_sorting
 
     @classmethod
     def get_sort_group_info(cls, key: dict) -> dj.Table:
