@@ -400,7 +400,6 @@ class Probe(SpyglassMixin, dj.Manual):
                     shank_dict,
                     elect_dict,
                 )
-            # DONE
             elif probe_id in config_probes:
                 cls._read_config_probe_data(
                     config,
