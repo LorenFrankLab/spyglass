@@ -24,8 +24,8 @@ from spyglass.spikesorting import SpikeSorting
 
 def run_table_cleanups():
     """Run respective table cleanups"""
-    Nwbfile().cleanup()  # cleanup nwbfile 'raw' externals
-    AnalysisNwbfile().cleanup()  # cleanup nwbfile 'analysis' externals
+    Nwbfile().cleanup()  # cleanup 'raw' externals
+    AnalysisNwbfile().cleanup()  # delete orphans, cleanup 'analysis' externals
     SpikeSorting().cleanup()  # remove unreferenced sorting_dir files
     DecodingOutput().cleanup()  # remove `.nc` and `.pkl` files
 
