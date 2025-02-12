@@ -13,6 +13,7 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population of `DLCPoseEstimation` #1208
+    - Enable import of existing pose data to `ImportedPose` in position pipeline #1225
 
 ## [0.5.4] (December 20, 2024)
 
