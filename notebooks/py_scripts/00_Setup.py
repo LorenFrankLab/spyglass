@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.15.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -301,7 +301,7 @@
 #
 # For persistent databases with backups, administrators should review our
 # documentation on
-# [database management](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Database).
+# [database management](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Management).
 #
 
 # ### Running your own database with Docker
