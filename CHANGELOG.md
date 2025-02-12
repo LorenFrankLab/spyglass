@@ -6,6 +6,7 @@
 
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
+- Add common method `get_position_interval_epoch` #1056
 
 ### Pipelines
 
@@ -13,6 +14,10 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population of `DLCPoseEstimation` #1208
+
+- Behavior
+    - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+
 
 ## [0.5.4] (December 20, 2024)
 
