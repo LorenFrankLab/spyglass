@@ -3,6 +3,7 @@ from datajoint.utils import to_camel_case
 from pandas import DataFrame
 
 from spyglass.common.common_position import IntervalPositionInfo as CommonPos
+from spyglass.position.v1.imported_pose import ImportedPose
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
 from spyglass.position.v1.position_trodes_position import TrodesPosV1
 from spyglass.utils import SpyglassMixin, _Merge
@@ -13,6 +14,7 @@ source_class_dict = {
     "IntervalPositionInfo": CommonPos,
     "DLCPosV1": DLCPosV1,
     "TrodesPosV1": TrodesPosV1,
+    "ImportedPose": ImportedPose,
 }
 
 
@@ -61,6 +63,17 @@ class PositionOutput(_Merge, SpyglassMixin):
         -> PositionOutput
         ---
         -> CommonPos
+        """
+
+    class ImportedPose(SpyglassMixin, dj.Part):
+        """
+        Table to pass-through upstream Pose information from NWB file
+        """
+
+        definition = """
+        -> PositionOutput
+        ---
+        -> ImportedPose
         """
 
     def fetch1_dataframe(self) -> DataFrame:
