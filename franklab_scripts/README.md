@@ -29,9 +29,8 @@ regularly as cron jobs.
 3. Set up a cron job to run `run_jobs.sh` at the desired interval by running
     `crontab -e` and adding the script.
 
-In the following example, the script is set to run every Monday at 4:00 AM,
-logging output to `/var/log/script1.log`.
+In the following example, the script is set to run every Monday at 4:00 AM.
 
 ```text
-0 4 * * 1 /path/to/run_jobs.sh >> /var/log/spyglass_jobs.log 2>&1
+0 4 * * 1 /path/to/run_jobs.sh
 ```
