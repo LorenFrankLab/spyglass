@@ -1,6 +1,5 @@
 # Change Log
 
-
 ## [0.5.5] (Unreleased)
 
 ### Infrastructure
@@ -10,6 +9,8 @@
 
 ### Pipelines
 
+- Common
+    - Set `probe_id` as `probe_description` when inserting from nwb file #1220
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population of `DLCPoseEstimation` #1208
 
