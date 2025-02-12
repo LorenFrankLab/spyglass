@@ -116,6 +116,7 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
     declare_all_merge_tables()
@@ -135,6 +136,7 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            ImportedPose,  # Depends on Session
             # NwbfileKachery, # Not used by default
             # SensorData, # Not used by default. Generates large files
         ],
