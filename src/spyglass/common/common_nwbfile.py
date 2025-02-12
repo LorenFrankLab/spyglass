@@ -679,7 +679,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
     @staticmethod
-    def cleanup(delete_files=False):
+    def cleanup_external(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         Does not delete the files themselves unless delete_files=True is
@@ -693,14 +693,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         schema.external["analysis"].delete(delete_external_files=delete_files)
 
     @staticmethod
-    def nightly_cleanup():
+    def cleanup():
         """Clean up orphaned AnalysisNwbfile entries and external files."""
         child_tables = get_child_tables(AnalysisNwbfile)
         (AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
-        AnalysisNwbfile.cleanup(True)
+        AnalysisNwbfile.cleanup_external(delete_files=True)
 
     def log(self, *args, **kwargs):
         """Null log method. Revert to _disabled_log to turn back on."""
