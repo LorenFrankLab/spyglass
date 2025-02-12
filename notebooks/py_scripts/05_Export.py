@@ -252,9 +252,9 @@ Export().populate_paper(**paper_key)
 
 # ### Dandiset Upload
 
-# The first step you will need to do is to [create a Dandi account](https://www.dandiarchive.org/handbook/16_account/).
+# The first step you will need to do is to [create a Dandi account](https://docs.dandiarchive.org/16_account/).
 # With this account you can then [register a new dandiset](https://dandiarchive.org/dandiset/create) by providing a name and basic metadata.
-# Dandi's instructions for these steps are available [here](https://www.dandiarchive.org/handbook/13_upload/).
+# Dandi's instructions for these steps are available [here](https://docs.dandiarchive.org/13_upload/).
 #
 # The key information you will need from your registration is the `dandiset ID` and your account `api_key`, both of which are available from your registered account.
 #
