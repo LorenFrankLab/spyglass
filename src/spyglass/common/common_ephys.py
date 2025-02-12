@@ -335,7 +335,7 @@ class Raw(SpyglassMixin, dj.Imported):
                 gap_proportion=1.75,
                 min_valid_len=0,
             )
-        IntervalList().insert1(interval_dict, skip_duplicates=True)
+        IntervalList().insert1(interval_dict, replace=True)
 
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id
