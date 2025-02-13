@@ -6,9 +6,9 @@
 # 3. Set up the cron job (See README.md)
 # Note that the log file will be truncated to the last 1000 lines.
 
-SPYGLASS_CONDA_ENV=spy
-SPYGLASS_REPO_PATH=/home/cb/wrk/spyglass/
-SPYGLASS_LOG=/home/cb/wrk/spyglass/jobs.log
+SPYGLASS_CONDA_ENV=spyglass
+SPYGLASS_REPO_PATH=/home/franklab/spyglass
+SPYGLASS_LOG=/home/franklab/spyglass/spyglass.log
 
 exec >> $SPYGLASS_LOG 2>&1
 

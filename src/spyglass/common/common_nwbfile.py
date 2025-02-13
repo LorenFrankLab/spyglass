@@ -1,6 +1,5 @@
 import os
 import random
-import stat
 import string
 from pathlib import Path
 from time import time
@@ -174,7 +173,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     _creation_times = {}
 
-    def create(self, nwb_file_name: str) -> str:
+    def create(self, nwb_file_name: str, restrict_permission=False) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
         Note that this does NOT add the file to the schema; that needs to be
@@ -184,6 +183,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         nwb_file_name : str
             The name of an NWB file to be copied.
+        restrict_permissions : bool, optional
+            Default False, no permission restriction (666). If True, restrict
+            write permissions to owner only.
 
         Returns
         -------
@@ -231,8 +233,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         with h5py.File(analysis_file_abs_path, "a") as f:
             f.attrs["object_id"] = str(uuid4())
 
-        # change the permissions to only allow owner to write
-        permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+        # permissions: 0o644 (only owner write), 0o666 (open)
+        permissions = 0o644 if restrict_permission else 0o666
         os.chmod(analysis_file_abs_path, permissions)
 
         # self._creation_times[analysis_file_name] = creation_time
