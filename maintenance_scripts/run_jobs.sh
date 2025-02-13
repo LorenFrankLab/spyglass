@@ -37,7 +37,7 @@ conda_run python -c "import datajoint as dj; dj.conn()" > /dev/null || \
     { echo "Error: Could not connect to the database"; exit 1; }
 
 # Run cleanup script
-conda_run python franklab_scripts/cleanup.py
+conda_run python maintenance_scripts/cleanup.py
 
 echo "SPYGLASS CRON JOB END"
 

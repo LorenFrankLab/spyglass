@@ -240,7 +240,7 @@ removing all `IntervalList` orphan entries with each delete call.
 
 Similar orphan cleanups for `Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`, and
 `DecodingOutput` are not as critical and can be run less frequently.
-[this script](https://github.com/LorenFrankLab/spyglass/blob/master/franklab_scripts/run_jobs.sh)
+[this script](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/run_jobs.sh)
 in our cron jobs. See
-[this README](https://github.com/LorenFrankLab/spyglass/blob/master/franklab_scripts/README.md)
+[this README](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/README.md)
 for additional information on how to set up cron jobs.
