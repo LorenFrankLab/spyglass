@@ -12,7 +12,7 @@ from itertools import chain as iter_chain
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 from datajoint import FreeTable, Table
-from datajoint.condition import make_condition
+from datajoint.condition import AndList, make_condition
 from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
@@ -261,6 +261,7 @@ class AbstractGraph(ABC):
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
 
+        # self._log_truncate(f"Set restr: {self._camel(table)}: {restriction}")
         self._set_node(table, "restr", restriction)
 
     def _get_ft(self, table, with_restr=False, warn=True):
@@ -298,7 +299,6 @@ class AbstractGraph(ABC):
         restr: str,
         direction: Direction = None,
         attr_map: dict = None,
-        aliased: bool = None,
         **kwargs,
     ):
         """Given two tables and a restriction, return restriction for table2.
@@ -356,7 +356,7 @@ class AbstractGraph(ABC):
                 else "FULL" if len(ft2) == len(ret) else "partial"
             )
             path = f"{self._camel(table1)} -> {self._camel(table2)}"
-            self._log_truncate(f"Bridge Link: {path}: result {result}")
+            self._log_truncate(f"Bridge Link: {result} {path}: {ret}")
 
         return ret
 
@@ -410,7 +410,7 @@ class AbstractGraph(ABC):
     def cascade1(
         self,
         table: str,
-        restriction: str,
+        restriction: str = None,
         direction: Direction = Direction.UP,
         replace=False,
         count=0,
@@ -423,7 +423,7 @@ class AbstractGraph(ABC):
         table : str
             Table name
         restriction : str
-            Restriction to apply
+            Restriction to apply, optional. Default fetch existing restriction.
         direction : Direction, optional
             Direction to cascade. Default 'up'
         replace : bool, optional
@@ -431,8 +431,11 @@ class AbstractGraph(ABC):
         """
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
+        if restriction is None:
+            restriction = self._get_restr(table)
+        else:
+            self._set_restr(table, restriction, replace=replace)
 
-        self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
         next_tables, next_func = self._get_next_tables(table, direction)
@@ -521,6 +524,25 @@ class AbstractGraph(ABC):
             for table in self._topo_sort(nodes, subgraph=True, reverse=False)
         ]
 
+    def print_restr(self):
+        """Print restrictions for all visited nodes."""
+        self.cascade(warn=False)
+        for table in self._topo_sort(self.visited):
+            logger.info(f"{self._camel(table)}: {self._get_restr(table)}")
+
+    def _get_key(
+        self, table: str, attr_map: dict = None, as_dict: bool = True
+    ) -> dict:
+        if not self._get_restr(table):
+            raise ValueError(f"Table has no restriction: {table}")
+        attr_map = attr_map or {}
+        return (
+            self._get_ft(table, with_restr=True)
+            .proj(**attr_map)
+            .proj()
+            .fetch(as_dict=as_dict)
+        )
+
     @property
     def restr_ft(self):
         """Get non-empty restricted FreeTables from all visited nodes."""
@@ -565,6 +587,17 @@ class AbstractGraph(ABC):
             for table in self.visited
             if self._get_restr(table)
         ]
+
+    def non_alias(self, original_list: list = None) -> List[str]:
+        """Return list of non-alias nodes.
+
+        Parameters
+        ----------
+        original_list : list, optional
+            List of table names. Default None, use visited nodes.
+        """
+        original_list = original_list or self.visited
+        return [n for n in original_list if not n.isnumeric()]
 
 
 class RestrGraph(AbstractGraph):
@@ -679,7 +712,7 @@ class RestrGraph(AbstractGraph):
         Accepts ...
         - [str]: table names, use default_restriction
         - [{'table_name': str, 'restriction': str}]: used for export
-        - [{table_name: restriction}]: userd for distance restriction
+        - [{table_name: restriction}]: used for distance restriction
         """
         if not leaves:
             return []
@@ -690,24 +723,24 @@ class RestrGraph(AbstractGraph):
                 {"table_name": leaf, "restriction": default_restriction}
                 for leaf in leaves
             ]
-        hashable = True
         if all(isinstance(leaf, dict) for leaf in leaves):
             new_leaves = []
             for leaf in leaves:
                 if "table_name" in leaf and "restriction" in leaf:
                     new_leaves.append(leaf)
-                    continue
-                for table, restr in leaf.items():
-                    if not isinstance(restr, (str, dict)):
-                        hashable = False  # likely a dj.AndList
-                    new_leaves.append(
-                        {"table_name": table, "restriction": restr}
-                    )
-            if not hashable:
-                return new_leaves
+                else:
+                    for table, restr in leaf.items():
+                        new_leaves.append(
+                            {"table_name": table, "restriction": restr}
+                        )
             leaves = new_leaves
 
-        return unique_dicts(leaves)
+        hashable = not any(
+            isinstance(leaf.get("restriction"), (dict, AndList, set))
+            for leaf in leaves
+        )
+
+        return unique_dicts(leaves) if hashable else leaves
 
     def add_leaves(
         self,
@@ -1168,10 +1201,13 @@ class TableChain(RestrGraph):
         return path
 
     def cascade(
-        self, restriction: str = None, direction: Direction = None, **kwargs
+        self,
+        restriction: str = None,
+        direction: Direction = None,
+        null_on_fail: bool = True,
+        **kwargs,
     ):
-        """Cascade restriction up or down the chain."""
-        if not self.has_link:
+        if not self.has_link or self.cascaded:
             return
 
         _ = self.path
@@ -1194,16 +1230,217 @@ class TableChain(RestrGraph):
         # Cascade will stop if any restriction is empty, so set rest to None
         # This would cause issues if we want a table partway through the chain
         # but that's not a typical use case, were the start and end are desired
-        safe_tbls = [
-            t for t in self.path if not t.isnumeric() and not self._is_out(t)
-        ]
-        if any(self._get_restr(t) is None for t in safe_tbls):
-            for table in safe_tbls:
-                if table is not start:
+        if null_on_fail:
+            non_numeric = [
+                t
+                for t in self.path
+                if not t.isnumeric() and t != start and not self._is_out(t)
+            ]
+            if any(self._get_restr(t) is None for t in non_numeric):
+                for table in non_numeric:
                     self._set_restr(table, False, replace=True)
+
+        self.cascaded = True
 
         return self._get_ft(end, with_restr=True)
 
     def restrict_by(self, *args, **kwargs) -> None:
         """Cascade passthrough."""
         return self.cascade(*args, **kwargs)
+
+
+import importlib
+import inspect
+from itertools import product as iter_product
+from pathlib import Path
+
+import datajoint as dj
+
+
+class ImportedGraph(TableChain):
+    def __init__(
+        self,
+        target: TableChain = None,
+        class_map: dict = None,
+        new_restr: str = None,
+        banned_tables: list = None,
+        *args,
+        **kwargs,
+    ):
+        banned_tables = banned_tables or []
+        banned_tables.extend(list(getattr(target, "no_visit", [])))
+
+        super().__init__(banned_tables=banned_tables, *args, **kwargs)
+        self._class_map = class_map
+        self.target = target
+
+        if new_restr:
+            self.cascade(
+                direction=Direction.DOWN,
+                restriction=new_restr,
+                null_on_fail=False,
+            )
+
+    def merged_list_of_dicts(self, *args):
+        # TODO: accept list from multi-table fetches
+        merged = []
+        # merged = [{**a, **b} for a, b in iter_product(list1, list2)]
+        for combo in iter_product(*args):
+            new = dict()
+            for this_dict in combo:
+                new.update(this_dict)
+            merged.append(new)
+        return merged
+
+    def cascade1_target(self, next_tbl: str = None):
+        target = self.target
+        if (
+            not self.target  # Missing target
+            or not self.has_link  # Cannot find path
+            or not target._get_restr(self.child)  # Target not at end of chain
+        ):
+            self._log_truncate("No target or no link")
+            return
+
+        # Find next table to cascade to
+        next_tbl = next_tbl or self.find_cascade_stop()
+        next_class = self._get_class(next_tbl, with_restr=False)
+
+        # Find that table's parents
+        all_parents = set(self._get_ft(next_tbl).parents())
+        filled_parents = all_parents & self.visited  # Already visited
+        next_parents = all_parents - self.visited  # Need to check target
+
+        self._log_truncate(f"Next   : {next_tbl}, {next_parents}")
+
+        # Parent keys.
+        # Use all combinations, assume want all given self.parent restriction
+        # List[List[Dict[str, str]]] N_parents[N_keys] # Parent keys
+        parent_keys = []
+        for parent in filled_parents:
+            attr_map = self._get_edge(parent, next_tbl)[1]["attr_map"]
+            parent_keys.append(self._get_key(parent, attr_map=attr_map))
+        for parent in next_parents:
+            attr_map = target._get_edge(parent, next_tbl)[1]["attr_map"]
+            parent_keys.append(target._get_key(parent, attr_map=attr_map))
+        next_inserts = self.merged_list_of_dicts(*parent_keys)
+
+        # Populate or insert next table
+        if isinstance(next_class, (dj.Imported, dj.Computed)):
+            self._log_truncate(f"AutoPop: {next_tbl}")
+            next_class.populate(next_inserts)
+        else:  # Insert directly
+            self._log_truncate(f"Insert : {next_tbl}")
+            next_class.insert(next_inserts, skip_duplicates=True)
+
+        # Cascade to next table
+        self.cascade1(next(iter(filled_parents)), direction=Direction.DOWN)
+
+        # TODO: gets hung up on selection table before a merge
+
+    def cascade_target(self, limit=20):
+        while limit > 0 and self.find_cascade_stop():
+            self.cascade1_target()
+            limit -= 1
+
+    def find_cascade_stop(self):
+        """Find the first table in the chain without a restriction."""
+        for table in self.non_alias(self.path):
+            if self._get_restr(table) is False:
+                return table
+        return None
+
+    # -------------------- Map Package for Importing Class --------------------
+    # This is needed to run populate on tables directly.
+    # Dict[Class, Dict[Schema, Module]
+    # TODO: use datajoint regex to only import Imported/Computed tables
+
+    @cached_property
+    def class_map(self):
+        if not self._class_map:
+            self._class_map = self._map_package()
+        return self._class_map
+
+    def _set_class(self, table_name: str, class_obj: Any) -> None:
+        """Set class object for table name."""
+        self._set_node(table_name, "class", class_obj)
+
+    def _get_class(self, table_name: str, with_restr=True) -> Any:
+        """Get class object for table name."""
+        class_obj = self._get_node(table_name).get("class")
+        if not class_obj:
+            class_obj = self._import_class(table_name)
+        if isinstance(class_obj, dj.user_tables.TableMeta):
+            class_obj = class_obj()
+        if not with_restr:
+            return class_obj
+        return class_obj & self._get_restr(table_name)
+
+    def _map_package(self) -> dict:
+        package_name = "spyglass"
+        package = importlib.import_module("spyglass")
+        package_path = Path(package.__file__).parent
+
+        class_map = {}
+
+        for py_file in package_path.rglob("*.py"):
+            if py_file.stem.startswith("_"):
+                continue
+
+            # Convert file path to module path
+            relative_path = py_file.relative_to(package_path)
+            module_name = (
+                f"{package_name}.{relative_path.with_suffix('')}".replace(
+                    "/", "."
+                ).replace("\\", ".")
+            )
+
+            try:
+                module = importlib.import_module(module_name)
+
+                # Check if the module has a `schema` object
+                schema_obj = getattr(module, "schema", None)
+                if not schema_obj:
+                    self._log_truncate(f"Skipping: {module_name}")
+                    continue
+                schema_name = getattr(schema_obj, "database")
+                entry = {schema_name: module_name}
+
+                # Map class names to schema and module names
+                self._log_truncate(f"Mapping : {module_name}")
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    if "__" in name or "Mixin" in name:
+                        continue
+                    if "position_merge" in module_name:
+                        self._log_truncate(f"Add merge: {name}")
+                    if class_map.get(name):
+                        class_map[name].update(entry)
+                    else:
+                        class_map[name] = entry
+
+            except ImportError:
+                continue
+
+        return dict(class_map)
+
+    def _decompose_name(self, name: str) -> Tuple[str, str, str]:
+        """Decompose table name into schema and table name."""
+        schema, table = self._ensure_names(name).strip("`").split(".")
+        part = None
+        if "__" in table and "`__" not in table:
+            table, part = table.split("__")
+        return schema, self._camel(table), self._camel(part)
+
+    def _import_class(self, table_name: str) -> Any:
+        schema_name, class_name, part_name = self._decompose_name(table_name)
+        class_map = self.class_map
+        module_name = class_map.get(class_name, {}).get(schema_name.strip("`"))
+
+        if not module_name:
+            raise ImportError(f"Class {class_name} not found in the package.")
+
+        module = importlib.import_module(module_name)
+        table_class = getattr(module, class_name)
+        if part_name:
+            table_class = getattr(table_class, part_name)
+        return table_class
