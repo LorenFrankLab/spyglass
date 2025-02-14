@@ -248,9 +248,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         """Placeholder to override mixin method"""
         raise NotImplementedError
 
-    def nightly_cleanup(self):
-        """Clean up spike sorting directories that are not in the SpikeSorting table.
-        This should be run after AnalysisNwbFile().nightly_cleanup()
+    def cleanup(self):
+        """Clean up spike sorting directories that are not in the table.
+
+        This should be run after AnalysisNwbFile().cleanup()
         """
         # get a list of the files in the spike sorting storage directory
         dir_names = next(os.walk(sorting_dir))[1]
