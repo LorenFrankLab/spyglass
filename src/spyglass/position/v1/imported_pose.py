@@ -13,8 +13,6 @@ from spyglass.utils.nwb_helper_fn import (
 
 schema = dj.schema("position_v1_imported_pose")
 
-from spyglass.common import Nwbfile
-
 
 @schema
 class ImportedPose(SpyglassMixin, dj.Manual):
@@ -42,6 +40,9 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         ---
         part_object_id: varchar(80)
         """
+
+    def make(self, key):
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def insert_from_nwbfile(self, nwb_file_name):
         file_path = Nwbfile().get_abs_path(nwb_file_name)

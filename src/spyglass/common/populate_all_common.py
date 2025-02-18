@@ -83,6 +83,8 @@ def single_transaction_make(
             if table.__name__ == "PositionSource":
                 # PositionSource only uses nwb_file_name - full calls redundant
                 key_source = dj.U("nwb_file_name") & key_source
+            if table.__name__ == "ImportedPose":
+                key_source = Nwbfile()
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
@@ -136,7 +138,6 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
-            ImportedPose,  # Depends on Session
             # NwbfileKachery, # Not used by default
             # SensorData, # Not used by default. Generates large files
         ],
@@ -145,6 +146,7 @@ def populate_all_common(
             PositionSource,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
+            ImportedPose,  # Depends on Session
         ],
         [
             RawPosition,  # Depends on PositionSource
