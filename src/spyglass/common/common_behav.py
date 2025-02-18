@@ -112,7 +112,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls._safe_context():
-            IntervalList.insert(intervals, skip_duplicates=skip_duplicates)
+            IntervalList().cautious_insert(intervals)
             cls.insert(sources, skip_duplicates=skip_duplicates)
             cls.SpatialSeries.insert(
                 spat_series, skip_duplicates=skip_duplicates
