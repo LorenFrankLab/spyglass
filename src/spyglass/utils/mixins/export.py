@@ -263,7 +263,6 @@ class ExportMixin:
             table_list.append(other)  # can other._log_fetch
         else:
             logger.warning(f"Cannot export log join for\n{other}")
-            __import__("pdb").set_trace()
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
@@ -294,7 +293,7 @@ class ExportMixin:
             else:
                 restr = kwargs.get("restriction")
                 if isinstance(restr, QueryExpression) and getattr(
-                    restr, "restriction"
+                    restr, "restriction"  # if table, try to get restriction
                 ):
                     restr = restr.restriction
                 self._log_fetch(restriction=restr)
@@ -332,7 +331,7 @@ class ExportMixin:
         log_export = "fetch_nwb" not in self._called_funcs()
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
-        else:
+        else:  # Only combine if both are restricting
             combined = restriction or self.restriction
         return self._run_with_log(
             super().restrict, restriction=combined, log_export=log_export

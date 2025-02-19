@@ -791,7 +791,13 @@ class RestrGraph(AbstractGraph):
         return schema.external
 
     def cascade_files(self):
-        """Set node attribute for analysis files."""
+        """Add file lists as to nodes in graph.
+
+        1. For any table fk'ing AnalysisNwbfile, add files to node.
+        2. For both raw and analysis files, add restrictions to externals tables
+            Uses dj_config['stores'] to determine resolve roots present in the
+            externals tables.
+        """
         analysis_pk = self.analysis_file_tbl.primary_key
         for ft in self.restr_ft:
             if not set(analysis_pk).issubset(ft.heading.names):
@@ -801,31 +807,34 @@ class RestrGraph(AbstractGraph):
 
         stores = dj_config["stores"]
 
+        def set_external(external, file_list=None):
+            """Set restriction on external table."""
+            if not file_list:
+                return
+            restr = (
+                f"filepath in {tuple(file_list)}"
+                if len(file_list) > 1
+                else f"filepath = '{file_list[0]}'"
+            )
+            self._set_restr(self.file_externals[external], restr)
+
+        analysis_abs_paths = self._get_ft(
+            self.analysis_file_tbl.full_table_name, with_restr=True
+        ).fetch("analysis_file_abs_path")
         analysis_paths = [
             str(Path(p).relative_to(stores["analysis"]["location"]))
-            for p in self._get_ft(
-                self.analysis_file_tbl.full_table_name, with_restr=True
-            ).fetch("analysis_file_abs_path")
+            for p in analysis_abs_paths
         ]
-        self._set_restr(
-            self.file_externals["analysis"],
-            f"filepath in {tuple(analysis_paths)}",
-        )
+        set_external("analysis", analysis_paths)
 
+        raw_abs_paths = self._get_ft(
+            "`common_nwbfile`.`nwbfile`", with_restr=True
+        ).fetch("nwb_file_abs_path")
         raw_paths = [
             str(Path(p).relative_to(stores["raw"]["location"]))
-            for p in self._get_ft(
-                "`common_nwbfile`.`nwbfile`", with_restr=True
-            ).fetch("nwb_file_abs_path")
+            for p in raw_abs_paths
         ]
-        if len(raw_paths) == 1:
-            self._set_restr(
-                self.file_externals["raw"], f"filepath = '{raw_paths[0]}'"
-            )
-        elif len(raw_paths) > 1:
-            self._set_restr(
-                self.file_externals["raw"], f"filepath in {tuple(raw_paths)}"
-            )
+        set_external("raw", raw_paths)
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:
