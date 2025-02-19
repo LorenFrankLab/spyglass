@@ -7,7 +7,8 @@ from inspect import stack as inspect_stack
 from os import environ
 from re import match as re_match
 
-from datajoint.condition import AndList, make_condition
+from datajoint.condition import AndList, Top, make_condition
+from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
@@ -262,6 +263,7 @@ class ExportMixin:
             table_list.append(other)  # can other._log_fetch
         else:
             logger.warning(f"Cannot export log join for\n{other}")
+            __import__("pdb").set_trace()
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
@@ -290,10 +292,19 @@ class ExportMixin:
             if getattr(method, "__name__", None) == "join":  # special case
                 self._run_join(**kwargs)
             else:
-                self._log_fetch(restriction=kwargs.get("restriction"))
+                restr = kwargs.get("restriction")
+                if isinstance(restr, QueryExpression) and getattr(
+                    restr, "restriction"
+                ):
+                    restr = restr.restriction
+                self._log_fetch(restriction=restr)
             logger.debug(f"Export: {self._called_funcs()}")
 
         return ret
+
+    def is_restr(self, restr) -> bool:
+        """Check if a restriction is actually restricting."""
+        return bool(restr) and restr != True and not isinstance(restr, Top)
 
     # -------------------------- Intercept DJ methods --------------------------
 
@@ -317,11 +328,14 @@ class ExportMixin:
         """Log restrict for export."""
         if not self.export_id:
             return super().restrict(restriction)
+
         log_export = "fetch_nwb" not in self._called_funcs()
+        if self.is_restr(restriction) and self.is_restr(self.restriction):
+            combined = AndList([restriction, self.restriction])
+        else:
+            combined = restriction or self.restriction
         return self._run_with_log(
-            super().restrict,
-            restriction=AndList([restriction, self.restriction]),
-            log_export=log_export,
+            super().restrict, restriction=combined, log_export=log_export
         )
 
     def join(self, other, log_export=True, *args, **kwargs):

@@ -7,6 +7,7 @@
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
 - Improve cron job documentation and script #1226
+- Update export process to include `~external` tables #XXXX
 
 ### Pipelines
 

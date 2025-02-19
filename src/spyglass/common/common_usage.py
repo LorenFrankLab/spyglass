@@ -228,8 +228,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             )
             restr_graph.visited.add(analysis_name)
 
-        restr_graph.visited.update({raw_name, analysis_name})
-
         return restr_graph
 
     def get_restr_graph(
@@ -255,9 +253,14 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
         restr_graph = RestrGraph(
-            seed_table=self, leaves=leaves, verbose=verbose, cascade=cascade
+            seed_table=self, leaves=leaves, verbose=verbose, cascade=False
         )
-        return self._add_externals_to_restr_graph(restr_graph, key)
+        restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
+
+        if cascade:
+            restr_graph.cascade()
+
+        return restr_graph
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.

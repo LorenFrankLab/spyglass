@@ -9,9 +9,11 @@ from enum import Enum
 from functools import cached_property
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 from datajoint import FreeTable, Table
+from datajoint import config as dj_config
 from datajoint.condition import make_condition
 from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
@@ -782,6 +784,12 @@ class RestrGraph(AbstractGraph):
 
         return AnalysisNwbfile()
 
+    @property
+    def file_externals(self):
+        from spyglass.common.common_nwbfile import schema
+
+        return schema.external
+
     def cascade_files(self):
         """Set node attribute for analysis files."""
         analysis_pk = self.analysis_file_tbl.primary_key
@@ -790,6 +798,34 @@ class RestrGraph(AbstractGraph):
                 continue
             files = list(ft.fetch(*analysis_pk))
             self._set_node(ft, "files", files)
+
+        stores = dj_config["stores"]
+
+        analysis_paths = [
+            str(Path(p).relative_to(stores["analysis"]["location"]))
+            for p in self._get_ft(
+                self.analysis_file_tbl.full_table_name, with_restr=True
+            ).fetch("analysis_file_abs_path")
+        ]
+        self._set_restr(
+            self.file_externals["analysis"],
+            f"filepath in {tuple(analysis_paths)}",
+        )
+
+        raw_paths = [
+            str(Path(p).relative_to(stores["raw"]["location"]))
+            for p in self._get_ft(
+                "`common_nwbfile`.`nwbfile`", with_restr=True
+            ).fetch("nwb_file_abs_path")
+        ]
+        if len(raw_paths) == 1:
+            self._set_restr(
+                self.file_externals["raw"], f"filepath = '{raw_paths[0]}'"
+            )
+        elif len(raw_paths) > 1:
+            self._set_restr(
+                self.file_externals["raw"], f"filepath in {tuple(raw_paths)}"
+            )
 
     @property
     def file_dict(self) -> Dict[str, List[str]]:

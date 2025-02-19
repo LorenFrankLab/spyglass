@@ -261,8 +261,8 @@ class Merge(ExportMixin, dj.Manual):
         datajoint.expression.Union
         """
 
-        parts = [
-            cls() * p  # join with master to include sec key (i.e., 'source')
+        parts = [  # join with master to include sec key (i.e., 'source')
+            cls().join(p, log_export=False)
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
