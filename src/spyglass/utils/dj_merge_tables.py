@@ -707,6 +707,7 @@ class Merge(ExportMixin, dj.Manual):
             self._source_class_dict = {
                 part_name: getattr(module, part_name)
                 for part_name in self.parts(camel_case=True)
+                if hasattr(module, part_name)
             }
         return self._source_class_dict
 
