@@ -325,7 +325,7 @@
 #   - Port mapping. Here, we map 3306 across the local machine and container.
 #
 #   ```bash
-#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0
+#   docker run --cap-add=sys_nice --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0
 #   ```
 #
 # - For data to persist after terminating the container,
@@ -333,7 +333,7 @@
 #
 #   ```bash
 #   docker volume create dj-vol
-#   docker run --name spyglass-db -v dj-vol:/var/lib/mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
+#   docker run --cap-add=sys_nice --name spyglass-db -v dj-vol:/var/lib/mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
 #   ```
 #
 # Docker credentials are as follows:

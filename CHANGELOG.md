@@ -8,6 +8,7 @@
 - Update URL for DANDI Docs #1210
 - Improve cron job documentation and script #1226
 - Only add merge parts to `source_class_dict` if present in codebase #1237
+- Edit docker security settings to quiet `mbind` warnings #1242
 
 ### Pipelines
 
