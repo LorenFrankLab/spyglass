@@ -16,6 +16,8 @@
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
+- Spikesorting
+    - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit filtering #1238
 
 ## [0.5.4] (December 20, 2024)
 
