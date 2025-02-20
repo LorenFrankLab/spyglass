@@ -576,6 +576,7 @@ class RestrGraph(AbstractGraph):
         leaves: List[Dict[str, str]] = None,
         destinations: List[str] = None,
         direction: Direction = "up",
+        include_files: bool = False,
         cascade: bool = False,
         verbose: bool = False,
         **kwargs,
@@ -600,6 +601,10 @@ class RestrGraph(AbstractGraph):
             ignore nodes not in the path(s) to the destination(s).
         direction : Direction, optional
             Direction to cascade. Default 'up'
+        include_files : bool, optional
+            Default False. If True, add 'files' list to nodes in graph, add
+            externals tables. For use in export, not database-state hashing, or
+            long-distance restrictions.
         cascade : bool, optional
             Whether to cascade restrictions up the graph on initialization.
             Default False
@@ -607,6 +612,7 @@ class RestrGraph(AbstractGraph):
             Whether to print verbose output. Default False
         """
         super().__init__(seed_table, verbose=verbose)
+        self.include_files = include_files
 
         self.add_leaves(leaves)
 
@@ -633,7 +639,8 @@ class RestrGraph(AbstractGraph):
         """Return hash of all visited nodes."""
         initial = hash_md5(b"")
         for table in self.all_ft:
-            for row in table.fetch(as_dict=True):
+            # for row in table.fetch(as_dict=True):
+            for row in table:
                 initial.update(key_hash(row).encode("utf-8"))
         return initial.hexdigest()
 
@@ -798,12 +805,21 @@ class RestrGraph(AbstractGraph):
             Uses dj_config['stores'] to determine resolve roots present in the
             externals tables.
         """
+        if not self.include_files:  # Skip if not needed
+            return  # if _hash_upstream, may cause 'missing node' error
+
         analysis_pk = self.analysis_file_tbl.primary_key
         for ft in self.restr_ft:
             if not set(analysis_pk).issubset(ft.heading.names):
                 continue
             files = list(ft.fetch(*analysis_pk))
             self._set_node(ft, "files", files)
+
+        raw_ext = self.file_externals["raw"].full_table_name
+        analysis_ext = self.file_externals["analysis"].full_table_name
+
+        if not {raw_ext, analysis_ext}.issubset(self.graph.nodes):
+            return  # Skip if externals not in graph
 
         stores = dj_config["stores"]
 
@@ -816,7 +832,8 @@ class RestrGraph(AbstractGraph):
                 if len(file_list) > 1
                 else f"filepath = '{file_list[0]}'"
             )
-            self._set_restr(self.file_externals[external], restr)
+            tbl = raw_ext if external == "raw" else analysis_ext
+            self._set_restr(tbl, restr)
 
         analysis_abs_paths = self._get_ft(
             self.analysis_file_tbl.full_table_name, with_restr=True
