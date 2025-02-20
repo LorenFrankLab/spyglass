@@ -189,8 +189,10 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             ]
 
             # filter the spike times based on the labels if present
-            if "label" in nwb_file[nwb_field_name]:
-                group_label_list = nwb_file[nwb_field_name]["label"].to_list()
+            for attr in ("curation_label", "label"):  # v1, v0. if both, use v0
+                group_labels = getattr(nwb_file[nwb_field_name], attr, None)
+            if group_labels is not None:
+                group_label_list = group_labels.to_list()
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels
                 )

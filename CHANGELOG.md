@@ -8,6 +8,7 @@
 - Update URL for DANDI Docs #1210
 - Improve cron job documentation and script #1226
 - Update export process to include `~external` tables #1239
+- Only add merge parts to `source_class_dict` if present in codebase #1237
 
 ### Pipelines
 
@@ -17,6 +18,8 @@
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
+- Spikesorting
+    - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit filtering #1238
 
 ## [0.5.4] (December 20, 2024)
 
