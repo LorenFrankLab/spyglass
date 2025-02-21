@@ -1,14 +1,52 @@
 #!/bin/bash
+# AUTHOR: Chris Brozdowski
+# DATE: 2025-02-20
+#
+# 1. Go to SPYGLASS_REPO_PATH and pull the latest changes from the master branch
+# 2. Test the SPYGLASS_CONDA_ENV conda environment
+# 3. Test the connection to the database
+# 4. Run the cleanup script
+#
+# This script is intended to be run as a cron job, weekly or more frequently.
+# It will store a log of its output in SPYGLASS_LOG.
+# If any of the operations fail, an email will be sent to SPYGLASS_EMAIL_DEST
 
-# SETUP:
-# 1. Create a conda environment with datajoint installed.
-# 2. Edit the variables below to match your setup.
-# 3. Set up the cron job (See README.md)
-# Note that the log file will be truncated to the last 1000 lines.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/.env" # load environment variables from this directory
 
-SPYGLASS_CONDA_ENV=spyglass
-SPYGLASS_REPO_PATH=/home/franklab/spyglass
-SPYGLASS_LOG=/home/franklab/spyglass/spyglass.log
+if [[ -z "${SPYGLASS_CONDA_ENV}" \
+  || -z "${SPYGLASS_REPO_PATH}" \
+  || -z "${SPYGLASS_LOG}" ]]; then
+  echo "Error: SPYGLASS_CONDA_ENV, SPYGLASS_REPO_PATH,
+        and SPYGLASS_LOG must be set in .env"
+  exit 1
+fi
+
+EMAIL_TEMPLATE=$(cat <<-EOF
+From: "Spyglass" <$SPYGLASS_EMAIL_SRC>
+To: $SPYGLASS_EMAIL_DEST
+Subject: cron fail - $(date "+%Y-%m-%d")
+
+%s
+EOF
+)
+
+on_fail() { # $1: error message. Echo message and send as email
+    echo "Error: $1"
+    if [ -z "$SPYGLASS_EMAIL_SRC" ]; then
+      return 1 # No email source, so don't send an email
+    fi
+    local error_msg="$1"
+    local content
+    content=$(printf "$EMAIL_TEMPLATE" "$error_msg")
+
+    curl -o /dev/null --ssl-reqd \
+      --url "smtps://smtp.gmail.com:465" \
+      --user "${SPYGLASS_EMAIL_SRC}:${SPYGLASS_EMAIL_PASS}" \
+      --mail-from "$SPYGLASS_EMAIL_SRC" \
+      --mail-rcpt "$SPYGLASS_EMAIL_DEST" \
+      -T <(echo "$content")
+}
 
 exec >> $SPYGLASS_LOG 2>&1
 
@@ -17,24 +55,27 @@ echo "SPYGLASS CRON JOB START: $(date +"%Y-%m-%d %H:%M:%S")"
 
 # Run from the root of the spyglass repository
 cd $SPYGLASS_REPO_PATH || \
-    { echo "Error: Could not change to the spyglass directory"; exit 1; }
+    { on_fail "Could not find repo path: $SPYGLASS_REPO_PATH"; exit 1; }
+
 
 # Update the spyglass repository
-git pull https://github.com/LorenFrankLab/spyglass.git master > /dev/null || \
-    { echo "Error: $PWD Could not update the spyglass repository"; exit 1; }
+git pull --quiet \
+  https://github.com/LorenFrankLab/spyglass.git master > /dev/null || \
+    { on_fail "Could not update the spyglass repo $PWD"; exit 1; }
 
 # Test conda environment
 if ! conda env list | grep -q $SPYGLASS_CONDA_ENV; then
-    echo "Error: Conda environment $SPYGLASS_CONDA_ENV not found"
-    exit 1
+  on_fail "Conda environment $SPYGLASS_CONDA_ENV not found"
+  exit 1
 fi
 
 # convenience function to run a command in the spyglass conda environment
 conda_run() { conda run --name $SPYGLASS_CONDA_ENV "$@"; }
 
 # Test connection to the database
-conda_run python -c "import datajoint as dj; dj.conn()" > /dev/null || \
-    { echo "Error: Could not connect to the database"; exit 1; }
+CONN_TEST="import datajoint as dj; dj.logger.setLevel('ERROR'); dj.conn()"
+conda_run python -c "$CONN_TEST" > /dev/null || \
+  { on_fail "Could not connect to the database"; exit 1; }
 
 # Run cleanup script
 conda_run python maintenance_scripts/cleanup.py
@@ -42,5 +83,5 @@ conda_run python maintenance_scripts/cleanup.py
 echo "SPYGLASS CRON JOB END"
 
 # truncate long log file
-tail -n 1000 "$SPYGLASS_LOG" > "${SPYGLASS_LOG}.tmp" && \
-  mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
+tail -n ${SPYGLASS_MAX_LOG:-1000} "$SPYGLASS_LOG" > "${SPYGLASS_LOG}.tmp" \
+  && mv "${SPYGLASS_LOG}.tmp" "$SPYGLASS_LOG"
