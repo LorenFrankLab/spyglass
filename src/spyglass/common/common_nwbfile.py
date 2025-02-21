@@ -380,7 +380,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 raise FileNotFoundError(
                     f"Found {len(query)} files for: {analysis_nwb_file_name}"
                 )
-            return f"{analysis_dir}/" + query.fetch1("filepath")
+            return Path(analysis_dir) / query.fetch1("filepath")
 
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
@@ -508,8 +508,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         external_tbl = schema.external["analysis"]
         file_path = (
-            self.__get_analysis_file_dir(analysis_file_name)
-            + f"/{analysis_file_name}"
+            Path(self.__get_analysis_file_dir(analysis_file_name))
+            / analysis_file_name
         )
         key = (external_tbl & f"filepath = '{file_path}'").fetch1()
         abs_path = Path(analysis_dir) / file_path

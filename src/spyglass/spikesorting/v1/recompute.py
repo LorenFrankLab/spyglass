@@ -1,4 +1,4 @@
-"""This schema is used to transition manage files for recompute.
+"""This schema is used to track recompute capabilities for existing files.
 
 Tables
 ------
@@ -27,7 +27,7 @@ from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
-schema = dj.schema("cbroz_temp")  # TODO: spikesorting_v1_usage or _recompute
+schema = dj.schema("cbroz_temp")  # TODO: spikesorting_v1_recompute
 
 
 @schema

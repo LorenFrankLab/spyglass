@@ -317,8 +317,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording = self._get_filtered_recording(key)
         recording_name = self._get_recording_name(key)
 
-        # recording_dir = Path("/home/cbroz/wrk/temp_ssr0/")
-
         # Path to files that will hold the recording extractors
         recording_path = str(recording_dir / Path(recording_name))
         if os.path.exists(recording_path):

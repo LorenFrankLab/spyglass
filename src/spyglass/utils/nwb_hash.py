@@ -193,7 +193,8 @@ class NwbfileHasher:
     def cleanup(self):
         self.file.close()
 
-    def remove_version(self, key: str) -> bool:
+    def remove_version(self, input_string: str) -> str:
+        """Removes version numbers from the input."""
         version_pattern = (
             r"\d+\.\d+\.\d+"  # Major.Minor.Patch
             + r"(?:-alpha|-beta|a\d+)?"  # Optional alpha or beta, -alpha
@@ -201,7 +202,7 @@ class NwbfileHasher:
             + r"(?:\+[a-z0-9]{9})?"  # Optional commit hash, +abcdefghi
             + r"(?:\.d\d{8})?"  # Optional date, dYYYYMMDD
         )
-        return re.sub(version_pattern, "VERSION", key)
+        return re.sub(version_pattern, "VERSION", input_string)
 
     def collect_names(self, file):
         """Collects all object names in the file."""
