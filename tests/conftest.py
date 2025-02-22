@@ -1367,8 +1367,6 @@ def sorter_dict():
 
 @pytest.fixture(scope="session")
 def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
-    pre = spike_v1.SpikeSorting().fetch("KEY", as_dict=True)
-
     key = {
         **mini_dict,
         **sorter_dict,
@@ -1379,7 +1377,7 @@ def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
     spike_v1.SpikeSortingSelection.insert_selection(key)
     spike_v1.SpikeSorting.populate()
 
-    yield (spike_v1.SpikeSorting() - pre).fetch(
+    yield spike_v1.SpikeSorting().fetch(
         "KEY", as_dict=True, order_by="time_of_sort desc"
     )[0]
 
@@ -1397,7 +1395,9 @@ def pop_curation(spike_v1, pop_sort):
     parent_curation_id = -1
     has_sort = spike_v1.CurationV1 & {"sorting_id": pop_sort["sorting_id"]}
     if has_sort:
-        parent_curation_id = has_sort.fetch1("curation_id")
+        parent_curation_id = has_sort.fetch(
+            "curation_id", order_by="curation_id desc"
+        )[0]
 
     spike_v1.CurationV1.insert_curation(
         sorting_id=pop_sort["sorting_id"],

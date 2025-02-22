@@ -354,7 +354,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a concatenated dataframe of all bodyparts."""
-        entries = (self.BodyPart & self).fetch("KEY")
+        entries = (self.BodyPart & self).fetch("KEY", log_export=False)
         nwb_data_dict = {
             entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
             for entry in entries

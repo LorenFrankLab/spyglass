@@ -193,7 +193,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """Add external tables to a RestrGraph for a given restriction/key.
 
         Tables added as nodes with restrictions based on file paths. Names
-        added to visited set to appear in restr_ft obj bassed to SQLDumpHelper.
+        added to visited set to appear in restr_ft obj passed to SQLDumpHelper.
+
+        This process adds files explicitly listed in the ExportSelection.File
+        by the logging process. A separate RestrGraph process, cascade_files, is
+        used to track all tables with fk-ref to file tables, and cascade up to
+        externals.
 
         Parameters
         ----------
@@ -228,8 +233,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             )
             restr_graph.visited.add(analysis_name)
 
-        restr_graph.visited.update({raw_name, analysis_name})
-
         return restr_graph
 
     def get_restr_graph(
@@ -255,9 +258,18 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
         restr_graph = RestrGraph(
-            seed_table=self, leaves=leaves, verbose=verbose, cascade=cascade
+            seed_table=self,
+            leaves=leaves,
+            verbose=verbose,
+            cascade=False,
+            include_files=True,
         )
-        return self._add_externals_to_restr_graph(restr_graph, key)
+        restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
+
+        if cascade:
+            restr_graph.cascade()
+
+        return restr_graph
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.
