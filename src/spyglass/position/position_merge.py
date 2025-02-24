@@ -75,3 +75,25 @@ class PositionOutput(_Merge, SpyglassMixin):
             & key
         )
         return query.fetch1_dataframe()
+
+    def fetch_pose_dataframe(self):
+        key = self.merge_restrict(self.fetch("KEY", as_dict=True)).fetch(
+            "KEY", as_dict=True
+        )
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_pose_dataframe()
+
+    def fetch_video_path(self, key=dict()):
+        key = self.merge_restrict((self & key).proj()).proj()
+        query = (
+            source_class_dict[
+                to_camel_case(self.merge_get_parent(self.proj()).table_name)
+            ]
+            & key
+        )
+        return query.fetch_video_path()
