@@ -79,10 +79,13 @@ class PositionOutput(_Merge, SpyglassMixin):
         return query.fetch1_dataframe()
 
     def fetch_pose_dataframe(self):
-        """Fetch a single dataframe of pose bodypart coordinates.
+        """
+        Fetch a single dataframe of pose bodypart coordinates.
         This will work only for sources that have pose information.
         """
-        key = self.merge_restrict(self.proj()).proj()
+        key = self.merge_restrict(self.fetch("KEY", as_dict=True)).fetch(
+            "KEY", as_dict=True
+        )  # fetch the key from the merged table
         query = (
             source_class_dict[
                 to_camel_case(self.merge_get_parent(self.proj()).table_name)
