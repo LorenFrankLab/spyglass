@@ -51,6 +51,11 @@
       "video": "/your/base/path/deeplabcut/video",
       "output": "/your/base/path/deeplabcut/output"
     },
+    "moseq_dirs": {
+      "base": "/your/base/path/moseq",
+      "project": "/your/base/path/moseq/projects",
+      "video": "/your/base/path/moseq/video",
+    },
     "kachery_zone": "franklab.default"
   }
 }
