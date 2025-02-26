@@ -324,6 +324,7 @@ class MoseqSyllableSelection(SpyglassMixin, dj.Manual):
         super().insert(rows, **kwargs)
 
     def validate_bodyparts(self, key):
+        """Method to validate that the bodyparts in the model are in the data"""
         if self & key:
             return
         model_bodyparts = (PoseGroup & key).fetch1("bodyparts")

@@ -79,6 +79,9 @@ class PositionOutput(_Merge, SpyglassMixin):
         return query.fetch1_dataframe()
 
     def fetch_pose_dataframe(self):
+        """Fetch a single dataframe of pose bodypart coordinates.
+        This will work only for sources that have pose information.
+        """
         key = self.merge_restrict(self.proj()).proj()
         query = (
             source_class_dict[
@@ -89,6 +92,7 @@ class PositionOutput(_Merge, SpyglassMixin):
         return query.fetch_pose_dataframe()
 
     def fetch_video_path(self, key=dict()):
+        """Fetch the video path associated with the position information."""
         key = self.merge_restrict((self & key).proj()).proj()
         query = (
             source_class_dict[

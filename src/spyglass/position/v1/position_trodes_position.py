@@ -252,6 +252,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         )
 
     def fetch_pose_dataframe(self):
+        """Not applicable for TrodesPosV1 pipeline."""
         raise NotImplementedError("No pose data for TrodesPosV1")
 
     def fetch_video_path(self, key=dict()):
