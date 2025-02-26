@@ -341,7 +341,7 @@
 #
 # For persistent databases with backups, administrators should review our
 # documentation on
-# [database management](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Database).
+# [database management](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Management).
 #
 
 # ### Running your own database with Docker

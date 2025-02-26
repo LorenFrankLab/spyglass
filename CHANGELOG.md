@@ -1,6 +1,5 @@
 # Change Log
 
-
 ## [0.5.5] (Unreleased)
 
 ### Infrastructure
@@ -8,11 +7,21 @@
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
 - Add common method `get_position_interval_epoch` #1056
+- Improve cron job documentation and script #1226, #1241
+- Update export process to include `~external` tables #1239
+- Only add merge parts to `source_class_dict` if present in codebase #1237
 
 ### Pipelines
 
+- Common
+    - Set `probe_id` as `probe_description` when inserting from nwb file #1220
+    - Default `AnalysisNwbfile.create` permissions are now 777 #1226
 - Position
-    - Allow population of missing `PositionIntervalMap` entries during population of `DLCPoseEstimation` #1208
+    - Allow population of missing `PositionIntervalMap` entries during population
+        of `DLCPoseEstimation` #1208
+- Spikesorting
+    - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
+        filtering #1238
 
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
