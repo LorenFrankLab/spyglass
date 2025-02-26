@@ -65,6 +65,17 @@ dlc = [
     "ffmpeg",
     "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
 ]
+moseq-gpu = [
+    "jax[cuda12]",
+    "jax-moseq[cuda12]",
+    "keypoint-moseq",
+]
+moseq-cpu = [
+    "jax[cpu]",
+    "jax-moseq",
+    "keypoint-moseq",
+]
+
 test = [
     "click",                  # for CLI subpackage only
     "docker",                 # for tests in a container
@@ -177,6 +188,7 @@ omit = [ # which submodules have no tests
     # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",
+    "*/moseq/*",
 ]
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
