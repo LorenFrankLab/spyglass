@@ -66,12 +66,12 @@ dlc = [
     "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
 ]
 moseq-gpu = [
-    "jax[cuda12]==0.3.22",
+    "jax[cuda12]",
     "jax-moseq[cuda12]",
     "keypoint-moseq",
 ]
 moseq-cpu = [
-    "jax[cpu]==0.3.22",
+    "jax[cpu]",
     "jax-moseq",
     "keypoint-moseq",
 ]
