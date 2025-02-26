@@ -420,7 +420,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         str
             absolute path to video file
         """
-        key = (self & key).fetch1("KEY")
+        key = (self & key).fetch1("KEY", log_export=False)
         return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
