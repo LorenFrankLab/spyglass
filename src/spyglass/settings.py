@@ -187,12 +187,14 @@ class SpyglassConfig:
         Path(self._moseq_base).mkdir(exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
+        source_config_lookup = {
+            "dlc": dj_dlc,
+            "moseq": dj_moseq,
+            "kachery": dj_kachery,
+        }
+        base_lookup = {"dlc": self._dlc_base, "moseq": self._moseq_base}
         for prefix, dirs in self.relative_dirs.items():
-            this_base = (
-                self._dlc_base
-                if prefix == "dlc"
-                else (self._moseq_base if prefix == "moseq" else resolved_base)
-            )
+            this_base = base_lookup.get(prefix, resolved_base)
             for dir, dir_str in dirs.items():
                 dir_env_fmt = self.dir_to_var(dir=dir, dir_type=prefix)
 
@@ -201,14 +203,7 @@ class SpyglassConfig:
                     if not self.supplied_base_dir
                     else None
                 )
-                if prefix == "dlc":
-                    source_config = dj_dlc
-                elif prefix == "moseq":
-                    source_config = dj_moseq
-                elif prefix == "kachery":
-                    source_config = dj_kachery
-                else:
-                    source_config = dj_spyglass
+                source_config = source_config_lookup.get(prefix, dj_spyglass)
                 dir_location = (
                     source_config.get(dir)
                     or env_loc
