@@ -7,7 +7,7 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.15.2
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: spyglass
 #     language: python
 #     name: python3
 # ---
@@ -257,6 +257,46 @@
 # their conda installation steps
 # [here](https://jax.readthedocs.io/en/latest/installation.html#conda-installation).
 #
+# #### Deep Lab Cut (DLC)
+#
+# Spyglass provides an environment build for using the DLC pipeline. To create an
+# environment with these features, please:
+# 1. navigate to your cloned spyglass repo.
+# 2. build the environment from the dlc version
+# 3. activate the environment to use
+#
+# ```bash
+# # cd /path/to/spyglass # 1
+# mamba env create -f environment_dlc.yml # 2
+# mamba activate spyglass-dlc # 3
+# ```
+#
+# Alternatively, you can pip install using
+# ```bash
+# pip install spyglass[dlc]
+# ```
+#
+# #### Keypoint-Moseq
+#
+# Spyglass provides an environment build for using the Moseq pipeline. To create an
+# environment with these features, please:
+# 1. navigate to your cloned spyglass repo.
+# 2. build the environment from one of the moseq versions
+# 3. activate the environment to use
+#
+# ```bash
+# # cd /path/to/spyglass # 1
+# mamba env create -f environment_moseq_cpu.yml # 2
+# mamba activate spyglass-moseq-cpu # 3
+# ```
+#
+# Alternatively, you can pip install using
+# ```bash
+# pip install spyglass[moseq-cpu]
+# ```
+#
+# To use a GPU enabled version of the package, replace `cpu` with `gpu` in the above
+# commands
 #
 
 # ## Database

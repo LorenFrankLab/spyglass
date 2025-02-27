@@ -101,15 +101,19 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
 
     def _get_pos_df(self, key):
         cohort_entries = DLCSmoothInterpCohort.BodyPart & key
-        pos_df = pd.concat(
-            {
-                bodypart: (
-                    DLCSmoothInterpCohort.BodyPart
-                    & {**key, **{"bodypart": bodypart}}
-                ).fetch1_dataframe()
-                for bodypart in cohort_entries.fetch("bodypart")
-            },
-            axis=1,
+        pos_df = (
+            pd.concat(
+                {
+                    bodypart: (
+                        DLCSmoothInterpCohort.BodyPart
+                        & {**key, **{"bodypart": bodypart}}
+                    ).fetch1_dataframe()
+                    for bodypart in cohort_entries.fetch("bodypart")
+                },
+                axis=1,
+            )
+            if cohort_entries
+            else pd.DataFrame()
         )
         return pos_df
 
