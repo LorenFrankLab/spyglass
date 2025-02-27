@@ -80,7 +80,7 @@ class PositionOutput(_Merge, SpyglassMixin):
 
     def fetch_pose_dataframe(self):
         """Fetch a single dataframe of pose bodypart coordinates.
-        
+
         This will work only for sources that have pose information.
         """
         key = self.merge_restrict(self.fetch("KEY", as_dict=True)).fetch(
