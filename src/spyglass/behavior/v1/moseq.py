@@ -11,7 +11,7 @@ from spyglass.utils import SpyglassMixin
 
 from .core import PoseGroup, format_dataset_for_moseq, results_to_df
 
-schema = dj.schema("moseq_v1")
+schema = dj.schema("behavior_v1_moseq")
 
 
 @schema
