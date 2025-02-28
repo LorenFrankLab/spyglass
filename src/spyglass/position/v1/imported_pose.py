@@ -100,10 +100,10 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     part_keys.append(part_key)
 
         IntervalList().insert(interval_keys, skip_duplicates=True)
-        self.insert(master_keys, skip_duplicates=True)
-        self.BodyPart().insert(part_keys, skip_duplicates=True)
+        self.insert(master_keys)
+        self.BodyPart().insert(part_keys)
 
-    def fetch_pose_dataframe(self, key=dict()):
+    def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
 
         Parameters
@@ -116,6 +116,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pd.DataFrame
             DataFrame containing pose data
         """
+        key = key or dict()
         key = (self & key).fetch1("KEY")
         pose_estimations = (
             (self & key).fetch_nwb()[0]["pose"].pose_estimation_series
@@ -123,17 +124,16 @@ class ImportedPose(SpyglassMixin, dj.Manual):
 
         index = None
         pose_df = {}
+        body_parts = list(pose_estimations.keys())
+        index = pd.Index(
+            pose_estimations[body_parts[0]].timestamps[:], name="time"
+        )
         for body_part in pose_estimations.keys():
-            if index is None:
-                index = pd.Index(
-                    pose_estimations[body_part].timestamps[:],
-                    name="time",
-                )
-
+            bp_data = pose_estimations[body_part].data
             part_df = {
                 "video_frame_ind": np.nan,
-                "x": pose_estimations[body_part].data[:, 0],
-                "y": pose_estimations[body_part].data[:, 1],
+                "x": bp_data[:, 0],
+                "y": bp_data[:, 1],
                 "likelihood": pose_estimations[body_part].confidence[:],
             }
 
@@ -142,11 +142,15 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pose_df
         return pd.concat(pose_df, axis=1)
 
-    def fetch_skeleton(self, key=dict()):
-        nwb = (self & key).fetch_nwb()[0]
-        nodes = nwb["skeleton"].nodes[:]
-        int_edges = nwb["skeleton"].edges[:]
+    def fetch_skeleton(self, key=None):
+        key = key or dict()
+        query = self & key
+        if not len(query) == 1:
+            raise ValueError(
+                "fetch_skeleton can only be called on a single entry"
+            )
+        skeleton = query.fetch_nwb()[0]["skeleton"]
+        nodes = skeleton.nodes[:]
+        int_edges = skeleton.edges[:]
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]
-        named_edges
-        skeleton = {"nodes": nodes, "edges": named_edges}
-        return skeleton
+        return {"nodes": nodes, "edges": named_edges}
