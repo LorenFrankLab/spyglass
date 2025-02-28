@@ -22,10 +22,9 @@
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238
-
+    - Speedup `get_sorting` on `CurationV1` #1246
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
-
 
 ## [0.5.4] (December 20, 2024)
 
