@@ -19,7 +19,7 @@
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
-    - Enable import of existing pose data to `ImportedPose` in position pipeline #1225
+    - Enable import of existing pose data to `ImportedPose` in position pipeline #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238
