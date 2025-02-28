@@ -256,14 +256,6 @@ hdmf.common.table.DynamicTable </b>
 | PositionSource.SpatialSeries |           id           |   int(nwbf.processing.behavior.position.\[index\]) (the enumerated index number) |               |                       |
 | RawPosition.PosObject        | raw_position_object_id |                            nwbf.processing.behavior.position.\[index\].object_id |               |                       |
 
-<b> NWBfile Location: nwbf.processing.behavior.PoseEstimation </br> Object type:
-(ndx_pose.PoseEstimation) </b>
-
-| Spyglass Table               |          Key           |                                                                 NWBfile Location | Config option |                 Notes |
-| :--------------------------- | :--------------------: | -------------------------------------------------------------------------------: | ------------: | --------------------: |
-| ImportedPose | interval_list_name | pose_{PoseEstimation.name}_valid_times |
-| ImportedPose.BodyPart | pose | nwbf.processing.behavior.PoseEstimation.pose_estimation_series.name |
-
 <b> NWBfile Location: nwbf.processing.video_files.video </br> Object type:
 pynwb.image.ImageSeries </b>
 
