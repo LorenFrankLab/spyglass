@@ -140,6 +140,7 @@ class NwbfileHasher:
         batch_size: int = DEFAULT_BATCH_SIZE,
         precision_lookup: Dict[str, int] = PRECISION_LOOKUP,
         keep_obj_hash: bool = False,
+        keep_file_open: bool = False,
         verbose: bool = True,
     ):
         """Hashes the contents of an NWB file.
@@ -187,8 +188,9 @@ class NwbfileHasher:
         self.hashed = md5("".encode())
         self.hash = self.compute_hash()
 
-        self.cleanup()
-        atexit.unregister(self.cleanup)
+        if not keep_file_open:
+            self.cleanup()
+            atexit.unregister(self.cleanup)
 
     def cleanup(self):
         self.file.close()

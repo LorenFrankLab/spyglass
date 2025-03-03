@@ -9,15 +9,22 @@ RecordingVersions: What versions are present in an existing analysis file?
 RecordingRecompute: Attempt recompute of an analysis file.
 """
 
+import atexit
+from functools import cached_property
+from json import loads as json_loads
+from os import environ as os_environ
 from pathlib import Path
-from typing import Union
+from typing import Tuple, Union
 
 import datajoint as dj
+import h5py
 import pynwb
+from datajoint.hash import key_hash
 from h5py import File as h5py_File
 from hdmf import __version__ as hdmf_version
 from hdmf.build import TypeMap
 from hdmf.spec import NamespaceCatalog
+from numpy import __version__ as np_version
 from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from spikeinterface import __version__ as si_version
 
@@ -25,6 +32,7 @@ from spyglass.common import AnalysisNwbfile
 from spyglass.settings import analysis_dir, temp_dir
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.h5_helper_fn import H5pyComparator
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
 schema = dj.schema("cbroz_temp")  # TODO: spikesorting_v1_recompute
@@ -42,15 +50,24 @@ class RecordingVersions(SpyglassMixin, dj.Computed):
     spyglass = '' : varchar(64)
     """
 
-    @property
+    @cached_property
     def valid_ver_restr(self):
         """Return a restriction of self for the current environment."""
         return self.namespace_dict(pynwb.get_manager().type_map)
 
-    @property
+    @cached_property
     def this_env(self):
         """Return restricted version of self for the current environment."""
         return self & self.valid_ver_restr
+
+    def key_env(self, key):
+        """Return the pynwb environment for a given key."""
+        if not self & key:
+            self.make(key)
+        query = self & key
+        if len(query) != 1:
+            raise ValueError(f"Key matches {len(query)} entries: {query}")
+        return (self & key).fetch(*self.valid_ver_restr.keys(), as_dict=True)[0]
 
     def namespace_dict(self, type_map: TypeMap):
         """Remap namespace names to hyphenated field names for DJ compatibility."""
@@ -65,15 +82,15 @@ class RecordingVersions(SpyglassMixin, dj.Computed):
         }
 
     def make(self, key):
+        """Inventory the namespaces present in an analysis file."""
         parent = (SpikeSortingRecording & key).fetch1()
         path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
 
-        insert = key.copy()
-        insert.update(get_file_namespaces(path))
+        insert = {**key, **get_file_namespaces(path)}
 
         with h5py_File(path, "r") as f:
             script = f.get("general/source_script")
-            if script is not None:
+            if script is not None:  # after `=`, remove quotes
                 script = str(script[()]).split("=")[1].strip().replace("'", "")
             insert["spyglass"] = script
 
@@ -85,25 +102,108 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> RecordingVersions
     attempt_id: varchar(32) # name for environment used to attempt recompute
+    rounding=8: int # rounding for float ElectricalSeries
     ---
     dependencies: blob # dict of pip dependencies
     """
 
-    @property
+    # --- Insert helpers ---
+
+    @cached_property
+    def default_attempt_id(self):
+        conda = os_environ.get("CONDA_DEFAULT_ENV", "base")
+        si_readable = si_version.replace(".", "-")
+        return f"{conda}_si{si_readable}"
+
+    @cached_property
     def pip_deps(self):
         return dict(
             pynwb=pynwb.__version__,
             hdmf=hdmf_version,
             spikeinterface=si_version,
-            # TODO: add othes?
+            numpy=np_version,
         )
 
-    def attempt_all(self, attempt_id):
+    def insert(self, rows, **kwargs):
+        """Custom insert to ensure dependencies are added to each row."""
+        if not isinstance(rows, list):
+            rows = [rows]
+        if not isinstance(rows[0], dict):
+            raise ValueError("Rows must be a list of dicts")
+        inserts = []
+        for row in rows:
+            if not self._has_matching_pynwb(row):
+                continue
+            if not row.get("attempt_id", None):
+                row["attempt_id"] = self.default_attempt_id
+            row["dependencies"] = self.pip_deps
+            inserts.append(row)
+        super().insert(inserts, **kwargs)
+
+    def attempt_all(self, attempt_id=None):
+        if not attempt_id:
+            attempt_id = self.default_attempt_id
         inserts = [
             {**key, "attempt_id": attempt_id, "dependencies": self.pip_deps}
             for key in RecordingVersions().this_env.fetch("KEY", as_dict=True)
         ]
         self.insert(inserts, skip_duplicates=True)
+
+    # --- Gatekeep recompute attempts ---
+
+    @cached_property  # Ok to cache b/c static to python runtime
+    def this_env(self):
+        """Restricted table matching pynwb env and pip env."""
+        restr = []
+        for key in RecordingVersions().this_env * self:
+            if key["dependencies"] != self.pip_deps:
+                continue
+            pk = {k: v for k, v in key.items() if k in self.primary_key}
+            restr.append(pk)
+        return self & restr
+
+    def _sort_dict(self, d):
+        return dict(sorted(d.items()))
+
+    def _has_matching_pynwb(self, key, show_err=True) -> bool:
+        """Check current env for matching pynwb versions."""
+        this_rec = {"recording_id": key["recording_id"]}
+        ret = RecordingVersions().this_env & key
+        if not ret and show_err:
+            need = self._sort_dict(RecordingVersions().key_env(key))
+            have = self._sort_dict(RecordingVersions().valid_ver_restr)
+            logger.warning(
+                f"PyNWB version mismatch. Skipping key: {this_rec}"
+                + f"\n\tHave: {have}"
+                + f"\n\tNeed: {need}"
+            )
+        return bool(ret)
+
+    def _has_matching_pip(self, key, show_err=True) -> bool:
+        """Check current env for matching pip versions."""
+        this_rec = {"recording_id": key["recording_id"]}
+        query = self.this_env & key
+
+        if not len(query) == 1:
+            raise ValueError(f"Query returned {len(query)} entries: {query}")
+
+        need = query.fetch1("dependencies")
+        ret = need == self.pip_deps
+
+        if not ret and show_err:
+            logger.error(
+                f"Pip version mismatch. Skipping key: {this_rec}"
+                + f"\n\tHave: {self.pip_deps}"
+                + f"\n\tNeed: {need}"
+            )
+
+        return ret
+
+    def _has_matching_env(self, key, show_err=True) -> bool:
+        """Check current env for matching pynwb and pip versions."""
+        return self._has_matching_pynwb(
+            key, show_err=show_err
+        ) and self._has_matching_pip(key, show_err=show_err)
 
 
 @schema
@@ -118,7 +218,6 @@ class RecordingRecompute(dj.Computed):
         definition = """
         -> master
         name : varchar(255)
-        ---
         missing_from: enum('old', 'new')
         """
 
@@ -131,115 +230,213 @@ class RecordingRecompute(dj.Computed):
         new=null: longblob
         """
 
-    key_source = RecordingVersions().this_env * RecordingRecomputeSelection
-    old_dir = Path(analysis_dir)
-    # see /stelmo/cbroz/temp_rcp/ for existing recomputed
-    new_dir = Path(temp_dir) / "spikesort_v1_recompute"
-    ignore_files = set()
+        def get_objs(self, key, obj_name=None):
+            old, new = (self & key).fetch1("old", "new")
+            if old is not None and new is not None:
+                return old, new
+            old, new = RecordingRecompute()._open_files(key)
+            this_obj = obj_name or key["name"]
+            return old.get(this_obj, None), new.get(this_obj, None)
 
-    def _get_subdir(self, key):
+        def compare(self, key, obj_name=None):
+            old, new = self.get_objs(key, obj_name=obj_name)
+            return H5pyComparator(old=old, new=new)
+
+    key_source = RecordingRecomputeSelection().this_env
+    _key_cache = {}
+    _hasher_cache = {}
+    _files_cache = {}
+    _cleanup_registered = False
+
+    @property
+    def with_names(self) -> dj.expression.QueryExpression:
+        """Return tables joined with analysis file names."""
+        return self * SpikeSortingRecording.proj("analysis_file_name")
+
+    # --- Cache management ---
+
+    def _cleanup(self) -> None:
+        """Close all open files."""
+        for file in self._file_cache.values():
+            file.close()
+        self._file_cache = {}
+        for hasher in self._hasher_cache.values():
+            hasher.cleanup()
+        if self._cleanup_registered:
+            atexit.unregister(self._cleanup)
+            self._cleanup_registered = False
+
+    def _open_files(self, key) -> Tuple[h5py_File, h5py_File]:
+        """Open old and new files for comparison."""
+        if not self._cleanup_registered:
+            atexit.register(self._cleanup)
+            self._cleanup_registered = True
+
+        old, new = self._get_paths(key, as_str=True)
+        if old not in self._file_cache:
+            self._file_cache[old] = h5py_File(old, "r")
+        if new not in self._file_cache:
+            self._file_cache[new] = h5py_File(new, "r")
+
+        return self._file_cache[old], self._file_cache[new]
+
+    def _hash_one(self, path, precision):
+        """Return the hasher for a given path. Store in cache."""
+        cache_val = f"{path}_{precision}"
+        if cache_val in self._hasher_cache:
+            return self._hasher_cache[cache_val]
+        hasher = NwbfileHasher(
+            path,
+            verbose=False,
+            keep_obj_hash=True,
+            keep_file_open=True,
+            precision_lookup=precision,
+        )
+        self._hasher_cache[cache_val] = hasher
+        return hasher
+
+    # --- Path management ---
+
+    def _get_subdir(self, key) -> Path:
+        """Return the analysis file's subdirectory."""
         file = key["analysis_file_name"] if isinstance(key, dict) else key
         parts = file.split("_")
         subdir = "_".join(parts[:-1])
         return subdir + "/" + file
 
-    def _get_paths(self, key):
-        old = self.old_dir / self._get_subdir(key)
-        new = self.new_dir / self._get_subdir(key)
-        return old, new
+    def _get_paths(self, key, as_str=False) -> Tuple[Path, Path]:
+        """Return the old and new file paths."""
+        key = self.get_parent_key(key)
 
-    def _hash_existing(self):
-        for nwb in self.new_dir.rglob("*.nwb"):
-            if nwb.with_suffix(".hash").exists():
-                continue
-            try:
-                logger.info(f"Hashing {nwb}")
-                _ = self._hash_one(nwb)
-            except (OSError, ValueError, RuntimeError) as e:
-                logger.warning(f"Error: {e.__class__.__name__}: {nwb.name}")
-                continue
+        old = Path(analysis_dir) / self._get_subdir(key)
+        new = (
+            Path(temp_dir)
+            / "spikesort_v1_recompute"
+            / key.get("attempt_id", "")
+            / self._get_subdir(key)
+        )
 
-    def _hash_one(self, path):
-        hasher = NwbfileHasher(path, verbose=False)
-        with open(path.with_suffix(".hash"), "w") as f:
-            f.write(hasher.hash)
-        return hasher.hash
+        return (str(old), str(new)) if as_str else (old, new)
 
-    def make(self, key):
-        if self & key:
-            return
+    # --- Database checks ---
 
+    def get_parent_key(self, key) -> dict:
+        """Return the parent key for a given recompute key."""
+        key = {
+            k: v
+            for k, v in key.items()
+            if k in RecordingRecomputeSelection.primary_key
+        }
+        hashed = key_hash(key)
+        if hashed in self._key_cache:
+            return self._key_cache[hashed]
         parent = (
             SpikeSortingRecording
             * RecordingVersions
             * RecordingRecomputeSelection
             & key
         ).fetch1()
+        self._key_cache[hashed] = parent
+        return parent
+
+    def _other_roundings(self, key, less_than=False):
+        """Return other planned precision recompute attempts.
+
+        Parameters
+        ----------
+        key : dict
+            Key for the current recompute attempt.
+        less_than : bool
+            Default False.
+            If True, return attempts with lower precision than key.
+            If False, return attempts with higher precision.
+        """
+        operator = "<" if less_than else "!="
+        return (
+            RecordingRecomputeSelection()
+            & {k: v for k, v in key.items() if k != "rounding"}
+            & f'rounding {operator} "{key["rounding"]}"'
+        ).proj() - self
+
+    def _has_other_roundings(self, key, less_than=False):
+        """Check if other planned precision recompute attempts exist."""
+        return bool(self._other_roundings(key, less_than=less_than))
+
+    # --- Recompute ---
+
+    def _recompute(self, key) -> Union[None, dict]:
+        """Attempt to recompute the analysis file. Catch common errors."""
+
+        _, new = self._get_paths(key)
+        parent = self.get_parent_key(key)
+
+        try:
+            new_vals = SpikeSortingRecording()._make_file(
+                parent,
+                recompute_file_name=parent["analysis_file_name"],
+                save_to=new.parent.parent,
+                rounding=key.get("rounding", 8),
+            )
+        except RuntimeError as e:
+            logger.warning(f"{e}: {new.name}")
+        except ValueError as e:
+            e_info = e.args[0]
+            if "probe info" in e_info:  # make failed bc missing probe info
+                self.insert1(dict(key, matched=False, diffs=e_info))
+            else:
+                logger.warning(f"ValueError: {e}: {new.name}")
+        except KeyError as err:
+            e_info = err.args[0]
+            if "MISSING" in e_info:  # make failed bc missing parent file
+                e = e_info.split("MISSING")[0].strip()
+                self.insert1(dict(key, matched=False, diffs=e))
+                self.Name().insert1(
+                    dict(key, name=f"Parent missing {e}", missing_from="old")
+                )
+            else:
+                logger.warning(f"KeyError: {err}: {new.name}")
+        else:
+            return new_vals
+
+    def make(self, key):
+        parent = self.get_parent_key(key)
+        rounding = key.get("rounding")
 
         # Ensure dependencies unchanged since selection insert
-        parent_deps = parent["dependencies"]
-        for dep, ver in RecordingRecomputeSelection().pip_deps.items():
-            if parent_deps.get(dep, None) != ver:
-                raise ValueError(f"Please run this key with {parent_deps}")
+        if not RecordingRecomputeSelection()._has_matching_env(key):
+            return
 
         old, new = self._get_paths(parent)
 
         if not new.exists():  # if the file has yet to be recomputed
-            try:
-                new_vals = SpikeSortingRecording()._make_file(
-                    parent,
-                    recompute_file_name=parent["analysis_file_name"],
-                    save_to=new,
-                )
-            except RuntimeError as e:
-                print(f"{e}: {new.name}")
+            new_hash = self._recompute(key)["file_hash"]
+            if new_vals is None:  # Error occurred
                 return
-            except ValueError as e:
-                e_info = e.args[0]
-                if "probe info" in e_info:  # make failed bc missing probe info
-                    self.insert1(dict(key, matched=False, diffs=e_info))
-                else:
-                    print(f"ValueError: {e}: {new.name}")
-                return
-            except KeyError as err:
-                e_info = err.args[0]
-                if "MISSING" in e_info:  # make failed bc missing parent file
-                    e = e_info.split("MISSING")[0].strip()
-                    self.insert1(dict(key, matched=False, diffs=e))
-                    self.Name().insert1(
-                        dict(
-                            key, name=f"Parent missing {e}", missing_from="old"
-                        )
-                    )
-                else:
-                    logger.warning(f"KeyError: {err}: {new.name}")
-                return
-            with open(new.with_suffix(".hash"), "w") as f:
-                f.write(new_vals["file_hash"])
-
-        # TODO: how to check the env used to make the file when reading?
-        elif new.with_suffix(".hash").exists():
-            print(f"\nReading hash {new}")
-            with open(new.with_suffix(".hash"), "r") as f:
-                new_vals = dict(file_hash=f.read())
         else:
-            new_vals = dict(file_hash=self._hash_one(new))
+            new_hasher = self._hash_one(new, rounding)
+            new_hash = new_hasher.hash
 
-        old_hasher = parent["file_hash"] or NwbfileHasher(
-            old, verbose=False, keep_obj_hash=True
-        )
+        old_hasher = self._hash_one(old, rounding)
 
-        if new_vals["file_hash"] == old_hasher.hash:
-            self.insert1(dict(key, match=True))
-            new.unlink(missing_ok=True)
+        if new_hash == old_hasher.hash:
+            self.insert1(dict(key, matched=True))
+            if not self._has_other_roundings(key, less_than=False):
+                # if no other recompute attempts
+                new.unlink(missing_ok=True)
+            elif query := self._other_roundings(key, less_than=True):
+                logger.info(
+                    f"Matched at {rounding} precision: {new.name}\n"
+                    + "Deleting lesser pecision attempts"
+                )
+                query.delete()
             return
 
         names = []
         hashes = []
 
-        logger.info(f"Compparing mismatched {new}")
-        new_hasher = NwbfileHasher(new, verbose=False, keep_obj_hash=True)
-        all_objs = set(old_hasher.objs.keys()) | set(new_hasher.objs.keys())
+        logger.info(f"Comparing mismatched {new.name}")
+        new_hasher = self._hash_one(new, rounding)
+        all_objs = set({**old_hasher.objs, **new_hasher.objs})
 
         for obj in all_objs:
             old_obj, old_hash = old_hasher.objs.get(obj, (None, None))
@@ -247,10 +444,10 @@ class RecordingRecompute(dj.Computed):
 
             if old_hash is None:
                 names.append(dict(key, name=obj, missing_from="old"))
-            elif new_hash is None:
+            if new_hash is None:
                 names.append(dict(key, name=obj, missing_from="new"))
-            elif old_hash != new_hash:
-                hashes.append(dict(key, name=obj, old=old_obj, new=new_obj))
+            if old_hash != new_hash:
+                hashes.append(dict(key, name=obj))
 
         self.insert1(dict(key, matched=False))
         self.Name().insert(names)

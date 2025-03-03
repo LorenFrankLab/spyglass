@@ -22,7 +22,7 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_nwbfile import schema as nwb_schema
-from spyglass.settings import temp_dir, test_mode
+from spyglass.settings import analysis_dir, temp_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
@@ -218,6 +218,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         key: dict = None,
         recompute_file_name: str = None,
         save_to: Union[str, Path] = None,
+        rounding: int = 4,
     ):
         """Preprocess recording and write to NWB file.
 
@@ -243,6 +244,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(
                 "Either key or recompute_file_name must be specified."
             )
+        if isinstance(key, dict):
+            key = {k: v for k, v in key.items() if k in cls.primary_key}
 
         file_hash = None
         recompute = recompute_file_name and not key and not save_to
@@ -291,8 +294,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # TODO: uncomment after review. Commented to avoid impacting database
         # if recompute:
         #     # AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
+        precision_lookup = dict(ProcessedElectricalSeries=rounding)
         file_hash = AnalysisNwbfile().get_hash(
-            recording_nwb_file_name, from_schema=True  # REVERT TO FALSE?
+            recording_nwb_file_name,
+            from_schema=True,  # REVERT TO FALSE?
+            precision_lookup=precision_lookup,
         )
 
         return dict(
@@ -667,6 +673,7 @@ def _write_recording_to_nwb(
     analysis_nwb_file : str
         name of analysis NWB file containing the preprocessed recording
     """
+
     recompute_args = (
         recompute_file_name,
         recompute_object_id,
