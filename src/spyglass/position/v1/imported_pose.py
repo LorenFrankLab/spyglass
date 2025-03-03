@@ -117,7 +117,10 @@ class ImportedPose(SpyglassMixin, dj.Manual):
             DataFrame containing pose data
         """
         key = key or dict()
-        key = (self & key).fetch1("KEY")
+        query = self & key
+        if len(query) != 1:
+            raise ValueError(f"Key selected {len(query)} entries: {query}")
+        key = query.fetch1("KEY")
         pose_estimations = (
             (self & key).fetch_nwb()[0]["pose"].pose_estimation_series
         )
@@ -128,7 +131,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         index = pd.Index(
             pose_estimations[body_parts[0]].timestamps[:], name="time"
         )
-        for body_part in pose_estimations.keys():
+        for body_part in body_parts:
             bp_data = pose_estimations[body_part].data
             part_df = {
                 "video_frame_ind": np.nan,
