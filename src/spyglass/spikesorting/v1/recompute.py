@@ -410,7 +410,7 @@ class RecordingRecompute(dj.Computed):
 
         if not new.exists():  # if the file has yet to be recomputed
             new_hash = self._recompute(key)["file_hash"]
-            if new_vals is None:  # Error occurred
+            if new_hash is None:  # Error occurred
                 return
         else:
             new_hasher = self._hash_one(new, rounding)
