@@ -191,7 +191,7 @@ sample_spike_sorting_preprocessing_parameters = {
 @click.command(help="Insert spike sorting preprocessing parameters")
 @click.argument("yaml_file_name", required=False)
 def insert_spike_sorting_preprocessing_parameters(
-    yaml_file_name: Union[str, None]
+    yaml_file_name: Union[str, None],
 ):
     if yaml_file_name is None:
         print("You must specify a yaml file. Sample content:")
