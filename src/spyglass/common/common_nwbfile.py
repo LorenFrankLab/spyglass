@@ -1,6 +1,5 @@
 import os
 import random
-import stat
 import string
 from pathlib import Path
 from typing import Union
@@ -175,11 +174,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
+    _creation_times = {}
+
     def create(
         self,
         nwb_file_name: str,
         recompute_file_name: str = None,
         alternate_dir: Union[str, Path] = None,
+        restrict_permission: bool = False,
     ) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
@@ -194,6 +196,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the file to be regenerated. Defaults to None.
         alternate_dir : Union[str, Path], Optional
             An alternate directory to store the file. Defaults to analysis_dir.
+        restrict_permissions : bool, optional
+            Default False, no permission restriction (666). If True, restrict
+            write permissions to owner only.
 
         Returns
         -------
@@ -254,8 +259,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         with h5py.File(analysis_file_abs_path, "a") as f:
             f.attrs["object_id"] = str(uuid4())
 
-        # change the permissions to only allow owner to write
-        permissions = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+        # permissions: 0o644 (only owner write), 0o666 (open)
+        permissions = 0o644 if restrict_permission else 0o666
         os.chmod(analysis_file_abs_path, permissions)
 
         return analysis_file_name
@@ -452,7 +457,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             return nwb_object.object_id
 
     def get_hash(
-        self, analysis_file_name: str, from_schema: bool = False
+        self,
+        analysis_file_name: str,
+        from_schema: bool = False,
+        precision_lookup: dict = None,
     ) -> str:
         """Return the hash of the file contents.
 
@@ -471,7 +479,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The hash of the file contents.
         """
         return NwbfileHasher(
-            self.get_abs_path(analysis_file_name, from_schema=from_schema)
+            self.get_abs_path(analysis_file_name, from_schema=from_schema),
+            precision_lookup=precision_lookup,
         ).hash
 
     def _update_external(self, analysis_file_name: str, file_hash: str):
@@ -784,7 +793,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
     @staticmethod
-    def cleanup(delete_files=False):
+    def cleanup_external(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
         Does not delete the files themselves unless delete_files=True is
@@ -798,11 +807,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         schema.external["analysis"].delete(delete_external_files=delete_files)
 
     @staticmethod
-    def nightly_cleanup():
+    def cleanup():
         """Clean up orphaned AnalysisNwbfile entries and external files."""
         child_tables = get_child_tables(AnalysisNwbfile)
         (AnalysisNwbfile - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
-        AnalysisNwbfile.cleanup(True)
+        AnalysisNwbfile.cleanup_external(delete_files=True)
+
+    def log(self, *args, **kwargs):
+        """Null log method. Revert to _disabled_log to turn back on."""
+        logger.debug("Logging disabled.")

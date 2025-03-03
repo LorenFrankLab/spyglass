@@ -112,7 +112,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls._safe_context():
-            IntervalList.insert(intervals, skip_duplicates=skip_duplicates)
+            IntervalList().cautious_insert(intervals)
             cls.insert(sources, skip_duplicates=skip_duplicates)
             cls.SpatialSeries.insert(
                 spat_series, skip_duplicates=skip_duplicates
@@ -535,6 +535,9 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
         # *** HARD CODED VALUES ***
         EPSILON = 0.51  # tolerated time diff in bounds across epoch/pos
         no_pop_msg = "CANNOT POPULATE PositionIntervalMap"
+
+        # Strip extra info from key if not passed via populate call
+        key = {k: v for k, v in key.items() if k in self.primary_key}
 
         nwb_file_name = key["nwb_file_name"]
         pos_intervals = get_pos_interval_list_names(nwb_file_name)

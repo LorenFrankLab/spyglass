@@ -198,7 +198,7 @@ def test_insert_camera(mini_insert, mini_devices, common):
 def test_insert_probe(mini_insert, mini_devices, common):
     this_probe = "probe 0"
     probe_raw = mini_devices.get(this_probe)
-    probe_id = probe_raw.probe_type
+    probe_id = probe_raw.probe_description
 
     probe_data = (
         common.Probe * common.ProbeType & {"probe_id": probe_id}

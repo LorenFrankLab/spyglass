@@ -58,7 +58,7 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
                 region_name=electrode_group.location
             )
             if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
-                key["probe_id"] = electrode_group.device.probe_type
+                key["probe_id"] = electrode_group.device.probe_description
             key["description"] = electrode_group.description
             if isinstance(
                 electrode_group, ndx_franklab_novela.NwbElectrodeGroup
@@ -171,7 +171,7 @@ class Electrode(SpyglassMixin, dj.Imported):
             ) and all(col in elect_data for col in extra_cols):
                 key.update(
                     {
-                        "probe_id": elect_data.group.device.probe_type,
+                        "probe_id": elect_data.group.device.probe_description,
                         "probe_shank": elect_data.probe_shank,
                         "probe_electrode": elect_data.probe_electrode,
                         "bad_channel": (
@@ -297,17 +297,24 @@ class Raw(SpyglassMixin, dj.Imported):
         nwbf = get_nwb_file(nwb_file_abspath)
         raw_interval_name = "raw data valid times"
 
-        # get the acquisition object
-        try:
-            # TODO this assumes there is a single item in NWBFile.acquisition
-            rawdata = nwbf.get_acquisition()
-            assert isinstance(rawdata, pynwb.ecephys.ElectricalSeries)
-        except (ValueError, AssertionError):
+        # get the ElectricalSeries acquisition object
+        eseries_aquisitions = []
+        for obj_name, obj in nwbf.acquisition.items():
+            if isinstance(obj, pynwb.ecephys.ElectricalSeries):
+                eseries_aquisitions.append(obj)
+        if len(eseries_aquisitions) == 0:
             warnings.warn(
                 f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
                 + f"Skipping entry in {self.full_table_name}"
             )
             return
+        elif len(eseries_aquisitions) > 1:
+            warnings.warn(
+                f"Multiple ElectricalSeries objects found in: {nwb_file_abspath}\n\t"
+                + f"Inserting only first entry in {self.full_table_name}\n\t"
+                + "See issue #396 for more details."
+            )
+        rawdata = eseries_aquisitions[0]
 
         if rawdata.rate is not None:
             key["sampling_rate"] = rawdata.rate
@@ -335,7 +342,8 @@ class Raw(SpyglassMixin, dj.Imported):
                 gap_proportion=1.75,
                 min_valid_len=0,
             )
-        IntervalList().insert1(interval_dict, skip_duplicates=True)
+
+        IntervalList().cautious_insert(interval_dict)
 
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id

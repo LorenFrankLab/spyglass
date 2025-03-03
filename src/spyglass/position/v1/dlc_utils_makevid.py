@@ -342,7 +342,8 @@ class VideoMaker:
             self.centroid_position_dot.set_offsets((np.NaN, np.NaN))
             for bodypart in self.centroid_plot_objs.keys():
                 self.centroid_plot_objs[bodypart].set_offsets((np.NaN, np.NaN))
-            self.orientation_line.set_data((np.NaN, np.NaN))
+            empty_array = np.array([], dtype=float)
+            self.orientation_line.set_data(empty_array, empty_array)
             self.title.set_text(f"time = {0:3.4f}s\n frame = {frame_ind}")
 
             self.fig.savefig(frame_out_path, dpi=400)
@@ -421,8 +422,17 @@ class VideoMaker:
         if self.debug:
             print(f"\r{msg}", end=end)
 
-    def plot_frames(self, start_frame, end_frame, progress_bar=None):
+    def plot_frames(
+        self, start_frame, end_frame, progress_bar=None, process_pool=True
+    ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
+
+        if not process_pool:  # Single-threaded processing for debugging
+            for frame_ind in range(start_frame, end_frame):
+                self._generate_single_frame(frame_ind)
+                progress_bar.update()
+            return
+
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}  # dict of jobs
 

@@ -68,6 +68,20 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
+def declare_all_merge_tables():
+    """Ensures all merge tables in the spyglass core package are declared.
+    - Prevents circular imports
+    - Prevents errors from table declaration within a transaction
+    - Run during nwb insertion
+    """
+    from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
+    from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
+    from spyglass.position.position_merge import PositionOutput  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+        SpikeSortingOutput,
+    )
+
+
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
     """Given lists of items/names, return item at index or by substring."""
     if isinstance(index, int):

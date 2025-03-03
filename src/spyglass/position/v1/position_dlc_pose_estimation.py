@@ -254,7 +254,6 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                     "nwb_file_name": key["nwb_file_name"],
                     "epoch": key["epoch"],
                 },
-                populate_missing=False,
             )
         )
         if interval_list_name:
