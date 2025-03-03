@@ -353,7 +353,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
     def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a concatenated dataframe of all bodyparts."""
-        entries = (self.BodyPart & self).fetch("KEY")
+        entries = (self.BodyPart & self).fetch("KEY", log_export=False)
         nwb_data_dict = {
             entry["bodypart"]: (self.BodyPart() & entry).fetch_nwb()[0]
             for entry in entries
@@ -406,6 +406,21 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             },
             axis=1,
         )
+
+    def fetch_video_path(self, key: dict = dict()) -> str:
+        """Return the video path for pose estimate
+
+        Parameters
+        ----------
+        key : dict, optional
+            DataJoint key, by default dict()
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        key = (self & key).fetch1("KEY", log_export=False)
+        return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
 def convert_to_cm(df, meters_to_pixels):

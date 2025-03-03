@@ -179,6 +179,28 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
         points = params.get("points")
         centroid_method = params.get("centroid_method")
+
+        # Handle the null centroid case
+        if centroid_method == "null":
+            logger.logger.warning("Null centroid method selected")
+            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+            null_obj_id = AnalysisNwbfile().add_nwb_object(
+                analysis_file_name, pd.DataFrame()
+            )
+            key.update(
+                {
+                    "analysis_file_name": analysis_file_name,
+                    "dlc_position_object_id": null_obj_id,
+                    "dlc_velocity_object_id": null_obj_id,
+                }
+            )
+            AnalysisNwbfile().add(
+                nwb_file_name=key["nwb_file_name"],
+                analysis_file_name=key["analysis_file_name"],
+            )
+            self.insert1(key)
+            return
+
         required_points = _key_to_points.get(centroid_method)
         for point in required_points:
             if points[point] not in self._available_bodyparts(key):
@@ -358,4 +380,5 @@ _key_to_points = {
     "four_led_centroid": ["greenLED", "redLED_L", "redLED_C", "redLED_R"],
     "two_pt_centroid": ["point1", "point2"],
     "one_pt_centroid": ["point1"],
+    "null": [],
 }

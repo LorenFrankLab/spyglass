@@ -67,7 +67,43 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
         ori_nwb = (DLCOrientation & key).fetch_nwb()[0]
+        key = (
+            self.make_null_position_nwb(key)
+            if isinstance(pos_nwb["dlc_position"], pd.DataFrame)  # null case
+            else self.make_dlc_pos_nwb(key, pos_nwb, ori_nwb)  # normal case
+        )
 
+        AnalysisNwbfile().add(
+            nwb_file_name=key["nwb_file_name"],
+            analysis_file_name=key["analysis_file_name"],
+        )
+        self.insert1(key)
+
+        from ..position_merge import PositionOutput
+
+        # TODO: The next line belongs in a merge table function
+        PositionOutput._merge_insert(
+            [orig_key],
+            part_name=to_camel_case(self.table_name.split("__")[-1]),
+            skip_duplicates=True,
+        )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
+
+    @staticmethod
+    def make_null_position_nwb(key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            nwb_file_name=key["nwb_file_name"]
+        )
+        obj_id = AnalysisNwbfile().add_nwb_object(
+            key["analysis_file_name"], pd.DataFrame()
+        )
+        key["position_object_id"] = obj_id
+        key["orientation_object_id"] = obj_id
+        key["velocity_object_id"] = obj_id
+        return key
+
+    @staticmethod
+    def make_dlc_pos_nwb(key, pos_nwb, ori_nwb):
         pos_obj = pos_nwb["dlc_position"].spatial_series["position"]
         vel_obj = pos_nwb["dlc_velocity"].time_series["velocity"]
         vid_frame_obj = pos_nwb["dlc_velocity"].time_series["video_frame_ind"]
@@ -135,21 +171,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
                 ),
             }
         )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=analysis_file_name,
-        )
-        self.insert1(key)
-
-        from ..position_merge import PositionOutput
-
-        # TODO: The next line belongs in a merge table function
-        PositionOutput._merge_insert(
-            [orig_key],
-            part_name=to_camel_case(self.table_name.split("__")[-1]),
-            skip_duplicates=True,
-        )
+        return key
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
@@ -213,6 +235,16 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         orientation_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_orientation"
         ]
+
+        # check for the null cohort case
+        if not (DLCSmoothInterpCohort.BodyPart & centroid_key) and not (
+            DLCSmoothInterpCohort.BodyPart & orientation_key
+        ):
+            return {}
+
+        centroid_bodyparts, centroid_si_params = (
+            DLCSmoothInterpCohort.BodyPart & centroid_key
+        ).fetch("bodypart", "dlc_si_params_name")
         orientation_bodyparts, orientation_si_params = (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ).fetch("bodypart", "dlc_si_params_name")
@@ -265,6 +297,32 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             for bodypart in bodyparts
         }
         return sub_thresh_percent_dict
+
+    def fetch_pose_dataframe(self):
+        """fetches the pose data from the pose estimation table
+
+        Returns
+        -------
+        pd.DataFrame
+            pose data
+        """
+        key = self.fetch1("KEY")
+        return (DLCPoseEstimation & key).fetch_dataframe()
+
+    def fetch_video_path(self, key: dict = dict()) -> str:
+        """Return the video path for pose estimate
+
+        Parameters
+        ----------
+        key : dict, optional
+            key of entry within the table instance, by default dict()
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        key = (self & key).fetch1("KEY")
+        return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
 @schema

@@ -24,7 +24,9 @@ SpikeSortingRecording().update_ids()
 
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
+- Add common method `get_position_interval_epoch` #1056
 - Improve cron job documentation and script #1226, #1241
+- Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
     - Add recompute ability for `SpikeSortingRecording` #1093
 
@@ -39,6 +41,9 @@ SpikeSortingRecording().update_ids()
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238
+    - Speedup `get_sorting` on `CurationV1` #1246
+- Behavior
+    - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
 ## [0.5.4] (December 20, 2024)
 

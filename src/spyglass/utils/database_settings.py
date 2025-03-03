@@ -11,6 +11,7 @@ import datajoint as dj
 from spyglass.utils.logging import logger
 
 SHARED_MODULES = [
+    "behavior",
     "common",
     "decoding",
     "lfp",
