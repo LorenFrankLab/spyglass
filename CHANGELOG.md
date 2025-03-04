@@ -10,6 +10,7 @@
 - Improve cron job documentation and script #1226, #1241
 - Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
+- Remove cli module #1250
 
 ### Pipelines
 
