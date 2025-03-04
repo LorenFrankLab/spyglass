@@ -57,7 +57,7 @@ def get_nwb_file(nwb_file_path):
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
     """
-    if not nwb_file_path.startswith("/"):
+    if not str(nwb_file_path).startswith("/"):
         from spyglass.common import Nwbfile
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)

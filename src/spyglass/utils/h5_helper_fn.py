@@ -1,4 +1,5 @@
 """Helper methods for comparing pynwb objects."""
+
 from json import loads as json_loads
 import h5py
 

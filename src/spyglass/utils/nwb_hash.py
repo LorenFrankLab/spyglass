@@ -88,7 +88,7 @@ class DirectoryHasher:
 
         for file_path in tqdm(all_files, disable=not self.verbose):
             if file_path.suffix == ".nwb":
-                hasher = NwbfileHasher(file_path, batch_size=batch_size)
+                hasher = NwbfileHasher(file_path, batch_size=self.batch_size)
                 self.hashed.update(hasher.hash.encode())
             elif file_path.suffix == ".json":
                 self.hashed.update(self.json_encode(file_path))
@@ -177,6 +177,8 @@ class NwbfileHasher:
         self.file = h5py.File(path, "r")
         atexit.register(self.cleanup)
 
+        if precision_lookup is None:
+            precision_lookup = PRECISION_LOOKUP
         if isinstance(precision_lookup, int):
             precision_lookup = dict(ProcessedElectricalSeries=precision_lookup)
 

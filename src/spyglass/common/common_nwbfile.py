@@ -381,11 +381,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 schema.external["analysis"]
                 & f"filepath LIKE '%{analysis_nwb_file_name}'"
             )
-            if len(query) != 1:
-                raise FileNotFoundError(
-                    f"Found {len(query)} files for: {analysis_nwb_file_name}"
-                )
-            return Path(analysis_dir) / query.fetch1("filepath")
+            if len(query) == 1:  # Else try the standard way
+                return Path(analysis_dir) / query.fetch1("filepath")
+            logger.warning(
+                f"Found {len(query)} files for: {analysis_nwb_file_name}"
+            )
 
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
@@ -461,7 +461,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         analysis_file_name: str,
         from_schema: bool = False,
         precision_lookup: dict = None,
-    ) -> str:
+        return_hasher: bool = False,
+    ) -> Union[str, NwbfileHasher]:
         """Return the hash of the file contents.
 
         Parameters
@@ -471,17 +472,20 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         from_schema : bool, Optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
-
+        return_hasher: bool, Optional
+            If true, return the hasher object instead of the hash. Defaults to
+            False.
 
         Returns
         -------
-        file_hash : str
-            The hash of the file contents.
+        file_hash : [str, NwbfileHasher]
+            The hash of the file contents or the hasher object itself.
         """
-        return NwbfileHasher(
+        hasher = NwbfileHasher(
             self.get_abs_path(analysis_file_name, from_schema=from_schema),
             precision_lookup=precision_lookup,
-        ).hash
+        )
+        return hasher if return_hasher else hasher.hash
 
     def _update_external(self, analysis_file_name: str, file_hash: str):
         """Update the external contents checksum for an analysis file.

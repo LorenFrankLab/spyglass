@@ -29,3 +29,15 @@ def test_recompute(spike_v1, pop_rec, common):
         pre.object_id == post.object_id
         and pre.electrodes.object_id == post.electrodes.object_id
     ), "Recompute failed to preserve object_ids"
+
+
+def test_recompute_env(spike_v1, pop_rec):
+    """Test recompute to temp_dir"""
+    from spyglass.spikesorting.v1 import recompute
+
+    key = spike_v1.SpikeSortingRecording().fetch("KEY", as_dict=True)[0]
+
+    recompute.RecordingRecompute().populate(key)
+
+    ret = (recompute.RecordingRecompute() & key).fetch1("matched")
+    assert ret, "Recompute failed"

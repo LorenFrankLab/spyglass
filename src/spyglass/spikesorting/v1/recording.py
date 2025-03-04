@@ -21,13 +21,12 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.common.common_nwbfile import schema as nwb_schema
-from spyglass.settings import analysis_dir, temp_dir, test_mode
+from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("spikesorting_v1_recording")
@@ -173,8 +172,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
-    electrodes_id='': varchar(40) # Object ID for the processed electrodes
-    file_hash='': varchar(32) # Hash of the NWB file
+    electrodes_id=null: varchar(40) # Object ID for the processed electrodes
+    file_hash=null: varchar(32) # Hash of the NWB file
     dependencies=null: blob # dict of dependencies (pynwb, hdmf, spikeinterface)
     """
 
@@ -211,6 +210,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
 
         self.insert1(key)
+        self._record_environment(key)
 
     @classmethod
     def _make_file(
@@ -249,10 +249,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         file_hash = None
         recompute = recompute_file_name and not key and not save_to
-        file_path = AnalysisNwbfile.get_abs_path(
-            recompute_file_name, from_schema=True
-        )
-        if recompute:
+
+        if recompute or save_to:  # if we expect file to exist
+            file_path = AnalysisNwbfile.get_abs_path(
+                recompute_file_name, from_schema=True
+            )
+        if recompute:  # If recompute, check if file exists
             if Path(file_path).exists():  # No need to recompute
                 return
             logger.info(f"Recomputing {recompute_file_name}.")
@@ -261,19 +263,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             key, recompute_object_id, recompute_electrodes_id, file_hash = (
                 query.fetch1("KEY", "object_id", "electrodes_id", "file_hash")
             )
-        elif save_to:  # recompute prior to deletion
-            elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-            if not Path(file_path).exists():
-                raise FileNotFoundError(f"File {analysis_path} not found.")
-
-            # ensure partial objects are present in existing file
-            with H5File(file_path, "r") as f:
-                elect_parts = elect_attr.split("/")
-                for i in range(len(elect_parts)):
-                    mid_path = "/".join(elect_parts[: i + 1])
-                    if mid_path not in f.keys():
-                        raise KeyError(f"{mid_path} MISSING {analysis_path}")
-                elect_id = f[elect_attr].attrs["object_id"]
+        elif save_to:  # recompute prior to deletion, save copy to temp_dir
+            elect_id = cls._validate_file(file_path)
             obj_id = (cls & key).fetch1("object_id")
             recompute_object_id, recompute_electrodes_id = obj_id, elect_id
         else:
@@ -291,15 +282,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         )
 
-        # TODO: uncomment after review. Commented to avoid impacting database
-        # if recompute:
-        #     # AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
-        precision_lookup = dict(ProcessedElectricalSeries=rounding)
         file_hash = AnalysisNwbfile().get_hash(
             recording_nwb_file_name,
             from_schema=True,  # REVERT TO FALSE?
-            precision_lookup=precision_lookup,
+            precision_lookup=rounding,
+            return_hasher=bool(save_to),
         )
+
+        # NOTE: Conditional to avoid impacting database. NO MERGE!
+        if recompute and test_mode:
+            AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
@@ -312,6 +304,49 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 spikeinterface=si.__version__,
             ),
         )
+
+    @classmethod
+    def _validate_file(self, file_path: str) -> str:
+        """Validate the NWB file exists and contains required upstream data.
+
+        Parameters
+        ----------
+        file_path : str
+            path to the NWB file to validate
+
+        Returns
+        -------
+        elect_id : str
+            ProcessedElectricalSeries/electrodes object ID
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file does not exist
+        KeyError
+            If the file does not contain electrodes or upstream objects
+        """
+        elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
+        if not Path(file_path).exists():
+            raise FileNotFoundError(f"File {file_path} not found.")
+
+        # ensure partial objects are present in existing file
+        with H5File(file_path, "r") as f:
+            elect_parts = elect_attr.split("/")
+            for i in range(len(elect_parts)):
+                mid_path = "/".join(elect_parts[: i + 1])
+                if mid_path in f.keys():
+                    continue
+                raise KeyError(f"{mid_path} MISSING {file_path}")
+            elect_id = f[elect_attr].attrs["object_id"]
+
+        return elect_id
+
+    def _record_environment(self, key):
+        """Record environment details for this recording."""
+        from spyglass.spikesorting.v1 import recompute as rcp
+
+        rcp.RecordingRecomputeSelection().insert(key)
 
     @classmethod
     def get_recording(cls, key: dict) -> si.BaseRecording:
@@ -552,8 +587,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recording = recording.set_probe(tetrode, in_place=True)
 
         return dict(recording=recording, timestamps=np.asarray(timestamps))
-
-        return obj_id, elect_id
 
     def update_ids(self):
         """Update electrodes_id, and file_hash in SpikeSortingRecording table.

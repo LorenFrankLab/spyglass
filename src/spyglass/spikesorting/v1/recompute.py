@@ -11,21 +11,17 @@ RecordingRecompute: Attempt recompute of an analysis file.
 
 import atexit
 from functools import cached_property
-from json import loads as json_loads
 from os import environ as os_environ
 from pathlib import Path
 from typing import Tuple, Union
 
 import datajoint as dj
-import h5py
 import pynwb
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
 from hdmf import __version__ as hdmf_version
 from hdmf.build import TypeMap
-from hdmf.spec import NamespaceCatalog
 from numpy import __version__ as np_version
-from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from spikeinterface import __version__ as si_version
 
 from spyglass.common import AnalysisNwbfile
@@ -83,7 +79,14 @@ class RecordingVersions(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Inventory the namespaces present in an analysis file."""
-        parent = (SpikeSortingRecording & key).fetch1()
+        query = SpikeSortingRecording() & key
+        if not len(query) == 1:
+            raise ValueError(
+                f"SpikeSortingRecording & {key} has {len(query)} "
+                + f"matching entries: {query}"
+            )
+
+        parent = query.fetch1()
         path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
 
         insert = {**key, **get_file_namespaces(path)}
@@ -94,7 +97,7 @@ class RecordingVersions(SpyglassMixin, dj.Computed):
                 script = str(script[()]).split("=")[1].strip().replace("'", "")
             insert["spyglass"] = script
 
-        self.insert1(insert)
+        self.insert1(insert, allow_direct_insert=True)
 
 
 @schema
@@ -104,10 +107,15 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     attempt_id: varchar(32) # name for environment used to attempt recompute
     rounding=8: int # rounding for float ElectricalSeries
     ---
-    dependencies: blob # dict of pip dependencies
+    logged_at_creation=0: bool # whether the attempt was logged at creation
+    pip_deps: blob # dict of pip dependencies
+    nwb_deps: blob # dict of pynwb dependencies
     """
 
     # --- Insert helpers ---
+    @cached_property
+    def default_rounding(self):
+        return int(self.heading.attributes["rounding"].default)
 
     @cached_property
     def default_attempt_id(self):
@@ -124,20 +132,34 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             numpy=np_version,
         )
 
-    def insert(self, rows, **kwargs):
+    def key_pk(self, key):
+        """Return the current recording_id."""
+        return {"recording_id": key["recording_id"]}
+
+    def insert(self, rows, at_creation=False, **kwargs):
         """Custom insert to ensure dependencies are added to each row."""
+        # rows = rows.copy()
         if not isinstance(rows, list):
             rows = [rows]
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
+
         inserts = []
         for row in rows:
-            if not self._has_matching_pynwb(row):
+            key_pk = self.key_pk(row)
+            if not RecordingVersions & key_pk:  # ensure in parent table
+                RecordingVersions().make(key_pk)
+            if not self._has_matching_pynwb(key_pk):
                 continue
-            if not row.get("attempt_id", None):
-                row["attempt_id"] = self.default_attempt_id
-            row["dependencies"] = self.pip_deps
-            inserts.append(row)
+            inserts.append(
+                dict(
+                    **key_pk,
+                    rounding=row.get("rounding", self.default_rounding),
+                    attempt_id=row.get("attempt_id", self.default_attempt_id),
+                    dependencies=self.pip_deps,
+                    logged_at_creation=at_creation,
+                )
+            )
         super().insert(inserts, **kwargs)
 
     def attempt_all(self, attempt_id=None):
@@ -151,11 +173,19 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     # --- Gatekeep recompute attempts ---
 
-    @cached_property  # Ok to cache b/c static to python runtime
+    @cached_property
     def this_env(self):
-        """Restricted table matching pynwb env and pip env."""
+        """Restricted table matching pynwb env and pip env.
+
+        Serves as key_source for RecordingRecompute. Ensures that recompute
+        attempts are only made when the pynwb and pip environments match the
+        records. Also skips files whose environment was logged on creation.
+        """
+
         restr = []
-        for key in RecordingVersions().this_env * self:
+        for key in RecordingVersions().this_env * (
+            self & "logged_at_creation=0"
+        ):
             if key["dependencies"] != self.pip_deps:
                 continue
             pk = {k: v for k, v in key.items() if k in self.primary_key}
@@ -167,13 +197,13 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     def _has_matching_pynwb(self, key, show_err=True) -> bool:
         """Check current env for matching pynwb versions."""
-        this_rec = {"recording_id": key["recording_id"]}
+        key_pk = self.key_pk(key)
         ret = RecordingVersions().this_env & key
         if not ret and show_err:
             need = self._sort_dict(RecordingVersions().key_env(key))
             have = self._sort_dict(RecordingVersions().valid_ver_restr)
             logger.warning(
-                f"PyNWB version mismatch. Skipping key: {this_rec}"
+                f"PyNWB version mismatch. Skipping key: {key_pk}"
                 + f"\n\tHave: {have}"
                 + f"\n\tNeed: {need}"
             )
@@ -242,7 +272,9 @@ class RecordingRecompute(dj.Computed):
             old, new = self.get_objs(key, obj_name=obj_name)
             return H5pyComparator(old=old, new=new)
 
-    key_source = RecordingRecomputeSelection().this_env
+    # TODO: debug key source issues
+    key_source = RecordingRecomputeSelection().this_env.proj()
+    # key_source = RecordingRecomputeSelection() & "logged_at_creation=0"
     _key_cache = {}
     _hasher_cache = {}
     _files_cache = {}
@@ -333,34 +365,41 @@ class RecordingRecompute(dj.Computed):
         parent = (
             SpikeSortingRecording
             * RecordingVersions
-            * RecordingRecomputeSelection
+            * RecordingRecomputeSelection.proj()
             & key
         ).fetch1()
         self._key_cache[hashed] = parent
         return parent
 
-    def _other_roundings(self, key, less_than=False):
+    def _other_roundings(
+        self, key, operator="<"
+    ) -> dj.expression.QueryExpression:
         """Return other planned precision recompute attempts.
 
         Parameters
         ----------
         key : dict
             Key for the current recompute attempt.
-        less_than : bool
-            Default False.
-            If True, return attempts with lower precision than key.
-            If False, return attempts with higher precision.
+        operator : str, optional
+            Comparator for rounding field.
+            Default 'less than', return attempts with lower precision than key.
+            Also accepts '!=' or '>'.
         """
-        operator = "<" if less_than else "!="
         return (
             RecordingRecomputeSelection()
             & {k: v for k, v in key.items() if k != "rounding"}
             & f'rounding {operator} "{key["rounding"]}"'
         ).proj() - self
 
-    def _has_other_roundings(self, key, less_than=False):
-        """Check if other planned precision recompute attempts exist."""
-        return bool(self._other_roundings(key, less_than=less_than))
+    def _is_lower_rounding(self, key) -> bool:
+        """Check for lesser precision recompute attempts after match."""
+        this_key = {k: v for k, v in key.items() if k != "rounding"}
+        has_match = bool(self & this_key & "matched=1")
+        return (
+            False
+            if not has_match  # Only if match, report True of lower precision
+            else bool(self._other_roundings(key) & key)
+        )
 
     # --- Recompute ---
 
@@ -398,47 +437,43 @@ class RecordingRecompute(dj.Computed):
         else:
             return new_vals
 
-    def make(self, key):
+    def make(self, key, force_check=False):
         parent = self.get_parent_key(key)
         rounding = key.get("rounding")
 
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_env(key):
             return
+        # Ensure not duplicate work for lesser precision
+        if self._is_lower_rounding(key) and not force_check:
+            logger.warning(
+                f"Match at higher precision. Assuming match for {key}\n\t"
+                + "Run with force_check=True to recompute."
+            )
 
         old, new = self._get_paths(parent)
 
-        if not new.exists():  # if the file has yet to be recomputed
-            new_hash = self._recompute(key)["file_hash"]
-            if new_hash is None:  # Error occurred
-                return
-        else:
-            new_hasher = self._hash_one(new, rounding)
-            new_hash = new_hasher.hash
+        new_hasher = (
+            self._hash_one(new, rounding)
+            if new.exists()
+            else self._recompute(key)["file_hash"]
+        )
+
+        if new_hasher is None:  # Error occurred during recompute
+            return
 
         old_hasher = self._hash_one(old, rounding)
 
-        if new_hash == old_hasher.hash:
+        if new_hasher.hash == old_hasher.hash:
             self.insert1(dict(key, matched=True))
-            if not self._has_other_roundings(key, less_than=False):
+            if not self._has_other_roundings(key, operator="!="):
                 # if no other recompute attempts
                 new.unlink(missing_ok=True)
-            elif query := self._other_roundings(key, less_than=True):
-                logger.info(
-                    f"Matched at {rounding} precision: {new.name}\n"
-                    + "Deleting lesser pecision attempts"
-                )
-                query.delete()
-            return
-
-        names = []
-        hashes = []
 
         logger.info(f"Comparing mismatched {new.name}")
-        new_hasher = self._hash_one(new, rounding)
-        all_objs = set({**old_hasher.objs, **new_hasher.objs})
 
-        for obj in all_objs:
+        names, hashes = [], []
+        for obj in set({**old_hasher.objs, **new_hasher.objs}):
             old_obj, old_hash = old_hasher.objs.get(obj, (None, None))
             new_obj, new_hash = new_hasher.objs.get(obj, (None, None))
 
