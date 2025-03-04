@@ -21,7 +21,7 @@
         of `DLCPoseEstimation` #1208
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
-        filtering #1238
+        filtering #1249
     - Speedup `get_sorting` on `CurationV1` #1246
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
