@@ -77,7 +77,6 @@ moseq-cpu = [
 ]
 
 test = [
-    "click",                  # for CLI subpackage only
     "docker",                 # for tests in a container
     "ghostipy",
     "kachery",                # database access
