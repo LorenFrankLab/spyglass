@@ -75,6 +75,7 @@ nav:
     - Merge Tables: Features/Merge.md
     - Export: Features/Export.md
     - Centralized Code: Features/Mixin.md
+    - Recompute: Features/Recompute.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md

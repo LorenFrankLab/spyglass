@@ -54,6 +54,7 @@ class DirectoryHasher:
         self,
         directory_path: Union[str, Path],
         batch_size: int = DEFAULT_BATCH_SIZE,
+        keep_file_hash: bool = False,
         verbose: bool = False,
     ):
         """Generate a hash of the contents of a directory, recursively.
@@ -74,11 +75,21 @@ class DirectoryHasher:
             Path to the directory to hash.
         batch_size : int, optional
             Limit of data to hash for large files, by default 4095.
+        keep_file_hash : bool, optional
+            Default false. If true, keep cache the hash of each file.
+        verbose : bool, optional
+            Display progress bar, by default False.
         """
-
         self.dir_path = Path(directory_path)
-        self.batch_size = batch_size
-        self.verbose = verbose
+        if not self.dir_path.exists():
+            raise FileNotFoundError(f"Dir does not exist: {self.dir_path}")
+        if not self.dir_path.is_dir():
+            raise NotADirectoryError(f"Path is not a dir: {self.dir_path}")
+
+        self.batch_size = int(batch_size)
+        self.keep_file_hash = bool(keep_file_hash)
+        self.hash_cache = {}
+        self.verbose = bool(verbose)
         self.hashed = md5("".encode())
         self.hash = self.compute_hash()
 
@@ -88,32 +99,37 @@ class DirectoryHasher:
 
         for file_path in tqdm(all_files, disable=not self.verbose):
             if file_path.suffix == ".nwb":
-                hasher = NwbfileHasher(file_path, batch_size=self.batch_size)
-                self.hashed.update(hasher.hash.encode())
+                this_hash = NwbfileHasher(
+                    file_path, batch_size=self.batch_size
+                ).hash.encode()
             elif file_path.suffix == ".json":
-                self.hashed.update(self.json_encode(file_path))
+                this_hash = self.json_encode(file_path)
             else:
-                self.chunk_encode(file_path)
+                this_hash = self.chunk_encode(file_path)
+
+            self.hashed.update(this_hash)
 
             # update with the rel path to for same file in diff dirs
             rel_path = str(file_path.relative_to(self.dir_path))
             self.hashed.update(rel_path.encode())
 
-            if self.verbose:
-                print(f"{file_path.name}: {self.hased.hexdigest()}")
+            if self.keep_file_hash:
+                self.hash_cache[rel_path] = this_hash
 
         return self.hashed.hexdigest()  # Return the hex digest of the hash
 
     def chunk_encode(self, file_path: Path) -> str:
         """Encode the contents of a file in chunks for hashing."""
+        this_hash = md5("".encode())
         with file_path.open("rb") as f:
             while chunk := f.read(self.batch_size):
-                self.hashed.update(chunk)
+                this_hash.update(chunk)
+        return this_hash.hexdigest()
 
     def json_encode(self, file_path: Path) -> str:
         """Encode the contents of a json file for hashing.
 
-        Ignores the 'version' key(s) in the json file.
+        Ignores the predetermined keys in the IGNORED_KEYS list.
         """
         with file_path.open("r") as f:
             file_data = json.load(f, object_hook=self.pop_version)

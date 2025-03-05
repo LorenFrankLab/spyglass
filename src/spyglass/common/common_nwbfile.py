@@ -478,7 +478,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         Returns
         -------
-        file_hash : [str, NwbfileHasher]
+        hash : [str, NwbfileHasher]
             The hash of the file contents or the hasher object itself.
         """
         hasher = NwbfileHasher(
@@ -487,7 +487,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         )
         return hasher if return_hasher else hasher.hash
 
-    def _update_external(self, analysis_file_name: str, file_hash: str):
+    def _update_external(self, analysis_file_name: str, hash: str):
         """Update the external contents checksum for an analysis file.
 
         USE WITH CAUTION. If the hash does not match the file contents, the file
@@ -497,7 +497,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         analysis_file_name : str
             The name of the analysis NWB file.
-        file_hash : str
+        hash : str
             The hash of the file contents as calculated by NwbfileHasher.
             If the hash does not match the file contents, the file and
             downstream entries are deleted.
@@ -505,7 +505,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         file_path = self.get_abs_path(analysis_file_name, from_schema=True)
         new_hash = self.get_hash(analysis_file_name, from_schema=True)
 
-        if file_hash != new_hash:
+        if hash != new_hash:
             Path(file_path).unlink()  # remove mismatched file
             # force delete, including all downstream, forcing permissions
             del_kwargs = dict(force_permission=True, safemode=False)

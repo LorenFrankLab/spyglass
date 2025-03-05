@@ -1,4 +1,3 @@
-import os
 import shutil
 from functools import reduce
 from pathlib import Path
@@ -8,6 +7,7 @@ import numpy as np
 import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
+from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
@@ -27,6 +27,7 @@ from spyglass.spikesorting.utils import (
 )
 from spyglass.utils import SpyglassMixin
 from spyglass.utils.dj_helper_fn import dj_replace
+from spyglass.utils.nwb_hash import DirectoryHasher
 
 schema = dj.schema("spikesorting_recording")
 
@@ -291,16 +292,16 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
-
     definition = """
     -> SpikeSortingRecordingSelection
     ---
     recording_path: varchar(1000)
     -> IntervalList.proj(sort_interval_list_name='interval_list_name')
+    hash=null: char(32)  # hash of the directory
     """
 
     _parallel_make = True
+    use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populates the SpikeSortingRecording table with the recording data.
@@ -313,37 +314,71 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         2. Saves the recording data to the recording directory
         3. Inserts the path to the recording data into SpikeSortingRecording
         """
-        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording = self._get_filtered_recording(key)
-        recording_name = self._get_recording_name(key)
-
-        # Path to files that will hold the recording extractors
-        recording_path = str(recording_dir / Path(recording_name))
-        if os.path.exists(recording_path):
-            shutil.rmtree(recording_path)
-
-        recording.save(
-            folder=recording_path, chunk_duration="10000ms", n_jobs=8
-        )
+        rec_info = self._make_file(key)
 
         IntervalList.insert1(
             {
                 "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": recording_name,
-                "valid_times": sort_interval_valid_times,
+                "interval_list_name": rec_info["name"],
+                "valid_times": self._get_sort_interval_valid_times(key),
                 "pipeline": "spikesorting_recording_v0",
             },
             replace=True,
         )
 
-        self.insert1(
-            {
-                **key,
-                # store the list of valid times for the sort
-                "sort_interval_list_name": recording_name,
-                "recording_path": recording_path,
-            }
+        self_insert = dict(
+            key,
+            sort_interval_list_name=rec_info["name"],
+            recording_path=rec_info["path"],
         )
+        self.insert1(self_insert)
+
+        from spyglass.spikesorting.v0.spikesorting_recompute import (
+            RecordingRecomputeSelection,
+        )
+
+        RecordingRecomputeSelection.insert(self_insert, logged_at_creation=True)
+
+    def _make_file(self, key):
+        """Run only operations required to save the recording data to disk."""
+        has_entry = bool(self & key)  # table entry exists, so recompute files
+        ret = {
+            "name": self._get_recording_name(key),
+            "path": str(
+                Path(recording_dir) / Path(self._get_recording_name(key))
+            ),
+        }
+
+        # Path to files that will hold the recording extractors
+        recording_name = self._get_recording_name(key)
+        recording_path = str(recording_dir / Path(recording_name))
+        if Path(ret["path"]).exists():
+            if has_entry:  # if table entry for existing file, use it
+                return {**ret, "hash": self._dir_hash(ret["path"])}
+            else:  # if no table entry, assume existing is outdated and delete
+                shutil.rmtree(recording_path)
+
+        recording = self._get_filtered_recording(key)
+        recording.save(folder=ret["path"], chunk_duration="10000ms", n_jobs=8)
+
+        return {**ret, "hash": self._dir_hash(recording_path)}
+
+    def _dir_hash(self, path):
+        """Return the hash of the directory."""
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Directory does not exist: {path}")
+        if not path.is_dir():
+            raise NotADirectoryError(f"Path is not a directory: {path}")
+        return DirectoryHasher(directory=path).hash
+
+    def update_ids(self):
+        """Update file hashes for all entries in the table.
+
+        Only used for transitioning to recompute NWB files, see #1093."""
+        for key in tqdm(self & 'hash=""', desc="Updating hashes"):
+            key["hash"] = self._dir_hash(key["recording_path"])
+            self.update1(key)
 
     @staticmethod
     def _get_recording_name(key):

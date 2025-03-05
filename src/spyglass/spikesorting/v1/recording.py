@@ -11,6 +11,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 from h5py import File as H5File
 from hdmf.data_utils import GenericDataChunkIterator
+from tqdm import tqdm
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_device import Probe
@@ -173,8 +174,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
     electrodes_id=null: varchar(40) # Object ID for the processed electrodes
-    file_hash=null: varchar(32) # Hash of the NWB file
-    dependencies=null: blob # dict of dependencies (pynwb, hdmf, spikeinterface)
+    hash=null: varchar(32) # Hash of the NWB file
     """
 
     def make(self, key):
@@ -247,7 +247,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if isinstance(key, dict):
             key = {k: v for k, v in key.items() if k in cls.primary_key}
 
-        file_hash = None
+        hash = None
         recompute = recompute_file_name and not key and not save_to
 
         if recompute or save_to:  # if we expect file to exist
@@ -260,8 +260,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
             # Use deleted file's ids and hash for recompute
-            key, recompute_object_id, recompute_electrodes_id, file_hash = (
-                query.fetch1("KEY", "object_id", "electrodes_id", "file_hash")
+            key, recompute_object_id, recompute_electrodes_id, hash = (
+                query.fetch1("KEY", "object_id", "electrodes_id", "hash")
             )
         elif save_to:  # recompute prior to deletion, save copy to temp_dir
             elect_id = cls._validate_file(file_path)
@@ -282,7 +282,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         )
 
-        file_hash = AnalysisNwbfile().get_hash(
+        hash = AnalysisNwbfile().get_hash(
             recording_nwb_file_name,
             from_schema=True,  # REVERT TO FALSE?
             precision_lookup=rounding,
@@ -291,13 +291,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         # NOTE: Conditional to avoid impacting database. NO MERGE!
         if recompute and test_mode:
-            AnalysisNwbfile()._update_external(recompute_file_name, file_hash)
+            AnalysisNwbfile()._update_external(recompute_file_name, hash)
 
         return dict(
             analysis_file_name=recording_nwb_file_name,
             object_id=recording_object_id,
             electrodes_id=electrodes_id,
-            file_hash=file_hash,
+            hash=hash,
             dependencies=dict(
                 pynwb=pynwb.__version__,
                 hdmf=hdmf.__version__,
@@ -589,23 +589,27 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         return dict(recording=recording, timestamps=np.asarray(timestamps))
 
     def update_ids(self):
-        """Update electrodes_id, and file_hash in SpikeSortingRecording table.
+        """Update electrodes_id, and hash in SpikeSortingRecording table.
 
         Only used for transitioning to recompute NWB files, see #1093.
         """
         elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-        needs_update = self & ["electrodes_id=''", "file_hash=''"]
-        for key in needs_update.fetch(as_dict=True):
+        needs_update = self & ["electrodes_id=''", "hash=''"]
+
+        for key in tqdm(needs_update):
             analysis_file_path = AnalysisNwbfile.get_abs_path(
                 key["analysis_file_name"]
             )
             with H5File(analysis_file_path, "r") as f:
                 elect_id = f[elect_attr].attrs["object_id"]
-            key["electrodes_id"] = elect_id
 
-            key["file_hash"] = NwbfileHasher(analysis_file_path).hash
+            updated = dict(
+                key,
+                electrodes_id=elect_id,
+                hash=NwbfileHasher(analysis_file_path).hash,
+            )
 
-            self.update1(key)
+            self.update1(updated)
 
     def recompute(self, key: dict):
         """Recompute the processed recording.

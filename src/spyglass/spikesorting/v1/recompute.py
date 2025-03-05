@@ -4,9 +4,15 @@ Tables
 ------
 RecordingVersions: What versions are present in an existing analysis file?
     Allows restrict of recompute attempts to pynwb environments that are
-    compatible with a pre-existing file. For pip dependencies, see
-    SpikeSortingRecording.dependencies field
-RecordingRecompute: Attempt recompute of an analysis file.
+    compatible with a pre-existing file.
+RecordingRecomputeSelection: Plan a recompute attempt. Capture a list of
+    pip dependencies under an attempt label, 'attempt_id', and set the desired
+    level of precision for the recompute (i.e., rounding for ElectricalSeries
+    data).
+RecordingRecompute: Attempt to recompute an analysis file, saving a new file
+    to a temporary directory. If the new file matches the old, the new file is
+    deleted. If the new file does not match, the differences are logged in
+    the Hash table.
 """
 
 import atexit
@@ -119,9 +125,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @cached_property
     def default_attempt_id(self):
+        user = dj.config["database.user"]
         conda = os_environ.get("CONDA_DEFAULT_ENV", "base")
-        si_readable = si_version.replace(".", "-")
-        return f"{conda}_si{si_readable}"
+        return f"{user}_{conda}"
 
     @cached_property
     def pip_deps(self):
@@ -138,7 +144,6 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     def insert(self, rows, at_creation=False, **kwargs):
         """Custom insert to ensure dependencies are added to each row."""
-        # rows = rows.copy()
         if not isinstance(rows, list):
             rows = [rows]
         if not isinstance(rows[0], dict):
@@ -163,10 +168,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         super().insert(inserts, **kwargs)
 
     def attempt_all(self, attempt_id=None):
-        if not attempt_id:
-            attempt_id = self.default_attempt_id
         inserts = [
-            {**key, "attempt_id": attempt_id, "dependencies": self.pip_deps}
+            {
+                **key,
+                "attempt_id": attempt_id or self.default_attempt_id,
+                "dependencies": self.pip_deps,
+            }
             for key in RecordingVersions().this_env.fetch("KEY", as_dict=True)
         ]
         self.insert(inserts, skip_duplicates=True)
@@ -245,14 +252,14 @@ class RecordingRecompute(dj.Computed):
     """
 
     class Name(dj.Part):
-        definition = """
+        definition = """ # Object names missing from old or new versions
         -> master
         name : varchar(255)
         missing_from: enum('old', 'new')
         """
 
     class Hash(dj.Part):
-        definition = """
+        definition = """ # Object hashes that differ between old and new
         -> master
         name : varchar(255)
         ---
@@ -272,12 +279,10 @@ class RecordingRecompute(dj.Computed):
             old, new = self.get_objs(key, obj_name=obj_name)
             return H5pyComparator(old=old, new=new)
 
-    # TODO: debug key source issues
     key_source = RecordingRecomputeSelection().this_env.proj()
-    # key_source = RecordingRecomputeSelection() & "logged_at_creation=0"
-    _key_cache = {}
-    _hasher_cache = {}
-    _files_cache = {}
+    _key_cache = dict()
+    _hasher_cache = dict()
+    _files_cache = dict()
     _cleanup_registered = False
 
     @property
@@ -456,7 +461,7 @@ class RecordingRecompute(dj.Computed):
         new_hasher = (
             self._hash_one(new, rounding)
             if new.exists()
-            else self._recompute(key)["file_hash"]
+            else self._recompute(key)["hash"]
         )
 
         if new_hasher is None:  # Error occurred during recompute
@@ -487,3 +492,7 @@ class RecordingRecompute(dj.Computed):
         self.insert1(dict(key, matched=False))
         self.Name().insert(names)
         self.Hash().insert(hashes)
+
+    def delete_files(self, key):
+        """If successfully recomputed, delete files for a given restriction."""
+        pass  # TODO: add means of deleting replicated files

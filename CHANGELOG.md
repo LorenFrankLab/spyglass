@@ -1,6 +1,6 @@
 # Change Log
 
-## [0.5.5] (Unreleased)
+## \[0.5.5\] (Unreleased)
 
 ### Release Notes
 
@@ -10,14 +10,17 @@
 
 ```python
 import datajoint as dj
-from spyglass.spikesorting.v1.recording import *  # noqa
+from spyglass.spikesorting.v1 import recording as v1rec  # noqa
+from spyglass.spikesorting.v0 import spikesorting_recording as v0rec  # noqa
 from spyglass.linearization.v1.main import *  # noqa
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 TrackGraph.alter()  # Add edge map parameter
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
+v0rec.SpikeSortingRecording().alter()
+v0rec.SpikeSortingRecording().update_ids()
+v1rec.SpikeSortingRecording().alter()
+v1rec.SpikeSortingRecording().update_ids()
 ```
 
 ### Infrastructure
@@ -28,7 +31,7 @@ SpikeSortingRecording().update_ids()
 - Improve cron job documentation and script #1226, #1241
 - Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
-    - Add recompute ability for `SpikeSortingRecording` #1093
+- Add recompute ability for `SpikeSortingRecording` #1093
 
 ### Pipelines
 
