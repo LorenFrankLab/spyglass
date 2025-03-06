@@ -1,5 +1,4 @@
-"""Generate the api pages and navigation.
-"""
+"""Generate the api pages and navigation."""
 
 from pathlib import Path
 
