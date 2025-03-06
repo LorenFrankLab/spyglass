@@ -1,4 +1,16 @@
-"""This schema is used to track recompute capabilities for existing files."""
+"""This schema is used to track recompute capabilities for existing files.
+
+Tables
+------
+RecordingRecomputeSelection:
+    - Manual table to track recompute attempts.
+    - Records the pip dependencies used to attempt recompute.
+    - Records whether the attempt was logged at creation, skipping recomputes.
+RecordingRecompute:
+    - Computed table to track recompute success.
+    - Runs `SpikeSortingRecording()._make_file` to recompute files, saving the
+        resulting folder to `temp_dir/spikesort_v0_recompute/{attempt_id}`.
+"""
 
 from functools import cached_property
 from os import environ as os_environ
@@ -45,7 +57,7 @@ class RecordingRecomputeSelection(dj.Manual):
         )
 
     def key_pk(self, key):
-        return {k: key[k] for k in self.primary_key}
+        return {k: v for k, v in key.items() if k in self.primary_key}
 
     def insert(self, rows, logged_at_creation=False, **kwargs):
         """Custom insert to ensure dependencies are added to each row."""
@@ -61,7 +73,7 @@ class RecordingRecomputeSelection(dj.Manual):
                 dict(
                     **key_pk,
                     attempt_id=row.get("attempt_id", self.default_attempt_id),
-                    dependencies=self.pip_deps,
+                    pip_deps=self.pip_deps,
                     logged_at_creation=logged_at_creation,
                 )
             )
@@ -80,7 +92,7 @@ class RecordingRecomputeSelection(dj.Manual):
 
         restr = []
         for key in self:
-            if key["dependencies"] != self.pip_deps:
+            if key["pip_deps"] != self.pip_deps:
                 continue
             restr.append(self.key_pk(key))
         return self & restr
@@ -92,7 +104,7 @@ class RecordingRecomputeSelection(dj.Manual):
         if not len(query) == 1:
             raise ValueError(f"Query returned {len(query)} entries: {query}")
 
-        need = query.fetch1("dependencies")
+        need = query.fetch1("pip_deps")
         ret = need == self.pip_deps
 
         if not ret and show_err:
@@ -114,6 +126,7 @@ class RecordingRecompute(dj.Computed):
     """
 
     _hasher_cache = dict()
+    key_source = RecordingRecomputeSelection.this_env
 
     class Name(dj.Part):
         definition = """ # File names missing from old or new versions

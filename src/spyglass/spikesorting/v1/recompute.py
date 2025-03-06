@@ -115,7 +115,6 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     ---
     logged_at_creation=0: bool # whether the attempt was logged at creation
     pip_deps: blob # dict of pip dependencies
-    nwb_deps: blob # dict of pynwb dependencies
     """
 
     # --- Insert helpers ---
@@ -161,7 +160,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                     **key_pk,
                     rounding=row.get("rounding", self.default_rounding),
                     attempt_id=row.get("attempt_id", self.default_attempt_id),
-                    dependencies=self.pip_deps,
+                    pip_deps=self.pip_deps,
                     logged_at_creation=at_creation,
                 )
             )
@@ -172,7 +171,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             {
                 **key,
                 "attempt_id": attempt_id or self.default_attempt_id,
-                "dependencies": self.pip_deps,
+                "pip_deps": self.pip_deps,
             }
             for key in RecordingVersions().this_env.fetch("KEY", as_dict=True)
         ]
@@ -191,7 +190,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         restr = []
         for key in RecordingVersions().this_env:
-            if key["dependencies"] != self.pip_deps:
+            if key["pip_deps"] != self.pip_deps:
                 continue
             pk = {k: v for k, v in key.items() if k in self.primary_key}
             restr.append(pk)
@@ -222,7 +221,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         if not len(query) == 1:
             raise ValueError(f"Query returned {len(query)} entries: {query}")
 
-        need = query.fetch1("dependencies")
+        need = query.fetch1("pip_deps")
         ret = need == self.pip_deps
 
         if not ret and show_err:
