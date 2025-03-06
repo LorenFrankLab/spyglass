@@ -284,7 +284,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         hash = AnalysisNwbfile().get_hash(
             recording_nwb_file_name,
-            from_schema=True,  # REVERT TO FALSE?
+            from_schema=True,
             precision_lookup=rounding,
             return_hasher=bool(save_to),
         )
@@ -298,11 +298,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             object_id=recording_object_id,
             electrodes_id=electrodes_id,
             hash=hash,
-            dependencies=dict(
-                pynwb=pynwb.__version__,
-                hdmf=hdmf.__version__,
-                spikeinterface=si.__version__,
-            ),
         )
 
     @classmethod

@@ -190,9 +190,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """
 
         restr = []
-        for key in RecordingVersions().this_env * (
-            self & "logged_at_creation=0"
-        ):
+        for key in RecordingVersions().this_env:
             if key["dependencies"] != self.pip_deps:
                 continue
             pk = {k: v for k, v in key.items() if k in self.primary_key}
@@ -334,16 +332,16 @@ class RecordingRecompute(dj.Computed):
 
     # --- Path management ---
 
-    def _get_subdir(self, key) -> Path:
-        """Return the analysis file's subdirectory."""
-        file = key["analysis_file_name"] if isinstance(key, dict) else key
-        parts = file.split("_")
-        subdir = "_".join(parts[:-1])
-        return subdir + "/" + file
-
     def _get_paths(self, key, as_str=False) -> Tuple[Path, Path]:
         """Return the old and new file paths."""
         key = self.get_parent_key(key)
+
+        def _get_subdir(self, key) -> Path:
+            """Return the analysis file's subdirectory."""
+            file = key["analysis_file_name"] if isinstance(key, dict) else key
+            parts = file.split("_")
+            subdir = "_".join(parts[:-1])
+            return subdir + "/" + file
 
         old = Path(analysis_dir) / self._get_subdir(key)
         new = (
@@ -446,6 +444,10 @@ class RecordingRecompute(dj.Computed):
         parent = self.get_parent_key(key)
         rounding = key.get("rounding")
 
+        # Skip recompute for files logged at creation
+        if parent["logged_at_creation"]:
+            self.insert1(dict(key, matched=True))
+
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_env(key):
             return
@@ -493,6 +495,23 @@ class RecordingRecompute(dj.Computed):
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
-    def delete_files(self, key):
+    def delete_files(self, key, dry_run=True):
         """If successfully recomputed, delete files for a given restriction."""
-        pass  # TODO: add means of deleting replicated files
+        query = self.with_names & "matched=1" & key
+        file_names = query.fetch("analysis_file_name")
+        prefix = "DRY RUN: " if dry_run else ""
+        msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
+            file_names
+        )
+
+        if dry_run:
+            logger.info(msg)
+            return
+
+        if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
+            return
+
+        for key in query.proj():
+            old, new = self._get_paths(key)
+            new.unlink(missing_ok=True)
+            old.unlink(missing_ok=True)

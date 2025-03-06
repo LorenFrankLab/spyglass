@@ -1,6 +1,5 @@
 import atexit
 import json
-import re
 from functools import cached_property
 from hashlib import md5
 from pathlib import Path
@@ -15,7 +14,7 @@ from pynwb.spec import NWBDatasetSpec, NWBGroupSpec, NWBNamespace
 from tqdm import tqdm
 
 DEFAULT_BATCH_SIZE = 4095
-IGNORED_KEYS = ["version"]
+IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
 
@@ -88,7 +87,7 @@ class DirectoryHasher:
 
         self.batch_size = int(batch_size)
         self.keep_file_hash = bool(keep_file_hash)
-        self.hash_cache = {}
+        self.cache = {}
         self.verbose = bool(verbose)
         self.hashed = md5("".encode())
         self.hash = self.compute_hash()
@@ -114,7 +113,7 @@ class DirectoryHasher:
             self.hashed.update(rel_path.encode())
 
             if self.keep_file_hash:
-                self.hash_cache[rel_path] = this_hash
+                self.cache[rel_path] = this_hash
 
         return self.hashed.hexdigest()  # Return the hex digest of the hash
 
@@ -124,7 +123,7 @@ class DirectoryHasher:
         with file_path.open("rb") as f:
             while chunk := f.read(self.batch_size):
                 this_hash.update(chunk)
-        return this_hash.hexdigest()
+        return this_hash.hexdigest().encode()
 
     def json_encode(self, file_path: Path) -> str:
         """Encode the contents of a json file for hashing.
@@ -213,17 +212,6 @@ class NwbfileHasher:
     def cleanup(self):
         self.file.close()
 
-    def remove_version(self, input_string: str) -> str:
-        """Removes version numbers from the input."""
-        version_pattern = (
-            r"\d+\.\d+\.\d+"  # Major.Minor.Patch
-            + r"(?:-alpha|-beta|a\d+)?"  # Optional alpha or beta, -alpha
-            + r"(?:\.dev\d+)?"  # Optional dev build, .dev01
-            + r"(?:\+[a-z0-9]{9})?"  # Optional commit hash, +abcdefghi
-            + r"(?:\.d\d{8})?"  # Optional date, dYYYYMMDD
-        )
-        return re.sub(version_pattern, "VERSION", input_string)
-
     def collect_names(self, file):
         """Collects all object names in the file."""
 
@@ -260,12 +248,13 @@ class NwbfileHasher:
         return repr(value).encode()  # For other, use repr
 
     def hash_dataset(self, dataset: h5py.Dataset):
+        if dataset.name in IGNORED_KEYS:
+            return  # Ignore source script
+
         this_hash = md5(self.hash_shape_dtype(dataset))
 
         if dataset.shape == ():
             raw_scalar = str(dataset[()])
-            if "source_script" in dataset.name:
-                raw_scalar = self.remove_version(raw_scalar)
             this_hash.update(self.serialize_attr_value(raw_scalar))
             return
 

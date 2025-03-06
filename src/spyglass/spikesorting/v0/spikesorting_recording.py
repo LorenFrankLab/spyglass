@@ -78,8 +78,12 @@ class SortGroup(SpyglassMixin, dj.Manual):
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
-        # delete any current groups
-        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
+        existing_entries = SortGroup & {"nwb_file_name": nwb_file_name}
+
+        if existing_entries and self._test_mode:
+            return
+        elif existing_entries:  # delete any current groups
+            existing_entries.delete()
 
         sg_keys, sge_keys = get_group_by_shank(
             nwb_file_name=nwb_file_name,
@@ -339,38 +343,30 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         RecordingRecomputeSelection.insert(self_insert, logged_at_creation=True)
 
-    def _make_file(self, key):
+    def _make_file(self, key, base_dir=None, return_hasher=False):
         """Run only operations required to save the recording data to disk."""
         has_entry = bool(self & key)  # table entry exists, so recompute files
-        ret = {
-            "name": self._get_recording_name(key),
-            "path": str(
-                Path(recording_dir) / Path(self._get_recording_name(key))
-            ),
-        }
+        base_dir = Path(base_dir or recording_dir)
+        rec_path = base_dir / Path(self._get_recording_name(key))
+        ret = {"name": self._get_recording_name(key), "path": str(rec_path)}
 
-        # Path to files that will hold the recording extractors
-        recording_name = self._get_recording_name(key)
-        recording_path = str(recording_dir / Path(recording_name))
-        if Path(ret["path"]).exists():
+        if rec_path.exists():
             if has_entry:  # if table entry for existing file, use it
-                return {**ret, "hash": self._dir_hash(ret["path"])}
+                return {**ret, "hash": self._dir_hash(rec_path)}
             else:  # if no table entry, assume existing is outdated and delete
-                shutil.rmtree(recording_path)
+                shutil.rmtree(rec_path)
 
         recording = self._get_filtered_recording(key)
-        recording.save(folder=ret["path"], chunk_duration="10000ms", n_jobs=8)
+        recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
 
-        return {**ret, "hash": self._dir_hash(recording_path)}
+        return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
 
-    def _dir_hash(self, path):
+    def _dir_hash(self, path, return_hasher=False):
         """Return the hash of the directory."""
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(f"Directory does not exist: {path}")
-        if not path.is_dir():
-            raise NotADirectoryError(f"Path is not a directory: {path}")
-        return DirectoryHasher(directory=path).hash
+        hasher = DirectoryHasher(  # only cache per file if returning hasher obj
+            directory_path=path, keep_file_hash=return_hasher
+        )
+        return hasher if return_hasher else hasher.hash
 
     def update_ids(self):
         """Update file hashes for all entries in the table.
