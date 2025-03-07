@@ -77,7 +77,6 @@ moseq-cpu = [
 ]
 
 test = [
-    "click",                  # for CLI subpackage only
     "docker",                 # for tests in a container
     "ghostipy",
     "kachery",                # database access
@@ -102,9 +101,6 @@ docs = [
     "mkdocs-material",       # Docs theme
     "mkdocstrings[python]",  # Docs API docstrings
 ]
-
-[project.scripts]
-spyglass_cli = "spyglass.cli:cli"
 
 [project.urls]
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
@@ -171,7 +167,6 @@ source = ["*/src/spyglass/*"]
 omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
-    "*/cli/*",
     # "*/common/*",
     "*/data_import/*",
     "*/decoding/v0/*",
