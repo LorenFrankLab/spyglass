@@ -81,7 +81,7 @@ class RecordingRecomputeSelection(dj.Manual):
 
     # --- Gatekeep recompute attempts ---
 
-    @cached_property
+    @property  # key_source must not be a cached_property
     def this_env(self):
         """Restricted table matching pynwb env and pip env.
 
@@ -126,7 +126,7 @@ class RecordingRecompute(dj.Computed):
     """
 
     _hasher_cache = dict()
-    key_source = RecordingRecomputeSelection.this_env
+    # key_source = RecordingRecomputeSelection().this_env.proj()
 
     class Name(dj.Part):
         definition = """ # File names missing from old or new versions
@@ -151,7 +151,7 @@ class RecordingRecompute(dj.Computed):
         str_path = str(path)
         if str_path in self._hasher_cache:
             return self._hasher_cache[str_path]
-        hasher = DirectoryHasher(path=path, keep_file_hash=True)
+        hasher = DirectoryHasher(directory_path=path, keep_file_hash=True)
         self._hasher_cache[str_path] = hasher
         return hasher
 
@@ -160,7 +160,7 @@ class RecordingRecompute(dj.Computed):
 
     def _get_paths(self, key, as_str=False) -> Tuple[Path, Path]:
         """Return the old and new file paths."""
-        rec_name = SpikeSortingRecording().__get_recording_name(key)
+        rec_name = SpikeSortingRecording()._get_recording_name(key)
 
         old = Path(recording_dir) / rec_name
         new = self._get_temp_dir(key) / rec_name
@@ -169,9 +169,10 @@ class RecordingRecompute(dj.Computed):
 
     def make(self, key):
         # Skip recompute for files logged at creation
-        parent = (SpikeSortingRecording & key).fetch1()
+        parent = self._parent_key(key)
         if parent.get("logged_at_creation", True):
             self.insert1({**key, "matched": True})
+            return
 
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_pip(key):
@@ -187,7 +188,10 @@ class RecordingRecompute(dj.Computed):
             )["hash"]
         )
 
-        if parent["hash"] == new_hasher.hash:
+        # hack pending table alter
+        old_hash = parent.get("hash") or self._hash_one(old).hash
+
+        if old_hash == new_hasher.hash:
             self.insert1({**key, "matched": True})
             return
 
@@ -200,7 +204,7 @@ class RecordingRecompute(dj.Computed):
             if file not in new_hasher.cache:
                 names.append((key, file, "new"))
                 continue
-            if old_hasher[file] != new_hasher[file]:
+            if old_hasher.cache[file] != new_hasher.cache[file]:
                 hashes.append((key, file))
 
         self.insert1(dict(key, matched=False))

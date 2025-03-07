@@ -35,7 +35,11 @@ def test_recompute_env(spike_v1, pop_rec):
     """Test recompute to temp_dir"""
     from spyglass.spikesorting.v1 import recompute
 
-    key = spike_v1.SpikeSortingRecording().fetch("KEY", as_dict=True)[0]
+    select = recompute.RecordingRecomputeSelection()
+
+    key = select.fetch("KEY")[0]
+    key["logged_at_creation"] = False  # Prevent skip of recompute
+    select.update1(key)
 
     recompute.RecordingRecompute().populate(key)
 

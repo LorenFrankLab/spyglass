@@ -3,7 +3,11 @@ from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
 
-def test_merge_get_restr(spike_merge, pop_spike_merge, pop_curation_metric):
+def test_merge_get_restr(
+    spike_merge, pop_spike_merge, pop_curation_metric, frequent_imports
+):
+    _ = frequent_imports
+
     restr_id = spike_merge.get_restricted_merge_ids(
         pop_curation_metric, sources=["v1"]
     )[0]

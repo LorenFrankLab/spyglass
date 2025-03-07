@@ -179,7 +179,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     # --- Gatekeep recompute attempts ---
 
-    @cached_property
+    @property  # key_source must not be a cached_property
     def this_env(self):
         """Restricted table matching pynwb env and pip env.
 
@@ -189,7 +189,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """
 
         restr = []
-        for key in RecordingVersions().this_env:
+        for key in self * RecordingVersions().this_env:
             if key["pip_deps"] != self.pip_deps:
                 continue
             pk = {k: v for k, v in key.items() if k in self.primary_key}
@@ -335,19 +335,19 @@ class RecordingRecompute(dj.Computed):
         """Return the old and new file paths."""
         key = self.get_parent_key(key)
 
-        def _get_subdir(self, key) -> Path:
+        def get_subdir(key) -> Path:
             """Return the analysis file's subdirectory."""
             file = key["analysis_file_name"] if isinstance(key, dict) else key
             parts = file.split("_")
             subdir = "_".join(parts[:-1])
             return subdir + "/" + file
 
-        old = Path(analysis_dir) / self._get_subdir(key)
+        old = Path(analysis_dir) / get_subdir(key)
         new = (
             Path(temp_dir)
             / "spikesort_v1_recompute"
             / key.get("attempt_id", "")
-            / self._get_subdir(key)
+            / get_subdir(key)
         )
 
         return (str(old), str(new)) if as_str else (old, new)
@@ -367,7 +367,7 @@ class RecordingRecompute(dj.Computed):
         parent = (
             SpikeSortingRecording
             * RecordingVersions
-            * RecordingRecomputeSelection.proj()
+            * RecordingRecomputeSelection
             & key
         ).fetch1()
         self._key_cache[hashed] = parent
@@ -472,9 +472,10 @@ class RecordingRecompute(dj.Computed):
 
         if new_hasher.hash == old_hasher.hash:
             self.insert1(dict(key, matched=True))
-            if not self._has_other_roundings(key, operator="!="):
+            if not self._other_roundings(key, operator="!="):
                 # if no other recompute attempts
                 new.unlink(missing_ok=True)
+            return
 
         logger.info(f"Comparing mismatched {new.name}")
 
