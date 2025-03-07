@@ -368,6 +368,27 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         return hasher if return_hasher else hasher.hash
 
+    def load_recording(self, key):
+        """Load the recording data from the file."""
+        query = self & key
+        if not len(query) == 1:
+            query = self & {
+                k: v for k, v in key.items() if k in self.primary_key
+            }
+        if not len(query) == 1:
+            raise ValueError(f"Expected 1 entry, got {len(query)}: {query}")
+
+        path = query.fetch1("recording_path")
+
+        if not Path(path).exists():
+            SpikeSortingRecording()._make_file(key)
+        if not Path(path).exists():
+            raise FileNotFoundError(
+                f"Recording could not be recomputed: {path}"
+            )
+
+        return si.load_extractor(path)
+
     def update_ids(self):
         """Update file hashes for all entries in the table.
 

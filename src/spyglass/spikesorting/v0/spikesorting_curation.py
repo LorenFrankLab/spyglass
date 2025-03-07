@@ -166,8 +166,7 @@ class Curation(SpyglassMixin, dj.Manual):
         recording_extractor : spike interface recording extractor
 
         """
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-        return si.load_extractor(recording_path)
+        return SpikeSortingRecording().load_recording(key)
 
     @staticmethod
     def get_curated_sorting(key: dict):
