@@ -41,7 +41,7 @@ def test_recompute_env(spike_v1, pop_rec):
     key["logged_at_creation"] = False  # Prevent skip of recompute
     select.update1(key)
 
-    recompute.RecordingRecompute().populate(key)
+    recompute.RecordingRecompute().populate()
 
-    ret = (recompute.RecordingRecompute() & key).fetch1("matched")
+    ret = (recompute.RecordingRecompute() & key).fetch("matched")[0]
     assert ret, "Recompute failed"

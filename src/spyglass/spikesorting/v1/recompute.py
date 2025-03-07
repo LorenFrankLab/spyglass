@@ -288,7 +288,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         def compare(self, key, obj_name=None):
             return H5pyComparator(*self.get_objs(key, obj_name=obj_name))
 
-    key_source = RecordingRecomputeSelection().this_env.proj()
     _key_cache = dict()
     _hasher_cache = dict()
     _files_cache = dict()
@@ -422,13 +421,14 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         _, new = self._get_paths(key)
         parent = self.get_parent_key(key)
+        default_rounding = RecordingRecomputeSelection().default_rounding
 
         try:
             new_vals = SpikeSortingRecording()._make_file(
                 parent,
                 recompute_file_name=parent["analysis_file_name"],
                 save_to=new.parent.parent,
-                rounding=key.get("rounding", self.default_rounding),
+                rounding=key.get("rounding", default_rounding),
             )
         except RuntimeError as e:  # fail bc error in recompute, will retry
             logger.warning(f"{e}: {new.name}")
@@ -462,6 +462,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_env(key):
+            logger.info(f"Skipping due to env mismatch: {key}")
             return
 
         # Ensure not duplicate work for lesser precision
@@ -485,6 +486,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher = self._hash_one(old, rounding)
 
         if new_hasher.hash == old_hasher.hash:
+            logger.info(f"Matched {new.name}")
             self.insert1(dict(key, matched=True))
             if not self._other_roundings(key, operator="!="):
                 # if no other recompute attempts

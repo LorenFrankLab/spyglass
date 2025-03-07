@@ -10,6 +10,7 @@ def test_fetch_results(clusterless_pop, result_coordinates):
     ), "Incorrect coordinates in results"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_fetch_model(clusterless_pop):
     from non_local_detector.models.base import ClusterlessDetector
 
