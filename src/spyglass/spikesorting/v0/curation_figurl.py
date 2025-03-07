@@ -59,7 +59,6 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
         )
 
         # fetch
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
         sorting_path = (SpikeSorting & key).fetch1("sorting_path")
         recording_label = SpikeSortingRecording._get_recording_name(key)
         sorting_label = SpikeSorting._get_sorting_name(key)
@@ -85,7 +84,7 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
         initial_curation_uri = kcl.store_json(initial_curation)
 
         # Get the recording/sorting extractors
-        R = si.load_extractor(recording_path)
+        R = SpikeSortingRecording().load_recording(key)
         if R.get_num_segments() > 1:
             R = si.concatenate_recordings([R])
         S = si.load_extractor(sorting_path)
@@ -102,10 +101,14 @@ class CurationFigurl(SpyglassMixin, dj.Computed):
         )
 
         # insert
-        key["url"] = url
-        key["initial_curation_uri"] = initial_curation_uri
-        key["new_curation_uri"] = new_curation_uri
-        self.insert1(key)
+        self.insert1(
+            dict(
+                key,
+                url=url,
+                initial_curation_uri=initial_curation_uri,
+                new_curation_uri=new_curation_uri,
+            )
+        )
 
 
 def _generate_the_figurl(
