@@ -102,9 +102,6 @@ docs = [
     "mkdocstrings[python]",  # Docs API docstrings
 ]
 
-[project.scripts]
-spyglass_cli = "spyglass.cli:cli"
-
 [project.urls]
 "Homepage" = "https://github.com/LorenFrankLab/spyglass"
 "Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
@@ -170,7 +167,6 @@ source = ["*/src/spyglass/*"]
 omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
-    "*/cli/*",
     # "*/common/*",
     "*/data_import/*",
     "*/decoding/v0/*",
