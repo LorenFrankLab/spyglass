@@ -45,22 +45,33 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingRecording
     ---
-    core = '' : varchar(32)
-    hdmf_common = '' : varchar(32)
-    hdmf_experimental = '' : varchar(32)
-    ndx_franklab_novela = '' : varchar(32)
-    spyglass = '' : varchar(64)
+    nwb_deps=null:blob
     """
 
+    # expect
+    #  - core
+    #  - hdmf_common
+    #  - hdmf_experimental
+    #  - ndx_franklab_novela
+    #  - ndx_optogenetics
+    #  - spyglass
+
     @cached_property
-    def valid_ver_restr(self):
+    def nwb_deps(self):
         """Return a restriction of self for the current environment."""
         return self.namespace_dict(pynwb.get_manager().type_map)
 
     @cached_property
     def this_env(self):
         """Return restricted version of self for the current environment."""
-        return self & self.valid_ver_restr
+        restr = []
+        for key in self:
+            key_deps = key["nwb_deps"]
+            _ = key_deps.pop("spyglass", None)
+            if key_deps != self.nwb_deps:
+                continue
+            restr.append(self.dict_to_pk(key))
+        return self & restr
 
     def key_env(self, key):
         """Return the pynwb environment for a given key."""
@@ -69,18 +80,14 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         query = self & key
         if len(query) != 1:
             raise ValueError(f"Key matches {len(query)} entries: {query}")
-        return (self & key).fetch(*self.valid_ver_restr.keys(), as_dict=True)[0]
+        return (self & key).fetch("pip_deps", as_dict=True)[0]
 
     def namespace_dict(self, type_map: TypeMap):
         """Remap namespace names to hyphenated field names for DJ compatibility."""
-        hyph_fields = [f.replace("_", "-") for f in self.heading.names]
         name_cat = type_map.namespace_catalog
         return {
-            field.replace("-", "_"): name_cat.get_namespace(field).get(
-                "version", None
-            )
+            field: name_cat.get_namespace(field).get("version", None)
             for field in name_cat.namespaces
-            if field in hyph_fields
         }
 
     def make(self, key):
@@ -95,15 +102,15 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         parent = query.fetch1()
         path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
 
-        insert = {**key, **get_file_namespaces(path)}
+        nwb_deps = get_file_namespaces(path).copy()
 
         with h5py_File(path, "r") as f:
             script = f.get("general/source_script")
             if script is not None:  # after `=`, remove quotes
                 script = str(script[()]).split("=")[1].strip().replace("'", "")
-            insert["spyglass"] = script
+            nwb_deps["spyglass"] = script
 
-        self.insert1(insert, allow_direct_insert=True)
+        self.insert1(dict(key, nwb_deps=nwb_deps), allow_direct_insert=True)
 
 
 @schema
@@ -135,6 +142,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     def insert(self, rows, at_creation=False, **kwargs) -> None:
         """Custom insert to ensure dependencies are added to each row."""
+        defaults = dict(
+            attempt_id=DEFAULT_ATTEMPT_ID,
+            rounding=self.default_rounding,
+            pip_deps=self.pip_deps,
+        )
+
         if not isinstance(rows, list):
             rows = [rows]
         if not isinstance(rows[0], dict):
@@ -147,12 +160,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 RecordingRecomputeVersions().make(key_pk)
             if not self._has_matching_pynwb(key_pk):
                 continue
+
             inserts.append(
                 dict(
-                    **key_pk,
-                    rounding=row.get("rounding", self.default_rounding),
-                    attempt_id=row.get("attempt_id", DEFAULT_ATTEMPT_ID),
-                    pip_deps=self.pip_deps,
+                    **row,
+                    **{k: v for k, v in defaults.items() if k not in row},
                     logged_at_creation=at_creation,
                 )
             )
@@ -187,12 +199,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 **key,
                 "attempt_id": attempt_id or DEFAULT_ATTEMPT_ID,
                 "rounding": rounding or self.default_rounding,
-                "logged_at_creation": False,
                 "pip_deps": self.pip_deps,
             }
             for key in source.fetch("KEY", as_dict=True)
         ]
-        self.insert(inserts, **kwargs)
+        self.insert(inserts, at_creation=False, **kwargs)
 
     # --- Gatekeep recompute attempts ---
 
@@ -222,7 +233,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         ret = RecordingRecomputeVersions().this_env & key
         if not ret:
             need = self._sort_dict(RecordingRecomputeVersions().key_env(key))
-            have = self._sort_dict(RecordingRecomputeVersions().valid_ver_restr)
+            have = self._sort_dict(RecordingRecomputeVersions().nwb_deps)
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {key_pk}"
                 + f"\n\tHave: {have}"

@@ -18,9 +18,7 @@ IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
 
-def get_file_namespaces(
-    file_path: Union[str, Path], replace_hypens: bool = True
-) -> dict:
+def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     """Get all namespace versions from an NWB file.
 
     WARNING: This function falsely reports core <= 2.6.0 as 2.6.0-alpha
@@ -29,23 +27,15 @@ def get_file_namespaces(
     ----------
     file_path : Union[str, Path]
         Path to the NWB file.
-    replace_hypens : bool, optional
-        Replace hyphens with underscores for DJ compatibility, by default True.
     """
     catalog = NamespaceCatalog(NWBGroupSpec, NWBDatasetSpec, NWBNamespace)
     pynwb.NWBHDF5IO.load_namespaces(catalog, file_path)
     name_cat = TypeMap(catalog).namespace_catalog
 
-    ret = {
+    return {
         ns_name: name_cat.get_namespace(ns_name).get("version", None)
         for ns_name in name_cat.namespaces
     }
-
-    return (
-        {k.replace("-", "_"): v for k, v in ret.items()}
-        if replace_hypens
-        else ret
-    )
 
 
 class DirectoryHasher:
