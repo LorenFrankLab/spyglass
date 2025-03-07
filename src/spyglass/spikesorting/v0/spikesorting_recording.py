@@ -359,6 +359,15 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording = self._get_filtered_recording(key)
         recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
 
+        if has_entry and base_dir == recording_dir:  # if recompute, check hash
+            new_hash = self._dir_hash(rec_path, return_hasher=False)
+            old_hash = self.fetch("hash")[0]
+            if new_hash != old_hash:
+                shutil.rmtree(rec_path)
+                raise ValueError(
+                    f"Hash mismatch for {rec_path}: {new_hash} != {old_hash}"
+                )
+
         return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
 
     def _dir_hash(self, path, return_hasher=False):

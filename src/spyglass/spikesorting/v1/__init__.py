@@ -19,7 +19,7 @@ from spyglass.spikesorting.v1.metric_curation import (
 from spyglass.spikesorting.v1.recompute import (
     RecordingRecompute,
     RecordingRecomputeSelection,
-    RecordingVersions,
+    RecordingRecomputeVersions,
 )
 from spyglass.spikesorting.v1.recording import (
     SortGroup,

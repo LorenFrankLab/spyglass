@@ -41,7 +41,7 @@ schema = dj.schema("cbroz_temp")  # TODO: spikesorting_v1_recompute
 
 
 @schema
-class RecordingVersions(SpyglassMixin, dj.Computed):
+class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     definition = """
     -> SpikeSortingRecording
     ---
@@ -111,7 +111,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> RecordingVersions
     attempt_id: varchar(32) # name for environment used to attempt recompute
-    rounding=8: int # rounding for float ElectricalSeries
+    rounding=4: int # rounding for float ElectricalSeries
     ---
     logged_at_creation=0: bool # whether the attempt was logged at creation
     pip_deps: blob # dict of pip dependencies
@@ -151,8 +151,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         inserts = []
         for row in rows:
             key_pk = self.key_pk(row)
-            if not RecordingVersions & key_pk:  # ensure in parent table
-                RecordingVersions().make(key_pk)
+            if (
+                not RecordingRecomputeVersions & key_pk
+            ):  # ensure in parent table
+                RecordingRecomputeVersions().make(key_pk)
             if not self._has_matching_pynwb(key_pk):
                 continue
             inserts.append(
@@ -173,7 +175,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 "attempt_id": attempt_id or self.default_attempt_id,
                 "pip_deps": self.pip_deps,
             }
-            for key in RecordingVersions().this_env.fetch("KEY", as_dict=True)
+            for key in RecordingRecomputeVersions().this_env.fetch(
+                "KEY", as_dict=True
+            )
         ]
         self.insert(inserts, skip_duplicates=True)
 
@@ -189,7 +193,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """
 
         restr = []
-        for key in self * RecordingVersions().this_env:
+        for key in self * RecordingRecomputeVersions().this_env:
             if key["pip_deps"] != self.pip_deps:
                 continue
             pk = {k: v for k, v in key.items() if k in self.primary_key}
@@ -202,10 +206,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     def _has_matching_pynwb(self, key, show_err=True) -> bool:
         """Check current env for matching pynwb versions."""
         key_pk = self.key_pk(key)
-        ret = RecordingVersions().this_env & key
+        ret = RecordingRecomputeVersions().this_env & key
         if not ret and show_err:
-            need = self._sort_dict(RecordingVersions().key_env(key))
-            have = self._sort_dict(RecordingVersions().valid_ver_restr)
+            need = self._sort_dict(RecordingRecomputeVersions().key_env(key))
+            have = self._sort_dict(RecordingRecomputeVersions().valid_ver_restr)
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {key_pk}"
                 + f"\n\tHave: {have}"
@@ -366,7 +370,7 @@ class RecordingRecompute(dj.Computed):
             return self._key_cache[hashed]
         parent = (
             SpikeSortingRecording
-            * RecordingVersions
+            * RecordingRecomputeVersions
             * RecordingRecomputeSelection
             & key
         ).fetch1()
