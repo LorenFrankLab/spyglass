@@ -1,6 +1,6 @@
 # Change Log
 
-## \[0.5.5\] (Unreleased)
+## [0.5.5] (Unreleased)
 
 ### Release Notes
 
@@ -31,7 +31,8 @@ v1rec.SpikeSortingRecording().update_ids()
 - Improve cron job documentation and script #1226, #1241
 - Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
-- Add recompute ability for `SpikeSortingRecording` #1093
+- Remove cli module #1250
+- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093
 
 ### Pipelines
 
@@ -454,3 +455,4 @@ v1rec.SpikeSortingRecording().update_ids()
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
+[0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
