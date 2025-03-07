@@ -1,6 +1,7 @@
 """Helper methods for comparing pynwb objects."""
 
 from json import loads as json_loads
+
 import h5py
 
 
@@ -9,6 +10,13 @@ class H5pyComparator:
         self.old = self.obj_to_dict(old)
         self.new = self.obj_to_dict(new)
         self.line_limit = line_limit
+        self.compare_dicts(self.old, self.new)
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.old}, {self.new})"
+
+    def run(self):
+        """Rerun the comparison."""
         self.compare_dicts(self.old, self.new)
 
     def unpack_scalar(self, obj):

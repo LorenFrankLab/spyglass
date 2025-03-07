@@ -2,8 +2,8 @@
 
 Tables
 ------
-RecordingVersions: What versions are present in an existing analysis file?
-    Allows restrict of recompute attempts to pynwb environments that are
+RecordingRecomputeVersions: What versions are present in an existing analysis
+    file? Allows restrict of recompute attempts to pynwb environments that are
     compatible with a pre-existing file.
 RecordingRecomputeSelection: Plan a recompute attempt. Capture a list of
     pip dependencies under an attempt label, 'attempt_id', and set the desired
@@ -17,7 +17,6 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 
 import atexit
 from functools import cached_property
-from os import environ as os_environ
 from pathlib import Path
 from typing import Tuple, Union
 
@@ -32,6 +31,7 @@ from spikeinterface import __version__ as si_version
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.settings import analysis_dir, temp_dir
+from spyglass.spikesorting.utils import DEFAULT_ATTEMPT_ID
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator
@@ -109,7 +109,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 @schema
 class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
-    -> RecordingVersions
+    -> RecordingRecomputeVersions
     attempt_id: varchar(32) # name for environment used to attempt recompute
     rounding=4: int # rounding for float ElectricalSeries
     ---
@@ -119,17 +119,13 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     # --- Insert helpers ---
     @cached_property
-    def default_rounding(self):
+    def default_rounding(self) -> int:
+        """Return the default rounding for ElectricalSeries data."""
         return int(self.heading.attributes["rounding"].default)
 
     @cached_property
-    def default_attempt_id(self):
-        user = dj.config["database.user"]
-        conda = os_environ.get("CONDA_DEFAULT_ENV", "base")
-        return f"{user}_{conda}"
-
-    @cached_property
-    def pip_deps(self):
+    def pip_deps(self) -> dict:
+        """Return the pip dependencies for the current environment."""
         return dict(
             pynwb=pynwb.__version__,
             hdmf=hdmf_version,
@@ -137,11 +133,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             numpy=np_version,
         )
 
-    def key_pk(self, key):
-        """Return the current recording_id."""
-        return {"recording_id": key["recording_id"]}
-
-    def insert(self, rows, at_creation=False, **kwargs):
+    def insert(self, rows, at_creation=False, **kwargs) -> None:
         """Custom insert to ensure dependencies are added to each row."""
         if not isinstance(rows, list):
             rows = [rows]
@@ -150,10 +142,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         inserts = []
         for row in rows:
-            key_pk = self.key_pk(row)
-            if (
-                not RecordingRecomputeVersions & key_pk
-            ):  # ensure in parent table
+            key_pk = self.dict_to_pk(row)
+            if not RecordingRecomputeVersions & key_pk:  # ensure in parent
                 RecordingRecomputeVersions().make(key_pk)
             if not self._has_matching_pynwb(key_pk):
                 continue
@@ -161,30 +151,53 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 dict(
                     **key_pk,
                     rounding=row.get("rounding", self.default_rounding),
-                    attempt_id=row.get("attempt_id", self.default_attempt_id),
+                    attempt_id=row.get("attempt_id", DEFAULT_ATTEMPT_ID),
                     pip_deps=self.pip_deps,
                     logged_at_creation=at_creation,
                 )
             )
         super().insert(inserts, **kwargs)
 
-    def attempt_all(self, attempt_id=None):
+    def attempt_all(
+        self,
+        restr: dict = True,
+        rounding: int = None,
+        attempt_id=None,
+        **kwargs,
+    ) -> None:
+        """Insert recompute attempts for all existing files.
+
+        Parameters
+        ----------
+        restr : dict
+            Key or restriction for RecordingRecomputeVersions. Default all
+            available files.
+        rounding : int, optional
+            Rounding for float ElectricalSeries data. Default is the table's
+            default_rounding, 4.
+        attempt_id : str, optional
+            Label for the recompute attempt. Default is the current user and
+            conda environment.
+        """
+        source = RecordingRecomputeVersions().this_env & restr
+        kwargs["skip_duplicates"] = True
+
         inserts = [
             {
                 **key,
-                "attempt_id": attempt_id or self.default_attempt_id,
+                "attempt_id": attempt_id or DEFAULT_ATTEMPT_ID,
+                "rounding": rounding or self.default_rounding,
+                "logged_at_creation": False,
                 "pip_deps": self.pip_deps,
             }
-            for key in RecordingRecomputeVersions().this_env.fetch(
-                "KEY", as_dict=True
-            )
+            for key in source.fetch("KEY", as_dict=True)
         ]
-        self.insert(inserts, skip_duplicates=True)
+        self.insert(inserts, **kwargs)
 
     # --- Gatekeep recompute attempts ---
 
-    @property  # key_source must not be a cached_property
-    def this_env(self):
+    @property
+    def this_env(self) -> dj.expression.QueryExpression:
         """Restricted table matching pynwb env and pip env.
 
         Serves as key_source for RecordingRecompute. Ensures that recompute
@@ -200,14 +213,14 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             restr.append(pk)
         return self & restr
 
-    def _sort_dict(self, d):
+    def _sort_dict(self, d) -> dict:
         return dict(sorted(d.items()))
 
-    def _has_matching_pynwb(self, key, show_err=True) -> bool:
+    def _has_matching_pynwb(self, key: dict) -> bool:
         """Check current env for matching pynwb versions."""
-        key_pk = self.key_pk(key)
+        key_pk = self.dict_to_pk(key)
         ret = RecordingRecomputeVersions().this_env & key
-        if not ret and show_err:
+        if not ret:
             need = self._sort_dict(RecordingRecomputeVersions().key_env(key))
             have = self._sort_dict(RecordingRecomputeVersions().valid_ver_restr)
             logger.warning(
@@ -217,7 +230,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             )
         return bool(ret)
 
-    def _has_matching_pip(self, key, show_err=True) -> bool:
+    def _has_matching_pip(self, key) -> bool:
         """Check current env for matching pip versions."""
         this_rec = {"recording_id": key["recording_id"]}
         query = self.this_env & key
@@ -228,7 +241,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         need = query.fetch1("pip_deps")
         ret = need == self.pip_deps
 
-        if not ret and show_err:
+        if not ret:
             logger.error(
                 f"Pip version mismatch. Skipping key: {this_rec}"
                 + f"\n\tHave: {self.pip_deps}"
@@ -237,19 +250,18 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         return ret
 
-    def _has_matching_env(self, key, show_err=True) -> bool:
+    def _has_matching_env(self, key) -> bool:
         """Check current env for matching pynwb and pip versions."""
-        return self._has_matching_pynwb(
-            key, show_err=show_err
-        ) and self._has_matching_pip(key, show_err=show_err)
+        return self._has_matching_pynwb(key) and self._has_matching_pip(key)
 
 
 @schema
-class RecordingRecompute(dj.Computed):
+class RecordingRecompute(SpyglassMixin, dj.Computed):
     definition = """
     -> RecordingRecomputeSelection
     ---
     matched: bool
+    err_msg=null: varchar(255)
     """
 
     class Name(dj.Part):
@@ -263,9 +275,6 @@ class RecordingRecompute(dj.Computed):
         definition = """ # Object hashes that differ between old and new
         -> master
         name : varchar(255)
-        ---
-        old=null: longblob
-        new=null: longblob
         """
 
         def get_objs(self, key, obj_name=None):
@@ -277,8 +286,7 @@ class RecordingRecompute(dj.Computed):
             return old.get(this_obj, None), new.get(this_obj, None)
 
         def compare(self, key, obj_name=None):
-            old, new = self.get_objs(key, obj_name=obj_name)
-            return H5pyComparator(old=old, new=new)
+            return H5pyComparator(*self.get_objs(key, obj_name=obj_name))
 
     key_source = RecordingRecomputeSelection().this_env.proj()
     _key_cache = dict()
@@ -318,7 +326,7 @@ class RecordingRecompute(dj.Computed):
 
         return self._file_cache[old], self._file_cache[new]
 
-    def _hash_one(self, path, precision):
+    def _hash_one(self, path, precision) -> NwbfileHasher:
         """Return the hasher for a given path. Store in cache."""
         cache_val = f"{path}_{precision}"
         if cache_val in self._hasher_cache:
@@ -420,21 +428,21 @@ class RecordingRecompute(dj.Computed):
                 parent,
                 recompute_file_name=parent["analysis_file_name"],
                 save_to=new.parent.parent,
-                rounding=key.get("rounding", 8),
+                rounding=key.get("rounding", self.default_rounding),
             )
-        except RuntimeError as e:
+        except RuntimeError as e:  # fail bc error in recompute, will retry
             logger.warning(f"{e}: {new.name}")
         except ValueError as e:
             e_info = e.args[0]
             if "probe info" in e_info:  # make failed bc missing probe info
-                self.insert1(dict(key, matched=False, diffs=e_info))
-            else:
+                self.insert1(dict(key, matched=False, err_msg=e_info))
+            else:  # unexpected ValueError, will retry
                 logger.warning(f"ValueError: {e}: {new.name}")
         except KeyError as err:
             e_info = err.args[0]
-            if "MISSING" in e_info:  # make failed bc missing parent file
-                e = e_info.split("MISSING")[0].strip()
-                self.insert1(dict(key, matched=False, diffs=e))
+            if "H5 object missing" in e_info:  # failed bc missing parent obj
+                e = e_info.split(", ")[1].split(":")[0].strip()
+                self.insert1(dict(key, matched=False, err_msg=e_info))
                 self.Name().insert1(
                     dict(key, name=f"Parent missing {e}", missing_from="old")
                 )
@@ -443,7 +451,8 @@ class RecordingRecompute(dj.Computed):
         else:
             return new_vals
 
-    def make(self, key, force_check=False):
+    def make(self, key, force_check=False) -> None:
+        """Attempt to recompute an analysis file and compare to the original."""
         parent = self.get_parent_key(key)
         rounding = key.get("rounding")
 
@@ -454,6 +463,7 @@ class RecordingRecompute(dj.Computed):
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_env(key):
             return
+
         # Ensure not duplicate work for lesser precision
         if self._is_lower_rounding(key) and not force_check:
             logger.warning(
@@ -499,9 +509,9 @@ class RecordingRecompute(dj.Computed):
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
-    def delete_files(self, key, dry_run=True):
+    def delete_files(self, restriction=True, dry_run=True) -> None:
         """If successfully recomputed, delete files for a given restriction."""
-        query = self.with_names & "matched=1" & key
+        query = self.with_names & "matched=1" & restriction
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(

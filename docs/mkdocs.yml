@@ -124,7 +124,7 @@ plugins:
       execute: False # Very slow, needs gh-action edit to work/link to db
       include_source: False
       ignore_h1_titles: True
-      ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
+      ignore: ["*make_pages.py", "**checkpoint**", "*/py_scripts/*"]
 
 markdown_extensions:
   - attr_list

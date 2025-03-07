@@ -332,7 +332,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 mid_path = "/".join(elect_parts[: i + 1])
                 if mid_path in f.keys():
                     continue
-                raise KeyError(f"{mid_path} MISSING {file_path}")
+                raise KeyError(f"H5 object missing, {mid_path}: {file_path}")
             elect_id = f[elect_attr].attrs["object_id"]
 
         return elect_id

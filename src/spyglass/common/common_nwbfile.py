@@ -196,7 +196,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The name of the file to be regenerated. Defaults to None.
         alternate_dir : Union[str, Path], Optional
             An alternate directory to store the file. Defaults to analysis_dir.
-        restrict_permissions : bool, optional
+        restrict_permission : bool, optional
             Default False, no permission restriction (666). If True, restrict
             write permissions to owner only.
 
@@ -367,7 +367,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         ----------
         analysis_nwb_file_name : str
             The name of the NWB file in AnalysisNwbfile.
-        from schema : bool, optional
+        from_schema : bool, optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
 

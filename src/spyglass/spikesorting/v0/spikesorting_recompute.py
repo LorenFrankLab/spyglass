@@ -13,7 +13,6 @@ RecordingRecompute:
 """
 
 from functools import cached_property
-from os import environ as os_environ
 from pathlib import Path
 from typing import Tuple
 
@@ -23,17 +22,19 @@ from probeinterface import __version__ as pi_version
 from spikeinterface import __version__ as si_version
 
 from spyglass.settings import recording_dir, temp_dir
+from spyglass.spikesorting.utils import DEFAULT_ATTEMPT_ID
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.h5_helper_fn import H5pyComparator
 from spyglass.utils.nwb_hash import DirectoryHasher
 
 schema = dj.schema("cbroz_temp_v0")
 
 
 @schema
-class RecordingRecomputeSelection(dj.Manual):
+class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> SpikeSortingRecording
     attempt_id: varchar(32) # name for environment used to attempt recompute
@@ -43,21 +44,12 @@ class RecordingRecomputeSelection(dj.Manual):
     """
 
     @cached_property
-    def default_attempt_id(self):
-        user = dj.config["database.user"]
-        conda = os_environ.get("CONDA_DEFAULT_ENV", "base")
-        return f"{user}_{conda}"
-
-    @cached_property
     def pip_deps(self):
         return dict(
             spikeinterface=si_version,
             probeinterface=pi_version,
             numpy=np_version,
         )
-
-    def key_pk(self, key):
-        return {k: v for k, v in key.items() if k in self.primary_key}
 
     def insert(self, rows, logged_at_creation=False, **kwargs):
         """Custom insert to ensure dependencies are added to each row."""
@@ -68,16 +60,43 @@ class RecordingRecomputeSelection(dj.Manual):
 
         inserts = []
         for row in rows:
-            key_pk = self.key_pk(row)
+            key_pk = self.dict_to_pk(row)
             inserts.append(
                 dict(
                     **key_pk,
-                    attempt_id=row.get("attempt_id", self.default_attempt_id),
+                    attempt_id=row.get("attempt_id", DEFAULT_ATTEMPT_ID),
                     pip_deps=self.pip_deps,
                     logged_at_creation=logged_at_creation,
                 )
             )
         super().insert(inserts, **kwargs)
+
+    def attempt_all(
+        self, restr: dict = True, attempt_id: str = None, **kwargs
+    ) -> None:
+        """Insert all files into the recompute table.
+
+        Parameters
+        ----------
+        restr : dict, optional
+            Key or restriction of SpikeSortingRecording. If None, all files
+            are inserted.
+        attempt_id : str, optional
+            Name for the environment used to attempt recompute. If None, the
+            current user and conda environment are used.
+        """
+        source = SpikeSortingRecording() & restr
+        kwargs["skip_duplicates"] = True
+
+        inserts = [
+            {
+                **key,
+                "attempt_id": attempt_id or DEFAULT_ATTEMPT_ID,
+                "logged_at_creation": False,
+            }
+            for key in source.fetch("KEY", as_dict=True)
+        ]
+        self.insert(inserts, **kwargs)
 
     # --- Gatekeep recompute attempts ---
 
@@ -94,10 +113,10 @@ class RecordingRecomputeSelection(dj.Manual):
         for key in self:
             if key["pip_deps"] != self.pip_deps:
                 continue
-            restr.append(self.key_pk(key))
+            restr.append(self.dict_to_pk(key))
         return self & restr
 
-    def _has_matching_pip(self, key, show_err=True) -> bool:
+    def _has_matching_pip(self, key: dict, show_err=True) -> bool:
         """Check current env for matching pip versions."""
         query = self.this_env & key
 
@@ -109,7 +128,7 @@ class RecordingRecomputeSelection(dj.Manual):
 
         if not ret and show_err:
             logger.error(
-                f"Pip version mismatch. Skipping key: {self.key_pk(key)}"
+                f"Pip version mismatch. Skipping key: {self.dict_to_pk(key)}"
                 + f"\n\tHave: {self.pip_deps}"
                 + f"\n\tNeed: {need}"
             )
@@ -118,7 +137,7 @@ class RecordingRecomputeSelection(dj.Manual):
 
 
 @schema
-class RecordingRecompute(dj.Computed):
+class RecordingRecompute(SpyglassMixin, dj.Computed):
     definition = """
     -> RecordingRecomputeSelection
     ---
@@ -126,7 +145,6 @@ class RecordingRecompute(dj.Computed):
     """
 
     _hasher_cache = dict()
-    # key_source = RecordingRecomputeSelection().this_env.proj()
 
     class Name(dj.Part):
         definition = """ # File names missing from old or new versions
@@ -140,6 +158,21 @@ class RecordingRecompute(dj.Computed):
         -> master
         name : varchar(255)
         """
+
+        def get_objs(self, key, name: str = None):
+            old, new = RecordingRecompute()._get_paths(key, as_str=True)
+
+            old_hasher = RecordingRecompute()._hash_one(old)
+            new_hasher = RecordingRecompute()._hash_one(new)
+
+            name = name or key["name"]
+            old_obj = old_hasher.cache.get(name)
+            new_obj = new_hasher.cache.get(name)
+
+            return old_obj, new_obj
+
+        def compare(self, key, name: str = None):
+            return H5pyComparator(*self.get_objs(key, name))
 
     def _parent_key(self, key):
         ret = SpikeSortingRecording * RecordingRecomputeSelection & key
@@ -171,11 +204,13 @@ class RecordingRecompute(dj.Computed):
         # Skip recompute for files logged at creation
         parent = self._parent_key(key)
         if parent.get("logged_at_creation", True):
+            logger.info(f"Skipping logged_at_creation {key}")
             self.insert1({**key, "matched": True})
             return
 
         # Ensure dependencies unchanged since selection insert
         if not RecordingRecomputeSelection()._has_matching_pip(key):
+            logger.info(f"Skipping due to pip mismatch: {key}")
             return
 
         old, new = self._get_paths(key)
@@ -192,6 +227,7 @@ class RecordingRecompute(dj.Computed):
         old_hash = parent.get("hash") or self._hash_one(old).hash
 
         if old_hash == new_hasher.hash:
+            logger.info(f"Matched {key}")
             self.insert1({**key, "matched": True})
             return
 
@@ -199,21 +235,22 @@ class RecordingRecompute(dj.Computed):
         names, hashes = [], []
         for file in set(new_hasher.cache) | set(old_hasher.cache):
             if file not in old_hasher.cache:
-                names.append((key, file, "old"))
+                names.append(dict(key, name=file, missing_from="old"))
                 continue
             if file not in new_hasher.cache:
-                names.append((key, file, "new"))
+                names.append(dict(key, name=file, missing_from="new"))
                 continue
             if old_hasher.cache[file] != new_hasher.cache[file]:
-                hashes.append((key, file))
+                hashes.append(dict(key, name=file))
 
+        logger.info(f"Failed to match {key}")
         self.insert1(dict(key, matched=False))
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
-    def delete_file(self, key, dry_run=True):
+    def delete_files(self, restriction=True, dry_run=True):
         """If successfully recomputed, delete files for a given restriction."""
-        query = self & "matched=1" & key
+        query = self & "matched=1" & restriction
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(

@@ -65,11 +65,19 @@ replicability of old files prior to deletion, we'll need to...
 
 1. Update the tables for new fields, as shown above.
 2. Attempt file recompute, and record dependency info for successful attempts.
+3. Investigate failed attempts and make environment changes as necessary.
+4. Delete files that successfully recomputed.
+
+#### Attempting recompute
+
+`RecomputeSelection` tables will record information about the dependencies of
+the environments used to attempt recompute. These attempts are run using the
+`Recompute` table `populate` method.
 
 === "v0"
     ```python
     from spyglass.spikesorting.v0 import spikesorting_recording as v0_recording
-    from spyglass.spikesorting.v0 import spikesorting_recompute as v0_recording
+    from spyglass.spikesorting.v0 import spikesorting_recompute as v0_recompute
 
     # Alter tables to include new fields, updating values
     my_keys = (v0_recording.SpikeSortingRecording() & restriction).fetch("KEY")
@@ -85,16 +93,103 @@ replicability of old files prior to deletion, we'll need to...
     # Alter tables to include new fields, updating values
     my_keys = (v1_recording.SpikeSortingRecording() & restriction).fetch("KEY")
     v1_recompute.RecordingRecomputeVersions().populate(my_keys)
-    v1_recompute.RecordingRecomputeSelection().insert(my_keys)
+    v1_recompute.RecordingRecomputeSelection().insert(my_keys)  # (1)! (2)!
     v1_recompute.RecordingRecompute().populate(my_keys)
     ```
 
-    Optionally, you can set your preferred precision for recompute when inserting
-    into `RecordingRecomputeSelection`. The default is 4.
+    1. Optionally, you can set your preferred precision for recompute when inserting
+        into `RecordingRecomputeSelection`. The default is 4.
+    2. This will also skip over items whose internal dependencies do not match the
+        current environment. To see matching keys, you can check
+        `RecordingRecomputeVersions().this_env`.
 
 By default, these insert methods will generate an `attempt_id` that serves as a
 unique identifier for relevant pip dependencies. You can customize this
 identifier by passing an additional `attempt_id` argument to the insert method.
+
+Newly generated files are stored in a subdirectory according to this attempt_id:
+`{SPYGLASS_TEMP_DIR}/{pipeline}_v{version}_recompute/{attempt_id}`.
+
+#### Investigating failed attempts
+
+Recompute tables are set up to have `Name` and `Hash` part tables that track...
+
+1. `Name`: The name of any file or object that was missing from the old file
+    (i.e., the original) or the new file (i.e., the recompute attempt).
+2. `Hash`: The names of files or objects for which the hash did not match
+    between the original and recompute attempt.
+
+=== "v0"
+    ```python
+    from spyglass.spikesorting.v0.spikesorting_recompute import RecordingRecompute
+
+    RecordingRecompute().Name()
+    RecordingRecompute().Hash()
+    hash_key = (RecordingRecompute().Hash() & restriction).fetch1("KEY")
+    RecordingRecompute().Hash().compare(key)
+    ```
+
+=== "v1"
+    ```python
+    from spyglass.spikesorting.v1.recompute import RecordingRecompute
+
+    RecordingRecompute().Name()
+    RecordingRecompute().Hash()
+
+    old_nwb_obj, new_nwb_obj = RecordingRecompute().Hash().get_objs(key)
+    hash_key = (RecordingRecompute().Hash() & restriction).fetch1("KEY")
+    RecordingRecompute().Hash().compare(key)
+    ```
+
+The `compare` methods will print out the differences between the two objects or
+files, recursively checking for differences in nested objects. This will
+truncate output for large objects an may fail for objects that cannot be read as
+JSON.
+
+To expand the functionality of this feature, please either post a GitHub issue
+or make a pull request with edits to `spyglas.utils.h5_helper_fn.H5pyComarator`.
+
+With this information, you can make changes to the environment to try another
+recompute attempt. For the best record keeping of attempts, we recommend cloning
+your conda environment and making changes to the clone. This will allow you to
+attempt recomputes with different dependencies without affecting the original
+environment. In the event of a successful recompute, you can update your base
+environment to match the clone.
+
+```bash
+conda create --name my_clone --clone my_default
+```
+
+#### Deleting files
+
+Each recompute table has a `delete_files` method that will delete files that
+were successfully recomputed.
+
+=== "v0"
+    ```python
+    from spyglass.spikesorting.v0.spikesorting_recompute import RecordingRecompute
+
+    fails = RecordingRecompute() & "matching=0"
+    subset = fails & my_restriction
+    RecordingRecompute().delete_files(my_restriction, dry_run=False)
+    ```
+
+=== "v1"
+    ```python
+    from spyglass.spikesorting.v1.recompute import RecordingRecompute
+
+    fails = v0_recompute.RecordingRecompute() & "matching=0"
+    subset = fails & my_restriction
+    RecordingRecompute().delete_files(my_restriction, dry_run=False)
+    ```
+
+These methods have ...
+
+1. A `restriction` argument that will delete files matching table entries that
+    match the restriction.
+2. A `dry_run` argument that will print the files that would be deleted without
+    actually deleting them.
+3. A confirmation prompt before deleting files.
 
 ## Folders vs. NWB files
 

@@ -47,7 +47,7 @@ __all__ = [
     "MetricParameters",
     "RecordingRecompute",
     "RecordingRecomputeSelection",
-    "RecordingVersions",
+    "RecordingRecomputeVersions",
     "SortGroup",
     "SpikeSorterParameters",
     "SpikeSorting",

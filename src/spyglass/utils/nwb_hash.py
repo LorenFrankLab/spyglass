@@ -179,10 +179,11 @@ class NwbfileHasher:
             Path to the NWB file.
         batch_size  : int, optional
             Limit of data to hash for large datasets, by default 4095.
-        data_rounding : Dict[str, int], optional
+        precision_lookup : Dict[str, int], optional
             Round data to n decimal places for specific datasets (i.e.,
             {dataset_name: n}). Default is to round ProcessedElectricalSeries
-            to 10 significant digits via np.round(chunk, n).
+            to 4 significant digits via np.round(chunk, n). An integer value
+            will be applied to the ProcessedElectricalSeries dataset.
         keep_obj_hash : bool, optional
             Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
