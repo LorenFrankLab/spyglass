@@ -167,10 +167,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -408,7 +408,7 @@ class SpyglassMixin(ExportMixin):
         if None in experimenters:
             raise PermissionError(
                 "Please ensure all Sessions have an experimenter in "
-                + f"SessionExperimenter:\n{sess_summary}"
+                + f"Session.Experimenter:\n{sess_summary}"
             )
 
         user_name = LabMember().get_djuser_name(dj_user)
@@ -841,8 +841,8 @@ class SpyglassMixin(ExportMixin):
                 "Connection ID",  # t.PROCESSLIST_ID -- User connection ID
                 "User",  # t.PROCESSLIST_USER -- User
                 "Host",  # t.PROCESSLIST_HOST -- User machine
-                "Process Database",  # t.PROCESSLIST_DB -- Thread database
                 "Time (s)",  # t.PROCESSLIST_TIME -- Time in seconds
+                "Process Database",  # t.PROCESSLIST_DB -- Thread database
                 "Process",  # t.PROCESSLIST_COMMAND -- Likely Query
                 "State",  # t.PROCESSLIST_STATE
                 "Query",  # t.PROCESSLIST_INFO -- Actual query
