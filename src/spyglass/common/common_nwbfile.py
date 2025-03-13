@@ -75,6 +75,12 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         key["nwb_file_abs_path"] = nwb_file_abs_path
         cls.insert1(key, skip_duplicates=True)
 
+    def fetch_nwb(self):
+        return [
+            get_nwb_file(self.get_abs_path(file))
+            for file in self.fetch("nwb_file_name")
+        ]
+
     @classmethod
     def _get_file_name(cls, nwb_file_name: str) -> str:
         """Get valid nwb file name given substring."""

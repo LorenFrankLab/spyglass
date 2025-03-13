@@ -10,19 +10,22 @@
 - Improve cron job documentation and script #1226, #1241
 - Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
+- Remove cli module #1250
+- Fix column error in `check_threads` method #1256
 
 ### Pipelines
 
 - Common
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
+    - Make `Nwbfile.fetch_nwb` functional # 1256
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
-        filtering #1238
+        filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
