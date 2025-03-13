@@ -1,6 +1,7 @@
 from typing import List, Union
 
 import datajoint as dj
+from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
     PositionSource,
@@ -80,9 +81,12 @@ def single_transaction_make(
                 for parent in parents[1:]:
                     key_source *= parent.proj()
 
-            if table.__name__ == "PositionSource":
+            table_name = to_camel_case(table.table_name)
+            if table_name == "PositionSource":
                 # PositionSource only uses nwb_file_name - full calls redundant
                 key_source = dj.U("nwb_file_name") & key_source
+            if table_name == "ImportedPose":
+                key_source = Nwbfile()
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
@@ -116,6 +120,7 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
     declare_all_merge_tables()
@@ -143,6 +148,7 @@ def populate_all_common(
             PositionSource,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
+            ImportedPose,  # Depends on Session
         ],
         [
             RawPosition,  # Depends on PositionSource
