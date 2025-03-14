@@ -162,9 +162,13 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             if not self._has_matching_pynwb(key_pk):
                 continue
 
+            key_full = {
+                k: v for k, v in key_pk.items() if k in self.heading.names
+            }
+
             inserts.append(
                 dict(
-                    **row,
+                    **key_full,
                     **{k: v for k, v in defaults.items() if k not in row},
                     logged_at_creation=at_creation,
                 )
