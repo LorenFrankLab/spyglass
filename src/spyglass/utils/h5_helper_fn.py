@@ -1,16 +1,27 @@
 """Helper methods for comparing pynwb objects."""
 
 from json import loads as json_loads
+from pathlib import Path
 
 import h5py
+import numpy as np
+from yaml import safe_load as yaml_safe_load
 
 
 class H5pyComparator:
-    def __init__(self, old, new, line_limit=80):
+    """Compare two objects by treating them as dictionaries.
+
+    Designed to compare two h5py objects, but can be used with any objects.
+    By default, the comparison is run when the object is created and traverse
+    embedded dictionaries and lists to compare values, printing differences.
+    """
+
+    def __init__(self, old, new, line_limit=80, run=True):
         self.old = self.obj_to_dict(old)
         self.new = self.obj_to_dict(new)
         self.line_limit = line_limit
-        self.compare_dicts(self.old, self.new)
+        if run:
+            self.compare_dicts(self.old, self.new)
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.old}, {self.new})"
@@ -21,12 +32,11 @@ class H5pyComparator:
 
     def unpack_scalar(self, obj):
         """Unpack a scalar from an h5py dataset."""
-        if isinstance(obj, (int, float, str)):
+        if isinstance(obj, (int, float)):
             return dict(scalar=obj)
-        str_obj = str(obj[()])
-        if "{" not in str_obj:
-            return dict(scalar=str_obj)
-        return json_loads(str_obj)
+        if hasattr(obj, "shape") and obj.shape == ():
+            obj = str(obj[()])
+        return json_loads(obj) if "{" in obj else dict(scalar=obj)
 
     def assemble_dict(self, obj):
         """Assemble a dictionary from an h5py group."""
@@ -42,13 +52,40 @@ class H5pyComparator:
 
     def obj_to_dict(self, obj):
         """Convert an h5py object to a dictionary."""
+        if isinstance(obj, [Path, str]) and Path(obj).exists():
+            return self.obj_to_dict(self.open_file(Path(obj)))
         if isinstance(obj, dict):
             return {k: self.obj_to_dict(v) for k, v in obj.items()}
         if isinstance(obj, (float, str, int, h5py.Dataset)):
             return self.unpack_scalar(obj)
         if isinstance(obj, h5py.Group):
             return self.assemble_dict(obj)
+        if isinstance(obj, np.ndarray):
+            return self.numpy_to_dict(obj)
+        if isinstance(obj, bytes):
+            return self.unpack_scalar(obj.decode())
         return json_loads(obj)
+
+    def open_file(self, path):
+        if file.suffix == ".h5":
+            return h5py.File(path, "r")
+        if file.suffix == ".nwb":
+            return NWBHDF5IO(path, "r").read()
+        if file.suffix == ".json":
+            return json_loads(path.read_text())
+        if file.suffix == ".yaml":
+            return yaml_safe_load(path.read_text())
+        if file.suffix in ["npy", "npz"]:
+            return np.load(path)
+        return dict(unrecognized_file_type=path.suffix)
+
+    def numpy_to_dict(self, obj):
+        """Convert a numpy object to a dictionary."""
+        if obj.dtype.names:
+            return {k: self.numpy_to_dict(obj[k]) for k in obj.dtype.names}
+        elif getattr(obj, "ndim", 0) == 1:
+            return obj.tolist()
+        return [self.numpy_to_dict(x) for x in obj]
 
     def sort_list_of_dicts(self, obj):
         """Sort a list of dictionaries."""
@@ -59,12 +96,14 @@ class H5pyComparator:
 
     def compare_dict_values(self, key, oval, nval, level, iteration):
         """Compare values of a specific key in two dictionaries."""
-        if oval != nval:
-            print(f"{level} {iteration}: dict val differ for {key}")
+        next_level = f"{level} {key}".replace("kwargs ", "")
         if isinstance(oval, dict):
-            self.compare_dicts(oval, nval, f"{level} {key}", iteration + 1)
+            self.compare_dicts(oval, nval, next_level, iteration + 1)
         elif isinstance(oval, list):
-            self.compare_lists(oval, nval, f"{level} {key}", iteration)
+            self.compare_lists(oval, nval, next_level, iteration)
+        elif oval != nval:
+            show = f"\n\t{oval} != {nval}"[: self.line_limit]
+            print(f"{level} {iteration}: vals differ for {key}{show}")
 
     def compare_lists(self, old_list, new_list, level, iteration):
         """Compare two lists of dictionaries."""
@@ -75,7 +114,7 @@ class H5pyComparator:
             if isinstance(o, dict):
                 self.compare_dicts(o, n, level, iteration)
             elif o != n:
-                print(f"{level} {iteration}: list val differ")
+                print(f"{iteration} {level}: list val differ")
                 print(f"\t{str(o)[:self.line_limit]}")
                 print(f"\t{str(n)[:self.line_limit]}")
 
@@ -84,9 +123,9 @@ class H5pyComparator:
         all_keys = set(old.keys()) | set(new.keys())
         for key in all_keys:
             if key not in old:
-                print(f"{level} {iteration}: old missing key: {key}")
+                print(f"{iteration} {level}: old missing key: {key}")
                 continue
             if key not in new:
-                print(f"{level} {iteration}: new missing key: {key}")
+                print(f"{iteration} {level}: new missing key: {key}")
                 continue
             self.compare_dict_values(key, old[key], new[key], level, iteration)

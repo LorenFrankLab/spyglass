@@ -86,13 +86,15 @@ class DirectoryHasher:
         """Hashes the contents of the directory, recursively."""
         all_files = [f for f in sorted(self.dir_path.rglob("*")) if f.is_file()]
 
-        for file_path in tqdm(all_files, disable=not self.verbose):
+        for file_path in all_files:
             if file_path.suffix == ".nwb":
                 this_hash = NwbfileHasher(
                     file_path, batch_size=self.batch_size
                 ).hash.encode()
-            elif file_path.suffix == ".json":
+            elif file_path.suffix in [".json", ".jsonl"]:
                 this_hash = self.json_encode(file_path)
+            elif file_path.suffix in [".npy", ".npz"]:
+                this_hash = self.npy_encode(file_path)
             else:
                 this_hash = self.chunk_encode(file_path)
 
@@ -106,6 +108,11 @@ class DirectoryHasher:
                 self.cache[rel_path] = this_hash
 
         return self.hashed.hexdigest()  # Return the hex digest of the hash
+
+    def npy_encode(self, file_path: Path) -> str:
+        """Encode the contents of a numpy file for hashing."""
+        data = np.load(file_path, allow_pickle=True).tobytes()
+        return md5(data).hexdigest().encode()
 
     def chunk_encode(self, file_path: Path) -> str:
         """Encode the contents of a file in chunks for hashing."""

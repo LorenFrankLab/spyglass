@@ -10,12 +10,6 @@ import spikeinterface as si
 from spyglass.common.common_ephys import Electrode
 from spyglass.utils import logger
 
-DEFAULT_ATTEMPT_ID = (
-    dj.config["database.user"]
-    + "_"
-    + os_environ.get("CONDA_DEFAULT_ENV", "base")
-)
-
 
 def get_group_by_shank(
     nwb_file_name: str,

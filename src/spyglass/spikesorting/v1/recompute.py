@@ -30,6 +30,7 @@ from numpy import __version__ as np_version
 from spikeinterface import __version__ as si_version
 
 from spyglass.common import AnalysisNwbfile
+from spyglass.common.common_user import UserEnvironment
 from spyglass.settings import analysis_dir, temp_dir
 from spyglass.spikesorting.utils import DEFAULT_ATTEMPT_ID
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
@@ -37,7 +38,7 @@ from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
-schema = dj.schema("cbroz_temp")  # TODO: spikesorting_v1_recompute
+schema = dj.schema("cbroz_recomp_v1")  # TODO: spikesorting_v1_recompute
 
 
 @schema
@@ -117,7 +118,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> RecordingRecomputeVersions
-    attempt_id: varchar(32) # name for environment used to attempt recompute
+    -> UserEnvironment
     rounding=4: int # rounding for float ElectricalSeries
     ---
     logged_at_creation=0: bool # whether the attempt was logged at creation
