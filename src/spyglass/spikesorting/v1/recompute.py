@@ -39,7 +39,9 @@ from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
 schema = dj.schema("cbroz_recomp_v1")  # TODO: spikesorting_v1_recompute
 
+# Initializing table to prevent recompute of cached properties
 USER_TBL = UserEnvironment()
+logger.info(f"Initializing UserEnvironment: {USER_TBL.this_env}")
 
 
 @schema
@@ -50,13 +52,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     nwb_deps=null:blob
     """
 
-    # expect
-    #  - core
-    #  - hdmf_common
-    #  - hdmf_experimental
-    #  - ndx_franklab_novela
-    #  - ndx_optogenetics
-    #  - spyglass
+    # expected nwb_deps: core, hdmf_common, hdmf_experimental,
+    #                    ndx_franklab_novela, ndx_optogenetics, spyglass
 
     @cached_property
     def nwb_deps(self):
@@ -64,9 +61,11 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         return self.namespace_dict(pynwb.get_manager().type_map)
 
     @cached_property
-    def this_env(self):
-        """Return restricted version of self for the current environment."""
-        logger.info("Checking current nwb environment.")
+    def this_env(self) -> dj.expression.QueryExpression:
+        """Return restricted version of self for the current environment.
+
+        Ignores the spyglass version.
+        """
         restr = []
         for key in self:
             key_deps = key["nwb_deps"]
@@ -80,6 +79,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         """Check current env for matching pynwb versions."""
         if not self & key:
             self.make(key)
+
         ret = self.this_env & key
 
         if not ret and show_err:
@@ -156,18 +156,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         return int(self.heading.attributes["rounding"].default)
 
     @cached_property
-    def pip_deps(self) -> dict:
-        """Return the pip dependencies for the current environment."""
-        return dict(
-            pynwb=pynwb.__version__,
-            hdmf=hdmf_version,
-            spikeinterface=si_version,
-            numpy=np_version,
-        )
-
-    @cached_property
     def env_dict(self):
-        logger.info("Inserting current environment.")
         return USER_TBL.insert_current_env()
 
     def insert(self, rows, limit=None, at_creation=False, **kwargs) -> None:

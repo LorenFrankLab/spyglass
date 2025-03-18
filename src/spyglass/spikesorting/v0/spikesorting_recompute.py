@@ -2,14 +2,14 @@
 
 Tables
 ------
-RecordingRecomputeSelection:
-    - Manual table to track recompute attempts.
-    - Records the pip dependencies used to attempt recompute.
-    - Records whether the attempt was logged at creation, skipping recomputes.
-RecordingRecompute:
-    - Computed table to track recompute success.
-    - Runs `SpikeSortingRecording()._make_file` to recompute files, saving the
-        resulting folder to `temp_dir/spikesort_v0_recompute/{env_id}`.
+UserEnvironment (upstream): Table to track the current environment.
+RecordingRecomputeVersions: Computed table to track versions of spikeinterface
+    and probeinterface used to generate existing files.
+RecordingRecomputeSelection: Plan a recompute attempt for a given key.
+RecordingRecompute: Computed table to track recompute success.
+    Runs `SpikeSortingRecording()._make_file` to recompute files, saving the
+    resulting folder to `temp_dir/{this database}/{env_id}`. If the new
+    directory matches the old, the new directory is deleted.
 """
 
 import json
@@ -68,18 +68,30 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         return self._version_cache["package"]
 
     @cached_property
-    def this_env(self):
+    def this_env(self) -> dj.expression.QueryExpression:
         """Return restricted version of self for the current environment."""
         return (
             self & self._package_restr("spikeinterface", si_version)
         ) & self._package_restr("probeinterface", pi_version)
 
-    def _has_matching_env(self, key: dict) -> bool:
+    def _has_matching_env(self, key: dict, show_err=True) -> bool:
         """Check current env for matching pynwb versions."""
         key_pk = self.dict_to_pk(key)
         if not self & key:
             self.make(key)
-        return bool(self.this_env & key_pk)
+        ret = bool(self.this_env & key_pk)
+        if not ret and show_err:
+            need = sort_dict(
+                (self & key).fetch1(
+                    "spikeinterface", "probeinterface", as_dict=True
+                )
+            )
+            have = sort_dict(
+                dict(spikeinterface=si_version, probeinterface=pi_version)
+            )
+            logger.error(f"Versions mismatch: {need} != {have}")
+
+        return ret
 
     def _package_restr(self, package, version):
         """Return a restriction string for a package and version.
