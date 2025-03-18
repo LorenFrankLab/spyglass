@@ -29,9 +29,8 @@ from spikeinterface import __version__ as si_version
 
 from spyglass.common.common_user import UserEnvironment
 from spyglass.settings import recording_dir, temp_dir
-from spyglass.spikesorting.v0.spikesorting_recording import (
-    SpikeSortingRecording,
-)  # noqa F401
+from spyglass.spikesorting.v0.spikesorting_recording import \
+    SpikeSortingRecording  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
@@ -321,7 +320,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         str_path = str(path)
         if str_path in self._hasher_cache:
             return self._hasher_cache[str_path]
-        hasher = DirectoryHasher(directory_path=path, keep_file_hash=True)
+        hasher = DirectoryHasher(directory_path=path, keep_obj_hash=True)
         self._hasher_cache[str_path] = hasher
         return hasher
 

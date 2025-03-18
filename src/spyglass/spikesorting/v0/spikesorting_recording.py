@@ -6,8 +6,8 @@ import datajoint as dj
 import numpy as np
 import probeinterface as pi
 import spikeinterface as si
-from spikeinterface import preprocessing as si_preprocessing
 import spikeinterface.extractors as se
+from spikeinterface import preprocessing as si_preprocessing
 from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
@@ -374,7 +374,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     def _dir_hash(self, path, return_hasher=False):
         """Return the hash of the directory."""
         hasher = DirectoryHasher(  # only cache per file if returning hasher obj
-            directory_path=path, keep_file_hash=return_hasher
+            directory_path=path, keep_obj_hash=return_hasher
         )
         return hasher if return_hasher else hasher.hash
 
