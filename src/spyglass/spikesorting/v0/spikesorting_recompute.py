@@ -9,36 +9,38 @@ RecordingRecomputeSelection:
 RecordingRecompute:
     - Computed table to track recompute success.
     - Runs `SpikeSortingRecording()._make_file` to recompute files, saving the
-        resulting folder to `temp_dir/spikesort_v0_recompute/{attempt_id}`.
+        resulting folder to `temp_dir/spikesort_v0_recompute/{env_id}`.
 """
 
-from pprint import pprint  # TODO: Remove before merge
-from shutil import rmtree as shutil_rmtree
-
+import json
+import re
 from functools import cached_property
 from pathlib import Path
+from pprint import pprint  # TODO: Remove before merge
+from shutil import rmtree as shutil_rmtree
+from subprocess import run as sub_run
 from typing import Tuple
 
 import datajoint as dj
 from numpy import __version__ as np_version
+from packaging.version import parse as version_parse
 from probeinterface import __version__ as pi_version
 from spikeinterface import __version__ as si_version
 
-from spyglass.settings import recording_dir, temp_dir
-import json
-
 from spyglass.common.common_user import UserEnvironment
+from spyglass.settings import recording_dir, temp_dir
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.h5_helper_fn import H5pyComparator
+from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
-import re
-from subprocess import run as sub_run
-from packaging.version import parse as version_parse
 
 schema = dj.schema("cbroz_recomp_v0")  # TODO: spikesorting_recompute_v0
+
+# Initializing table to prevent recompute of cached properties
+USER_TBL = UserEnvironment()
+logger.info(f"Initializing UserEnvironment: {USER_TBL.this_env}")
 
 
 @schema
@@ -65,34 +67,53 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         self._version_cache["package"] = sorted(ret, key=version_parse)
         return self._version_cache["package"]
 
-    @property  # @cached_property
+    @cached_property
     def this_env(self):
         """Return restricted version of self for the current environment."""
         return (
             self & self._package_restr("spikeinterface", si_version)
         ) & self._package_restr("probeinterface", pi_version)
 
+    def _has_matching_env(self, key: dict) -> bool:
+        """Check current env for matching pynwb versions."""
+        key_pk = self.dict_to_pk(key)
+        if not self & key:
+            self.make(key)
+        return bool(self.this_env & key_pk)
+
     def _package_restr(self, package, version):
         """Return a restriction string for a package and version.
 
-        If the version is an official release, allow any version that starts
-        with the same base. If the version is a dev release, allow any version
-        that starts with the same base or the next available version.
+        Restricts to versions matching the most recent official release
+        (e.g., 0.1.0dev1 and 0.1.0 -> 0.1.0). For dev releases, also includes
+        the next official release (e.g., 0.1.0dev1 -> 0.1.1). For official
+        releases, also includes the previous release (e.g., 0.1.0 -> 0.9.3).
         """
         base = re.match(r"(\d+\.\d+\.\d+)", version)
-        if "dev" not in version or not base:
+        if not base:
             return f"{package} LIKE '{version}%'"
         base = base.group(1)
         avail = self._fetch_versions(package)
         if base not in avail:
             raise ValueError(f"Version {version} not found in {package}")
-        next_index = avail.index(base) + 1
-        next_avail = avail[next_index] if next_index < len(avail) else base
-        return f"{package} like '{base}%' OR {package}='{next_avail}'"
+
+        if "dev" in version:  # if dev release, look at next
+            next_index = min(avail.index(base) + 1, len(avail) - 1)
+        else:  # if official release, look at prev dev release
+            next_index = max(avail.index(base) - 1, 0)
+
+        next_avail = avail[next_index]
+
+        return f"{package} like '{base}%' OR {package} like '{next_avail}%'"
 
     # --- Inventory versions ---
 
     def _extract_version(self, obj):
+        """Extract version numbers from a nested dictionary.
+
+        Developed to be recursive to handle provenance.json files, which could
+        theoretically contain different versions for different processing steps.
+        """
         if isinstance(obj, (list, set, tuple)):
             obj_sets = set()
             for o in obj:
@@ -113,7 +134,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for val in obj.values():
             versions.update(self._extract_version(val))
 
-        return {v for v in versions if v is not None}
+        return versions
 
     def make(self, key):
         """Inventory the namespaces present in an analysis file."""
@@ -126,8 +147,10 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
                 for fname in ["binary", "si_folder", "provenance"]
             ]
         )
-        if len(si_version) != 1:
-            raise ValueError(f"Multiple si versions found: {si_version}")
+        si_version.discard(None)
+        n_versions = len(si_version)
+        if n_versions != 1:
+            raise ValueError(f"{n_versions} si versions found: {si_version}")
 
         with open(rec_path / "probe.json", "r") as file:
             pi_version = json.load(file).get("version", None)
@@ -137,11 +160,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
                 key,
                 probeinterface=pi_version,
                 spikeinterface=next(iter(si_version)),
-            )
+            ),
+            allow_direct_insert=True,
         )
 
 
-# TODO: try to insert with the new upstream table
+# Initializing table to prevent recompute of cached properties
+REC_VER_TBL = RecordingRecomputeVersions()
 
 
 @schema
@@ -153,39 +178,27 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     logged_at_creation=0: bool
     """
 
-    @cached_property
-    def pip_deps(self):
-        return dict(
-            spikeinterface=si_version,
-            probeinterface=pi_version,
-            numpy=np_version,
-        )
-
-    def insert(self, rows, logged_at_creation=False, limit=None, **kwargs):
+    def insert(self, rows, at_creation=False, **kwargs):
         """Custom insert to ensure dependencies are added to each row."""
-        if not isinstance(rows, list):
+        if not rows:
+            return
+        if not isinstance(rows, (list, tuple)):
             rows = [rows]
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
 
-        this_env = UserEnvironment().insert_current_env()
-
         inserts = []
-        for i, row in enumerate(rows):
-            if limit and i >= limit:
-                break
+        for row in rows:
             key_pk = self.dict_to_pk(row)
-            inserts.append(
-                dict(
-                    **key_pk,
-                    **this_env,
-                    logged_at_creation=logged_at_creation,
-                )
-            )
+            if not REC_VER_TBL._has_matching_env(key_pk):
+                continue
+            key_pk.update(USER_TBL.this_env)
+            key_pk.setdefault("logged_at_creation", at_creation)
+            inserts.append(key_pk)
         super().insert(inserts, **kwargs)
 
     def attempt_all(
-        self, restr: dict = True, attempt_id: str = None, limit=None, **kwargs
+        self, restr: dict = True, limit: int = None, **kwargs
     ) -> None:
         """Insert all files into the recompute table.
 
@@ -194,11 +207,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         restr : dict, optional
             Key or restriction of SpikeSortingRecording. If None, all files
             are inserted.
-        attempt_id : str, optional
-            Name for the environment used to attempt recompute. If None, the
-            current user and conda environment are used.
+        limit : int, optional
+            Maximum number of entries to insert. Randomly selected.
         """
-        source = SpikeSortingRecording() & restr
+        source = REC_VER_TBL.this_env & restr
         kwargs["skip_duplicates"] = True
 
         if limit:
@@ -207,48 +219,18 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         inserts = [
             {
                 **key,
-                "attempt_id": attempt_id or DEFAULT_ATTEMPT_ID,
                 "logged_at_creation": False,
             }
             for key in source.fetch("KEY", as_dict=True)
         ]
-        self.insert(inserts, **kwargs)
+        self.insert(inserts, at_creation=False, **kwargs)
 
     # --- Gatekeep recompute attempts ---
 
-    @property  # key_source must not be a cached_property
-    def this_env(self):
-        """Restricted table matching pynwb env and pip env.
-
-        Serves as key_source for RecordingRecompute. Ensures that recompute
-        attempts are only made when the pynwb and pip environments match the
-        records. Also skips files whose environment was logged on creation.
-        """
-
-        restr = []
-        for key in self:
-            if key["pip_deps"] != self.pip_deps:
-                continue
-            restr.append(self.dict_to_pk(key))
-        return self & restr
-
-    def _has_matching_pip(self, key: dict, show_err=False) -> bool:
-        """Check current env for matching pip versions."""
-        ret, need = False, "Unknown"
-        query = self.this_env & key
-
-        if len(query) == 1:
-            need = query.fetch1("pip_deps")
-            ret = need == self.pip_deps
-
-        if not ret and show_err:
-            logger.error(
-                f"Pip version mismatch. Skipping key: {self.dict_to_pk(key)}"
-                + f"\n\tHave: {self.pip_deps}"
-                + f"\n\tNeed: {need}"
-            )
-
-        return ret
+    @cached_property
+    def this_env(self) -> dj.expression.QueryExpression:
+        """Restricted table matching pynwb env and pip env."""
+        return self & USER_TBL.this_env
 
 
 @schema
@@ -286,25 +268,39 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
             return old_obj, new_obj
 
-        def compare(self, key=None, name: str = None):
-            if key is None:
-                key = self.restriction or True
-            if isinstance(key, list):
-                for row in key:
-                    self.compare(row)
+        def compare(self, key=None):
+            """Compare embedded objects as available.
+
+            If key is a list or tuple, compare all entries. If no key, compare
+            all entries in self (likely restricted). If key specifies a name,
+            use key to find paths to files and compare the objects.
+            """
+            if isinstance(key, (list, tuple)) or not key:
+                comps = []
+                for row in key or self:
+                    comps.append(self.compare(row))
+                return comps
+
+            if not key.get("name"):
+                self.compare(self & key)
                 return
-            if this_name := name or key.get("name"):
-                old, new = RecordingRecompute()._get_paths(key)
-                print(f"Comparing {this_name}\n\t{old}\n\t{new}")
-                return H5pyComparator(*self.get_objs(key, name))
-            query = self & key
-            if len(query) == 0 or len(query) == len(self):
+
+            old, new = RecordingRecompute()._get_paths(key)
+            this_file = key.get("name")
+            msg = f" {this_file}\n\t{old}\n\t{new}"
+            if str(old).endswith("raw"):
+                print("Cannot compare raw files" + msg)
                 return
-            for row in query:
-                self.compare(row)
+            print("Comparing" + msg)
+            return H5pyComparator(old / this_file, new / this_file)
 
     def _parent_key(self, key):
-        ret = SpikeSortingRecording * RecordingRecomputeSelection & key
+        ret = (
+            SpikeSortingRecording
+            * RecordingRecomputeVersions
+            * RecordingRecomputeSelection
+            & key
+        )
         if len(ret) != 1:
             raise ValueError(f"Query returned {len(ret)} entries: {ret}")
         return ret.fetch(as_dict=True)[0]
@@ -318,7 +314,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         return hasher
 
     def _get_temp_dir(self, key):
-        return Path(temp_dir) / "spikesort_v0_recompute" / key["attempt_id"]
+        return Path(temp_dir) / self.database / key["env_id"]
 
     def _get_paths(self, key, as_str=False) -> Tuple[Path, Path]:
         """Return the old and new file paths."""
@@ -339,9 +335,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         # Ensure dependencies unchanged since selection insert
-        if not RecordingRecomputeSelection()._has_matching_pip(key):
+        if not REC_VER_TBL._has_matching_env(key):
             logger.info(
-                f"Skipping due to pip mismatch, {key['attempt_id']}: {log_key}"
+                f"Skipping due to pip mismatch, {key['env_id']}: {log_key}"
             )
             return
 
@@ -404,7 +400,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             old.unlink(missing_ok=True)
 
     def delete(self, *args, **kwargs):
-
+        """Delete recompute attempts when deleting rows."""
         attempt_dirs = []
         for key in self:
             _, new = self._get_paths(key)

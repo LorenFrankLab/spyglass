@@ -43,7 +43,7 @@ class DirectoryHasher:
         self,
         directory_path: Union[str, Path],
         batch_size: int = DEFAULT_BATCH_SIZE,
-        keep_file_hash: bool = False,
+        keep_obj_hash: bool = False,
         verbose: bool = False,
     ):
         """Generate a hash of the contents of a directory, recursively.
@@ -64,7 +64,7 @@ class DirectoryHasher:
             Path to the directory to hash.
         batch_size : int, optional
             Limit of data to hash for large files, by default 4095.
-        keep_file_hash : bool, optional
+        keep_obj_hash : bool, optional
             Default false. If true, keep cache the hash of each file.
         verbose : bool, optional
             Display progress bar, by default False.
@@ -76,7 +76,7 @@ class DirectoryHasher:
             raise NotADirectoryError(f"Path is not a dir: {self.dir_path}")
 
         self.batch_size = int(batch_size)
-        self.keep_file_hash = bool(keep_file_hash)
+        self.keep_obj_hash = bool(keep_obj_hash)
         self.cache = {}
         self.verbose = bool(verbose)
         self.hashed = md5("".encode())
@@ -104,7 +104,7 @@ class DirectoryHasher:
             rel_path = str(file_path.relative_to(self.dir_path))
             self.hashed.update(rel_path.encode())
 
-            if self.keep_file_hash:
+            if self.keep_obj_hash:
                 self.cache[rel_path] = this_hash
 
         return self.hashed.hexdigest()  # Return the hex digest of the hash
@@ -129,6 +129,7 @@ class DirectoryHasher:
         """
         with file_path.open("r") as f:
             file_data = json.load(f, object_hook=self.pop_version)
+
         return json.dumps(file_data, sort_keys=True).encode()
 
     def pop_version(self, data: Union[dict, list]) -> Union[dict, list]:

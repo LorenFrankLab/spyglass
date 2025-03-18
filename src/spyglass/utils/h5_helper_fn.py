@@ -8,6 +8,10 @@ import numpy as np
 from yaml import safe_load as yaml_safe_load
 
 
+def sort_dict(d) -> dict:
+    return dict(sorted(d.items()))
+
+
 class H5pyComparator:
     """Compare two objects by treating them as dictionaries.
 
@@ -17,6 +21,7 @@ class H5pyComparator:
     """
 
     def __init__(self, old, new, line_limit=80, run=True):
+        self.inputs = (old.__repr__(), new.__repr__())
         self.old = self.obj_to_dict(old)
         self.new = self.obj_to_dict(new)
         self.line_limit = line_limit
@@ -24,7 +29,8 @@ class H5pyComparator:
             self.compare_dicts(self.old, self.new)
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.old}, {self.new})"
+        old, new = self.inputs
+        return f"{self.__class__.__name__}({old}, {new})"
 
     def run(self):
         """Rerun the comparison."""
@@ -52,7 +58,9 @@ class H5pyComparator:
 
     def obj_to_dict(self, obj):
         """Convert an h5py object to a dictionary."""
-        if isinstance(obj, [Path, str]) and Path(obj).exists():
+        if not obj:
+            return dict(empty=True)
+        if isinstance(obj, (Path, str)) and Path(obj).exists():
             return self.obj_to_dict(self.open_file(Path(obj)))
         if isinstance(obj, dict):
             return {k: self.obj_to_dict(v) for k, v in obj.items()}
@@ -64,18 +72,20 @@ class H5pyComparator:
             return self.numpy_to_dict(obj)
         if isinstance(obj, bytes):
             return self.unpack_scalar(obj.decode())
+        if isinstance(obj, (list, tuple)):
+            return {"iterable": self.obj_to_dict(x) for x in obj}
         return json_loads(obj)
 
     def open_file(self, path):
-        if file.suffix == ".h5":
+        if path.suffix == ".h5":
             return h5py.File(path, "r")
-        if file.suffix == ".nwb":
-            return NWBHDF5IO(path, "r").read()
-        if file.suffix == ".json":
+        if path.suffix == ".nwb":
+            return f"pointer to {path}"
+        if path.suffix == ".json":
             return json_loads(path.read_text())
-        if file.suffix == ".yaml":
+        if path.suffix == ".yaml":
             return yaml_safe_load(path.read_text())
-        if file.suffix in ["npy", "npz"]:
+        if path.suffix in ["npy", "npz"]:
             return np.load(path)
         return dict(unrecognized_file_type=path.suffix)
 

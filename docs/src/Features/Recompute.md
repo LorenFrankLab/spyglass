@@ -81,6 +81,7 @@ the environments used to attempt recompute. These attempts are run using the
 
     # Alter tables to include new fields, updating values
     my_keys = (v0_recording.SpikeSortingRecording() & restriction).fetch("KEY")
+    v0_recompute.RecordingRecomputeVersions().populate(my_keys)
     v0_recompute.RecordingRecomputeSelection().insert(my_keys)
     v0_recompute.RecordingRecompute().populate()
     ```
@@ -99,16 +100,23 @@ the environments used to attempt recompute. These attempts are run using the
 
     1. Optionally, you can set your preferred precision for recompute when inserting
         into `RecordingRecomputeSelection`. The default is 4.
-    2. This will also skip over items whose internal dependencies do not match the
-        current environment. To see matching keys, you can check
-        `RecordingRecomputeVersions().this_env`.
 
-By default, these insert methods will generate an `attempt_id` that serves as a
-unique identifier for relevant pip dependencies. You can customize this
-identifier by passing an additional `attempt_id` argument to the insert method.
+The respective `Versions` tables will record the dependencies of existing files
+(i.e., spikeinterface and probeinterface versions for v0 and pynwb dependencies for v0).
+By default, these insert methods will generate an entry in `common.UserEnvironment`.
+This table stores all conda and pip dependencies for the environment used, and
+associates them with a unique `env_id` identifier (`{USER}_{CONDA_ENV_NAME}_{##}`)
+that increments if the environment is updated. You can customize the `env_id`
+by inserting an entry prior to recompute.
 
-Newly generated files are stored in a subdirectory according to this attempt_id:
-`{SPYGLASS_TEMP_DIR}/{pipeline}_v{version}_recompute/{attempt_id}`.
+```python
+from spyglass.common import UserEnvironment
+
+UserEnvironment().insert_current_env("my_env_id")
+```
+
+Newly generated recompute files are stored in a subdirectory according to this
+env_id: `{SPYGLASS_TEMP_DIR}/{recompute schema name}/{env_id}`.
 
 #### Investigating failed attempts
 
@@ -125,8 +133,7 @@ Recompute tables are set up to have `Name` and `Hash` part tables that track...
 
     RecordingRecompute().Name()
     RecordingRecompute().Hash()
-    hash_key = (RecordingRecompute().Hash() & restriction).fetch1("KEY")
-    RecordingRecompute().Hash().compare(key)
+    (RecordingRecompute().Hash() & key).compare() # OR Hash().compare(key)
     ```
 
 === "v1"

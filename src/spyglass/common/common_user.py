@@ -1,15 +1,18 @@
-import datajoint as dj
 import re
-from os import environ as os_environ
-from typing import List
 from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
+from os import environ as os_environ
 from subprocess import run as sub_run
-from spyglass.utils import logger
+from typing import List
+
+import datajoint as dj
 from yaml import safe_load as yaml_load
 
-schema = dj.schema("cbroz_user")  # TODO: common_user
+from spyglass.utils import logger
+
+schema = dj.schema("common_user")
+# TODO: oops, declared on 'common' instead of 'cbroz' - delete?
 
 DEFAULT_ENV_ID = (
     dj.config["database.user"]
@@ -35,10 +38,16 @@ class UserEnvironment(dj.Manual):
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
     @cached_property
-    def current_env(self) -> dict:
+    def env_dict(self) -> dict:
         """Fetch the current Conda environment as a dictionary."""
+
+        logger.info("Retrieving the current Conda environment.")
+
         result = sub_run(
-            ["conda", "env", "export"], capture_output=True, text=True
+            ["conda", "env", "export"],
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         if result.returncode != 0:
             logger.error("Failed to retrieve the Conda environment.")
@@ -54,18 +63,42 @@ class UserEnvironment(dj.Manual):
             elif isinstance(dep, dict) and "pip" in dep:
                 for pip_dep in dep["pip"]:
                     pip_key, pip_val = pip_dep.split("==", maxsplit=1)
-                    dependencies.setdefault(pip_key, pip_val)  # no overide
+                    dependencies.setdefault(pip_key, pip_val)  # no override
 
         return dependencies
 
     @cached_property
     def env_hash(self) -> str:
         """Compute an MD5 hash of the environment dictionary."""
-        env_json = json_dumps(self.current_env, sort_keys=True)
+        logger.info("Computing current environment hash.")
+        env_json = json_dumps(self.env_dict, sort_keys=True)
         return md5(env_json.encode()).hexdigest()
 
+    @cached_property
+    def matching_env_id(self):
+        """Return the env_id that matches the current environment's hash."""
+        logger.info("Checking for a matching environment.")
+        matches = self & f'env_hash="{self.env_hash}"'
+        return matches.fetch1("env_id") if matches else None
+
+    @cached_property
+    def this_env(self) -> dict:
+        """Return the environment key. Cached to avoid rerunning insert."""
+        if self.matching_env_id:
+            return {"env_id": self.matching_env_id}
+        del self.matching_env_id  # clear the cached property
+        return self.insert_current_env()
+
     def _increment_id(self, env_id: str) -> str:
-        """Increment the environment ID."""
+        """Increment the environment ID.
+
+        Users are likely to update their environments without careful
+        record-keeping. This method increments the numeric suffix of the
+        environment ID, if present, to avoid overwriting existing records.
+
+        Substringing the environment ID is not ideal for precise record-keeping,
+        but it simplifies the downstream inherited keys.
+        """
         if not self & f'env_id="{env_id}"':
             return env_id
 
@@ -86,7 +119,7 @@ class UserEnvironment(dj.Manual):
     def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
         """Insert the current environment into the table."""
 
-        if not self.current_env:  # if conda dump fails
+        if not self.env_dict:  # if conda dump fails
             logger.error("Failed to retrieve the current environment.")
             return
 
@@ -98,8 +131,9 @@ class UserEnvironment(dj.Manual):
             {  # if current env not stored, but name taken, increment
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
-                "env": self.current_env,
-            }
+                "env": self.env_dict,
+            },
+            skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
         return {"env_id": env_id}
@@ -123,13 +157,13 @@ class UserEnvironment(dj.Manual):
 
         mismatches = []
         for key in relevant_deps or stored_env:
-            if stored_env.get(key) != self.current_env.get(key):
+            if stored_env.get(key) != self.env_dict.get(key):
                 mismatches.append(
                     f"  - {key}: {stored_env[key]} != {env.get(key)}"
                 )
 
         relevant_set = set(relevant_deps) if relevant_deps else set()
-        current_set = set(self.current_env.keys())
+        current_set = set(self.env_dict.keys())
         stored_set = set(stored_env.keys())
 
         if not relevant_set.issubset(current_set):
@@ -146,9 +180,3 @@ class UserEnvironment(dj.Manual):
             )
 
         return not bool(mismatches)  # True if no mismatches
-
-    @cached_property
-    def matching_env_id(self):
-        """Return the env_id that matches the current environment's hash."""
-        matches = self & f'env_hash="{self.env_hash}"'
-        return matches.fetch1("env_id") if matches else None
