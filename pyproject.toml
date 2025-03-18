@@ -15,6 +15,7 @@ authors = [
     { name = "Ryan Ly", email = "rly@lbl.gov" },
     { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
     { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
+    { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -45,6 +46,7 @@ dependencies = [
     "ipympl",
     "matplotlib",
     "ndx_franklab_novela>=0.1.0",
+    "ndx-pose",
     "non_local_detector",
     "numpy",
     "opencv-python",
