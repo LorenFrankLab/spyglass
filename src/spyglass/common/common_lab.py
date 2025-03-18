@@ -115,6 +115,11 @@ class LabMember(SpyglassMixin, dj.Manual):
             cls._load_admin()
         return cls._admin
 
+    @property
+    def user_is_admin(cls) -> bool:
+        """Return True if the user is an admin."""
+        return dj.config["database.user"] in cls.admin
+
     def get_djuser_name(cls, dj_user) -> str:
         """Return the lab member name associated with a datajoint user name.
 
@@ -153,7 +158,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         error_message: str
             The error message to display if the user is not an admin.
         """
-        if dj.config["database.user"] not in cls.admin:
+        if cls.user_is_admin:
             raise PermissionError(error_message)
 
 

@@ -12,11 +12,17 @@ import numpy as np
 import spikeinterface as si
 from packaging import version
 
-if version.parse(si.__version__) < version.parse("0.99.1"):
+from spyglass.common import LabMember
+
+if not LabMember().user_is_admin and version.parse(
+    si.__version__
+) < version.parse("0.99.1"):
+    # Allow admin to bypass version check for recompute purposes
     raise ImportError(
         "SpikeInterface version must updated. "
         + "Please run `pip install spikeinterface==0.99.1` to update."
     )
+
 import spikeinterface.preprocessing as sip
 import spikeinterface.qualitymetrics as sq
 

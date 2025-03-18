@@ -68,6 +68,10 @@ replicability of old files prior to deletion, we'll need to...
 3. Investigate failed attempts and make environment changes as necessary.
 4. Delete files that successfully recomputed.
 
+Changing the spikeinterface to comply with an older version of spyglass may
+trigger an import error in `v0.spikesorting_curation`. There is a built-in
+bypass for users listed as admin in `common.LabMember`.
+
 #### Attempting recompute
 
 `RecomputeSelection` tables will record information about the dependencies of
