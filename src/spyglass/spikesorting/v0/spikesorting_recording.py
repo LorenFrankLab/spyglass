@@ -337,12 +337,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recording_path=rec_info["path"],
         )
         self.insert1(self_insert)
+        self._record_environment(self_insert)
 
-        from spyglass.spikesorting.v0.spikesorting_recompute import (
-            RecordingRecomputeSelection,
-        )
+    def _record_environment(self, key):
+        """Record environment details for this recording."""
+        from spyglass.spikesorting.v0 import spikesorting_recompute as rcp
 
-        RecordingRecomputeSelection.insert(self_insert, logged_at_creation=True)
+        rcp.RecordingRecomputeSelection.insert(key, at_creation=True)
 
     def _make_file(self, key, base_dir=None, return_hasher=False):
         """Run only operations required to save the recording data to disk."""

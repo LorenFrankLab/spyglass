@@ -212,6 +212,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         self.insert1(key)
         self._record_environment(key)
 
+    def _record_environment(self, key):
+        """Record environment details for this recording."""
+        from spyglass.spikesorting.v1 import recompute as rcp
+
+        rcp.RecordingRecomputeSelection().insert(key, at_creation=True)
+
     @classmethod
     def _make_file(
         cls,
@@ -336,12 +342,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             elect_id = f[elect_attr].attrs["object_id"]
 
         return elect_id
-
-    def _record_environment(self, key):
-        """Record environment details for this recording."""
-        from spyglass.spikesorting.v1 import recompute as rcp
-
-        rcp.RecordingRecomputeSelection().insert(key)
 
     @classmethod
     def get_recording(cls, key: dict) -> si.BaseRecording:

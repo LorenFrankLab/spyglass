@@ -112,11 +112,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         5. Inserts into ClusterlessDecodingV1 table and DecodingOutput merge
             table.
         """
-        n = 0
-
-        n += 1
-        print(f"n={n}")
-
         orig_key = copy.deepcopy(key)
 
         # Get model parameters
@@ -138,9 +133,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         # Get the waveform features for the selected units. Don't need to filter
         # by interval since the non_local_detector code will do that
-
-        n += 1
-        print(f"n={n}")
 
         (
             spike_times,
@@ -169,9 +161,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         if "is_training" not in decoding_kwargs:
             decoding_kwargs["is_training"] = is_training
 
-        n += 1
-        print(f"n={n}")
-
         decoding_interval = (
             IntervalList
             & {
@@ -189,9 +178,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             # decoding interval will not use the spiking data a better approach
             # would be to treat the intervals as multiple sequences (see
             # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
-
-            n += 1
-            print(f"n={n}")
 
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
@@ -224,9 +210,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 for key, value in decoding_kwargs.items()
                 if key in VALID_FIT_KWARGS
             }
-
-            n += 1
-            print(f"n={n}")
 
             classifier.fit(
                 position_time=position_info.index.to_numpy(),
@@ -272,9 +255,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 )
             results = xr.concat(results, dim="intervals")
 
-            n += 1
-            print(f"n={n}")
-
         # Save discrete transition and initial conditions
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
@@ -285,9 +265,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             dims=("states", "states"),
             name="discrete_state_transitions",
         )
-
-        n += 1
-        print(f"n={n}")
 
         if (
             vars(classifier).get("discrete_transition_coefficients_")
@@ -301,9 +278,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
 
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
-
-        n += 1
-        print(f"n={n}")
 
         # Generate a unique path for the results file
         path_exists = True
@@ -319,9 +293,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             results_path,
         )
         key["results_path"] = results_path
-
-        n += 1
-        print(f"n={n}")
 
         classifier_path = results_path.with_suffix(".pkl")
         classifier.save_model(classifier_path)

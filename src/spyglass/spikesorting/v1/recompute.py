@@ -85,7 +85,6 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         if not ret and show_err:
             need = sort_dict(self.key_env(key))
             have = sort_dict(self.nwb_deps)
-            key_pk = self.dict_to_pk(key)
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
                 + f"\n\tHave: {have}"
@@ -169,8 +168,6 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
 
-        logger.info(f"Inserting {len(rows)} recompute attempts.")
-
         inserts = []
         for row in rows:
             row_pk = self.dict_to_pk(row)
@@ -179,8 +176,6 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             full_key = self.dict_to_full_key(row)
             full_key.update(dict(self.env_dict, logged_at_creation=at_creation))
             inserts.append(full_key)
-
-        logger.info(f"Inserting {len(inserts)} valid recompute attempts.")
 
         super().insert(inserts, **kwargs)
 
@@ -524,7 +519,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             _, new = self._get_paths(key)
             attempt_paths.append(new)
 
-        msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_dirs)
+        msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_paths)
         if dj.utils.user_choice(msg).lower() == "yes":
             for path in attempt_paths:
                 path.unlink(missing_ok=True)
