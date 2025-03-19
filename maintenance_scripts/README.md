@@ -27,6 +27,8 @@ regularly as cron jobs.
     - Calculate the percent available relative to `SPACE_PERCENT_LIMIT`.
     - If above, sends an email for each drive to each recipient listed in
         `SPACE_EMAIL_RECIPENTS`.
+    - If provided with `SLACK_TOKEN` and `SLACK_CHANNEL`, posts a message to
+        slack.
 
 ## Setup
 
@@ -57,11 +59,20 @@ regularly as cron jobs.
             space notifications.
         - `SPACE_EMAIL_RECIPENTS`: a space-separated list of email addresses to
             receive disk space notifications.
+    - Items for posting to slack:
+        - `SLACK_TOKEN`: the token for the slack app.
+        - `SLACK_CHANNEL`: the channel to post to.
 4. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
 Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
 lines on each run. 1000 lines should be sufficient.
+
+To enable slack notifications, you will need to create a slack app and generate
+a token following the instructions
+[here](https://api.slack.com/tutorials/tracks/posting-messages-with-curl).
+For posting to a private channel, you will need to invite the app to the
+relevant channel before attempting to post.
 
 ### Example Cron Jobs
 
