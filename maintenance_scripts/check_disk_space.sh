@@ -15,7 +15,8 @@ if [[ -z "${SPACE_CHECK_DRIVES}" \
   || -z "${SPACE_EMAIL_PASS}" \
   || -z "${SPACE_EMAIL_RECIPIENTS}" \
   || -z "${SPACE_DRIVE_LIMITS}" \
-  || -z "${SPACE_LOG}" ]] ; then
+  || -z "${SPACE_LOG}" \
+  || -z "${SPACE_ROOT_NAME}" ]] ; then
   echo "Error: Missing one or more variables required for check_disk_space.sh"
   exit 1
 fi
@@ -88,14 +89,18 @@ for i in "${!DRIVE_LIST[@]}"; do
         continue
     fi
 
-    # Get free space in bytes
-    FREE_BYTES=$(df --output=avail "$DRIVE" | awk 'NR==2 {print $1}')000
-    TOTAL_BYTES=$(df --output=size "$DRIVE" | awk 'NR==2 {print $1}')000
+    # Get free space in bytes. Multiply by 1024 to convert kilo -> bytes.
+    FREE_BYTES=$(df --output=avail "$DRIVE" | awk 'NR==2 {print $1 * 1024}')
+    TOTAL_BYTES=$(df --output=size "$DRIVE" | awk 'NR==2 {print $1 * 1024}')
     FREE_HUMAN=$(numfmt --to=iec "$FREE_BYTES")
     TOTAL_HUMAN=$(numfmt --to=iec "$TOTAL_BYTES")
 
     # Log with left-padded drive names
-    NAME="${DRIVE:1}" # assumes first char is `/`
+    if [[ "$DRIVE" == "/" ]]; then
+        NAME="$SPACE_ROOT_NAME" # Use custom name for root
+    else
+        NAME="${DRIVE:1}" # Assumes first char is `/`
+    fi
     printf "%-*s: %s/%s\n" "$MAX_DRIVE_LEN" "$NAME" \
         "$FREE_HUMAN" "$TOTAL_HUMAN" >> "$SPACE_LOG"
 
@@ -108,10 +113,13 @@ for i in "${!DRIVE_LIST[@]}"; do
     BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
     SUBJ="LOW SPACE: ${NAME}"
 
+    echo $BODY >> "$SPACE_LOG"
+
     send_slack_message "$BODY"
 
     for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do
         send_email_message "$RECIPIENT" "$SUBJ" "$BODY"
     done
+
 done
 
