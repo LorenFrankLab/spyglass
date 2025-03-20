@@ -14,14 +14,21 @@ if [[ -z "${SPACE_CHECK_DRIVES}" \
   || -z "${SPACE_EMAIL_SRC}" \
   || -z "${SPACE_EMAIL_PASS}" \
   || -z "${SPACE_EMAIL_RECIPIENTS}" \
-  || -z "${SPACE_LIMIT}" \
+  || -z "${SPACE_DRIVE_LIMITS}" \
   || -z "${SPACE_LOG}" ]] ; then
   echo "Error: Missing one or more variables required for check_disk_space.sh"
   exit 1
 fi
 
-# Convert space limit to bytes
-SPACE_LIMIT_BYTES=$(numfmt --from=iec "$SPACE_LIMIT")
+# Inputs to arrays
+IFS=' ' read -r -a DRIVE_LIST <<< "$SPACE_CHECK_DRIVES"
+IFS=' ' read -r -a LIMIT_LIST <<< "$SPACE_DRIVE_LIMITS"
+
+if [[ "${#SPACE_CHECK_DRIVES[@]}" -ne "${#SPACE_DRIVE_LIMITS[@]}" ]]; then
+  echo "Error: Number of drives does not match number of limits"
+  exit 1
+fi
+
 echo "SPACE CHECK: $(date)" > "$SPACE_LOG"
 
 # Email template
@@ -68,8 +75,12 @@ for DRIVE in $SPACE_CHECK_DRIVES; do
 done
 
 # Check each drive
-for DRIVE in $SPACE_CHECK_DRIVES; do
-    NAME="${DRIVE:1}" # assumes first char is `/`
+for i in "${!DRIVE_LIST[@]}"; do
+    DRIVE="${DRIVE_LIST[$i]}"
+    LIMIT="${LIMIT_LIST[$i]}"
+
+    # Convert limit to bytes
+    SPACE_LIMIT_BYTES=$(numfmt --from=iec "$LIMIT")
 
     # Skip nonexistent drives
     if [[ ! -d "$DRIVE" ]]; then
@@ -84,6 +95,7 @@ for DRIVE in $SPACE_CHECK_DRIVES; do
     TOTAL_HUMAN=$(numfmt --to=iec "$TOTAL_BYTES")
 
     # Log with left-padded drive names
+    NAME="${DRIVE:1}" # assumes first char is `/`
     printf "%-*s: %s/%s\n" "$MAX_DRIVE_LEN" "$NAME" \
         "$FREE_HUMAN" "$TOTAL_HUMAN" >> "$SPACE_LOG"
 
