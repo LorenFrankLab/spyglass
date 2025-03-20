@@ -27,6 +27,7 @@
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
+    - Add cleanup for `v0.SpikeSortingRecording` #XXXX
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
