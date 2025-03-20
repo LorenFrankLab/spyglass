@@ -208,7 +208,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
             # filter the spike times based on the time slice if provided
             if time_slice is not None:
-                if isinstance(time_slice, list):
+                if isinstance(time_slice, (list, tuple)):
                     time_slice = slice(*time_slice)
                 sorting_spike_times = [
                     times[
