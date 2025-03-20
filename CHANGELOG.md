@@ -22,12 +22,13 @@
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
-    - Enable import of existing pose data to `ImportedPose` in position pipeline #1247
+    - Enable import of existing pose data to `ImportedPose` in position pipeline
+        #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
-    - Add cleanup for `v0.SpikeSortingRecording` #XXXX
+    - Add cleanup for `v0.SpikeSortingRecording` #1263
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
@@ -434,3 +435,4 @@
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
+[0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
