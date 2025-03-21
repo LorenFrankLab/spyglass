@@ -69,6 +69,53 @@ from spyglass.utils.nwb_helper_fn import (
     get_raw_eseries,
     get_valid_intervals,
 )
+from spyglass.common.common_user import UserEnvironment
+
+__all__ = [
+    "LabTeam",
+    "LinearizationParameters",
+    "Nwbfile",
+    "PositionInfoParameters",
+    "PositionIntervalMap",
+    "PositionSource",
+    "PositionVideo",
+    "Probe",
+    "ProbeType",
+    "Raw",
+    "RawPosition",
+    "SampleCount",
+    "SensorData",
+    "Session",
+    "StateScriptFile",
+    "Subject",
+    "Task",
+    "TaskEpoch",
+    "TrackGraph",
+    "UserEnvironment",
+    "VideoFile",
+    "close_nwb_files",
+    "convert_epoch_interval_name_to_position_interval_name",
+    "estimate_sampling_rate",
+    "get_data_interface",
+    "get_electrode_indices",
+    "get_nwb_file",
+    "get_position_interval_epoch",
+    "get_raw_eseries",
+    "get_valid_intervals",
+    "interval_list_censor",
+    "interval_list_contains",
+    "interval_list_contains_ind",
+    "interval_list_excludes",
+    "interval_list_excludes_ind",
+    "interval_list_intersect",
+    "interval_list_union",
+    "intervals_by_length",
+    "populate_all_common",
+    "populate_from_yaml",
+    "prepopulate",
+    "prepopulate_default",
+]
+
 
 if prepopulate:
     prepopulate_default()

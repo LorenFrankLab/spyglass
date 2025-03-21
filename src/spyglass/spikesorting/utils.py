@@ -1,6 +1,8 @@
 import warnings
+from os import environ as os_environ
 from typing import Dict, List
 
+import datajoint as dj
 import numpy as np
 import scipy.stats as stats
 import spikeinterface as si

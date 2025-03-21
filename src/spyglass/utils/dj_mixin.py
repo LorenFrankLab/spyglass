@@ -89,6 +89,22 @@ class SpyglassMixin(ExportMixin):
 
     # -------------------------- Misc helper methods --------------------------
 
+    def dict_to_pk(self, key):
+        """Return primary key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.primary_key}
+
+    def dict_to_full_key(self, key):
+        """Return full key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.heading.names}
+
+    def cautious_fetch1(self, key=True, *attrs, **kwargs):
+        """Fetch one entry, raise error if not unique."""
+        # TODO: overwrite fetch1 to use this method?
+        query = self & key
+        if not len(query) == 1:
+            raise KeyError(f"Expected 1 entry, found {len(query)}.\n{query}")
+        return query.fetch1(*attrs, **kwargs)
+
     @property
     def camel_name(self):
         """Return table name in camel case."""
@@ -151,7 +167,7 @@ class SpyglassMixin(ExportMixin):
             ):  # check if all required fields are in key
                 if not len(query := cls() & key) == 1:  # check if key is unique
                     raise KeyError(
-                        f"Key is neither fully specified nor a unique entry in"
+                        "Key is neither fully specified nor a unique entry in"
                         + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
                         + f"Required fields: {required_fields}\n\tResult: {query}"
                     )
