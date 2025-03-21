@@ -322,7 +322,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         if fetch_all:
             waveform_params["max_spikes_per_unit"] = None
-            waveforms_dir += "_all"  # TODO: would it be better to overwrite?
+            waveforms_dir += "_all"
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)

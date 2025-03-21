@@ -4,7 +4,6 @@ from time import time
 from typing import List
 
 import datajoint as dj
-from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
@@ -114,12 +113,41 @@ class SpyglassMixin(ExportMixin):
             return
         return self & f"{attr} LIKE '%{name}%'"
 
-    def restrict_by_list(self, field: str, values: list) -> QueryExpression:
+    def restrict_by_list(
+        self, field: str, values: list, return_restr=False
+    ) -> QueryExpression:
         """Restrict a field by list of values."""
         if field not in self.heading.attributes:
             raise KeyError(f"Field '{field}' not in {self.camel_name}.")
         quoted_vals = '"' + '","'.join(map(str, values)) + '"'
-        return self & f"{field} IN ({quoted_vals})"
+        restr = self & f"{field} IN ({quoted_vals})"
+        return restr if return_restr else self & restr
+
+    def get_params_blob_from_key(self, key: dict, default="default") -> dict:
+        """Get params blob from table using key, assuming 1 primary key.
+
+        Defaults to 'default' if no entry is found.
+
+        TODO: Split SpyglassMixin to SpyglassParamsMixin.
+        """
+        pk = self.primary_key[0]
+        blob_fields = [
+            k.name for k in self.heading.attributes.values() if k.is_blob
+        ]
+        if len(blob_fields) != 1:
+            raise ValueError(
+                f"Table must have only 1 blob field, found {len(blob_fields)}"
+            )
+        blob_attr = blob_fields[0]
+
+        if isinstance(key, str):
+            key = {pk: key}
+        if not isinstance(key, dict):
+            raise ValueError("key must be a dictionary")
+        passed_key = key.get(pk, None)
+        if not passed_key:
+            logger.warning("No key passed, using default")
+        return (self & {pk: passed_key or default}).fetch1(blob_attr)
 
     def find_insert_fail(self, key):
         """Find which parent table is causing an IntergrityError on insert."""
@@ -176,10 +204,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",

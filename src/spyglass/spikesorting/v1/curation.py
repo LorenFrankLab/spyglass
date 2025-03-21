@@ -192,7 +192,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         as_dataframe : bool, optional
-            whether to return the sorting as a pandas DataFrame, by default False
+            Return the sorting as a pandas DataFrame, by default False
 
         Returns
         -------
