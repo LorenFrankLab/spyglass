@@ -203,6 +203,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
+
         with pynwb.NWBHDF5IO(
             analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
@@ -215,20 +216,15 @@ class CurationV1(SpyglassMixin, dj.Manual):
         recording = cls.get_recording(key)
         sampling_frequency = recording.get_sampling_frequency()
 
-        units_dict_list = [
-            {
-                unit_id: np.searchsorted(recording.get_times(), spike_times)
-                for unit_id, spike_times in zip(
-                    units.index, units["spike_times"]
-                )
-            }
-        ]
+        recording_times = recording.get_times()
+        units_dict = {
+            unit.Index: np.searchsorted(recording_times, unit.spike_times)
+            for unit in units.itertuples()
+        }
 
-        sorting = si.NumpySorting.from_unit_dict(
-            units_dict_list, sampling_frequency=sampling_frequency
+        return si.NumpySorting.from_unit_dict(
+            [units_dict], sampling_frequency=sampling_frequency
         )
-
-        return sorting
 
     @classmethod
     def get_merged_sorting(cls, key: dict) -> si.BaseSorting:

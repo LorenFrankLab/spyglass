@@ -46,7 +46,7 @@ def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
         "original_reference_electrode": 0,
         "parent_curation_id": 0,
         "probe_electrode": 0,
-        "probe_id": "tetrode_12.5",
+        "probe_id": "four wire electrode",
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,

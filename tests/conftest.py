@@ -1393,7 +1393,9 @@ def pop_curation(spike_v1, pop_sort):
     parent_curation_id = -1
     has_sort = spike_v1.CurationV1 & {"sorting_id": pop_sort["sorting_id"]}
     if has_sort:
-        parent_curation_id = has_sort.fetch1("curation_id")
+        parent_curation_id = has_sort.fetch(
+            "curation_id", order_by="curation_id desc"
+        )[0]
 
     spike_v1.CurationV1.insert_curation(
         sorting_id=pop_sort["sorting_id"],
