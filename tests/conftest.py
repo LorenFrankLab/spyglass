@@ -29,6 +29,17 @@ from .data_downloader import DataDownloader
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
+warnings.filterwarnings("ignore", module="tensorflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+warnings.filterwarnings(
+    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+)
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
+warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+warnings.simplefilter("ignore", category=ResourceWarning)
+warnings.simplefilter("ignore", category=DeprecationWarning)
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -107,19 +118,6 @@ def pytest_configure(config):
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
     )
-
-    warnings.filterwarnings("ignore", module="tensorflow")
-    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-    warnings.filterwarnings(
-        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
-    )
-    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-    warnings.filterwarnings(
-        "ignore", category=PerformanceWarning, module="pandas"
-    )
-    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-    warnings.simplefilter("ignore", category=ResourceWarning)
-    warnings.simplefilter("ignore", category=DeprecationWarning)
 
 
 def pytest_unconfigure(config):
