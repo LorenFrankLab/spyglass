@@ -2,7 +2,6 @@ from itertools import permutations
 from typing import Dict, List, Tuple
 
 import datajoint as dj
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
 from spikeinterface.postprocessing.correlograms import (
@@ -11,7 +10,7 @@ from spikeinterface.postprocessing.correlograms import (
 )
 
 from spyglass.decoding.utils import _get_peak_amplitude
-from spyglass.spikesorting.utils import (
+from spyglass.spikesorting.utils_burst import (
     calculate_ca,
     calculate_isi_violation,
     plot_burst_by_sort_group,
