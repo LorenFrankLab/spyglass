@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -14,7 +14,7 @@
 
 # # Sorted Spikes Decoding
 #
-# The mechanics of decoding with sorted spikes are largely similar to those of decoding with unsorted spikes. You should familiarize yourself with the [clusterless decoding tutorial](./42_Decoding_Clusterless.ipynb) before proceeding with this one.
+# The mechanics of decoding with sorted spikes are largely similar to those of decoding with unsorted spikes. You should familiarize yourself with the [clusterless decoding tutorial](./41_Decoding_Clusterless.ipynb) before proceeding with this one.
 #
 # The elements we will need to decode with sorted spikes are:
 # - `PositionGroup`
