@@ -3,16 +3,16 @@ from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
 from os import environ as os_environ
+from pathlib import Path
 from subprocess import run as sub_run
 from typing import List
 
 import datajoint as dj
-from yaml import safe_load as yaml_load
+import yaml
 
 from spyglass.utils import logger
 
 schema = dj.schema("common_user")
-# TODO: oops, declared on 'common' instead of 'cbroz' - delete?
 
 DEFAULT_ENV_ID = (
     dj.config["database.user"]
@@ -28,7 +28,7 @@ class UserEnvironment(dj.Manual):
     env_id: varchar(32)  # Unique environment identifier
     ---
     env_hash: char(32)  # MD5 hash of the environment
-    env: blob  # Full Conda environment stored as a dictionary
+    env: blob  # Conda environment
     timestamp=CURRENT_TIMESTAMP: timestamp  # Automatic timestamp
     UNIQUE INDEX (env_hash)
     """
@@ -38,11 +38,9 @@ class UserEnvironment(dj.Manual):
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
     @cached_property
-    def env_dict(self) -> dict:
-        """Fetch the current Conda environment as a dictionary."""
-
+    def env(self) -> str:
+        """Fetch the current Conda environment as a string."""
         logger.info("Retrieving the current Conda environment.")
-
         result = sub_run(
             ["conda", "env", "export"],
             capture_output=True,
@@ -51,27 +49,32 @@ class UserEnvironment(dj.Manual):
         )
         if result.returncode != 0:
             logger.error("Failed to retrieve the Conda environment.")
-            return {}
+            return ""
 
-        parsed = yaml_load(result.stdout)
+        return {
+            k: v
+            for k, v in yaml.safe_load(result.stdout).items()
+            if k not in ["name", "prefix"]
+        }
 
+    def parse_env_dict(self, env):
+        """Convert the environment string to a dictionary."""
         dependencies = dict()
-        for dep in parsed.get("dependencies", []):
-            if isinstance(dep, str):
+        for dep in env.get("dependencies", []):
+            if isinstance(dep, str):  # split conda by '='
                 pip_dep, val = dep.split("=", maxsplit=1)
                 dependencies[pip_dep] = val
             elif isinstance(dep, dict) and "pip" in dep:
-                for pip_dep in dep["pip"]:
+                for pip_dep in dep["pip"]:  # split pip by '=='
                     pip_key, pip_val = pip_dep.split("==", maxsplit=1)
-                    dependencies.setdefault(pip_key, pip_val)  # no override
-
+                    dependencies.setdefault(pip_key, pip_val)  # no overwrite
         return dependencies
 
     @cached_property
     def env_hash(self) -> str:
         """Compute an MD5 hash of the environment dictionary."""
         logger.info("Computing current environment hash.")
-        env_json = json_dumps(self.env_dict, sort_keys=True)
+        env_json = json_dumps(self.parse_env_dict(self.env), sort_keys=True)
         return md5(env_json.encode()).hexdigest()
 
     @cached_property
@@ -119,7 +122,7 @@ class UserEnvironment(dj.Manual):
     def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
         """Insert the current environment into the table."""
 
-        if not self.env_dict:  # if conda dump fails
+        if not self.env:  # if conda dump fails
             logger.error("Failed to retrieve the current environment.")
             return
 
@@ -131,20 +134,52 @@ class UserEnvironment(dj.Manual):
             {  # if current env not stored, but name taken, increment
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
-                "env": self.env_dict,
+                "env": self.env,
             },
             skip_duplicates=False,
         )
         del self.matching_env_id  # clear the cached property
         return {"env_id": env_id}
 
-    def compare_env(
+    def write_env_yaml(
+        self, env_id: str = DEFAULT_ENV_ID, dest_path: str = None
+    ) -> None:
+        """Write the environment to a YAML file."""
+        query = self & f'env_id="{env_id}"'
+        if not query:
+            logger.error(f"No environment found with env_id '{env_id}'.")
+            return
+
+        env_dict = dict(query.fetch1("env"), name=env_id)
+
+        dest_dir = Path(dest_path) if dest_path else Path.cwd()
+
+        with open(dest_dir / env_id, "w") as yaml_file:
+            yaml_file.write(yaml.dump(env_dict))
+
+    def has_matching_env(
         self,
         env_id: str = DEFAULT_ENV_ID,
         relevant_deps: List[str] = None,
         show_diffs=True,
     ):
-        """Check if env_id matches the current env, list discrepancies."""
+        """Check if env_id matches the current env, list discrepancies.
+
+        Note: Developers working on recompute pipelines may find that they only
+        want to gatekeep recompute attempts based on a subset of dependencies.
+        This method allows for that by specifying a list of relevant_deps.
+
+        Parameters
+        ----------
+        env_id : str, optional
+            The environment ID to compare against. Default to DEFAULT_ENV_ID.
+        relevant_deps : List[str], optional
+            A list of dependencies to compare. Default to None, meaning compare
+            all dependencies.
+        show_diffs : bool, optional
+            Show discrepancies between the current and stored environments.
+            Default to True.
+        """
         query = self & f'env_id="{env_id}"'
         if not query:
             logger.error(f"No environment found with env_id '{env_id}'.")
@@ -156,22 +191,21 @@ class UserEnvironment(dj.Manual):
             return True
 
         mismatches = []
-        for key in relevant_deps or stored_env:
-            if stored_env.get(key) != self.env_dict.get(key):
+        this_env = self.parse_env_dict(self.env)
+        prev_env = self.parse_env_dict(stored_env)
+        for key in relevant_deps or prev_env:
+            if this_env.get(key) != prev_env.get(key):
                 mismatches.append(
-                    f"  - {key}: {stored_env[key]} != {env.get(key)}"
+                    f"  - {key}: {prev_env[key]} -> {this_env.get(key)}"
                 )
 
-        relevant_set = set(relevant_deps) if relevant_deps else set()
-        current_set = set(self.env_dict.keys())
-        stored_set = set(stored_env.keys())
+        this_set = set(this_env.keys())
+        prev_set = set(prev_env.keys())
+        relevant_set = set(relevant_deps) if relevant_deps else prev_set
 
-        if not relevant_set.issubset(current_set):
-            diff = relevant_set - current_set
-            mismatches.append(f"  - Missing current deps: {diff}")
-        if not relevant_set.issubset(stored_set):
-            diff = relevant_set - stored_set
-            mismatches.append(f"  - Missing stored: {diff}")
+        if not relevant_set.issubset(this_set):
+            diff = relevant_set - this_set
+            mismatches.append(f"  - Missing deps: {diff}")
 
         if mismatches and show_diffs:
             logger.error(

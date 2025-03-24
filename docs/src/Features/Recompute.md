@@ -98,7 +98,7 @@ the environments used to attempt recompute. These attempts are run using the
     # Alter tables to include new fields, updating values
     my_keys = (v1_recording.SpikeSortingRecording() & restriction).fetch("KEY")
     v1_recompute.RecordingRecomputeVersions().populate(my_keys)
-    v1_recompute.RecordingRecomputeSelection().insert(my_keys)  # (1)! (2)!
+    v1_recompute.RecordingRecomputeSelection().insert(my_keys)  # (1)!
     v1_recompute.RecordingRecompute().populate(my_keys)
     ```
 
@@ -106,12 +106,12 @@ the environments used to attempt recompute. These attempts are run using the
         into `RecordingRecomputeSelection`. The default is 4.
 
 The respective `Versions` tables will record the dependencies of existing files
-(i.e., spikeinterface and probeinterface versions for v0 and pynwb dependencies for v0).
-By default, these insert methods will generate an entry in `common.UserEnvironment`.
-This table stores all conda and pip dependencies for the environment used, and
-associates them with a unique `env_id` identifier (`{USER}_{CONDA_ENV_NAME}_{##}`)
-that increments if the environment is updated. You can customize the `env_id`
-by inserting an entry prior to recompute.
+(i.e., spikeinterface and probeinterface versions for v0 and pynwb dependencies
+for v0). By default, these insert methods will generate an entry in
+`common.UserEnvironment`. This table stores all conda and pip dependencies for
+the environment used, and associates them with a unique `env_id` identifier
+(`{USER}_{CONDA_ENV_NAME}_{##}`) that increments if the environment is updated.
+You can customize the `env_id` by inserting an entry prior to recompute.
 
 ```python
 from spyglass.common import UserEnvironment
@@ -137,7 +137,7 @@ Recompute tables are set up to have `Name` and `Hash` part tables that track...
 
     RecordingRecompute().Name()
     RecordingRecompute().Hash()
-    (RecordingRecompute().Hash() & key).compare() # OR Hash().compare(key)
+    (RecordingRecompute().Hash() & key).compare()  # OR Hash().compare(key)
     ```
 
 === "v1"
@@ -213,6 +213,44 @@ more information.
 
 NWBs also store data objects in a more structured way, which allows us to make
 decisions about the degree of precision required for recompute attempts.
+
+## Managing Environments
+
+To manage environments, we've added a `UserEnvironment` table that stores all
+conda and pip dependencies for the environment used in a recompute attempt. To
+make a comparison between the current environment and a previous environment...
+
+```python
+from spyglass.common import UserEnvironment
+
+UserEnvironment().has_matching_env(
+    env_id="previous_env_id",
+    relevant_deps=["pynwb", "spikeinterface"],  # (1)!
+    show_diff=True,
+)
+```
+
+1. `relevant_deps` is an optional argument that will filter the comparison to
+    only the dependencies listed. If the comparison fails, the method will
+    print out the mismatching versions and/or missing dependencies.
+
+To install an environment from a previous recompute attempt, first save a yaml
+file of the environment, `previous_env_id.yaml`, with ...
+
+```python
+from spyglass.common import UserEnvironment
+
+UserEnvironment().write_env(
+    env_id="previous_env_id",
+    dest_path="/your/path/",  # Optional. Otherwise, user current directory
+)
+```
+
+Then, create a new environment with ...
+
+```bash
+conda env create -f /your/path/previous_env_id.yaml
+```
 
 ## Misc Notes
 

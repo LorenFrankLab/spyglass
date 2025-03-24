@@ -18,7 +18,6 @@ repos:
           - mdformat-beautysh
           - mdformat-config
           - mdformat-black
-          - mdformat-web
           - mdformat-gfm
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
