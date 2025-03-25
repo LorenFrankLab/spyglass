@@ -17,9 +17,18 @@ regularly as cron jobs.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
+    - Reads from the `.env` file in the same directory.
     - Updates the spyglass repository, fetching from the master branch.
     - Runs a database connection check (relying on a valid datajoint config).
     - Runs the `cleanup.py` script.
+- `check_disk_space.sh` - This script ...
+    - Reads from the same `.env` file as `run_jobs.sh`.
+    - Checks the disk space of each drive in `SPACE_CHECK_DRIVES`
+    - Calculate the percent available relative to `SPACE_PERCENT_LIMIT`.
+    - If above, sends an email for each drive to each recipient listed in
+        `SPACE_EMAIL_RECIPENTS`.
+    - If provided with `SLACK_TOKEN` and `SLACK_CHANNEL`, posts a message to
+        slack.
 
 ## Setup
 
@@ -63,12 +72,20 @@ regularly as cron jobs.
 Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
 lines on each run. 1000 lines should be sufficient.
 
-### Example Cron Job
+To enable slack notifications, you will need to create a slack app and generate
+a token following the instructions
+[here](https://api.slack.com/tutorials/tracks/posting-messages-with-curl). For
+posting to a private channel, you will need to invite the app to the relevant
+channel before attempting to post.
 
-In the following example, the script is set to run every Monday at 4:00 AM.
+### Example Cron Jobs
+
+In the following example, the cleanup script is set to run every Monday at 4:00
+AM, and the disk space check is set to run every day at 8:00 AM.
 
 ```text
 0 4 * * 1 /path/to/run_jobs.sh
+0 8 * * * /path/to/check_disk_space.sh
 ```
 
 ### Email Service
