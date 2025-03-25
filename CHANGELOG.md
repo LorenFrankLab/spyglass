@@ -22,11 +22,13 @@
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
-    - Enable import of existing pose data to `ImportedPose` in position pipeline #1247
+    - Enable import of existing pose data to `ImportedPose` in position pipeline
+        #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
+    - Add burst merge curation #1209
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
