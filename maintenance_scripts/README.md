@@ -28,15 +28,36 @@ regularly as cron jobs.
     `dj_local_conf.json` and filling in the necessary information.
 3. Copy the `example.env` file to `.env` in the `maintenance_scripts` directory
     and fill in the necessary information, including...
-    - `SPYGLASS_CONDA_ENV`: the name of the conda environment with Spyglass and
-        DataJoint installed.
-    - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
-    - `SPYGLASS_LOG`: the path to the log file.
-    - Optional email settings. If not set, email notifications will not be sent.
-        - `SPYGLASS_EMAIL_SRC`: The email address from which to send notifications.
-        - `SPYGLASS_EMAIL_PASS`: the password for the email address.
-        - `SPYGLASS_EMAIL_DEST`: the email address to which to send notifications.
 4. Set up a cron job to run `run_jobs.sh` at the desired interval by running
+    - Items for running cleanup jobs:
+        - `SPYGLASS_CONDA_PATH`: Path to conda initialization script. To find the
+            root directory, run `which conda` and follow the relative path in
+            `example.env`
+        - `SPYGLASS_CONDA_ENV`: the name of the conda environment with Spyglass and
+            DataJoint installed.
+        - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
+        - `SPYGLASS_LOG`: the path to the log file.
+        - Optional email settings. If not set, email notifications will not be
+            sent.
+            - `SPYGLASS_EMAIL_SRC`: The email address from which to send
+                notifications.
+            - `SPYGLASS_EMAIL_PASS`: the password for the email address.
+            - `SPYGLASS_EMAIL_DEST`: the email address to which to send
+                notifications.
+    - Items for checking disk space:
+        - `TZ`: the timezone to use reporting local times.
+        - `SPACE_PERCENT_LIMIT`: the percentage of disk space below which to send
+            notifications.
+        - `SPACE_CHECK_DRIVES`: a space-separated list of drives to check.
+        - `SPACE_LOG`: the path to the log file.
+        - `SPACE_EMAIL_SRC`/`SPACE_EMAIL_PASS`: email sender settings for disk
+            space notifications.
+        - `SPACE_EMAIL_RECIPENTS`: a space-separated list of email addresses to
+            receive disk space notifications.
+    - Items for posting to slack:
+        - `SLACK_TOKEN`: the token for the slack app.
+        - `SLACK_CHANNEL`: the channel to post to.
+5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
 Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
