@@ -33,11 +33,15 @@ implemented.
 
 ### New files
 
+**NOTE:** This feature relies on all users managing their environments with
+conda. If any user is not using conda, you may need to treat generated files as
+if they were old files, replicating after the fact.
+
 Newly generated files will automatically record information about their
-dependencies and the code that generated them in `RecomputeSelection` tables. To
-see the dependencies of a file, you can access `RecordingRecomputeSelection`.
-The only requirements for setting up this feature are modifying the existing
-table structure to include the new fields.
+dependencies and the code that generated them in `UserEnvironment` and
+`RecomputeSelection` tables. To see the dependencies of a file, you can access
+`RecordingRecomputeSelection`. The only requirements for setting up this feature
+are modifying the existing table structure to include the new fields.
 
 === "v0"
     ```python
