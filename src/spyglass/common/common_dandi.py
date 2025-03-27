@@ -54,8 +54,26 @@ class DandiPath(SpyglassMixin, dj.Manual):
     dandi_instance = "dandi": varchar(32)
     """
 
-    def fetch_file_from_dandi(self, key: dict):
+    def key_from_path(self, file_path) -> dict:
+        return {"filename": os.path.basename(file_path)}
+
+    def has_file_path(self, file_path: str) -> bool:
+        return bool(self & self.key_from_path(file_path))
+
+    def raw_from_path(self, file_path) -> dict:
+        return {"filename": Path(file_path).name.replace("_.nwb", ".nwb")}
+
+    def has_raw_path(self, file_path: str) -> bool:
+        return bool(self & self.raw_from_path(file_path))
+
+    def fetch_file_from_dandi(
+        self, key: dict = None, nwb_file_path: str = None
+    ):
         """Fetch the file from Dandi and return the NWB file object."""
+        if key is None and nwb_file_path is None:
+            raise ValueError("Must provide either key or nwb_file_path")
+        key = key or self.key_from_path(nwb_file_path)
+
         dandiset_id, dandi_path, dandi_instance = (self & key).fetch1(
             "dandiset_id", "dandi_path", "dandi_instance"
         )
