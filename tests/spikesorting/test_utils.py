@@ -1,5 +1,6 @@
 from uuid import UUID
 
+import numpy as np
 import pytest
 
 
@@ -25,3 +26,42 @@ def test_get_merge_ids(pop_spike_merge, mini_dict):
     assert (
         ret[0] == pop_spike_merge["merge_id"]
     ), "Unexpected merge_id from util"
+
+
+def test_fetch_data(
+    spike_v1_group,
+    pop_spikes_group,
+):
+    spike_times = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+        pop_spikes_group, return_unit_ids=False
+    )
+
+    flat_spikes = np.concatenate(spike_times)
+    start = np.min(flat_spikes)
+    rng = (start, start + 10)
+
+    spikes_tuple = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+        pop_spikes_group, time_slice=rng
+    )
+    spikes_slice = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+        pop_spikes_group, time_slice=slice(*rng)
+    )
+    spikes_list = spike_v1_group.SortedSpikesGroup().fetch_spike_data(
+        pop_spikes_group, time_slice=list(rng)
+    )
+
+    flat_tuple = np.concatenate(spikes_tuple)
+    flat_slice = np.concatenate(spikes_slice)
+    flat_list = np.concatenate(spikes_list)
+
+    assert all(
+        [
+            np.allclose(flat_tuple, flat_slice),
+            np.allclose(flat_tuple, flat_list),
+            np.allclose(flat_slice, flat_list),
+        ]
+    ), "Inconsistent spike data slices"
+
+    assert all(flat_tuple >= rng[0]) and all(
+        flat_tuple <= rng[1]
+    ), "Out of range"
