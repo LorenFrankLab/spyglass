@@ -37,7 +37,11 @@ regularly as cron jobs.
     `dj_local_conf.json` and filling in the necessary information.
 3. Copy the `example.env` file to `.env` in the `maintenance_scripts` directory
     and fill in the necessary information, including...
+4. Set up a cron job to run `run_jobs.sh` at the desired interval by running
     - Items for running cleanup jobs:
+        - `SPYGLASS_CONDA_PATH`: Path to conda initialization script. To find the
+            root directory, run `which conda` and follow the relative path in
+            `example.env`
         - `SPYGLASS_CONDA_ENV`: the name of the conda environment with Spyglass and
             DataJoint installed.
         - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
@@ -62,7 +66,7 @@ regularly as cron jobs.
     - Items for posting to slack:
         - `SLACK_TOKEN`: the token for the slack app.
         - `SLACK_CHANNEL`: the channel to post to.
-4. Set up a cron job to run each shell script at the desired interval by running
+5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
 Note that the log file will automatically be truncated to `SPYGLASS_MAX_LOG`
@@ -70,9 +74,9 @@ lines on each run. 1000 lines should be sufficient.
 
 To enable slack notifications, you will need to create a slack app and generate
 a token following the instructions
-[here](https://api.slack.com/tutorials/tracks/posting-messages-with-curl).
-For posting to a private channel, you will need to invite the app to the
-relevant channel before attempting to post.
+[here](https://api.slack.com/tutorials/tracks/posting-messages-with-curl). For
+posting to a private channel, you will need to invite the app to the relevant
+channel before attempting to post.
 
 ### Example Cron Jobs
 
