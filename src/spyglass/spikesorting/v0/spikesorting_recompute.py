@@ -220,7 +220,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             Key or restriction of SpikeSortingRecording. If None, all files
             are inserted.
         limit : int, optional
-            Maximum number of entries to insert. Randomly selected.
+            Maximum number of rows to insert, randomly selected. For
+            retrospective recompute attempts, randomly selecting potential
+            recompute attaempts can be useful for trying a diverse set of
+            files.
         """
         source = REC_VER_TBL.this_env & restr
         kwargs["skip_duplicates"] = True

@@ -197,7 +197,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             Rounding for float ElectricalSeries data. Default is the table's
             default_rounding, 4.
         limit : int, optional
-            Maximum number of rows to insert. Randomly selected from available.
+            Maximum number of rows to insert, randomly selected. For
+            retrospective recompute attempts, randomly selecting potential
+            recompute attaempts can be useful for trying a diverse set of
+            files.
         """
         source = REC_VER_TBL.this_env & restr
         kwargs["skip_duplicates"] = True
