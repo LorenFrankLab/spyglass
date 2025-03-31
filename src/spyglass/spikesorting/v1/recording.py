@@ -171,6 +171,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the processed recording in NWB file
     """
 
+    use_transaction, _allow_insert = False, True
+
     def make(self, key):
         """Populate SpikeSortingRecording.
 
