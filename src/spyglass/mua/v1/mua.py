@@ -112,6 +112,10 @@ class MuaEventsV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self):
         """Convenience function for returning the marks in a readable format"""
+        if not len(self) == 1:
+            raise ValueError(
+                "MuaEventsV1.fetch1_dataframe() requires a single key to be selected."
+            )
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[DataFrame]:
