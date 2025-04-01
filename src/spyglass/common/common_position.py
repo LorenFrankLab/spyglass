@@ -444,6 +444,13 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         # convert back to between -pi and pi
         orientation[~is_nan] = np.angle(np.exp(1j * orientation[~is_nan]))
 
+        # set orientation to NaN in single LED data
+        if np.all(front_LED == 0) or np.all(back_LED == 0):
+            logger.warning(
+                "Single LED data detected. Setting orientation to NaN."
+            )
+            orientation = np.nans_like(orientation)
+
         velocity = get_velocity(
             position,
             time=time,
