@@ -4,6 +4,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from tqdm import tqdm
 
 import datajoint as dj
 import numpy as np
@@ -248,20 +249,21 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         """Placeholder to override mixin method"""
         raise NotImplementedError
 
-    def cleanup(self):
-        """Clean up spike sorting directories that are not in the table.
+    def cleanup(self, dry_run=False):
+        """Clean up spike sorting directories that are not in the table."""
+        sort_dir = Path(sorting_dir)
+        tracked = set(self.fetch("sorting_path"))
+        all_dirs = {str(f) for f in sort_dir.iterdir() if f.is_dir()}
+        untracked = all_dirs - tracked
 
-        This should be run after AnalysisNwbFile().cleanup()
-        """
-        # get a list of the files in the spike sorting storage directory
-        dir_names = next(os.walk(sorting_dir))[1]
-        # now retrieve a list of the currently used analysis nwb files
-        analysis_file_names = self.fetch("analysis_file_name")
-        for dir in dir_names:
-            if dir not in analysis_file_names:
-                full_path = str(Path(sorting_dir) / dir)
-                logger.info(f"removing {full_path}")
-                shutil.rmtree(str(Path(sorting_dir) / dir))
+        if dry_run:
+            return untracked
+
+        for folder in tqdm(untracked, desc="Removing untracked folders"):
+            try:
+                shutil.rmtree(folder)
+            except PermissionError:
+                pass
 
     @staticmethod
     def _get_sorting_name(key):

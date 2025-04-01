@@ -1,4 +1,5 @@
 import os
+from tqdm import tqdm
 import shutil
 from functools import reduce
 from pathlib import Path
@@ -25,7 +26,7 @@ from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
@@ -556,5 +557,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in untracked:
-            shutil.rmtree(folder)
+        for folder in tqdm(untracked, desc="Removing untracked folders"):
+            try:
+                shutil.rmtree(folder)
+            except PermissionError:
+                pass
