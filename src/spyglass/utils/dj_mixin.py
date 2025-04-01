@@ -5,7 +5,6 @@ from time import time
 from typing import List
 
 import datajoint as dj
-import humanize
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
@@ -889,7 +888,14 @@ class SpyglassMixin(ExportMixin):
         file_paths = [path for path in file_paths if path is not None]
         file_sizes = [os.stat(path).st_size for path in file_paths]
         total_size = sum(file_sizes)
-        return humanize.naturalsize(total_size, binary=True), total_size
+        human_size = total_size
+        for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
+            if human_size < 1024.0 or unit == "PiB":
+                break
+            human_size /= 1024.0
+        human_size = f"{human_size:.2f} {unit}"
+
+        return human_size, total_size
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
