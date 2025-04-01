@@ -10,10 +10,6 @@ import subprocess
 import warnings
 from pathlib import Path
 
-# ignore datajoint+jupyter async warnings
-warnings.simplefilter("ignore", category=DeprecationWarning)
-warnings.simplefilter("ignore", category=ResourceWarning)
-
 from spyglass.common import AnalysisNwbfile, Nwbfile
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema
@@ -24,13 +20,15 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
 )
 from spyglass.spikesorting.v0.spikesorting_sorting import SpikeSorting
 
+warnings.simplefilter("ignore", category=DeprecationWarning)
+warnings.simplefilter("ignore", category=ResourceWarning)
+
 
 def run_table_cleanups():
     """Run respective table cleanups"""
     Nwbfile().cleanup()  # cleanup 'raw' externals
     AnalysisNwbfile().cleanup()  # delete orphans, cleanup 'analysis' externals
-    # Disabled pending fix
-    # SpikeSorting().cleanup()  # remove unreferenced sorting_dir files
+    SpikeSorting().cleanup()  # remove unreferenced sorting_dir files
     DecodingOutput().cleanup()  # remove `.nc` and `.pkl` files
     SpikeSortingRecording().cleanup()  # remove untracked folders
 

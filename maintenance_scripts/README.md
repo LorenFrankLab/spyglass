@@ -42,13 +42,13 @@ regularly as cron jobs.
         - `SPYGLASS_CHMOD_FILES`: if `true`, the script will set the permissions of
             all files in the data directory to 644. This is limited to files
             generated in the last week to save time. If `false`, the script will skip
-            this step.\[^1\]
+            this step.[^1]
         - `SPYGLASS_BASE_PATH`: the path to the Spyglass-managed data.
         - `SPYGLASS_CONDA_PATH`: Path to conda initialization script. To find the
             root directory, run `which conda` and follow the relative path in
             `example.env`
         - `SPYGLASS_CONDA_ENV`: the name of the conda environment with Spyglass and
-            DataJoint installed.\[^2\]
+            DataJoint installed.[^2]
         - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
         - `SPYGLASS_LOG`: the path to the log file.
         - Optional email settings. If not set, email notifications will not be
@@ -74,8 +74,10 @@ regularly as cron jobs.
 5. Set up a cron job to run each shell script at the desired interval by running
     `crontab -e` and adding the script.
 
-\[^1\]: Depending your system, you may need to run the script as `sudo` to set
-the permissions. \[^2\]: You may want to run the cronjob from a dedicated conda
+[^1]: Depending your system, you may need to run the script as `sudo` to set
+the permissions.
+
+[^2]: You may want to run the cronjob from a dedicated conda
 environment to avoid issues with local editable installs or other package
 conflicts.
 
