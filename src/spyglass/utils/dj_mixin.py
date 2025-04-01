@@ -1,9 +1,11 @@
+import os
 from contextlib import nullcontext
 from functools import cached_property
 from time import time
 from typing import List
 
 import datajoint as dj
+import humanize
 from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
@@ -16,6 +18,7 @@ from pymysql.err import DataError
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    _quick_get_analysis_path,
     ensure_names,
     fetch_nwb,
     get_nwb_table,
@@ -862,6 +865,31 @@ class SpyglassMixin(ExportMixin):
             df = df[keep_cols]
 
         return df
+
+    # --------------------------- Check disc usage ------------------------------
+    def get_table_storage_usage(self):
+        """Total size of all analysis files in the table.
+        Uses the analysis_file_name field to find the file paths and sum their
+        sizes.
+
+        Returns
+        -------
+        tuple
+            (human-readable string, total size in bytes)
+        """
+        if "analysis_file_name" not in self.heading.names:
+            logger.warning(
+                f"{self.full_table_name} does not have an analysis_file_name field."
+            )
+            return "0 Mib", 0
+        file_names = self.fetch("analysis_file_name")
+        file_paths = [
+            _quick_get_analysis_path(file_name) for file_name in file_names
+        ]
+        file_paths = [path for path in file_paths if path is not None]
+        file_sizes = [os.stat(path).st_size for path in file_paths]
+        total_size = sum(file_sizes)
+        return humanize.naturalsize(total_size, binary=True), total_size
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):

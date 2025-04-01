@@ -559,6 +559,38 @@ def make_file_obj_id_unique(nwb_path: str):
     return new_id
 
 
+def _quick_get_analysis_path(file):
+    """Get the absolute path to an analysis file on disc without integrity checks.
+    For use when scanning large number of files.
+
+    Parameters
+    ----------
+    file : str
+        Name of the analysis file to get the path for.
+    Returns
+    -------
+    str
+        Absolute path to the analysis file. Returns None if the file is not found locally.
+    """
+    from spyglass.common import AnalysisNwbfile
+    from spyglass.settings import sg_config
+
+    analysis_dir = sg_config.analysis_dir
+    if os.path.exists(path := f"{analysis_dir}/{file}"):
+        return path
+
+    folder = "_".join(file.split("_")[:-1])
+    path = f"{analysis_dir}/{folder}/{file}"
+    if os.path.exists(path):
+        return path
+    path = AnalysisNwbfile().get_abs_path(file)
+    if os.path.exists(path):
+        return path
+
+    print(f"File {file} not found in {analysis_dir}")
+    return None
+
+
 def populate_pass_function(value):
     """Pass function for parallel populate.
 
@@ -611,4 +643,5 @@ def str_to_bool(value) -> bool:
     # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
     if not value:
         return False
+    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
     return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
