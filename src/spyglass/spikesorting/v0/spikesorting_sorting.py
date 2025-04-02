@@ -127,6 +127,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int   # in Unix time, to the nearest second
     """
 
+    _parallel_make = True
+
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
