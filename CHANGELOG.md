@@ -36,7 +36,7 @@
     - Add cleanup for `v0.SpikeSortingRecording` #1263
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
-    - Update transaction and parellel make settings for `v0` and `v1` `SpikeSorting` tables #1270
+    - Update transaction and parallel make settings for `v0` and `v1` `SpikeSorting` tables #1270
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
