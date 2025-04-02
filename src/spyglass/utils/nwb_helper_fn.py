@@ -313,9 +313,11 @@ def estimate_sampling_rate(
     # we histogram with 100 bins out to 3 * mean, which should be fine for any
     # reasonable number of samples
     hist, bins = np.histogram(
-        smooth_diff, bins=100, range=[0, 3 * np.mean(smooth_diff)]
+        np.log10(smooth_diff),
+        bins=100,
+        range=[-5, np.log10(3 * np.mean(smooth_diff))],
     )
-    mode = bins[np.where(hist == np.max(hist))][0]
+    mode = 10 ** bins[np.where(hist == np.max(hist))][0]
 
     adjacent = sample_diff < mode * multiplier
 
