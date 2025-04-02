@@ -12,6 +12,8 @@
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Export python env and store in newly created analysis files #1270
+- Enforce single table entry in `fetch1_dataframe` calls #1270
 
 ### Pipelines
 
@@ -19,11 +21,14 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
+    - Calculate mode of timestep size in log scale when estimating sampling rate #1270
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
+    - Change key value `position_source` to "imported" during ingestion #1270
+    - Define orientation as `nan` for single-led data #1270
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -31,6 +36,7 @@
     - Add cleanup for `v0.SpikeSortingRecording` #1263
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
+    - Update transaction and parellel make settings for `v0` and `v1` `SpikeSorting` tables #1270
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
