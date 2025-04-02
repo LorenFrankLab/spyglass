@@ -257,7 +257,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     @staticmethod
     def _logged_env_info():
         """Get the environment information for logging."""
-        env_info = "spyglass={sg_version} \n\n"
+        env_info = f"spyglass={sg_version} \n\n"
         env_info += "Python Environment:\n"
         python_env = subprocess.check_output(
             ["conda", "env", "export"], text=True
