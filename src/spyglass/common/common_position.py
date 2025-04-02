@@ -449,7 +449,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
             logger.warning(
                 "Single LED data detected. Setting orientation to NaN."
             )
-            orientation = np.nan * orientation
+            orientation = np.full_like(orientation, np.nan)
 
         velocity = get_velocity(
             position,

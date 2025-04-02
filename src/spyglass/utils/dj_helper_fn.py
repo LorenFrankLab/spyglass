@@ -559,7 +559,7 @@ def make_file_obj_id_unique(nwb_path: str):
     return new_id
 
 
-def _quick_get_analysis_path(file):
+def _quick_get_analysis_path(file: str):
     """Get the absolute path to an analysis file on disc without integrity checks.
     For use when scanning large number of files.
 
@@ -576,15 +576,15 @@ def _quick_get_analysis_path(file):
     from spyglass.settings import sg_config
 
     analysis_dir = sg_config.analysis_dir
-    if os.path.exists(path := f"{analysis_dir}/{file}"):
+    if (path := Path(analysis_dir) / Path(file)).exists():
         return path
 
     folder = "_".join(file.split("_")[:-1])
-    path = f"{analysis_dir}/{folder}/{file}"
+    path = Path(analysis_dir) / Path(folder) / Path(file)
     if os.path.exists(path):
         return path
-    path = AnalysisNwbfile().get_abs_path(file)
-    if os.path.exists(path):
+    path = Path(AnalysisNwbfile().get_abs_path(file))
+    if path.exists():
         return path
 
     print(f"File {file} not found in {analysis_dir}")
