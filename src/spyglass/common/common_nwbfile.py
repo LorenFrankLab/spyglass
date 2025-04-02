@@ -1,6 +1,7 @@
 import os
 import random
 import string
+import subprocess
 from pathlib import Path
 from time import time
 from uuid import uuid4
@@ -217,7 +218,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                             nwb_object.pop(module)
             # add the version of spyglass that created this file
             if nwbf.source_script is None:
-                nwbf.source_script = f"spyglass={sg_version}"
+                nwbf.source_script = self._logged_env_info()
             else:
                 alter_source_script = True
 
@@ -247,11 +248,22 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         return analysis_file_name
 
-    @staticmethod
-    def _alter_spyglass_version(nwb_file_path: str) -> None:
+    @classmethod
+    def _alter_spyglass_version(cls, nwb_file_path: str) -> None:
         """Change the source script to the current version of spyglass"""
         with h5py.File(nwb_file_path, "a") as f:
-            f["/general/source_script"][()] = f"spyglass={sg_version}"
+            f["/general/source_script"][()] = cls._logged_env_info()
+
+    @staticmethod
+    def _logged_env_info():
+        """Get the environment information for logging."""
+        env_info = "spyglass={sg_version} \n\n"
+        env_info += "Python Environment:\n"
+        python_env = subprocess.check_output(
+            ["conda", "env", "export"], text=True
+        )
+        env_info += python_env
+        return env_info
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name: str) -> str:
