@@ -245,7 +245,7 @@ def interval_list_contains_ind(interval_list, timestamps):
                 )
             )
         ).tolist()
-    return np.unique(np.asarray(ind))
+    return np.asarray(ind)
 
 
 def interval_list_contains(interval_list, timestamps):
