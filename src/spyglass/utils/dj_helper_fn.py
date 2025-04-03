@@ -643,5 +643,4 @@ def str_to_bool(value) -> bool:
     # Adopted from github.com/PostHog/posthog/blob/master/posthog/utils.py
     if not value:
         return False
-    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
-    return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
+    return str(value).lower() in ("y", "yes", "t", "true", "1")
