@@ -166,6 +166,10 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the first spike indicator as a dataframe."""
+        if not len(self) == 1:
+            raise ValueError(
+                "SortedSpikesIndicator.fetch1_dataframe() requires a single key to be selected."
+            )
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:

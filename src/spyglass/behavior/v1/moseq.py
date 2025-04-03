@@ -402,6 +402,10 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     def fetch1_dataframe(self):
+        if not len(self) == 1:
+            raise ValueError(
+                "MoseqSyllable.fetch1_dataframe() requires a single key to be selected."
+            )
         dataframe = self.fetch_nwb()[0]["moseq"]
         dataframe.set_index("time", inplace=True)
         return dataframe

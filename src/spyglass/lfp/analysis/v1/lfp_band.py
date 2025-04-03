@@ -373,6 +373,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs):
         """Fetches the filtered data as a dataframe"""
+        if not len(self) == 1:
+            raise ValueError(
+                "LFPBandV1.fetch1_dataframe() requires a single key to be selected."
+            )
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["lfp_band"].data,
