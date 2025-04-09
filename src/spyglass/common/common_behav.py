@@ -395,14 +395,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
         for obj_id, obj in nwbf.objects.items():
             if isinstance(obj, pynwb.image.ImageSeries):
                 videos[obj.name] = obj
-
-        if videos is None:
+        if not videos:
             logger.warning(
                 f"No video data interface found in {nwb_file_name}\n"
             )
             return
-        else:
-            videos = videos.time_series
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
