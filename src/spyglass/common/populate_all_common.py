@@ -20,7 +20,6 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
-from spyglass.lfp import ImportedLFP
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 
@@ -121,6 +120,7 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
