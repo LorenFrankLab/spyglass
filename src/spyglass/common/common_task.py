@@ -142,10 +142,13 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             return
 
         task_inserts = []
-        for task in tasks_mod.data_interfaces.values():
-            if self.check_task_table(task):
-                # check if the task is in the Task table and if not, add it
-                Task.insert_from_task_table(task)
+        for task_table in tasks_mod.data_interfaces.values():
+            if not self.check_task_table(task_table):
+                continue
+            # check if the task entries are in the Task table and if not, add it
+            Task.insert_from_task_table(task_table)
+
+            for task in task_table:
                 key["task_name"] = task.task_name[0]
 
                 # get the CameraDevice used for this task (primary key is
