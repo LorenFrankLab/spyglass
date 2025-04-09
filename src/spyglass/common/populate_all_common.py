@@ -20,6 +20,7 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
+from spyglass.lfp import ImportedLFP
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 
@@ -140,6 +141,7 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            ImportedLFP,  # Depends on Session
             # NwbfileKachery, # Not used by default
             # SensorData, # Not used by default. Generates large files
         ],
