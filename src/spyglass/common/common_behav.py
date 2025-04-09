@@ -390,9 +390,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        videos = get_data_interface(
-            nwbf, "video", pynwb.behavior.BehavioralEvents
-        )
+        # get all ImageSeries objects in the NWB file
+        videos = {}
+        for obj_id, obj in nwbf.objects.items():
+            if isinstance(obj, pynwb.image.ImageSeries):
+                videos[obj.name] = obj
 
         if videos is None:
             logger.warning(
