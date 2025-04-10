@@ -158,7 +158,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         error_message: str
             The error message to display if the user is not an admin.
         """
-        if cls.user_is_admin:
+        if not cls.user_is_admin:
             raise PermissionError(error_message)
 
 
