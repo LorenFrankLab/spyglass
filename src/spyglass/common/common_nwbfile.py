@@ -513,16 +513,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
         if hash != new_hash:
             Path(file_path).unlink()  # remove mismatched file
-            # force delete, including all downstream, forcing permissions
-            del_kwargs = dict(force_permission=True, safemode=False)
-            if self._has_updated_dj_version:
-                del_kwargs["force_masters"] = True
-            query = self & {"analysis_file_name": analysis_file_name}
-            query.delete(**del_kwargs)
             raise ValueError(
                 f"Failed to recompute {analysis_file_name}.",
-                "Could not exactly replicate file content.",
-                "Please re-populate from parent table.",
+                "Could not exactly replicate file content. Please check ",
+                "UserEnvironment table for mismatched dependencies.",
             )
 
         external_tbl = schema.external["analysis"]
@@ -531,9 +525,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             / analysis_file_name
         )
         key = (external_tbl & f"filepath = '{file_path}'").fetch1()
-        abs_path = Path(analysis_dir) / file_path
-        key["contents_hash"] = dj.hash.uuid_from_file(abs_path)
-        key["size"] = abs_path.stat().st_size
+        key["contents_hash"] = dj.hash.uuid_from_file(file_path)
+        key["size"] = file_path.stat().st_size
 
         external_tbl.update1(key)
 
