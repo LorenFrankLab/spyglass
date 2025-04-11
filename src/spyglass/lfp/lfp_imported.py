@@ -11,7 +11,11 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup  # noqa: F401
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
-from spyglass.utils.nwb_helper_fn import estimate_sampling_rate, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    estimate_sampling_rate,
+    get_nwb_file,
+    get_valid_intervals,
+)
 
 schema = dj.schema("lfp_imported")
 
@@ -108,8 +112,9 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
             interval_key = {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": f"imported lfp {i} valid times",
-                "valid_times": np.array(
-                    [[es_object.timestamps[0], es_object.timestamps[-1]]]
+                "valid_times": get_valid_intervals(
+                    es_object.timestamps,
+                    sampling_rate,
                 ),
                 "pipeline": "imported_lfp",
             }
