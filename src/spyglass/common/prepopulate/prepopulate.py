@@ -57,7 +57,7 @@ def populate_from_yaml(yaml_path: str):
                 if k in table_cls.primary_key
             }
             if not primary_key_values:
-                logger.warn(
+                logger.warning(
                     f"Populate: No primary key provided in data {entry_dict} "
                     + f"for table {table_cls.__name__}"
                 )

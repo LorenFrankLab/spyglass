@@ -51,7 +51,7 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
         if "figurl_curation_id" in key:
             query = cls & {"figurl_curation_id": key["figurl_curation_id"]}
             if query:
-                logger.warn("Similar row(s) already inserted.")
+                logger.warning("Similar row(s) already inserted.")
                 return query.fetch(as_dict=True)
         key["figurl_curation_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)

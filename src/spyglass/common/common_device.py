@@ -88,7 +88,9 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
                 + f"{ndx_devices.keys()}"
             )
         else:
-            logger.warn("No conforming data acquisition device metadata found.")
+            logger.warning(
+                "No conforming data acquisition device metadata found."
+            )
 
     @classmethod
     def get_all_device_names(cls, nwbf, config) -> tuple:
@@ -305,7 +307,7 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         if device_name_list:
             logger.info(f"Inserted camera devices {device_name_list}")
         else:
-            logger.warn("No conforming camera device metadata found.")
+            logger.warning("No conforming camera device metadata found.")
         return device_name_list
 
 
@@ -376,21 +378,21 @@ class Probe(SpyglassMixin, dj.Manual):
             List of probe device types found in the NWB file.
         """
         config = config or dict()
-        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
-            nwbf, config
+        all_probes_descriptions, ndx_probes, config_probes = (
+            cls.get_all_probe_names(nwbf, config)
         )
 
-        for probe_type in all_probes_types:
+        for probe_id in all_probes_descriptions:
             new_probe_type_dict = dict()
             new_probe_dict = dict()
             shank_dict = dict()
             elect_dict = dict()
             num_shanks = 0
 
-            if probe_type in ndx_probes:
+            if probe_id in ndx_probes:
                 # read probe properties into new_probe_dict from PyNWB extension
                 # probe object
-                nwb_probe_obj = ndx_probes[probe_type]
+                nwb_probe_obj = ndx_probes[probe_id]
                 cls.__read_ndx_probe_data(
                     nwb_probe_obj,
                     new_probe_type_dict,
@@ -398,11 +400,11 @@ class Probe(SpyglassMixin, dj.Manual):
                     shank_dict,
                     elect_dict,
                 )
-
-            elif probe_type in config_probes:
+            elif probe_id in config_probes:
                 cls._read_config_probe_data(
                     config,
-                    probe_type,
+                    config_probes,
+                    probe_id,
                     new_probe_type_dict,
                     new_probe_dict,
                     shank_dict,
@@ -458,12 +460,12 @@ class Probe(SpyglassMixin, dj.Manual):
             for electrode in elect_dict.values():
                 cls.Electrode.insert1(electrode, skip_duplicates=True)
 
-        if all_probes_types:
-            logger.info(f"Inserted probes {all_probes_types}")
+        if all_probes_descriptions:
+            logger.info(f"Inserted probes {all_probes_descriptions}")
         else:
-            logger.warn("No conforming probe metadata found.")
+            logger.warning("No conforming probe metadata found.")
 
-        return all_probes_types
+        return all_probes_descriptions
 
     @classmethod
     def get_all_probe_names(cls, nwbf, config):
@@ -483,13 +485,18 @@ class Probe(SpyglassMixin, dj.Manual):
         -------
         device_name_list : list
             List of data acquisition object names found in the NWB file.
+        ndx_probes : dict
+            Dictionary of ndx_franklab_novela.Probe objects in the NWB file.
+        config_probes : list
+            List of probe descriptions from the config file.
+
         """
 
         # make a dict mapping probe type to PyNWB object for all devices in the
         # NWB file that are of type ndx_franklab_novela.Probe and thus have the
         # required metadata
         ndx_probes = {
-            device_obj.probe_type: device_obj
+            device_obj.probe_description: device_obj
             for device_obj in nwbf.devices.values()
             if isinstance(device_obj, ndx_franklab_novela.Probe)
         }
@@ -497,15 +504,17 @@ class Probe(SpyglassMixin, dj.Manual):
         # make a dict mapping probe type to dict of device metadata from the
         # config YAML if exists
         config_probes = (
-            [probe_dict["probe_type"] for probe_dict in config["Probe"]]
+            [probe_dict["probe_description"] for probe_dict in config["Probe"]]
             if "Probe" in config
             else list()
         )
 
         # get all the probe types from the NWB file plus the config YAML
-        all_probes_types = set(ndx_probes.keys()).union(set(config_probes))
+        all_probes_descriptions = set(ndx_probes.keys()).union(
+            set(config_probes)
+        )
 
-        return all_probes_types, ndx_probes, config_probes
+        return all_probes_descriptions, ndx_probes, config_probes
 
     @classmethod
     def __read_ndx_probe_data(
@@ -530,7 +539,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         new_probe_dict.update(
             {
-                "probe_id": nwb_probe_obj.probe_type,
+                "probe_id": nwb_probe_obj.probe_description,
                 "probe_type": nwb_probe_obj.probe_type,
                 "contact_side_numbering": (
                     "True" if nwb_probe_obj.contact_side_numbering else "False"
@@ -540,7 +549,7 @@ class Probe(SpyglassMixin, dj.Manual):
         # go through the shanks and add each one to the Shank table
         for shank in nwb_probe_obj.shanks.values():
             shank_dict[shank.name] = {
-                "probe_id": new_probe_dict["probe_type"],
+                "probe_id": new_probe_dict["probe_id"],
                 "probe_shank": int(shank.name),
             }
 
@@ -549,7 +558,7 @@ class Probe(SpyglassMixin, dj.Manual):
                 # the next line will need to be fixed if we have different sized
                 # contacts on a shank
                 elect_dict[electrode.name] = {
-                    "probe_id": new_probe_dict["probe_type"],
+                    "probe_id": new_probe_dict["probe_id"],
                     "probe_shank": shank_dict[shank.name]["probe_shank"],
                     "contact_size": nwb_probe_obj.contact_size,
                     "probe_electrode": int(electrode.name),
@@ -562,7 +571,8 @@ class Probe(SpyglassMixin, dj.Manual):
     def _read_config_probe_data(
         cls,
         config,
-        probe_type,
+        config_probes,
+        probe_id,
         new_probe_type_dict,
         new_probe_dict,
         shank_dict,
@@ -570,19 +580,19 @@ class Probe(SpyglassMixin, dj.Manual):
     ):
 
         # get the list of shank keys for the probe
-        shank_list = config["Probe"][config_probes.index(probe_type)].get(
+        shank_list = config["Probe"][config_probes.index(probe_id)].get(
             "Shank", []
         )
         for i in shank_list:
-            shank_dict[str(i)] = {"probe_id": probe_type, "probe_shank": int(i)}
+            shank_dict[str(i)] = {"probe_id": probe_id, "probe_shank": int(i)}
 
         # get the list of electrode keys for the probe
-        elect_dict_list = config["Probe"][config_probes.index(probe_type)].get(
+        elect_dict_list = config["Probe"][config_probes.index(probe_id)].get(
             "Electrode", []
         )
         for i, e in enumerate(elect_dict_list):
             elect_dict[str(i)] = {
-                "probe_id": probe_type,
+                "probe_id": probe_id,
                 "probe_shank": e["probe_shank"],
                 "probe_electrode": e["probe_electrode"],
                 "contact_size": e.get("contact_size"),
@@ -595,11 +605,13 @@ class Probe(SpyglassMixin, dj.Manual):
         new_probe_type_dict.update(
             {
                 "manufacturer": config["Probe"][
-                    config_probes.index(probe_type)
+                    config_probes.index(probe_id)
                 ].get("manufacturer"),
-                "probe_type": probe_type,
+                "probe_type": config["Probe"][
+                    config_probes.index(probe_id)
+                ].get("probe_type"),
                 "probe_description": config["Probe"][
-                    config_probes.index(probe_type)
+                    config_probes.index(probe_id)
                 ].get("probe_description"),
                 "num_shanks": len(shank_list),
             }
@@ -610,10 +622,12 @@ class Probe(SpyglassMixin, dj.Manual):
         # make the probe dictionary
         new_probe_dict.update(
             {
-                "probe_type": probe_type,
-                "probe_id": probe_type,
+                "probe_type": config["Probe"][
+                    config_probes.index(probe_id)
+                ].get("probe_type"),
+                "probe_id": probe_id,
                 "contact_side_numbering": config["Probe"][
-                    config_probes.index(probe_type)
+                    config_probes.index(probe_id)
                 ].get("contact_side_numbering"),
             }
         )
@@ -707,7 +721,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         query = ProbeType & {"probe_type": probe_type}
         if len(query) == 0:
-            logger.warn(
+            logger.warning(
                 f"No ProbeType found with probe_type '{probe_type}'. Aborting."
             )
             return
@@ -767,7 +781,7 @@ class Probe(SpyglassMixin, dj.Manual):
                     ]
 
         if not device_found:
-            logger.warn(
+            logger.warning(
                 "No electrodes in the NWB file were associated with a device "
                 + f"named '{nwb_device_name}'."
             )

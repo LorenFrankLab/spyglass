@@ -9,13 +9,11 @@ plan future development of Spyglass.
 from typing import List, Union
 
 import datajoint as dj
-from datajoint import FreeTable
-from datajoint import config as dj_config
 from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import export_dir, test_mode
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.settings import test_mode
+from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import (
     make_file_obj_id_unique,
@@ -88,7 +86,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     unique index (paper_id, analysis_id)
     """
 
-    class Table(SpyglassMixin, dj.Part):
+    class Table(SpyglassMixinPart):
         definition = """
         -> master
         table_id: int
@@ -144,6 +142,22 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       before actually exporting anything, which is more associated with
     #       Selection
 
+    def _list_raw_files(self, key: dict) -> list[str]:
+        """Return a list of unique nwb file names for a given restriction/key."""
+        file_table = self * self.File & key
+        return list(
+            {
+                *AnalysisNwbfile.join(file_table, log_export=False).fetch(
+                    "nwb_file_name"
+                )
+            }
+        )
+
+    def _list_analysis_files(self, key: dict) -> list[str]:
+        """Return a list of unique analysis file names for a given restriction/key."""
+        file_table = self * self.File & key
+        return list(file_table.fetch("analysis_file_name"))
+
     def list_file_paths(self, key: dict, as_dict=True) -> list[str]:
         """Return a list of unique file paths for a given restriction/key.
 
@@ -158,19 +172,72 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Return as a list of dicts: [{'file_path': x}]. Default True.
             If False, returns a list of strings without key.
         """
-        file_table = self * self.File & key
-        analysis_fp = [
-            AnalysisNwbfile().get_abs_path(fname)
-            for fname in file_table.fetch("analysis_file_name")
-        ]
-        nwbfile_fp = [
-            Nwbfile().get_abs_path(fname)
-            for fname in (AnalysisNwbfile * file_table).fetch("nwb_file_name")
-        ]
-        unique_ft = list({*analysis_fp, *nwbfile_fp})
-        return [{"file_path": p} for p in unique_ft] if as_dict else unique_ft
+        unique_fp = {
+            *[
+                AnalysisNwbfile().get_abs_path(p)
+                for p in self._list_analysis_files(key)
+            ],
+            *[Nwbfile().get_abs_path(p) for p in self._list_raw_files(key)],
+        }
 
-    def get_restr_graph(self, key: dict, verbose=False) -> RestrGraph:
+        return [{"file_path": p} for p in unique_fp] if as_dict else unique_fp
+
+    @property
+    def _externals(self) -> dj.external.ExternalMapping:
+        """Return the external mapping for the common_n schema."""
+        return dj.external.ExternalMapping(schema=AnalysisNwbfile)
+
+    def _add_externals_to_restr_graph(
+        self, restr_graph: RestrGraph, key: dict
+    ) -> RestrGraph:
+        """Add external tables to a RestrGraph for a given restriction/key.
+
+        Tables added as nodes with restrictions based on file paths. Names
+        added to visited set to appear in restr_ft obj passed to SQLDumpHelper.
+
+        This process adds files explicitly listed in the ExportSelection.File
+        by the logging process. A separate RestrGraph process, cascade_files, is
+        used to track all tables with fk-ref to file tables, and cascade up to
+        externals.
+
+        Parameters
+        ----------
+        restr_graph : RestrGraph
+            A RestrGraph object to add external tables to.
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+
+        Returns
+        -------
+        restr_graph : RestrGraph
+            The updated RestrGraph
+        """
+
+        if raw_files := self._list_raw_files(key):
+            raw_tbl = self._externals["raw"]
+            raw_name = raw_tbl.full_table_name
+            raw_restr = "filepath in ('" + "','".join(raw_files) + "')"
+            restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
+            restr_graph.visited.add(raw_name)
+
+        if analysis_files := self._list_analysis_files(key):
+            analysis_tbl = self._externals["analysis"]
+            analysis_name = analysis_tbl.full_table_name
+            # to avoid issues with analysis subdir, we use REGEXP
+            # this is slow, but we're only doing this once, and future-proof
+            analysis_restr = (
+                "filepath REGEXP '" + "|".join(analysis_files) + "'"
+            )
+            restr_graph.graph.add_node(
+                analysis_name, ft=analysis_tbl, restr=analysis_restr
+            )
+            restr_graph.visited.add(analysis_name)
+
+        return restr_graph
+
+    def get_restr_graph(
+        self, key: dict, verbose=False, cascade=True
+    ) -> RestrGraph:
         """Return a RestrGraph for a restriction/key's tables/restrictions.
 
         Ignores duplicate entries.
@@ -181,20 +248,44 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Any valid restriction key for ExportSelection.Table
         verbose : bool, optional
             Turn on RestrGraph verbosity. Default False.
+        cascade : bool, optional
+            Propagate restrictions to upstream tables. Default True.
         """
         leaves = unique_dicts(
             (self * self.Table & key).fetch(
                 "table_name", "restriction", as_dict=True
             )
         )
-        return RestrGraph(seed_table=self, leaves=leaves, verbose=verbose)
+
+        restr_graph = RestrGraph(
+            seed_table=self,
+            leaves=leaves,
+            verbose=verbose,
+            cascade=False,
+            include_files=True,
+        )
+        restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
+
+        if cascade:
+            restr_graph.cascade()
+
+        return restr_graph
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.
 
         Useful for checking what will be exported.
         """
+        kwargs["cascade"] = False
         return self.get_restr_graph(kwargs).leaf_ft
+
+    def show_all_tables(self, **kwargs) -> list[dj.FreeTable]:
+        """Return a list of all FreeTables for a given restriction/key.
+
+        Useful for checking what will be exported.
+        """
+        kwargs["cascade"] = True
+        return self.get_restr_graph(kwargs).restr_ft
 
     def _max_export_id(self, paper_id: str, return_all=False) -> int:
         """Return last export associated with a given paper id.

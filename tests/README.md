@@ -2,12 +2,6 @@
 
 ## Environment
 
-To allow pytest helpers to automatically dowlnoad requisite data, you'll need to
-set credentials for Box. Consider adding these to a private `.env` file.
-
-- `UCSF_BOX_USER`: UCSF email address
-- `UCSF_BOX_TOKEN`: Token generated from UCSF Box account
-
 To facilitate headless testing of various Qt-based tools as well as Tensorflow,
 `pyproject.toml` includes some environment variables associated with the
 display. These are...

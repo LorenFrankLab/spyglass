@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.15.2
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -176,7 +176,7 @@ sorting_ids = (
 for sorting_id in sorting_ids:
     try:
         sgs.CurationV1.insert_curation(sorting_id=sorting_id)
-    except KeyError as e:
+    except KeyError:
         pass
 
 SpikeSortingOutput.insert(

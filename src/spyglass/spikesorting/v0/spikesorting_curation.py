@@ -266,7 +266,7 @@ class Curation(SpyglassMixin, dj.Manual):
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
 
         if object_ids == "":
-            logger.warn(
+            logger.warning(
                 "Sorting contains no units."
                 "Created an empty analysis nwb file anyway."
             )
@@ -324,6 +324,8 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Waveforms(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> WaveformSelection
     ---
@@ -523,6 +525,8 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class QualityMetrics(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> MetricSelection
     ---
@@ -604,7 +608,9 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
 
         for unit_id in waveform_extractor.sorting.get_unit_ids():
             # checks to avoid bug in spikeinterface 0.98.2
-            if num_spikes[unit_id] < min_spikes:
+            if num_spikes[unit_id] < min_spikes and (
+                is_nn_iso or is_nn_overlap
+            ):
                 if is_nn_iso:
                     metric[str(unit_id)] = (np.nan, np.nan)
                 elif is_nn_overlap:

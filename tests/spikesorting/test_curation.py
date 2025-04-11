@@ -1,5 +1,4 @@
 import numpy as np
-from datajoint.hash import key_hash
 from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
@@ -44,7 +43,6 @@ def test_curation_sort_info(spike_v1, pop_curation):
     exp = {
         "bad_channel": "False",
         "curation_id": 0,
-        "description": "testing sort",
         "electrode_group_name": "0",
         "electrode_id": 0,
         "filtering": "None",
@@ -55,12 +53,10 @@ def test_curation_sort_info(spike_v1, pop_curation):
         "original_reference_electrode": 0,
         "parent_curation_id": -1,
         "probe_electrode": 0,
-        "probe_id": "tetrode_12.5",
+        "probe_id": "four wire electrode",
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter": "mountainsort4",
-        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,
         "x": 0.0,
@@ -70,6 +66,7 @@ def test_curation_sort_info(spike_v1, pop_curation):
         "z": 0.0,
         "z_warped": 0.0,
     }
+
     for k in exp:
         assert (
             sort_info[k] == exp[k]
@@ -83,7 +80,6 @@ def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
     expected = {
         "bad_channel": "False",
         "contacts": "",
-        "curation_id": 1,
         "description": "after metric curation",
         "electrode_group_name": "0",
         "electrode_id": 0,
@@ -95,12 +91,10 @@ def test_curation_sort_metric(spike_v1, pop_curation, pop_curation_metric):
         "original_reference_electrode": 0,
         "parent_curation_id": 0,
         "probe_electrode": 0,
-        "probe_id": "tetrode_12.5",
+        "probe_id": "four wire electrode",
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
-        "sorter": "mountainsort4",
-        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
         "subregion_name": None,
         "subsubregion_name": None,
         "x": 0.0,

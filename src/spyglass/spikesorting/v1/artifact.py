@@ -98,7 +98,7 @@ class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
         """
         query = cls & key
         if query:
-            logger.warn("Similar row(s) already inserted.")
+            logger.warning("Similar row(s) already inserted.")
             return query.fetch(as_dict=True)
         key["artifact_id"] = uuid.uuid4()
         cls.insert1(key, skip_duplicates=True)
@@ -290,7 +290,7 @@ def _get_artifact_times(
             [[valid_timestamps[0], valid_timestamps[-1]]]
         )
         artifact_times_empty = np.asarray([])
-        logger.warn("No artifacts detected.")
+        logger.warning("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
     # convert indices to intervals
@@ -308,7 +308,10 @@ def _get_artifact_times(
             ),
             np.searchsorted(
                 valid_timestamps,
-                valid_timestamps[interval[1]] + half_removal_window_s,
+                np.minimum(
+                    valid_timestamps[interval[1]] + half_removal_window_s,
+                    valid_timestamps[-1],
+                ),
             ),
         ]
         artifact_intervals_s[interval_idx] = [

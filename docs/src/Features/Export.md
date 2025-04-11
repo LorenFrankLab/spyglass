@@ -11,9 +11,9 @@ from only one project be shared during publication.
 
 To export data with the current implementation, you must do the following:
 
-- All custom tables must inherit from `SpyglassMixin` (e.g.,
-    `class MyTable(SpyglassMixin, dj.ManualOrOther):`)
-- Only one export can be active at a time.
+- All custom tables must inherit from either `SpyglassMixin` or `ExportMixin`
+    (e.g., `class MyTable(SpyglassMixin, dj.ManualOrOther):`)
+- Only one export can be active at a time for a given Python instance.
 - Start the export process with `ExportSelection.start_export()`, run all
     functions associated with a given analysis, and end the export process with
     `ExportSelection.end_export()`.
@@ -21,30 +21,66 @@ To export data with the current implementation, you must do the following:
 ## How
 
 The current implementation relies on two classes in the Spyglass package
-(`SpyglassMixin` and `RestrGraph`) and the `Export` tables.
+(`ExportMixin` and `RestrGraph`) and the `Export` tables.
 
-- `SpyglassMixin`: See `spyglass/utils/dj_mixin.py`
+- `ExportMixin`: See `spyglass/utils/mixins/export.py`
 - `RestrGraph`: See `spyglass/utils/dj_graph.py`
 - `Export`: See `spyglass/common/common_usage.py`
 
 ### Mixin
 
-The `SpyglassMixin` class adds functionality to DataJoint tables. A subset of
+The `ExportMixin` class adds functionality to DataJoint tables. A subset of
 methods are used to set an environment variable, `SPYGLASS_EXPORT_ID`, and,
-while active, intercept all `fetch`/`fetch_nwb` calls to tables. When `fetch` is
-called, the mixin grabs the table name and the restriction applied to the table
-and stores them in the `ExportSelection` part tables.
+while active, intercept all `fetch`, `fetch_nwb`, `restrict` and `join` calls to
+tables. When these functions are called, the mixin grabs the table name and the
+restriction applied to the table and stores them in the `ExportSelection` part
+tables.
+
+<!-- TODO: Mention intercepting of restrict and join. -->
 
 - `fetch_nwb` is specific to Spyglass and logs all analysis nwb files that are
     fetched.
 - `fetch` is a DataJoint method that retrieves data from a table.
+- `restrict` is a DataJoint method that restricts a table to a subset of data,
+    typically using the `&` operator.
+- `join` is a DataJoint method that joins two tables together, typically using
+    the `*` operator.
+
+This is designed to capture any way that Spyglass is accessed, including
+restricting one table via a join with another table. If this process seems to be
+missing a way that Spyglass is accessed in your pipeline, please let us know.
+
+Note that logging all restrictions may log more than is necessary. For example,
+`MyTable & restr1 & restr2` will log `MyTable & restr1` and `MyTable & restr2`,
+despite returning the combined restriction. Logging will treat compound
+restrictions as 'OR' instead of 'AND' statements. This can be avoided by
+combining restrictions before using the `&` operator.
+
+```python
+MyTable & "a = b" & "c > 5"  # Will capture 'a = b' OR 'c > 5'
+MyTable & "a = b AND c > 5"  # Will capture 'a = b AND c > 5'
+MyTable & dj.AndList(["a = b", "c > 5"])  # Will capture 'a = b AND c > 5'
+```
+
+If this process captures too much, you can either run a process with logging
+disabled, or delete these entries from `ExportSelection` after the export is
+logged.
+
+Disabling logging with the `log_export` flag:
+
+```python
+MyTable().fetch(log_export=False)
+MyTable().fetch_nwb(log_export=False)
+MyTable().restrict(restr, log_export=False)  # Instead of MyTable & restr
+MyTable().join(Other, log_export=False)  # Instead of MyTable * Other
+```
 
 ### Graph
 
 The `RestrGraph` class uses DataJoint's networkx graph to store each of the
-tables and restrictions intercepted by the `SpyglassMixin`'s `fetch` as
-'leaves'. The class then cascades these restrictions up from each leaf to all
-ancestors. Use is modeled in the methods of `ExportSelection`.
+tables and restrictions intercepted by the `ExportMixin`'s `fetch` as 'leaves'.
+The class then cascades these restrictions up from each leaf to all ancestors.
+Use is modeled in the methods of `ExportSelection`.
 
 ```python
 from spyglass.utils.dj_graph import RestrGraph
@@ -117,7 +153,7 @@ paper. Each shell script one `mysqldump` command per table.
 
 To implement an export for a non-Spyglass database, you will need to ...
 
-- Create a modified version of `SpyglassMixin`, including ...
+- Create a modified version of `ExportMixin`, including ...
     - `_export_table` method to lazy load an export table like `ExportSelection`
     - `export_id` attribute, plus setter and deleter methods, to manage the status
         of the export.
@@ -126,6 +162,45 @@ To implement an export for a non-Spyglass database, you will need to ...
     `spyglass_version` to match the new database.
 
 Or, optionally, you can use the `RestrGraph` class to cascade hand-picked tables
-and restrictions without the background logging of `SpyglassMixin`. The
-assembled list of restricted free tables, `RestrGraph.all_ft`, can be passed to
+and restrictions without the background logging of `ExportMixin`. The assembled
+list of restricted free tables, `RestrGraph.all_ft`, can be passed to
 `Export.write_export` to generate a shell script for exporting the data.
+
+## Backwards Compatibility
+
+Spyglass databases that were declared before varchars were reduced to
+accommodate MySQL key length restrictions (see
+[#630](https://github.com/LorenFrankLab/spyglass/issues/630)) will have trouble
+importing exported data. Specifically, varchar mismatches will throw foreign key
+errors. To fix this, you run the following bash script on the generated `sql`
+files before importing them into the new database.
+
+<details><summary>Script</summary>
+
+```bash
+#!/bin/bash
+
+for file in ./_Pop*sql; do \
+    echo $file
+    sed -i 's/ DEFAULT CHARSET=[^ ]\w*//g' "$file"
+    sed -i 's/ DEFAULT COLLATE [^ ]\w*//g' "$file"
+    sed -i 's/ `nwb_file_name` varchar(255)/ `nwb_file_name` varchar(64)/g' "$file"
+    sed -i 's/ `analysis_file_name` varchar(255)/ `analysis_file_name` varchar(64)/g' "$file"
+    sed -i 's/ `interval_list_name` varchar(200)/ `interval_list_name` varchar(170)/g' "$file"
+    sed -i 's/ `position_info_param_name` varchar(80)/ `position_info_param_name` varchar(32)/g' "$file"
+    sed -i 's/ `mark_param_name` varchar(80)/ `mark_param_name` varchar(32)/g' "$file"
+    sed -i 's/ `artifact_removed_interval_list_name` varchar(200)/ `artifact_removed_interval_list_name` varchar(128)/g' "$file"
+    sed -i 's/ `metric_params_name` varchar(200)/ `metric_params_name` varchar(64)/g' "$file"
+    sed -i 's/ `auto_curation_params_name` varchar(200)/ `auto_curation_params_name` varchar(36)/g' "$file"
+    sed -i 's/ `sort_interval_name` varchar(200)/ `sort_interval_name` varchar(64)/g' "$file"
+    sed -i 's/ `preproc_params_name` varchar(200)/ `preproc_params_name` varchar(32)/g' "$file"
+    sed -i 's/ `sorter` varchar(200)/ `sorter` varchar(32)/g' "$file"
+    sed -i 's/ `sorter_params_name` varchar(200)/ `sorter_params_name` varchar(64)/g' "$file"
+done
+```
+
+</details>
+
+This is essentially a series of `sed` commands that adjust varchar lengths to
+their updated values. This script should be run in the directory containing the
+`_Populate*.sql` files generated by the export process.

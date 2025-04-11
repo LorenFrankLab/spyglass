@@ -158,7 +158,50 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if return_fig:
             return fig
 
-    def nightly_cleanup(self, dry_run=True):
+    def cautious_insert(self, inserts, **kwargs):
+        """On existing primary key, check secondary key and update if needed.
+
+        `replace=True` will attempt to delete/replace the existing entry. When
+        the row has a foreign key constraint, this will fail. This method will
+        check if an update is needed.
+
+        Parameters
+        ----------
+        inserts : list of dict
+            List of dictionaries to insert.
+        **kwargs : dict
+            Additional keyword arguments to pass to `insert`.
+        """
+        if not isinstance(inserts, list):
+            inserts = [inserts]
+        if not isinstance(inserts[0], dict):
+            raise ValueError("Input must be a list of dictionaries.")
+
+        pk = self.heading.primary_key
+
+        def pk_match(row):
+            match = self & {k: v for k, v in row.items() if k in pk}
+            return match.fetch(as_dict=True)[0] if match else None
+
+        def sk_match(new, old):
+            return (
+                np.array_equal(new["valid_times"], old["valid_times"])
+                and new["pipeline"] == old["pipeline"]
+            )
+
+        basic_inserts, need_update = [], []
+        for row in inserts:
+            existing = pk_match(row)
+            if not existing:  # if no existing entry, insert
+                basic_inserts.append(row)
+            elif existing and not sk_match(row, existing):  # diff sk, update
+                need_update.append(row)
+
+        self.insert(basic_inserts, **kwargs)
+        for row in need_update:
+            self.update1(row)
+
+    def cleanup(self, dry_run=True):
         """Clean up orphaned IntervalList entries."""
         orphans = self - get_child_tables(self)
         if dry_run:

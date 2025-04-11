@@ -1,30 +1,53 @@
 # Change Log
 
-## [0.5.4] (Unreleased)
+## [0.5.5] (Unreleased)
 
-### Release Notes
+### Infrastructure
 
-<!-- Running draft to be removed immediately prior to release. -->
+- Ensure merge tables are declared during file insertion #1205
+- Update URL for DANDI Docs #1210
+- Add common method `get_position_interval_epoch` #1056
+- Improve cron job documentation and script #1226, #1241, #1257
+- Update export process to include `~external` tables #1239
+- Only add merge parts to `source_class_dict` if present in codebase #1237
+- Remove cli module #1250
+- Fix column error in `check_threads` method #1256
 
-```python
-import datajoint as dj
-from spyglass.linearization.v1.main import TrackGraph
+### Pipelines
 
-TrackGraph.alter()  # Add edge map parameter
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-```
+- Common
+    - Set `probe_id` as `probe_description` when inserting from nwb file #1220
+    - Default `AnalysisNwbfile.create` permissions are now 777 #1226
+    - Make `Nwbfile.fetch_nwb` functional # 1256
+- Position
+    - Allow population of missing `PositionIntervalMap` entries during population
+        of `DLCPoseEstimation` #1208
+    - Enable import of existing pose data to `ImportedPose` in position pipeline
+        #1247
+- Spikesorting
+    - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
+        filtering #1238, #1249
+    - Speedup `get_sorting` on `CurationV1` #1246
+    - Add cleanup for `v0.SpikeSortingRecording` #1263
+    - Fix type compatibility of `time_slice` in
+        `SortedSpikesGroup.fetch_spike_data` #1261
+- Behavior
+    - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+
+## [0.5.4] (December 20, 2024)
 
 ### Infrastructure
 
 - Disable populate transaction protection for long-populating tables #1066,
-    #1108
+    #1108, #1172, #1187
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
 - Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
     #1137, #1162
 - Fix bool settings imported from dj config file #1117
-- Allow definition of tasks and new probe entries from config #1074, #1120
+- Allow definition of tasks and new probe entries from config #1074, #1120,
+    #1179
 - Enforce match between ingested nwb probe geometry and existing table entry
     #1074
 - Update DataJoint install and password instructions #1131
@@ -34,6 +57,18 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Remove stored hashes from pytests #1152
     - Remove mambaforge from tests #1153
     - Remove debug statement #1164
+    - Add testing for python versions 3.9, 3.10, 3.11, 3.12 #1169
+    - Initialize tables in pytests #1181
+    - Download test data without credentials, trigger on approved PRs #1180
+    - Add coverage of decoding pipeline to pytests #1155
+- Allow python \< 3.13 #1169
+- Remove numpy version restriction #1169
+- Merge table delete removes orphaned master entries #1164
+- Edit `merge_fetch` to expect positional before keyword arguments #1181
+- Allow part restriction `SpyglassMixinPart.delete` #1192
+- Move cleanup of `IntervalList` orphan entries to cron job cleanup process
+    #1195
+- Add mixin method `get_fully_defined_key` #1198
 
 ### Pipelines
 
@@ -42,10 +77,18 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Drop `SessionGroup` table #1106
     - Improve electrodes import efficiency #1125
     - Fix logger method call in `common_task` #1132
+    - Export fixes #1164
+        - Allow `get_abs_path` to add selection entry. #1164
+        - Log restrictions and joins. #1164
+        - Check if querying table inherits mixin in `fetch_nwb`. #1192, #1201
+        - Ensure externals entries before adding to export. #1192
+    - Error specificity in `LabMemberInfo` #1192
 
 - Decoding
 
     - Fix edge case errors in spike time loading #1083
+    - Allow fetch of partial key from `DecodingParameters` #1198
+    - Allow data fetching with partial but unique key #1198
 
 - Linearization
 
@@ -56,7 +99,13 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix video directory bug in `DLCPoseEstimationSelection` #1103
     - Restore #973, allow DLC without position tracking #1100
     - Minor fix to `DLCCentroid` make function order #1112, #1148
-    - Pass output path as string to `cv2.VideoWriter` #1150
+    - Video creator tools:
+        - Pass output path as string to `cv2.VideoWriter` #1150
+        - Set `DLCPosVideo` default processor to `matplotlib`, remove support for
+            `open-cv` #1168
+        - `VideoMaker` class to process frames in multithreaded batches #1168, #1174
+        - `TrodesPosVideo` updates for `matplotlib` processor #1174
+    - User prompt if ambiguous insert in `DLCModelSource` #1192
 
 - Spike Sorting
 
@@ -64,6 +113,7 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
     - Fix handling of waveform extraction sparse parameter #1132
+    - Limit Artifact detection intervals to valid times #1196
 
 ## [0.5.3] (August 27, 2024)
 
@@ -387,3 +437,4 @@ dj.FreeTable(dj.conn(), "common_session.session_group").drop()
 [0.5.2]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.2
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
+[0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5

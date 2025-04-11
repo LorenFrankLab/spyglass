@@ -8,9 +8,6 @@ import pandas as pd
 import pynwb
 from datajoint.utils import to_camel_case
 
-from spyglass.common.common_behav import (
-    convert_epoch_interval_name_to_position_interval_name,
-)
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.position.v1.position_dlc_centroid import DLCCentroid
@@ -72,7 +69,43 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
         ori_nwb = (DLCOrientation & key).fetch_nwb()[0]
+        key = (
+            self.make_null_position_nwb(key)
+            if isinstance(pos_nwb["dlc_position"], pd.DataFrame)  # null case
+            else self.make_dlc_pos_nwb(key, pos_nwb, ori_nwb)  # normal case
+        )
 
+        AnalysisNwbfile().add(
+            nwb_file_name=key["nwb_file_name"],
+            analysis_file_name=key["analysis_file_name"],
+        )
+        self.insert1(key)
+
+        from ..position_merge import PositionOutput
+
+        # TODO: The next line belongs in a merge table function
+        PositionOutput._merge_insert(
+            [orig_key],
+            part_name=to_camel_case(self.table_name.split("__")[-1]),
+            skip_duplicates=True,
+        )
+        AnalysisNwbfile().log(key, table=self.full_table_name)
+
+    @staticmethod
+    def make_null_position_nwb(key):
+        key["analysis_file_name"] = AnalysisNwbfile().create(
+            nwb_file_name=key["nwb_file_name"]
+        )
+        obj_id = AnalysisNwbfile().add_nwb_object(
+            key["analysis_file_name"], pd.DataFrame()
+        )
+        key["position_object_id"] = obj_id
+        key["orientation_object_id"] = obj_id
+        key["velocity_object_id"] = obj_id
+        return key
+
+    @staticmethod
+    def make_dlc_pos_nwb(key, pos_nwb, ori_nwb):
         pos_obj = pos_nwb["dlc_position"].spatial_series["position"]
         vel_obj = pos_nwb["dlc_velocity"].time_series["velocity"]
         vid_frame_obj = pos_nwb["dlc_velocity"].time_series["video_frame_ind"]
@@ -140,22 +173,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
                 ),
             }
         )
-
-        nwb_analysis_file.add(
-            nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=analysis_file_name,
-        )
-        self.insert1(key)
-
-        from ..position_merge import PositionOutput
-
-        # TODO: The next line belongs in a merge table function
-        PositionOutput._merge_insert(
-            [orig_key],
-            part_name=to_camel_case(self.table_name.split("__")[-1]),
-            skip_duplicates=True,
-        )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
+        return key
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
@@ -219,6 +237,16 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         orientation_key["dlc_si_cohort_selection_name"] = key[
             "dlc_si_cohort_orientation"
         ]
+
+        # check for the null cohort case
+        if not (DLCSmoothInterpCohort.BodyPart & centroid_key) and not (
+            DLCSmoothInterpCohort.BodyPart & orientation_key
+        ):
+            return {}
+
+        centroid_bodyparts, centroid_si_params = (
+            DLCSmoothInterpCohort.BodyPart & centroid_key
+        ).fetch("bodypart", "dlc_si_params_name")
         orientation_bodyparts, orientation_si_params = (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ).fetch("bodypart", "dlc_si_params_name")
@@ -271,6 +299,32 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             for bodypart in bodyparts
         }
         return sub_thresh_percent_dict
+
+    def fetch_pose_dataframe(self):
+        """fetches the pose data from the pose estimation table
+
+        Returns
+        -------
+        pd.DataFrame
+            pose data
+        """
+        key = self.fetch1("KEY")
+        return (DLCPoseEstimation & key).fetch_dataframe()
+
+    def fetch_video_path(self, key: dict = dict()) -> str:
+        """Return the video path for pose estimate
+
+        Parameters
+        ----------
+        key : dict, optional
+            key of entry within the table instance, by default dict()
+        Returns
+        -------
+        str
+            absolute path to video file
+        """
+        key = (self & key).fetch1("KEY")
+        return (DLCPoseEstimationSelection & key).fetch1("video_path")
 
 
 @schema
@@ -342,18 +396,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         M_TO_CM = 100
 
         params = (DLCPosVideoParams & key).fetch1("params")
+        epoch = key["epoch"]
 
-        interval_name = convert_epoch_interval_name_to_position_interval_name(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "epoch": key["epoch"],
-            },
-            populate_missing=False,
-        )
-        epoch = (
-            int(interval_name.replace("pos ", "").replace(" valid times", ""))
-            + 1
-        )
         pose_est_key = {
             "nwb_file_name": key["nwb_file_name"],
             "epoch": epoch,
@@ -424,7 +468,12 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         )
         frames = params.get("frames", None)
 
-        make_video(
+        if limit := params.get("limit", None):  # new int param for debugging
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
+            video_frame_inds = video_frame_inds[:limit]
+            pos_info_df = pos_info_df.head(limit)
+
+        video_maker = make_video(
             video_filename=video_filename,
             video_frame_inds=video_frame_inds,
             position_mean={
@@ -434,12 +483,19 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             centroids=centroids,
             likelihoods=likelihoods,
             position_time=np.asarray(pos_info_df.index),
-            processor=params.get("processor", "opencv"),
+            processor=params.get("processor", "matplotlib"),
             frames=np.arange(frames[0], frames[1]) if frames else None,
             percent_frames=params.get("percent_frames", None),
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),
+            key_hash=dj.hash.key_hash(key),
+            debug=params.get("debug", True),  # REVERT TO FALSE
             **params.get("video_params", {}),
         )
-        self.insert1(key)
+
+        if limit:  # don't insert if we're just debugging
+            return video_maker
+
+        if output_video_filename.exists():
+            self.insert1(key)

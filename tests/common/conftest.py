@@ -51,3 +51,9 @@ def pos_interval_01(pos_src):
 @pytest.fixture(scope="session")
 def common_ephys(common):
     yield common.common_ephys
+
+
+@pytest.fixture(scope="session")
+def pop_common_electrode_group(common_ephys):
+    common_ephys.ElectrodeGroup.populate()
+    yield common_ephys.ElectrodeGroup()

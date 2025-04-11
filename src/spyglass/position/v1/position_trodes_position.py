@@ -1,11 +1,13 @@
 import copy
 import os
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
 from pandas import DataFrame
 
+from spyglass.common import get_position_interval_epoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
@@ -13,6 +15,7 @@ from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.position import fill_nan
 
 schema = dj.schema("position_v1_trodes_position")
 
@@ -248,6 +251,21 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
             self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
         )
 
+    def fetch_pose_dataframe(self):
+        """Not applicable for TrodesPosV1 pipeline."""
+        raise NotImplementedError("No pose data for TrodesPosV1")
+
+    def fetch_video_path(self, key=dict()):
+        """Fetch the video path for the position data."""
+        key = (self & key).fetch1("KEY")
+        nwb_file_name, interval_list_name = self.fetch1(
+            "nwb_file_name", "interval_list_name"
+        )
+        epoch = get_position_interval_epoch(nwb_file_name, interval_list_name)
+        return get_video_info({"nwb_file_name": nwb_file_name, "epoch": epoch})[
+            0
+        ]
+
 
 @schema
 class TrodesPosVideo(SpyglassMixin, dj.Computed):
@@ -270,7 +288,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             - Raw position data from the RawPosition table
             - Position data from the TrodesPosV1 table
             - Video data from the VideoFile table
-        Generates a video using opencv and the VideoMaker class.
+        Generates a video using VideoMaker class.
         """
         M_TO_CM = 100
 
@@ -285,13 +303,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
+        epoch = get_position_interval_epoch(
+            key["nwb_file_name"], key["interval_list_name"]
         )
 
         (
@@ -303,8 +316,29 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             {"nwb_file_name": key["nwb_file_name"], "epoch": epoch}
         )
 
+        # Check if video exists
         if not video_path:
             self.insert1(dict(**key, has_video=False))
+            return
+
+        # Check timepoints overlap
+        if not set(video_time).intersection(set(pos_df.index)):
+            raise ValueError(
+                "No overlapping time points between video and position data"
+            )
+
+        params_pk = "trodes_pos_params_name"
+        params = (TrodesPosParams() & {params_pk: key[params_pk]}).fetch1(
+            "params"
+        )
+
+        # Check if upsampled
+        if params["is_upsampled"]:
+            logger.error(
+                "Upsampled position data not supported for video creation\n"
+                + "Please submit a feature request via GitHub if needed."
+            )
+            self.insert1(dict(**key, has_video=False))  # Null insert
             return
 
         video_path = find_mp4(
@@ -315,31 +349,75 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         output_video_filename = (
             key["nwb_file_name"].replace(".nwb", "")
             + f"_{epoch:02d}_"
-            + f'{key["trodes_pos_params_name"]}.mp4'
+            + f"{key[params_pk]}.mp4"
         )
 
         adj_df = _fix_col_names(raw_df)  # adjust 'xloc1' to 'xloc'
 
-        if test_mode:
+        limit = params.get("limit", None)
+
+        if limit and not test_mode:
+            params["debug"] = True
+            output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
+        elif test_mode:
+            limit = 10
+
+        if limit:
             # pytest video data has mismatched shapes in some cases
-            min_len = min(len(adj_df), len(pos_df), len(video_time))
-            adj_df = adj_df[:min_len]
-            pos_df = pos_df[:min_len]
+            min_len = limit or min(len(adj_df), len(pos_df), len(video_time))
+            adj_df = adj_df.head(min_len)
+            pos_df = pos_df.head(min_len)
             video_time = video_time[:min_len]
 
-        make_video(
-            processor="opencv-trodes",
-            video_filename=video_path,
-            centroids={
-                "red": np.asarray(adj_df[["xloc", "yloc"]]),
-                "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
-            },
-            position_mean=np.asarray(pos_df[["position_x", "position_y"]]),
-            orientation_mean=np.asarray(pos_df[["orientation"]]),
+        centroids = {
+            "red": np.asarray(adj_df[["xloc", "yloc"]]),
+            "green": np.asarray(adj_df[["xloc2", "yloc2"]]),
+        }
+        position_mean = np.asarray(pos_df[["position_x", "position_y"]])
+        orientation_mean = np.asarray(pos_df[["orientation"]])
+        position_time = np.asarray(pos_df.index)
+
+        ind_col = (
+            pos_df["video_frame_ind"]
+            if "video_frame_ind" in pos_df.columns
+            else pos_df.index
+        )
+        video_frame_inds = ind_col.astype(int).to_numpy()
+
+        centroids = {
+            color: fill_nan(
+                variable=data,
+                video_time=video_time,
+                variable_time=position_time,
+            )
+            for color, data in centroids.items()
+        }
+        position_mean = fill_nan(
+            variable=position_mean,
             video_time=video_time,
-            position_time=np.asarray(pos_df.index),
+            variable_time=position_time,
+        )
+        orientation_mean = fill_nan(
+            variable=orientation_mean,
+            video_time=video_time,
+            variable_time=position_time,
+        )
+
+        vid_maker = make_video(
+            video_filename=video_path,
+            video_frame_inds=video_frame_inds,
+            centroids=centroids,
+            video_time=video_time,
+            position_mean=position_mean,
+            orientation_mean=orientation_mean,
+            position_time=position_time,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
-            disable_progressbar=False,
+            key_hash=dj.hash.key_hash(key),
+            **params,
         )
+
+        if limit and not test_mode:
+            return vid_maker
+
         self.insert1(dict(**key, has_video=True))

@@ -291,6 +291,8 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
+    use_transaction, _allow_insert = False, True
+
     definition = """
     -> SpikeSortingRecordingSelection
     ---
@@ -543,3 +545,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recording = recording.set_probe(tetrode, in_place=True)
 
         return recording
+
+    def cleanup(self, dry_run=False):
+        """Removes the recording data from the recording directory."""
+        rec_dir = Path(recording_dir)
+        tracked = set(self.fetch("recording_path"))
+        all_dirs = {str(f) for f in rec_dir.iterdir() if f.is_dir()}
+        untracked = all_dirs - tracked
+
+        if dry_run:
+            return untracked
+
+        for folder in untracked:
+            shutil.rmtree(folder)

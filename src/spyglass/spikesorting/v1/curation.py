@@ -9,7 +9,6 @@ import spikeinterface.curation as sc
 import spikeinterface.extractors as se
 
 from spyglass.common import BrainRegion, Electrode
-from spyglass.common.common_ephys import Raw
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.v1.recording import (
     SortGroup,
@@ -17,7 +16,7 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecordingSelection,
 )
 from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_curation")
 
@@ -84,13 +83,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
 
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
-        if parent_curation_id == -1:
+
+        parent_query = sort_query & {"curation_id": parent_curation_id}
+        if parent_curation_id == -1 and len(parent_query):
             # check to see if this sorting with a parent of -1
             # has already been inserted and if so, warn the user
-            query = sort_query & {"parent_curation_id": -1}
-            if query:
-                Warning("Sorting has already been inserted.")
-                return query.fetch("KEY")
+            logger.warning("Sorting has already been inserted.")
+            return parent_query.fetch("KEY")
 
         # generate curation ID
         existing_curation_ids = sort_query.fetch("curation_id")
@@ -204,25 +203,22 @@ class CurationV1(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
+
         with pynwb.NWBHDF5IO(
             analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
-        units_dict_list = [
-            {
-                unit_id: np.searchsorted(recording.get_times(), spike_times)
-                for unit_id, spike_times in zip(
-                    units.index, units["spike_times"]
-                )
-            }
-        ]
 
-        sorting = si.NumpySorting.from_unit_dict(
-            units_dict_list, sampling_frequency=sampling_frequency
+        recording_times = recording.get_times()
+        units_dict = {
+            unit.Index: np.searchsorted(recording_times, unit.spike_times)
+            for unit in units.itertuples()
+        }
+
+        return si.NumpySorting.from_unit_dict(
+            [units_dict], sampling_frequency=sampling_frequency
         )
-
-        return sorting
 
     @classmethod
     def get_merged_sorting(cls, key: dict) -> si.BaseSorting:
