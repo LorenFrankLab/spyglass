@@ -4,7 +4,6 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
-from tqdm import tqdm
 
 import datajoint as dj
 import numpy as np
@@ -12,6 +11,7 @@ import spikeinterface as si
 import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
+from tqdm import tqdm
 
 from spyglass.common.common_lab import LabMember, LabTeam
 from spyglass.settings import sorting_dir, temp_dir
@@ -263,7 +263,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             try:
                 shutil.rmtree(folder)
             except PermissionError:
-                pass
+                logger.warning(f"Permission denied: {folder}")
 
     @staticmethod
     def _get_sorting_name(key):

@@ -1,5 +1,4 @@
 import os
-from tqdm import tqdm
 import shutil
 from functools import reduce
 from pathlib import Path
@@ -9,6 +8,7 @@ import numpy as np
 import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
+from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
@@ -561,4 +561,4 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             try:
                 shutil.rmtree(folder)
             except PermissionError:
-                pass
+                logger.warning(f"Permission denied: {folder}")
