@@ -164,6 +164,10 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single bodypart dataframe."""
+            if not len(self) == 1:
+                raise ValueError(
+                    "DLCPoseEstimation.BodyPart.fetch1_dataframe() requires a single key to be selected."
+                )
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
