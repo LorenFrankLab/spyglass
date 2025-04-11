@@ -19,6 +19,8 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
+    - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
+    - Allow ingestion of multi-row task epoch tables #1278
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -33,6 +35,8 @@
         `SortedSpikesGroup.fetch_spike_data` #1261
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+- LFP
+    - Implement `ImportedLFP.make()`  for ingestion from nwb files #1278
 
 ## [0.5.4] (December 20, 2024)
 
