@@ -32,16 +32,13 @@ from spikeinterface import __version__ as si_version
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment
 from spyglass.settings import analysis_dir, temp_dir
+from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
 schema = dj.schema("cbroz_recomp_v1")  # TODO: spikesorting_v1_recompute
-
-# Initializing table to prevent recompute of cached properties
-USER_TBL = UserEnvironment()
-logger.info(f"Initializing UserEnvironment: {USER_TBL.this_env}")
 
 
 @schema

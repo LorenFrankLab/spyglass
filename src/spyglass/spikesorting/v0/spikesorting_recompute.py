@@ -29,6 +29,7 @@ from spikeinterface import __version__ as si_version
 
 from spyglass.common.common_user import UserEnvironment
 from spyglass.settings import recording_dir, temp_dir
+from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
@@ -37,10 +38,6 @@ from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
 
 schema = dj.schema("cbroz_recomp_v0")  # TODO: spikesorting_recompute_v0
-
-# Initializing table to prevent recompute of cached properties
-USER_TBL = UserEnvironment()
-logger.info(f"Initializing UserEnvironment: {USER_TBL.this_env}")
 
 
 @schema
