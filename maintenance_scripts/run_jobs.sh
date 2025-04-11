@@ -14,13 +14,16 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/.env" # load environment variables from this directory
 
-if [[ -z "${SPYGLASS_CONDA_ENV}" \
+if [[ -z "${SPYGLASS_CONDA_PATH}" \
+  || -z "${SPYGLASS_CONDA_ENV}" \
   || -z "${SPYGLASS_REPO_PATH}" \
   || -z "${SPYGLASS_LOG}" ]]; then
-  echo "Error: SPYGLASS_CONDA_ENV, SPYGLASS_REPO_PATH,
+  echo "Error: SPYGLASS_CONDA_PATH, SPYGLASS_CONDA_ENV, SPYGLASS_REPO_PATH,
         and SPYGLASS_LOG must be set in .env"
   exit 1
 fi
+
+source $SPYGLASS_CONDA_PATH
 
 EMAIL_TEMPLATE=$(cat <<-EOF
 From: "Spyglass" <$SPYGLASS_EMAIL_SRC>
