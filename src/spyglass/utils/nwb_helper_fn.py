@@ -39,23 +39,32 @@ def _open_nwb_file(nwb_file_path, source="local"):
     return nwbfile
 
 
-def get_nwb_file(nwb_file_path):
+def get_nwb_file(nwb_file_path, query_expression=None):
     """Return an NWBFile object with the given file path in read mode.
 
     If the file is not found locally, this will check if it has been shared
-    with kachery and if so, download it and open it.
-
+    with kachery/dandi and if so, download it and open it. If not, and the
+    query_expression has a `_make_file` method, it will call that method to
+    recompute the file.
 
     Parameters
     ----------
     nwb_file_path : str
         Path to the NWB file or NWB file name. If it does not start with a "/",
         get path with Nwbfile.get_abs_path
+    query_expression : dj.QueryExpression, optional
+        The restricted table associated with the NWB file, used for recompute.
 
     Returns
     -------
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the NWB file is not found locally or in kachery/Dandi, and cannot be
+        recomputed.
     """
     if not str(nwb_file_path).startswith("/"):
         from spyglass.common import Nwbfile
@@ -97,7 +106,16 @@ def get_nwb_file(nwb_file_path):
         raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
         return _open_nwb_file(raw, source="dandi")
 
-    # If not in Dandi, then we can't find the file
+    if hasattr(query_expression, "_make_file"):
+        # if the query_expression has a _make_file method, call it to
+        # recompute the file
+        basename = os.path.basename(nwb_file_path)
+        logger.info(f"Recomputing {basename}")
+
+        nwbfile = query_expression._make_file(recompute_file_name=basename)
+        if nwbfile is not None:
+            return nwbfile
+
     raise FileNotFoundError(
         "NWB file not found in kachery or Dandi: "
         + f"{os.path.basename(nwb_file_path)}."

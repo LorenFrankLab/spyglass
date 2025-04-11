@@ -40,7 +40,6 @@ class UserEnvironment(dj.Manual):
     @cached_property
     def env(self) -> str:
         """Fetch the current Conda environment as a string."""
-        logger.info("Retrieving the current Conda environment.")
         result = sub_run(
             ["conda", "env", "export"],
             capture_output=True,
@@ -73,14 +72,12 @@ class UserEnvironment(dj.Manual):
     @cached_property
     def env_hash(self) -> str:
         """Compute an MD5 hash of the environment dictionary."""
-        logger.info("Computing current environment hash.")
         env_json = json_dumps(self.parse_env_dict(self.env), sort_keys=True)
         return md5(env_json.encode()).hexdigest()
 
     @cached_property
     def matching_env_id(self):
         """Return the env_id that matches the current environment's hash."""
-        logger.info("Checking for a matching environment.")
         matches = self & f'env_hash="{self.env_hash}"'
         return matches.fetch1("env_id") if matches else None
 
@@ -127,7 +124,6 @@ class UserEnvironment(dj.Manual):
             return
 
         if self.matching_env_id:  # if env is already stored
-            logger.info(f"Env stored as '{self.matching_env_id}'")
             return {"env_id": self.matching_env_id}
 
         self.insert1(

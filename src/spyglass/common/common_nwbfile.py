@@ -525,8 +525,13 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             / analysis_file_name
         )
         key = (external_tbl & f"filepath = '{file_path}'").fetch1()
-        key["contents_hash"] = dj.hash.uuid_from_file(file_path)
-        key["size"] = file_path.stat().st_size
+        abs_path = Path(analysis_dir) / file_path
+        key.update(
+            {
+                "contents_hash": dj.hash.uuid_from_file(abs_path),
+                "size": abs_path.stat().st_size,
+            }
+        )
 
         external_tbl.update1(key)
 

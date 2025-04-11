@@ -314,11 +314,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     for file_name in nwb_files:
         file_path = file_path_fn(file_name, from_schema=True)
         if not os.path.exists(file_path):
-            if hasattr(query_expression, "_make_file"):
-                # Attempt to recompute the file
-                query_expression._make_file(recompute_file_name=file_name)
-            # get from kachery/dandi, store in cache
-            get_nwb_file(file_path)
+            # get from kachery/dandi or recompute, store in cache
+            get_nwb_file(file_path, query_expression)
 
     # logging arg only if instanced table inherits Mixin
     inst = (  # instancing may not be necessary
