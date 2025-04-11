@@ -29,6 +29,7 @@
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
     - Add cleanup for `v0.SpikeSortingRecording` #1263
+    - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
 - Behavior

@@ -30,7 +30,7 @@ if [[ "${#SPACE_CHECK_DRIVES[@]}" -ne "${#SPACE_DRIVE_LIMITS[@]}" ]]; then
   exit 1
 fi
 
-echo "SPACE CHECK: $(date)" > "$SPACE_LOG"
+echo "SPACE CHECK: $(date)" >> "$SPACE_LOG"
 
 # Email template
 EMAIL_TEMPLATE=$(cat <<-EOF
@@ -65,7 +65,8 @@ send_slack_message() {
   curl -d "text=$MESSAGE" \
     -d "channel=$SLACK_CHANNEL" \
     -H "Authorization: Bearer $SLACK_TOKEN" \
-    -X POST https://slack.com/api/chat.postMessage
+    -X POST https://slack.com/api/chat.postMessage \
+    2>> "$SPACE_LOG"
 }
 
 # Find the longest drive name for padding
@@ -111,7 +112,7 @@ for i in "${!DRIVE_LIST[@]}"; do
 
     # Send email alert
     BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
-    SUBJ="LOW SPACE: ${NAME}"
+    SUBJ="${NAME}"
 
     echo $BODY >> "$SPACE_LOG"
 
@@ -122,4 +123,3 @@ for i in "${!DRIVE_LIST[@]}"; do
     done
 
 done
-
