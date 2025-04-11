@@ -202,8 +202,8 @@ pynwb.ecephys.LFP </b>
 | Spyglass Table     |        Key         |                                     NWBfile Location     | Config option | Notes |
 | :----------------- | :----------------: | -------------------------------------------------------: | ------------: | ----: |
 | ImportedLFP        | lfp_sampling_rate  | LFP.eseries.rate else, estimated from eseries.timestamps |               | float |
-| IntervalList (raw) | interval_list_name |                           "imported lfp {i} valid times" |               |   str |
-| IntervalList (raw) |    valid_times     |         get_valid_intervals(eseries.timestamps, ...)     |               |       |
+| IntervalList       | interval_list_name |                           "imported lfp {i} valid times" |               |   str |
+| IntervalList       |    valid_times     |         get_valid_intervals(LFP.eseries.timestamps, ...) |               |       |
 
 <b> NWBfile Location: nwbf.processing.sample_count </br> Object type:
 pynwb.base.TimeSeries </b>
