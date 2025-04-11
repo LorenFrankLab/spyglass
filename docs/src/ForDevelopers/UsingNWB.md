@@ -84,6 +84,9 @@ The following tables highlight the correspondence between NWB objects and
 Spyglass tables/fields and should be a useful reference for developers looking
 to adapt existing NWB files for Spyglass injestion.
 
+Note that for entries where the **NWBfile Location** is a pynwb class, all objects in
+the nwb file of this class will be inserted into the spyglass table
+
 Please contact the developers if you have any questions or need help with
 adapting your NWB files for use with Spyglass, especially items marked with
 'TODO' in the tables below.
@@ -193,6 +196,15 @@ pynwb.ecephys.ElectricalSeries </b>
 | IntervalList (raw) | interval_list_name |                               "raw data valid times" |               |   str |
 | IntervalList (raw) |    valid_times     |         get_valid_intervals(eseries.timestamps, ...) |               |       |
 
+<b> NWBfile Location: pynwb.ecephys.LFP </br> Object type:
+pynwb.ecephys.LFP </b>
+
+| Spyglass Table     |        Key         |                                     NWBfile Location     | Config option | Notes |
+| :----------------- | :----------------: | -------------------------------------------------------: | ------------: | ----: |
+| ImportedLFP        | lfp_sampling_rate  | LFP.eseries.rate else, estimated from eseries.timestamps |               | float |
+| IntervalList (raw) | interval_list_name |                           "imported lfp {i} valid times" |               |   str |
+| IntervalList (raw) |    valid_times     |         get_valid_intervals(eseries.timestamps, ...)     |               |       |
+
 <b> NWBfile Location: nwbf.processing.sample_count </br> Object type:
 pynwb.base.TimeSeries </b>
 
@@ -251,7 +263,7 @@ hdmf.common.table.DynamicTable </b>
 | :--------------------------- | :--------------------: | -------------------------------------------------------------------------------: | ------------: | --------------------: |
 | IntervalList (position)      |   interval_list_name   |                                                        "pos {index} valid times" |               |                       |
 | IntervalList (position)      |      valid_times       | get_valid_intervals(nwbf.processing.behavior.position.\[index\].timestamps, ...) |               |                       |
-| PositionSource               |         source         |                                                                         "trodes" |               | TODO: infer from file |
+| PositionSource               |         source         |                                                                       "imported" |               |  |
 | PositionSource               |   interval_list_name   |                                                     See: IntervalList (position) |               |                       |
 | PositionSource.SpatialSeries |           id           |   int(nwbf.processing.behavior.position.\[index\]) (the enumerated index number) |               |                       |
 | RawPosition.PosObject        | raw_position_object_id |                            nwbf.processing.behavior.position.\[index\].object_id |               |                       |
@@ -269,7 +281,7 @@ pynwb.image.ImageSeries </b>
 
 | Spyglass Table |     Key     |                                        NWBfile Location | Config option | Notes |
 | :------------- | :---------: | ------------------------------------------------------: | ------------: | ----: |
-| VideoFile      | camera_name | nwbf.processing.video_files.video.\[index\].camera_name |               |       |
+| VideoFile      | camera_name | pynwb.ImageSeries |               |       |
 
 <b> NWBfile Location: nwbf.processing.associated_files <br/> Object type:
 ndx_franklab_novela.AssociatedFiles </b>
