@@ -210,6 +210,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 for key, value in decoding_kwargs.items()
                 if key in VALID_FIT_KWARGS
             }
+
             classifier.fit(
                 position_time=position_info.index.to_numpy(),
                 position=position_info[position_variable_names].to_numpy(),
@@ -264,6 +265,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             dims=("states", "states"),
             name="discrete_state_transitions",
         )
+
         if (
             vars(classifier).get("discrete_transition_coefficients_")
             is not None

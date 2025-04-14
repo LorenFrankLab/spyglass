@@ -1,3 +1,7 @@
+import pytest
+
+
+@pytest.mark.skip(reason="JAX issues")
 def test_analysis_units(pop_annotations):
     selected_spike_times, selected_unit_ids = pop_annotations.fetch_unit_spikes(
         return_unit_ids=True

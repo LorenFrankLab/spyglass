@@ -35,11 +35,12 @@ class SpikeSortingRecordingView(SpyglassMixin, dj.Computed):
         nwb_file_name = rec["nwb_file_name"]
         sort_group_id = rec["sort_group_id"]
         sort_interval_name = rec["sort_interval_name"]
-        recording_path = rec["recording_path"]
 
         # Load the SI recording extractor
         logger.info("Loading recording")
-        recording: si.BaseRecording = si.load_extractor(recording_path)
+        recording: si.BaseRecording = SpikeSortingRecording().load_recording(
+            key
+        )
 
         # Raw traces (sample)
         # Extract the first 1 second of traces
