@@ -1,14 +1,12 @@
 # Filename: spyglass/position/v1/pipeline_dlc_setup.py (Example Module Path)
 
 """High-level function for setting up a Spyglass DLC Project and extracting frames."""
-
-import os
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import datajoint as dj
 
 # --- Spyglass Imports ---
-from spyglass.common import LabMember, Nwbfile, VideoFile
+from spyglass.common import LabMember, VideoFile
 from spyglass.position.v1 import DLCProject
 from spyglass.utils import logger
 

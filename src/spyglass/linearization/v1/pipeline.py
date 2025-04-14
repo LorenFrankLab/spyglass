@@ -89,7 +89,7 @@ def populate_spyglass_linearization_v1(
     if not (PositionOutput & pos_key):
         raise ValueError(f"PositionOutput entry not found: {pos_merge_id}")
     # Need nwb_file_name from position source to check track graph and interval
-    pos_entry = (PositionOutput & pos_key).fetch_nwb_file_name()
+    pos_entry = (PositionOutput & pos_key).fetch("nwb_file_name")
     if not pos_entry:
         raise ValueError(
             f"Could not retrieve source NWB file for PositionOutput {pos_merge_id}"
