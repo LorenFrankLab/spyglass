@@ -26,7 +26,7 @@ from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
 from spyglass.utils.nwb_hash import DirectoryHasher
 
@@ -620,5 +620,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in untracked:
-            shutil.rmtree(folder)
+        for folder in tqdm(untracked, desc="Removing untracked folders"):
+            try:
+                shutil.rmtree(folder)
+            except PermissionError:
+                logger.warning(f"Permission denied: {folder}")
