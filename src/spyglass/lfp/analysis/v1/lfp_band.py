@@ -6,7 +6,6 @@ import pandas as pd
 import pynwb
 from scipy.signal import hilbert
 
-from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import (
     IntervalList,
