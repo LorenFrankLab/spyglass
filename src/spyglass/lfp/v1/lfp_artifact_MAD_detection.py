@@ -43,6 +43,7 @@ def mad_artifact_detector(
     lfps = np.asarray(recording.data)
 
     mad = median_abs_deviation(lfps, axis=0, nan_policy="omit", scale="normal")
+    mad = np.where((mad == 0.0) | ~np.isfinite(mad), 1.0, mad)
     is_artifact = _is_above_proportion_thresh(
         _mad_scale_lfps(lfps, mad), mad_thresh, proportion_above_thresh
     )
@@ -103,10 +104,9 @@ def _is_above_proportion_thresh(
         Whether each sample is above the threshold on the proportion of
         electrodes
     """
-
-    return (
-        np.mean(mad_scaled_lfps > mad_thresh, axis=1) > proportion_above_thresh
-    )
+    n_electrodes = mad_scaled_lfps.shape[1]
+    thresholded_count = np.sum(mad_scaled_lfps > mad_thresh, axis=1)
+    return thresholded_count > (proportion_above_thresh * n_electrodes)
 
 
 def _get_time_intervals_from_bool_array(
