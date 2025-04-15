@@ -13,6 +13,10 @@
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
 
+### Documentation
+
+- Add documentation for custom pipeline #12XX
+
 ### Pipelines
 
 - Common

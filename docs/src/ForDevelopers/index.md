@@ -30,6 +30,8 @@ order to develop your own.
     and how to use them.
 - [Schema design](./Schema.md) explains the anatomy of a Spyglass schema and
     gives a model for writing your version of each of the types of tables.
+- [Pipeline design](./CustomPipelines.md) explains the process of turning an
+    existing analysis into a Spyglass pipeline.
 - [Using NWB](./UsingNWB.md) explains how to use the NWB format in Spyglass.
 
 If you'd like help in developing a new pipeline, please reach out to the
