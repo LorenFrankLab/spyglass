@@ -33,7 +33,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         reference_elect_id = -1: int  # the reference electrode to use; -1 for no reference
         """
 
-    # --- REFACTORED METHOD ---
     def set_lfp_band_electrodes(
         self,
         nwb_file_name: str,
