@@ -950,31 +950,31 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         # 2. Append labels to current labels, checking for inconsistencies
         if not label_params:
             return parent_labels
-        else:
-            for metric in label_params:
-                if metric not in quality_metrics:
-                    Warning(f"{metric} not found in quality metrics; skipping")
-                else:
-                    compare = _comparison_to_function[label_params[metric][0]]
 
-                    for unit_id in quality_metrics[metric].keys():
-                        # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[metric] is a three element list with a comparison operator as a string,
-                        # the threshold value, and a list of labels to be applied if the comparison is true
-                        if compare(
-                            quality_metrics[metric][unit_id],
-                            label_params[metric][1],
-                        ):
-                            if unit_id not in parent_labels:
-                                parent_labels[unit_id] = label_params[metric][2]
-                            # check if the label is already there, and if not, add it
-                            elif (
-                                label_params[metric][2]
-                                not in parent_labels[unit_id]
-                            ):
-                                parent_labels[unit_id].extend(
-                                    label_params[metric][2]
-                                )
+        for metric in label_params:
+            if metric not in quality_metrics:
+                Warning(f"{metric} not found in quality metrics; skipping")
+                continue
+
+            compare = _comparison_to_function[label_params[metric][0]]
+
+            for unit_id in quality_metrics[metric]:
+
+                # compare the quality metric to the threshold with the
+                # specified operator note that label_params[metric] is a three
+                # element list with a comparison operator as a string, the
+                # threshold value, and a list of labels to be applied if the
+                # comparison is true
+
+                label = label_params[metric]
+
+                if compare(quality_metrics[metric][unit_id], label[1]):
+                    if unit_id not in parent_labels:
+                        parent_labels[unit_id] = label[2]
+                    # check if the label is already there, and if not, add it
+                    elif label[2] not in parent_labels[unit_id]:
+                        parent_labels[unit_id].extend(label[2])
+
             return parent_labels
 
 
