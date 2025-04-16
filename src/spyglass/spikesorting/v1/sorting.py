@@ -29,6 +29,60 @@ schema = dj.schema("spikesorting_v1_sorting")
 
 @schema
 class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for spike sorting algorithms.
+
+    Parameters
+    ----------
+    sorter: str
+        Name of the spike sorting algorithm.
+    sorter_params_name: str
+        Name of the parameter set for the spike sorting algorithm.
+    sorter_params: dict
+        Dictionary of parameters for the spike sorting algorithm.
+        The keys and values depend on the specific algorithm being used.
+        For example, for the "mountainsort4" algorithm, the parameters are...
+            detect_sign: int
+                Sign of the detected spikes. 1 for positive, -1 for negative.
+            adjacency_radius: int
+                Radius for adjacency graph. Determines which channels are
+                considered neighbors.
+            freq_min: int
+                Minimum frequency for bandpass filter.
+            freq_max: int
+                Maximum frequency for bandpass filter.
+            filter: bool
+                Whether to apply bandpass filter.
+            whiten: bool
+                Whether to whiten the data.
+            num_workers: int
+                Number of workers to use for parallel processing.
+            clip_size: int
+                Size of the clips to extract for spike detection.
+            detect_threshold: float
+                Threshold for spike detection.
+            detect_interval: int
+                Minimum interval between detected spikes.
+        For the "clusterless_thresholder" algorithm, the parameters are...
+            detect_threshold: float
+                microvolt detection threshold for spike detection.
+            method: str
+                Method for spike detection. Options are "locally_exclusive" or
+                "global".
+            peak_sign: enum ("neg", "pos")
+                Sign of the detected peaks.
+            exclude_sweep_ms: float
+                Exclusion time in milliseconds for detected spikes.
+            local_radius_um: int
+                Local radius in micrometers for spike detection.
+            noise_levels: np.ndarray
+                Noise levels for spike detection.
+            random_chunk_kwargs: dict
+                Additional arguments for random chunk processing.
+            outputs: str
+                Output type for spike detection. Options are "sorting" or
+                "labels".
+    """
+
     definition = """
     # Spike sorting algorithm and associated parameters.
     sorter: varchar(200)
@@ -36,38 +90,26 @@ class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
     ---
     sorter_params: blob
     """
+    mountain_default = {
+        "detect_sign": -1,
+        "adjacency_radius": 100,
+        "filter": False,
+        "whiten": True,
+        "num_workers": 1,
+        "clip_size": 40,
+        "detect_threshold": 3,
+        "detect_interval": 10,
+    }
     contents = [
         [
             "mountainsort4",
             "franklab_tetrode_hippocampus_30KHz",
-            {
-                "detect_sign": -1,
-                "adjacency_radius": 100,
-                "freq_min": 600,
-                "freq_max": 6000,
-                "filter": False,
-                "whiten": True,
-                "num_workers": 1,
-                "clip_size": 40,
-                "detect_threshold": 3,
-                "detect_interval": 10,
-            },
+            {**mountain_default, "freq_min": 600, "freq_max": 6000},
         ],
         [
             "mountainsort4",
             "franklab_probe_ctx_30KHz",
-            {
-                "detect_sign": -1,
-                "adjacency_radius": 100,
-                "freq_min": 300,
-                "freq_max": 6000,
-                "filter": False,
-                "whiten": True,
-                "num_workers": 1,
-                "clip_size": 40,
-                "detect_threshold": 3,
-                "detect_interval": 10,
-            },
+            {**mountain_default, "freq_min": 300, "freq_max": 6000},
         ],
         [
             "clusterless_thresholder",

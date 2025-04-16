@@ -24,6 +24,40 @@ ARTIFACT_DETECTION_ALGORITHMS = {
 
 @schema
 class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
+    """Parameters for detecting LFP artifacts.
+
+    Parameters
+    ----------
+    artifact_params_name : str
+        Name of the artifact detection parameters.
+    artifact_params : dict
+        artifact_detection_algorithm: str
+        artifact_detection_algorithm_params: dict
+            amplitude_thresh_1st : float, optional
+                Amplitude (ad units) threshold for exclusion, should be >=0,
+                defaults to None
+            amplitude_thresh_2nd : float, optional
+                Amplitude (ad units) threshold for exclusion, should be >=0,
+                defaults to None
+            proportion_above_thresh_1st : float, optional,
+                should be>0 and <=1. Proportion of electrodes that need to have
+                threshold crossings, defaults to 1
+            proportion_above_thresh_2nd : float, optional, should be>0 and <=1
+                Proportion of electrodes that need to have threshold crossings,
+                defaults to 1
+            removal_window_ms : float, optional
+                Width of the window in milliseconds to mask out per artifact
+                (window/2 removed on each side of threshold crossing), defaults
+                to 1 ms
+            local_window_ms: float, optional
+        referencing: dict, optional
+            ref_on: bool
+            reference_list: list of int
+                Reference electrode IDs.
+            electrode_list: list of int
+                Electrode IDs to be referenced.
+    """
+
     definition = """
     # Parameters for detecting LFP artifact times within a LFP group.
     artifact_params_name: varchar(64)

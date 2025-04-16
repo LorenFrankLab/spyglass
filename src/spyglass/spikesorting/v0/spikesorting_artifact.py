@@ -28,6 +28,25 @@ schema = dj.schema("spikesorting_artifact")
 
 @schema
 class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
+    """Parameters for detecting artifact times within a sort group.
+
+    Parameters
+    ----------
+    artifact_params_name : str
+        Name of the artifact detection parameters.
+    artifact_params : dict
+        Dictionary of parameters for artifact detection, including:
+            zscore_thresh : float or None
+                Stdev threshold for exclusion, should be >=0
+            amplitude_thresh : float or None
+                Amplitude threshold for exclusion, should be >=0
+            proportion_above_thresh : float
+                Proportion of electrodes that need to have threshold crossings,
+                should be >0 and <=1
+            removal_window_ms : float
+                Width of the window in milliseconds to mask out per artifact
+    """
+
     definition = """
     # Parameters for detecting artifact times within a sort group.
     artifact_params_name: varchar(200)
@@ -36,19 +55,28 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     """
 
     def insert_default(self):
-        """Insert the default artifact parameters with an appropriate parameter dict."""
-        artifact_params = {}
-        artifact_params["zscore_thresh"] = None  # must be None or >= 0
-        artifact_params["amplitude_thresh"] = 3000  # must be None or >= 0
-        # all electrodes of sort group
-        artifact_params["proportion_above_thresh"] = 1.0
-        artifact_params["removal_window_ms"] = 1.0  # in milliseconds
-        self.insert1(["default", artifact_params], skip_duplicates=True)
-
-        artifact_params_none = {}
-        artifact_params_none["zscore_thresh"] = None
-        artifact_params_none["amplitude_thresh"] = None
-        self.insert1(["none", artifact_params_none], skip_duplicates=True)
+        """Insert the default artifact parameters."""
+        self.insert(
+            [
+                (
+                    "default",
+                    {
+                        "zscore_thresh": 5.0,  # must be None or >= 0
+                        "amplitude_thresh": 3000,  # must be None or >= 0
+                        "proportion_above_thresh": 0.5,  # must be > 0 and <= 1
+                        "removal_window_ms": 1.0,  # in milliseconds
+                    },
+                ),
+                (
+                    "none",
+                    {
+                        "zscore_thresh": None,  # must be None or >= 0
+                        "amplitude_thresh": None,  # must be None or >= 0
+                    },
+                ),
+            ],
+            skip_duplicates=True,
+        )
 
 
 @schema
