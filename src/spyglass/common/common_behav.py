@@ -376,11 +376,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
-    def make(self, key):
-        """Make without transaction"""
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key, verbose=True, skip_duplicates=False):
+    def make(self, key, verbose=True, skip_duplicates=False):
+        """Make without optional transaction"""
         if not self.connection.in_transaction:
             self.populate(key)
             return
