@@ -58,40 +58,20 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
             electrode_ids = electrodes_df.index.values
 
             # check if existing electrode group for this set of electrodes exists
-            e_group_query = LFPElectrodeGroup() & {
+            session_key = {
                 "nwb_file_name": nwb_file_name,
             }
-            group_key = None
-            for test_group_key in e_group_query.fetch("KEY"):
-                group_electodes = (
-                    LFPElectrodeGroup().LFPElectrode() & test_group_key
-                ).fetch("electrode_id")
+            e_group_query = LFPElectrodeGroup() & session_key
+            group_num = len(
+                e_group_query & "lfp_electrode_group_name LIKE 'imported_lfp_%'"
+            )
+            proposed_group_name = f"imported_lfp_{group_num:03}"
 
-                if set(group_electodes) == set(electrode_ids):
-                    group_key = test_group_key
-                    break
-
-            if group_key is None:
-                # need to create a new group
-                group_num = len(
-                    e_group_query
-                    & "lfp_electrode_group_name LIKE 'imported_lfp_%'"
-                )
-                group_name = f"imported_lfp_{group_num:03}"
-                group_key = {
-                    "nwb_file_name": nwb_file_name,
-                    "lfp_electrode_group_name": group_name,
-                }
-                if len(LFPElectrodeGroup() & group_key):
-                    raise ValueError(
-                        f"LFPElectrodeGroup {group_key} already exists with different electrode entries."
-                    )
-
-                LFPElectrodeGroup().create_lfp_electrode_group(
-                    nwb_file_name=nwb_file_name,
-                    group_name=group_name,
-                    electrode_ids=electrode_ids,
-                )
+            group_key = LFPElectrodeGroup().cautious_insert(
+                session_key=session_key,
+                electrode_ids=electrode_ids,
+                group_name=proposed_group_name,
+            )
 
             # estimate the sampling rate or read in if available
             sampling_rate = es_object.rate or estimate_sampling_rate(
