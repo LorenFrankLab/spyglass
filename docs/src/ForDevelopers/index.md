@@ -10,7 +10,7 @@ pipeline or improving an existing one, please review the article on
 [contributing](./Contribute.md).
 
 Any computation that might be useful for more that one project is a good
-candidate for contribution. If you're note sure, feel free to
+candidate for contribution. If you're not sure, feel free to
 [open an issue](https://github.com/LorenFrankLab/spyglass/issues/new) to
 discuss.
 

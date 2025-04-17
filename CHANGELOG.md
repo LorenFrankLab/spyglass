@@ -17,6 +17,7 @@
 ### Documentation
 
 - Add documentation for custom pipeline #1281
+- Add developer note on initializing `hatch` #1281
 
 ### Pipelines
 
