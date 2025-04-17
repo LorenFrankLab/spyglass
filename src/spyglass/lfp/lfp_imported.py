@@ -34,22 +34,14 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
     _nwb_table = Nwbfile
 
     def make(self, key):
-        """Placeholder for importing LFP."""
-        raise NotImplementedError(
-            "For `insert`, use `allow_direct_insert=True`"
-        )
-
-    def _no_transaction_make(self, key):
-
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
 
         # get the set of lfp objects in the file
-        lfp_objects = []
-        for obj in nwbf.objects:
-            if isinstance(obj, pynwb.ecephys.LFP):
-                lfp_objects.append(obj)
+        lfp_objects = [
+            obj for obj in nwbf.objects if isinstance(obj, pynwb.ecephys.LFP)
+        ]
 
         if len(lfp_objects) == 0:
             logger.warning(
@@ -102,10 +94,8 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
                 )
 
             # estimate the sampling rate or read in if available
-            sampling_rate = (
-                estimate_sampling_rate(es_object.timestamps[: int(1e6)])
-                if es_object.rate is None
-                else es_object.rate
+            sampling_rate = es_object.rate or estimate_sampling_rate(
+                es_object.timestamps[: int(1e6)]
             )
 
             # create a new interval list for the valid times
