@@ -13,6 +13,7 @@
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
 - Track Spyglass version in dedicated table for enforcing updates #1281
+- Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 
 ### Documentation
 

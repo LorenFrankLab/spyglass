@@ -40,7 +40,7 @@ dependencies = [
     "black[jupyter]",
     "bottleneck",
     "dask",
-    "datajoint>=0.14.2",
+    "datajoint>=0.14.4",
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
