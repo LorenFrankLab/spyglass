@@ -60,7 +60,8 @@ class Task(SpyglassMixin, dj.Manual):
         # Check if the task is already in the table
         # if so check that the secondary keys all match
         for task_dict in task_dicts:
-            if existing_task := (self & task_dict).fetch1("KEY"):
+            if len(existing_task := (self & task_dict).fetch("KEY")):
+                existing_task = existing_task[0]
                 for k, v in task_dict.items():
                     if existing_task[k] != v:
                         raise ValueError(
