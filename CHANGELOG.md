@@ -12,10 +12,11 @@
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Track Spyglass version in dedicated table for enforcing updates #1281
 
 ### Documentation
 
-- Add documentation for custom pipeline #12XX
+- Add documentation for custom pipeline #1281
 
 ### Pipelines
 
