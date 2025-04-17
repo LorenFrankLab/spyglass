@@ -235,7 +235,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 task_inserts.append(key.copy())
 
         # check if the task entries are in the Task table and if not, add it
-        Task.insert_from_task_table(task_table)
+        Task().insert_from_task_table(task_table)
         self.insert(task_inserts, allow_direct_insert=True)
 
     @classmethod
