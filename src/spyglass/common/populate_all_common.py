@@ -17,7 +17,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.common.common_sensor import SensorData
+from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
