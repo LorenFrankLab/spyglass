@@ -32,6 +32,7 @@
     - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
+    - Disable make transactionsfor `CuratedSpikeSorting` #1288
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 
