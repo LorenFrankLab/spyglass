@@ -57,20 +57,29 @@ class Task(SpyglassMixin, dj.Manual):
             ),
             axis=1,
         ).tolist()
+
         # Check if the task is already in the table
         # if so check that the secondary keys all match
+        def unequal_vals(key, a, b):
+            a, b = a.get(key) or "", b.get(key, "") or ""
+            return a != b  # prevent false positive on None != ""
+
+        inserts = []
         for task_dict in task_dicts:
-            if len(existing_task := (self & task_dict).fetch("KEY")):
-                existing_task = existing_task[0]
-                for k, v in task_dict.items():
-                    if existing_task[k] != v:
-                        raise ValueError(
-                            f"Task {task_dict['task_name']} already exists "
-                            + f"with different values for {k}: "
-                            + f"{existing_task[k]} != {v}"
-                        )
+            query = self & {"task_name": task_dict["task_name"]}
+            if not query:
+                inserts.append(task_dict)  # only append novel tasks
+                continue
+            existing = query.fetch1()
+            for key in set(task_dict).union(existing):
+                if unequal_vals(key, task_dict, existing):
+                    raise ValueError(
+                        f"Task {task_dict['task_name']} already exists "
+                        + f"with different values for {key}: "
+                        + f"{task_dict.get(key)} != {existing.get(key)}"
+                    )
         # Insert the tasks into the table
-        self.insert(task_dicts, skip_duplicates=True)
+        self.insert(inserts)
 
     @classmethod
     def is_nwb_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
