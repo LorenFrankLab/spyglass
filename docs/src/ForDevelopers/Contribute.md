@@ -15,6 +15,9 @@ Regular contributors may choose to follow the
 [Feature Branch Workflow](https://www.atlassian.com/git/tutorials/comparing-workflows/feature-branch-workflow)
 for features that will involve multiple contributors.
 
+The local version is dynamically managed via `hatch`, so be sure to run
+`git pull --tags; hatch build` to update the version for any new local install.
+
 ## Code organization
 
 - Tables are grouped into schemas by topic (e.g., `common_metrics`)

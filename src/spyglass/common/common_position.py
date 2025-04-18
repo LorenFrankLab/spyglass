@@ -39,6 +39,30 @@ schema = dj.schema("common_position")
 class PositionInfoParameters(SpyglassMixin, dj.Lookup):
     """
     Parameters for extracting the smoothed position, orientation and velocity.
+
+    Parameters
+    ----------
+    position_info_param_name : str
+        Name for this set of parameters
+    max_separation : float
+        Max distance (in cm) between head LEDs. Default is 9.0 cm
+    max_speed : float
+        Max speed (in cm/s) of animal. Default is 300.0 cm/s
+    position_smoothing_duration : float
+        Size of moving window (s) for smoothing position. Default is 0.125s
+    speed_smoothing_std_dev : float
+        Smoothing standard deviation (s) for speed. Default is 0.100 s
+    head_orient_smoothing_std_dev : float
+        Smoothing standard deviation (s) for head orientation. Default is 0.001s
+    led1_is_front : int
+        1 if 1st LED is front LED, else 1st LED is back. Default is 1.
+    is_upsampled : int
+        1 if upsampling to higher sampling rate, else 0. Default is 0.
+    upsampling_sampling_rate : float
+        The rate to be upsampled to. Default is NULL.
+    upsampling_interpolation_method : str
+        Interpolation method for upsampling. Default is 'linear'. See
+        pandas.DataFrame.interpolation for list of methods.
     """
 
     definition = """

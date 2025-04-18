@@ -12,6 +12,13 @@
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Track Spyglass version in dedicated table for enforcing updates #1281
+- Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
+
+### Documentation
+
+- Add documentation for custom pipeline #1281
+- Add developer note on initializing `hatch` #1281
 
 ### Pipelines
 
@@ -19,11 +26,13 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
+    - Add `SensorData` to `populate_all_common` #1281
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
+    - Sanitize new project names for unix file system #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249

@@ -38,6 +38,28 @@ schema = dj.schema("spikesorting_sorting")
 
 @schema
 class SpikeSortingPipelineParameters(SpyglassMixin, dj.Manual):
+    """Parameters for the spike sorting pipeline
+
+    Parameters
+    ----------
+    pipeline_parameters_name : str
+        A name for this set of parameters
+    preproc_params_name : str
+        Name of the preprocessing parameters to use
+    artifact_parameters : str
+        Name of the artifact detection parameters to use
+    sorter : str
+        Name of the sorting algorithm to use
+    sorter_params_name : str
+        Name of the sorting parameters to use
+    waveform_params_name : str
+        Name of the waveform parameters to use
+    metric_params_name : str
+        Name of the metric parameters to use
+    auto_curation_params_name : str
+        Name of the automatic curation parameters to use
+    """
+
     definition = """
     pipeline_parameters_name: varchar(200)
     ---

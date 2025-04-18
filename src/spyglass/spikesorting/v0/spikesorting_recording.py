@@ -250,6 +250,24 @@ class SortInterval(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
+    """Preprocessing parameters for spike sorting.
+
+    Parameters
+    ----------
+    preproc_params_name : str
+        Name of the preprocessing parameters.
+    preproc_params : dict
+        Dictionary of preprocessing parameters.
+        frequency_min : float
+            High pass filter value in Hz.
+        frequency_max : float
+            Low pass filter value in Hz.
+        margin_ms : float
+            Margin in ms on border to avoid border effect.
+        seed : int
+            Random seed for whitening.
+    """
+
     definition = """
     preproc_params_name: varchar(32)
     ---

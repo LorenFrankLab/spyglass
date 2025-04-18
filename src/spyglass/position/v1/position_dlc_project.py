@@ -12,6 +12,7 @@ from spyglass.common.common_lab import LabTeam
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import sanitize_unix_name
 
 schema = dj.schema("position_v1_dlc_project")
 
@@ -90,6 +91,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             raise ValueError("project_name must be a string")
         if not isinstance(key["frames_per_video"], int):
             raise ValueError("frames_per_video must be of type `int`")
+        key["project_name"] = sanitize_unix_name(key["project_name"])
         super().insert1(key, **kwargs)
 
     def _existing_project(self, project_name):
@@ -242,6 +244,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             (Default is '/nimbus/deeplabcut/videos/')
         """
         from deeplabcut import create_new_project
+
+        project_name = sanitize_unix_name(project_name)
 
         if (existing := cls()._existing_project(project_name)) is not None:
             return existing

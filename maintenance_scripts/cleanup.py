@@ -11,6 +11,7 @@ import warnings
 from pathlib import Path
 
 from spyglass.common import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_version import SpyglassVersions
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema
 from spyglass.decoding.v1.sorted_spikes import schema as spikes_schema
@@ -72,6 +73,7 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
 
 
 def main():
+    SpyglassVersions().fetch_from_pypi()
     run_table_cleanups()
     cleanup_external_files()
     cleanup_temp_dir(dry_run=False)

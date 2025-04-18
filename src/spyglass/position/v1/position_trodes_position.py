@@ -24,6 +24,31 @@ schema = dj.schema("position_v1_trodes_position")
 class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the position (centroid, velocity, orientation)
+
+    Parameters
+    ----------
+    trodes_pos_params_name: str
+        Name for this set of parameters
+    params: dict
+        Dictionary of parameters for position calculation, including...
+        max_LED_separation: float
+            Maximum separation between LEDs in pixels
+        max_plausible_speed: float
+            Maximum plausible speed in cm/s
+        position_smoothing_duration: float
+            Duration for smoothing position in seconds
+        speed_smoothing_std_dev: float
+            Standard deviation for smoothing speed in seconds
+        orient_smoothing_std_dev: float
+            Standard deviation for smoothing orientation in radians
+        led1_is_front: int
+            Whether LED1 is the front LED (1) or not (0)
+        is_upsampled: int
+            Whether the data is upsampled (1) or not (0)
+        upsampling_sampling_rate: float
+            Sampling rate for upsampling in Hz
+        upsampling_interpolation_method: str
+            Interpolation method for upsampling (e.g., 'linear', 'cubic')
     """
 
     definition = """

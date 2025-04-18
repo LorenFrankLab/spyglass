@@ -329,6 +329,23 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
 @schema
 class DLCPosVideoParams(SpyglassMixin, dj.Manual):
+    """Parameters for the video generation.
+
+    Parameters
+    ----------
+    dlc_pos_video_params_name : str
+        Name of the parameter set.
+    params : dict
+        Parameters for the video generation, including...
+        percent_frames : int
+            Percentage of frames to include in the video.
+        incl_likelihood : bool
+            Whether to include likelihood in the video.
+        video_params : dict, optional
+            additional parameters passed to VideoMaker, like arrow_radius,
+            circle_radius
+    """
+
     definition = """
     dlc_pos_video_params_name : varchar(50)
     ---

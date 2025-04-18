@@ -124,6 +124,16 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 
 @schema
 class DLCModelParams(SpyglassMixin, dj.Manual):
+    """Parameters for model training.
+
+    Parameters
+    ----------
+    dlc_model_params_name : str
+        Name of the parameter set
+    params : dict
+        Dictionary of parameters for training, those found in the config.yaml
+    """
+
     definition = """
     dlc_model_params_name: varchar(40)
     ---

@@ -32,7 +32,25 @@ _key_to_func_dict = {
 @schema
 class DLCOrientationParams(SpyglassMixin, dj.Manual):
     """
-    Parameters for determining and smoothing the orientation of a set of BodyParts
+    Params for determining and smoothing the orientation of a set of BodyParts
+
+    Parameters
+    ----------
+    dlc_orientation_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        orient_method : str
+            Method for determining orientation. Options are:
+            'none': No orientation calculation
+            'red_green_orientation': Two-point head orientation calculation
+            'red_led_bisector': Red LED bisector orientation calculation
+        bodypart1 : str
+            First bodypart to use for orientation calculation
+        bodypart2 : str
+            Second bodypart to use for orientation calculation
+        orientation_smoothing_std_dev : float
+            Standard deviation for Gaussian smoothing of the orientation data
     """
 
     definition = """

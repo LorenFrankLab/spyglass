@@ -15,6 +15,18 @@ schema = dj.schema("spikesorting_group_v1")
 
 @schema
 class UnitSelectionParams(SpyglassMixin, dj.Manual):
+    """Unit selection parameters for sorted spikes
+
+    Parameters
+    ----------
+    unit_filter_params_name : str
+        name of the unit selection parameters
+    include_labels : List[str], optional
+        list of labels to include, by default None
+    exclude_labels : List[str], optional
+        list of labels to exclude, by default None
+    """
+
     definition = """
     unit_filter_params_name: varchar(32)
     ---
