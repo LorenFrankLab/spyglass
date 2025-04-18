@@ -963,6 +963,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)
     """
+    use_transaction, _allow_insert = False, True
 
     class Unit(SpyglassMixin, dj.Part):
         definition = """
