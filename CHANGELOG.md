@@ -26,7 +26,7 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
-    - Add `SesorData` to `populate_all_common` #1281
+    - Add `SensorData` to `populate_all_common` #1281
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
