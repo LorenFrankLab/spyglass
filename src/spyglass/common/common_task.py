@@ -151,11 +151,12 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             )
             return
 
-        task_inserts = []
+        task_inserts = []  # inserts for Task table
+        task_epoch_inserts = []  # inserts for TaskEpoch table
         for task_table in tasks_mod.data_interfaces.values():
             if not self.is_nwb_task_epoch(task_table):
                 continue
-
+            task_inserts.append(task_table)
             for task in task_table:
                 key["task_name"] = task.task_name[0]
 
@@ -200,7 +201,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         logger.warning("Skipping epoch.")
                         continue
                     key["interval_list_name"] = target_interval
-                    task_inserts.append(key.copy())
+                    task_epoch_inserts.append(key.copy())
 
         # Add tasks from config
         for task in config_tasks:
@@ -233,11 +234,14 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     logger.warning("Skipping epoch.")
                     continue
                 new_key["interval_list_name"] = target_interval
-                task_inserts.append(key.copy())
+                task_epoch_inserts.append(key.copy())
 
         # check if the task entries are in the Task table and if not, add it
-        Task().insert_from_task_table(task_table)
-        self.insert(task_inserts, allow_direct_insert=True)
+        [
+            Task().insert_from_task_table(task_table)
+            for task_table in task_inserts
+        ]
+        self.insert(task_epoch_inserts, allow_direct_insert=True)
 
     @classmethod
     def get_epoch_interval_name(cls, epoch, session_intervals):
