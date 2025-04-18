@@ -50,6 +50,9 @@ class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
                 (window/2 removed on each side of threshold crossing), defaults
                 to 1 ms
             local_window_ms: float, optional
+                Width of the local time window in milliseconds used for artifact
+                detection. This parameter defines the duration of the local
+                analysis window, defaults to None.
         referencing: dict, optional
             ref_on: bool
             reference_list: list of int
