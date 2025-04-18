@@ -362,7 +362,7 @@ def get_video_info(key):
     video_query = VideoFile & vf_key
 
     if not video_query:
-        VideoFile()._no_transaction_make(vf_key, verbose=False)
+        VideoFile().make(vf_key, verbose=False)
 
     if len(video_query) != 1:
         logger.warning(f"Found {len(video_query)} videos for {vf_key}")

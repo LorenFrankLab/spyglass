@@ -376,11 +376,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
-    def make(self, key):
-        """Make without transaction"""
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key, verbose=True, skip_duplicates=False):
+    def make(self, key, verbose=True, skip_duplicates=False):
+        """Make without optional transaction"""
         if not self.connection.in_transaction:
             self.populate(key)
             return
@@ -390,17 +387,17 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        videos = get_data_interface(
-            nwbf, "video", pynwb.behavior.BehavioralEvents
-        )
-
-        if videos is None:
+        # get all ImageSeries objects in the NWB file
+        videos = {
+            obj.name: obj
+            for obj in nwbf.objects.values()
+            if isinstance(obj, pynwb.image.ImageSeries)
+        }
+        if not videos:
             logger.warning(
                 f"No video data interface found in {nwb_file_name}\n"
             )
             return
-        else:
-            videos = videos.time_series
 
         # get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
