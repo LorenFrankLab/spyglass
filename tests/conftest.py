@@ -17,18 +17,12 @@ import numpy as np
 import pynwb
 import pytest
 from datajoint.logging import logger as dj_logger
+from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
 from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
-
-warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-warnings.filterwarnings("ignore", module="tensorflow")
-warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
-warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-warnings.filterwarnings("ignore", category=ResourceWarning, module="datajoint")
 
 # ------------------------------- TESTS CONFIG -------------------------------
 
@@ -114,6 +108,19 @@ def pytest_configure(config):
         download_dlc=not NO_DLC,
     )
 
+    warnings.filterwarnings("ignore", module="tensorflow")
+    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
+    warnings.filterwarnings(
+        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+    )
+    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+    warnings.filterwarnings(
+        "ignore", category=PerformanceWarning, module="pandas"
+    )
+    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+    warnings.simplefilter("ignore", category=ResourceWarning)
+    warnings.simplefilter("ignore", category=DeprecationWarning)
+
 
 def pytest_unconfigure(config):
     from spyglass.utils.nwb_helper_fn import close_nwb_files
@@ -121,6 +128,9 @@ def pytest_unconfigure(config):
     close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
+        analysis_dir = BASE_DIR / "analysis"
+        for file in analysis_dir.glob("*.nwb"):
+            file.unlink()
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -1299,3 +1309,187 @@ def dlc_key(sgp, dlc_selection):
 def populate_dlc(sgp, dlc_key):
     sgp.v1.DLCPosV1().populate(dlc_key)
     yield
+
+
+# ----------------------- FIXTURES, SPIKESORTING TABLES -----------------------
+# ------------------------ Note: Used in decoding tests ------------------------
+
+
+@pytest.fixture(scope="session")
+def spike_v1(common):
+    from spyglass.spikesorting import v1
+
+    yield v1
+
+
+@pytest.fixture(scope="session")
+def pop_rec(spike_v1, mini_dict, team_name):
+    spike_v1.SortGroup.set_group_by_shank(**mini_dict)
+    key = {
+        **mini_dict,
+        "sort_group_id": 0,
+        "preproc_param_name": "default",
+        "interval_list_name": "01_s1",
+        "team_name": team_name,
+    }
+    spike_v1.SpikeSortingRecordingSelection.insert_selection(key)
+    ssr_pk = (
+        (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
+    )
+    spike_v1.SpikeSortingRecording.populate(ssr_pk)
+
+    yield ssr_pk
+
+
+@pytest.fixture(scope="session")
+def pop_art(spike_v1, mini_dict, pop_rec):
+    key = {
+        "recording_id": pop_rec["recording_id"],
+        "artifact_param_name": "default",
+    }
+    spike_v1.ArtifactDetectionSelection.insert_selection(key)
+    spike_v1.ArtifactDetection.populate()
+
+    yield spike_v1.ArtifactDetection().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def spike_merge(spike_v1):
+    from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+
+    yield SpikeSortingOutput()
+
+
+@pytest.fixture(scope="session")
+def sorter_dict():
+    return {"sorter": "mountainsort4"}
+
+
+@pytest.fixture(scope="session")
+def pop_sort(spike_v1, pop_rec, pop_art, mini_dict, sorter_dict):
+    key = {
+        **mini_dict,
+        **sorter_dict,
+        "recording_id": pop_rec["recording_id"],
+        "interval_list_name": str(pop_art["artifact_id"]),
+        "sorter_param_name": "franklab_tetrode_hippocampus_30KHz",
+    }
+    spike_v1.SpikeSortingSelection.insert_selection(key)
+    spike_v1.SpikeSorting.populate()
+
+    yield spike_v1.SpikeSorting().fetch(
+        "KEY", as_dict=True, order_by="time_of_sort desc"
+    )[0]
+
+
+@pytest.fixture(scope="session")
+def sorting_objs(spike_v1, pop_sort):
+    sort_nwb = (spike_v1.SpikeSorting & pop_sort).fetch_nwb()
+    sort_si = spike_v1.SpikeSorting.get_sorting(pop_sort)
+    yield sort_nwb, sort_si
+
+
+@pytest.fixture(scope="session")
+def pop_curation(spike_v1, pop_sort):
+
+    parent_curation_id = -1
+    has_sort = spike_v1.CurationV1 & {"sorting_id": pop_sort["sorting_id"]}
+    if has_sort:
+        parent_curation_id = has_sort.fetch(
+            "curation_id", order_by="curation_id desc"
+        )[0]
+
+    spike_v1.CurationV1.insert_curation(
+        sorting_id=pop_sort["sorting_id"],
+        description="testing sort",
+        parent_curation_id=parent_curation_id,
+    )
+
+    yield (spike_v1.CurationV1() & {"parent_curation_id": -1}).fetch(
+        "KEY", as_dict=True
+    )[0]
+
+
+@pytest.fixture(scope="session")
+def pop_metric(spike_v1, pop_sort, pop_curation):
+    _ = pop_curation  # make sure this happens first
+    key = {
+        "sorting_id": pop_sort["sorting_id"],
+        "curation_id": 0,
+        "waveform_param_name": "default_not_whitened",
+        "metric_param_name": "franklab_default",
+        "metric_curation_param_name": "default",
+    }
+
+    spike_v1.MetricCurationSelection.insert_selection(key)
+    spike_v1.MetricCuration.populate(key)
+
+    yield spike_v1.MetricCuration().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def metric_objs(spike_v1, pop_metric):
+    key = {"metric_curation_id": pop_metric["metric_curation_id"]}
+    labels = spike_v1.MetricCuration.get_labels(key)
+    merge_groups = spike_v1.MetricCuration.get_merge_groups(key)
+    metrics = spike_v1.MetricCuration.get_metrics(key)
+    yield labels, merge_groups, metrics
+
+
+@pytest.fixture(scope="session")
+def pop_curation_metric(spike_v1, pop_metric, metric_objs):
+    labels, merge_groups, metrics = metric_objs
+    desc_dict = dict(description="after metric curation")
+    spike_v1.CurationV1.insert_curation(
+        sorting_id=(
+            spike_v1.MetricCurationSelection
+            & {"metric_curation_id": pop_metric["metric_curation_id"]}
+        ).fetch1("sorting_id"),
+        parent_curation_id=0,
+        labels=labels,
+        merge_groups=merge_groups,
+        metrics=metrics,
+        **desc_dict,
+    )
+
+    yield (spike_v1.CurationV1 & desc_dict).fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def pop_spike_merge(
+    spike_v1, pop_curation_metric, spike_merge, mini_dict, sorter_dict
+):
+    # TODO: add figurl fixtures when kachery_cloud is initialized
+
+    spike_merge.insert([pop_curation_metric], part_name="CurationV1")
+
+    yield (spike_merge << pop_curation_metric).fetch1("KEY")
+
+
+@pytest.fixture(scope="session")
+def spike_v1_group():
+    from spyglass.spikesorting.analysis.v1 import group
+
+    yield group
+
+
+@pytest.fixture(scope="session")
+def group_name():
+    yield "test_group"
+
+
+@pytest.fixture(scope="session")
+def pop_spikes_group(
+    group_name, spike_v1_group, spike_merge, mini_dict, pop_spike_merge
+):
+
+    _ = pop_spike_merge  # make sure this happens first
+
+    spike_v1_group.UnitSelectionParams().insert_default()
+    spike_v1_group.SortedSpikesGroup().create_group(
+        **mini_dict,
+        group_name=group_name,
+        keys=spike_merge.proj(spikesorting_merge_id="merge_id").fetch("KEY"),
+        unit_filter_params_name="default_exclusion",
+    )
+    yield spike_v1_group.SortedSpikesGroup().fetch("KEY", as_dict=True)[0]

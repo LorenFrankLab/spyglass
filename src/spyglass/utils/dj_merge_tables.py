@@ -261,8 +261,8 @@ class Merge(ExportMixin, dj.Manual):
         datajoint.expression.Union
         """
 
-        parts = [
-            cls() * p  # join with master to include sec key (i.e., 'source')
+        parts = [  # join with master to include sec key (i.e., 'source')
+            cls().join(p, log_export=False)
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
@@ -707,7 +707,11 @@ class Merge(ExportMixin, dj.Manual):
             self._source_class_dict = {
                 part_name: getattr(module, part_name)
                 for part_name in self.parts(camel_case=True)
+                if hasattr(module, part_name)
             }
+        for part_name in self.parts(camel_case=True):
+            if part_name not in self._source_class_dict:
+                logger.warning(f"Missing code for {part_name}")
         return self._source_class_dict
 
     def _normalize_source(
@@ -737,6 +741,8 @@ class Merge(ExportMixin, dj.Manual):
         source: Union[str, dict, dj.Table]
             Accepts a CamelCase name of the source, or key as a dict, or a part
             table.
+        init: bool, optional
+            Default False. If True, returns an instance of the class.
 
         Returns
         -------

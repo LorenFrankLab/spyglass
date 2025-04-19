@@ -9,12 +9,10 @@ plan future development of Spyglass.
 from typing import List, Union
 
 import datajoint as dj
-from datajoint import FreeTable
-from datajoint import config as dj_config
 from pynwb import NWBHDF5IO
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import export_dir, test_mode
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import (
@@ -174,7 +172,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             Return as a list of dicts: [{'file_path': x}]. Default True.
             If False, returns a list of strings without key.
         """
-        file_table = self * self.File & key
         unique_fp = {
             *[
                 AnalysisNwbfile().get_abs_path(p)
@@ -196,7 +193,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """Add external tables to a RestrGraph for a given restriction/key.
 
         Tables added as nodes with restrictions based on file paths. Names
-        added to visited set to appear in restr_ft obj bassed to SQLDumpHelper.
+        added to visited set to appear in restr_ft obj passed to SQLDumpHelper.
+
+        This process adds files explicitly listed in the ExportSelection.File
+        by the logging process. A separate RestrGraph process, cascade_files, is
+        used to track all tables with fk-ref to file tables, and cascade up to
+        externals.
 
         Parameters
         ----------
@@ -210,23 +212,26 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-        raw_tbl = self._externals["raw"]
-        raw_name = raw_tbl.full_table_name
-        raw_restr = (
-            "filepath in ('" + "','".join(self._list_raw_files(key)) + "')"
-        )
-        restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
 
-        analysis_tbl = self._externals["analysis"]
-        analysis_name = analysis_tbl.full_table_name
-        analysis_restr = (  # filepaths have analysis subdir. regexp substrings
-            "filepath REGEXP '" + "|".join(self._list_analysis_files(key)) + "'"
-        )  # regexp is slow, but we're only doing this once, and future-proof
-        restr_graph.graph.add_node(
-            analysis_name, ft=analysis_tbl, restr=analysis_restr
-        )
+        if raw_files := self._list_raw_files(key):
+            raw_tbl = self._externals["raw"]
+            raw_name = raw_tbl.full_table_name
+            raw_restr = "filepath in ('" + "','".join(raw_files) + "')"
+            restr_graph.graph.add_node(raw_name, ft=raw_tbl, restr=raw_restr)
+            restr_graph.visited.add(raw_name)
 
-        restr_graph.visited.update({raw_name, analysis_name})
+        if analysis_files := self._list_analysis_files(key):
+            analysis_tbl = self._externals["analysis"]
+            analysis_name = analysis_tbl.full_table_name
+            # to avoid issues with analysis subdir, we use REGEXP
+            # this is slow, but we're only doing this once, and future-proof
+            analysis_restr = (
+                "filepath REGEXP '" + "|".join(analysis_files) + "'"
+            )
+            restr_graph.graph.add_node(
+                analysis_name, ft=analysis_tbl, restr=analysis_restr
+            )
+            restr_graph.visited.add(analysis_name)
 
         return restr_graph
 
@@ -253,9 +258,18 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
         restr_graph = RestrGraph(
-            seed_table=self, leaves=leaves, verbose=verbose, cascade=cascade
+            seed_table=self,
+            leaves=leaves,
+            verbose=verbose,
+            cascade=False,
+            include_files=True,
         )
-        return self._add_externals_to_restr_graph(restr_graph, key)
+        restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
+
+        if cascade:
+            restr_graph.cascade()
+
+        return restr_graph
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.

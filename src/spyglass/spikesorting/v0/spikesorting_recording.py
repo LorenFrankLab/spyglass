@@ -8,6 +8,7 @@ import numpy as np
 import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
+from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
@@ -25,7 +26,7 @@ from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
 
 schema = dj.schema("spikesorting_recording")
@@ -545,3 +546,19 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recording = recording.set_probe(tetrode, in_place=True)
 
         return recording
+
+    def cleanup(self, dry_run=False):
+        """Removes the recording data from the recording directory."""
+        rec_dir = Path(recording_dir)
+        tracked = set(self.fetch("recording_path"))
+        all_dirs = {str(f) for f in rec_dir.iterdir() if f.is_dir()}
+        untracked = all_dirs - tracked
+
+        if dry_run:
+            return untracked
+
+        for folder in tqdm(untracked, desc="Removing untracked folders"):
+            try:
+                shutil.rmtree(folder)
+            except PermissionError:
+                logger.warning(f"Permission denied: {folder}")

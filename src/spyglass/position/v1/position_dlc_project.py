@@ -57,8 +57,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
     With ability to edit config, extract frames, label frames
     """
 
-    # Add more parameters as secondary keys...
-    # TODO: collapse params into blob dict
     definition = """
     project_name     : varchar(100) # name of DLC project
     ---

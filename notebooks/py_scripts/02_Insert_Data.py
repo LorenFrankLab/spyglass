@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.0
+#       jupytext_version: 1.16.7
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -503,7 +503,8 @@ sgc.Nwbfile().cleanup(delete_files=True)
 # Not every NWB file has all the information required by Spyglass. For example,
 # many NWB files do not contain any information about the `DataAcquisitionDevice`
 # or `Probe` because NWB does not yet have an official standard for specifying
-# them. Or, information in the NWB file may need correcting.
+# them. Or, information in the NWB file may need correcting. For example,
+# the NWB file specifies the lab name as the "Loren Frank Lab", but your lab table expects "Frank Lab".
 #
 # Manual inserts can either be done on tables directly (e.g.,
 # `Table.insert1(my_dict)`), or done in batch with `yaml` files. This is done in
@@ -550,11 +551,11 @@ sgc.Nwbfile().cleanup(delete_files=True)
 
 # ### Pairing with NWBs
 #
-# Next, we'll need to create a _configuration file_ to associate the above entries
-# with session(s). This must be done in the same directory as the NWB file that it
-# configures and have the following naming convention:
-# `<name_of_nwb_file>_spyglass_config.yaml`. This file is then read by Spyglass
-# when calling `insert_session` on the associated NWB file.
+# Next, we'll create a _configuration file_ to override values in a given NWB
+# (e.g., "Loren Frank Lab" -> "Frank Lab"). This must be done in the same
+# directory as the NWB file that it configures and have the following naming
+# convention: `<name_of_nwb_file>_spyglass_config.yaml`. This file is then read by
+# Spyglass when calling `insert_session` on the associated NWB file.
 #
 # An example of this can be found at
 # `examples/config_yaml/​​sub-AppleBottom_ses-AppleBottom-DY20-g3_behavior+ecephys_spyglass_config.yaml`.
@@ -572,14 +573,65 @@ sgc.Nwbfile().cleanup(delete_files=True)
 # For example:
 #
 # ```yaml
+# Lab:
+#   - lab_name: Frank Lab
 # DataAcquisitionDevice:
 #   - data_acquisition_device_name: Neuropixels Recording Device
 # ```
 #
 # In this example, the NWB file that corresponds to this config YAML will become
-# associated with the DataAcquisitionDevice with primary key
-# data_acquisition_device_name: Neuropixels Recording Device. This entry must
-# already exist.
+# associated with the Lab primary key 'Frank Lab' and the DataAcquisitionDevice
+# with primary key 'Neuropixels Recording Device'. This entry must already exist.
+
+# ### Example Ingestion with Real Data
+#
+# For this example, you will need to download the 5 GB NWB file
+# `sub-JDS-NFN-AM2_behavior+ecephys.nwb`
+# from dandiset 000447 here:
+# https://dandiarchive.org/dandiset/000447/0.230316.2133/files?location=sub-JDS-NFN-AM2&page=1
+#
+# Click the download arrow button to download the file to your computer. Add it to
+#  the folder containing your raw NWB data to be ingested into Spyglass.
+#
+# This file does not specify a data acquisition device. Let's say that the
+# data was collected from a SpikeGadgets system with an Intan amplifier. This
+# matches an existing entry in the `DataAcquisitionDevice` table with name
+# "data_acq_device0". We will create a configuration YAML file to associate
+# this entry with the NWB file.
+#
+# If you are connected to the Frank lab database, please rename any downloaded
+# files (e.g., `example20200101_yourname.nwb`) to avoid naming collisions, as the
+# file name acts as the primary key across key tables.
+
+nwb_file_name = "sub-JDS-NFN-AM2_behavior+ecephys_rly.nwb"
+
+# this configuration yaml file should be placed next to the downloaded NWB file
+yaml_config_path = "sub-JDS-NFN-AM2_behavior+ecephys_rly_spyglass_config.yaml"
+with open(yaml_config_path, "w") as config_file:
+    lines = [
+        "DataAcquisitionDevice",
+        "- data_acquisition_device_name: data_acq_device0",
+    ]
+    config_file.writelines(line + "\n" for line in lines)
+
+# Then call `insert_sessions` as usual.
+
+# +
+import spyglass.data_import as sgi
+
+sgi.insert_sessions(nwb_file_name)
+# -
+
+# Confirm the session was inserted with the correct `DataAcquisitionDevice`
+
+# +
+import spyglass.common as sgc
+from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+nwb_copy_file_name = get_nwb_copy_filename(nwb_file_name)
+
+sgc.Session.DataAcquisitionDevice & {"nwb_file_name": nwb_copy_file_name}
+# -
 
 # ## Up Next
 #

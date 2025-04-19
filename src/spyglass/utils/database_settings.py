@@ -11,16 +11,17 @@ import datajoint as dj
 from spyglass.utils.logging import logger
 
 SHARED_MODULES = [
+    "behavior",
     "common",
-    "spikesorting",
     "decoding",
-    "position",
-    "linearization",
-    "ripple",
     "lfp",
-    "waveform",
+    "linearization",
     "mua",
+    "position",
+    "ripple",
     "sharing",
+    "spikesorting",
+    # EDIT: waveform not used as a spyglass schema prefix
 ]
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
