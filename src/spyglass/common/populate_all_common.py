@@ -141,8 +141,8 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            SensorData,  # Depends on Session
             # NwbfileKachery, # Not used by default
-            SensorData,  # Not used by default. Generates large files
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup

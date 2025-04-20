@@ -30,9 +30,8 @@ class SpyglassVersions(dj.Manual):
     release_date: date   # Release date
     """
 
-    def fetch_from_pypi(self):
+    def fetch_from_pypi(self) -> None:
         """Populate SpyglassVersion table with the current version."""
-        # TODO: set on weekly cron job
         response = requests.get("https://pypi.org/pypi/spyglass-neuro/json")
 
         if not response.ok:
@@ -49,12 +48,12 @@ class SpyglassVersions(dj.Manual):
         self.insert(inserts, skip_duplicates=True)
 
     @property
-    def env_var(self):
+    def env_var(self) -> bool:
         """Get SPYGLASS_UPDATED environment variable."""
         return str_to_bool(os_environ.get("SPYGLASS_UPDATED", "false"))
 
     @cached_property
-    def is_up_to_date(self):
+    def is_up_to_date(self) -> bool:
         """Check if the current Spyglass version is up to date.
 
         Returns
@@ -67,13 +66,23 @@ class SpyglassVersions(dj.Manual):
 
         return self.check_updated(allowed_versions_behind=1)
 
-    def check_updated(self, allowed_versions_behind=1):
+    def check_updated(self, allowed_versions_behind=1) -> bool:
         """Check if the current Spyglass version is updated.
 
         Parameters
         ----------
         allowed_versions_behind: int, optional
             Number of versions behind to consider up to date. Default is 1.
+
+        Returns
+        -------
+        bool
+            True if the current Spyglass version is up to date.
+
+        Raises
+        ------
+        RuntimeError
+            If the current Spyglass version is outdated.
         """
         if self.env_var:
             return True

@@ -56,25 +56,18 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Manual):
 
     def insert_default(self):
         """Insert the default artifact parameters."""
+        params_default = {
+            "zscore_thresh": 5.0,  # must be None or >= 0
+            "amplitude_thresh": 3000,  # must be None or >= 0
+            "proportion_above_thresh": 0.5,  # must be > 0 and <= 1
+            "removal_window_ms": 1.0,  # in milliseconds
+        }
+        params_none = {
+            "zscore_thresh": None,  # must be None or >= 0
+            "amplitude_thresh": None,  # must be None or >= 0
+        }
         self.insert(
-            [
-                (
-                    "default",
-                    {
-                        "zscore_thresh": 5.0,  # must be None or >= 0
-                        "amplitude_thresh": 3000,  # must be None or >= 0
-                        "proportion_above_thresh": 0.5,  # must be > 0 and <= 1
-                        "removal_window_ms": 1.0,  # in milliseconds
-                    },
-                ),
-                (
-                    "none",
-                    {
-                        "zscore_thresh": None,  # must be None or >= 0
-                        "amplitude_thresh": None,  # must be None or >= 0
-                    },
-                ),
-            ],
+            [("default", params_default), ("none", params_none)],
             skip_duplicates=True,
         )
 

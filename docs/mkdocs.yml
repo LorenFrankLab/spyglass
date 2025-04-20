@@ -125,6 +125,7 @@ plugins:
       include_source: False
       ignore_h1_titles: True
       ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
+  - mermaid2 # for graphs
 
 markdown_extensions:
   - attr_list

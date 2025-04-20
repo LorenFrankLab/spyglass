@@ -223,6 +223,24 @@ anything: varchar(32)
 """
 ```
 
+To explain why this is not the best approach, consider the following example.
+
+```mermaid
+graph TD;
+    A[UpstreamTable] --> B[ThisTable]
+    B --> C[SelectionTable]
+    D[ParamsTable] --> C
+    C --> E[AnalysisTable]
+```
+
+It could be the case that `ThisTable` represents a conceptually different step
+than `SelectionTable`, and should be separated out, but your pipeline would
+likely be simplified by including this conceptual step in the selection process,
+via part tables or custom table methods.
+[`LFPBandSelection`](https://github.com/LorenFrankLab/spyglass/blob/794d486eec766a1e3965b3ed88996a2c486cd3a2/src/spyglass/common/common_ephys.py#L617),
+for example, add has a `set_lfp_band_electrodes` helper method for input
+validation and selection.
+
 #### Multiple
 
 A fk-ref as one of multiple fk-ref'ed primary keys indicates pairing of upstream
@@ -236,11 +254,18 @@ definition = """
 """
 ```
 
+This is common for a `Selection` table, like
+[`IntervalPositionInfoSelection`](https://github.com/LorenFrankLab/spyglass/blob/794d486eec766a1e3965b3ed88996a2c486cd3a2/src/spyglass/common/common_position.py#L63-L71),
+combining position parameters with a given set of position data via a time
+window. This is also common for part tables that fk-ref an upstream data source
+in addition to fk-ref'ing their master, like
+[`LFPElectrode`](https://github.com/LorenFrankLab/spyglass/blob/794d486eec766a1e3965b3ed88996a2c486cd3a2/src/spyglass/lfp/lfp_electrode.py#L18-L22).
+
 #### With Other Fields
 
 A fk-ref as a primary key with other fields indicates a many-to-one
-relationship. This is rare, as it is often better to separate this into a
-parameter table.
+relationship. This is rare in an analysis pipeline, as it is often better to
+separate this into a parameter table.
 
 ```python
 definition = """
@@ -248,6 +273,11 @@ definition = """
 other_field: varchar(32)
 """
 ```
+
+This is appropriate, however, for a table, like
+[`CurationV1`](https://github.com/LorenFrankLab/spyglass/blob/794d486eec766a1e3965b3ed88996a2c486cd3a2/src/spyglass/spikesorting/v1/curation.py#L27-L38),
+where one spike sorting may be curated multiple times, meaning the curation
+process is a many-to-one relationship with the spike sorting.
 
 ### Foreign Secondary Key
 
@@ -261,8 +291,13 @@ definition = """
 -> UpstreamTable1
 ---
 -> AnalysisNwbfile
+-> [nullable] CameraDevice
 """
 ```
+
+[`TaskEpoch`](https://github.com/LorenFrankLab/spyglass/blob/master/src/spyglass/common/common_task.py#L90-L102),
+for example, associates a session with exactly one task conducted during that
+session, and zero-or-one camera devices used during that task.
 
 #### Aliasing
 
