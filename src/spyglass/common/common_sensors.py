@@ -77,10 +77,8 @@ class SensorData(SpyglassMixin, dj.Imported):
             raise ValueError("More than one sensor data object found.")
 
         nwb = self.fetch_nwb()[0]
-        columns = nwb["sensor_data"].description.split("   ")
-        n_columns = nwb["sensor_data"].data.shape[1]
-        if len(columns) > n_columns:
-            columns = columns[:n_columns]
+        columns = nwb["sensor_data"].description.split()
+        columns = [col for col in columns if col not in ["time", "timestamps"]]
 
         if interval_list_name is None:
             return pd.DataFrame(
