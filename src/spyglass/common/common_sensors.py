@@ -80,6 +80,13 @@ class SensorData(SpyglassMixin, dj.Imported):
         columns = nwb["sensor_data"].description.split()
         columns = [col for col in columns if col not in ["time", "timestamps"]]
 
+        n_cols = nwb["sensor_data"].data.shape[1]
+        if len(columns) != n_cols:
+            raise ValueError(
+                f"Number of columns in description ({len(columns)}) "
+                f"does not match number of columns in data ({n_cols})."
+            )
+
         if interval_list_name is None:
             return pd.DataFrame(
                 nwb["sensor_data"].data,
