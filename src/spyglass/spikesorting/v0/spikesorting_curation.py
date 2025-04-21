@@ -336,7 +336,7 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Waveforms(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     definition = """
     -> WaveformSelection
@@ -542,7 +542,7 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class QualityMetrics(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     definition = """
     -> MetricSelection
@@ -993,6 +993,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)
     """
+    _use_transaction, _allow_insert = False, True
 
     class Unit(SpyglassMixin, dj.Part):
         definition = """
