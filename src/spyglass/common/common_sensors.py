@@ -1,6 +1,8 @@
 """Schema for headstage or other environmental sensors."""
 
 import datajoint as dj
+import numpy as np
+import pandas as pd
 import pynwb
 
 from spyglass.common.common_ephys import Raw
@@ -47,3 +49,76 @@ class SensorData(SpyglassMixin, dj.Imported):
             Raw & {"nwb_file_name": nwb_file_name}
         ).fetch1("interval_list_name")
         self.insert1(key)
+
+    def fetch1_dataframe(self, interval_list_name=None):
+        """Fetch the sensor data as a DataFrame.
+
+        Parameters
+        ----------
+        interval_list_name: str, optional
+            The name of the interval list to filter the data by. If None, no filtering is applied.
+            If the interval list is not found, a ValueError is raised.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame containing the sensor data, indexed by time.
+            If no data is found, None is returned.
+
+        Raises
+        -------
+        ValueError
+            If more than one sensor data object is found or if the specified interval list is not found.
+
+        """
+        if len(self) == 0:
+            return None
+        if len(self) > 1:
+            raise ValueError("More than one sensor data object found.")
+
+        nwb = self.fetch_nwb()[0]
+        columns = nwb["sensor_data"].description.split("   ")
+        n_columns = nwb["sensor_data"].data.shape[1]
+        if len(columns) > n_columns:
+            columns = columns[:n_columns]
+
+        if interval_list_name is None:
+            return pd.DataFrame(
+                nwb["sensor_data"].data,
+                index=pd.Index(nwb["sensor_data"].timestamps, name="time"),
+                columns=columns,
+            )
+        else:
+            # get the intervals for this object
+            key = self.fetch1("KEY")
+            valid_times = (
+                IntervalList
+                & {
+                    "nwb_file_name": key["nwb_file_name"],
+                    "interval_list_name": interval_list_name,
+                }
+            ).fetch1("valid_times")
+
+            if len(valid_times) == 0:
+                raise ValueError(
+                    f"No valid times found for {key['nwb_file_name']} "
+                    f"and {interval_list_name}"
+                )
+
+            sensor_data_df = []
+            for start_time, end_time in valid_times:
+                start_ind, end_ind = np.searchsorted(
+                    nwb["sensor_data"].timestamps, [start_time, end_time]
+                )
+                sensor_data_df.append(
+                    pd.DataFrame(
+                        nwb["sensor_data"].data[start_ind:end_ind, :],
+                        index=pd.Index(
+                            nwb["sensor_data"].timestamps[start_ind:end_ind],
+                            name="time",
+                        ),
+                        columns=columns,
+                    )
+                )
+
+            return pd.concat(sensor_data_df, axis=0).sort_index()
