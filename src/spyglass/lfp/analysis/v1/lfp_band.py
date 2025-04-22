@@ -149,8 +149,14 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 "All elements in reference_electrode_list must be valid electrode_ids or -1."
             )
 
-        # Ensure ref_list is a numpy array of int for zipping later if needed, or keep as list
+        # Ensure ref_list is a numpy array of int for zipping later
         ref_list = np.array(ref_list_final, dtype=int)
+
+        # Sort electrode_list and ref_list together
+        # This ensures that the order of electrodes and references is consistent
+        electrode_sort_ind = np.argsort(np.array(electrode_list, dtype=int))
+        electrode_list = np.array(electrode_list, dtype=int)[electrode_sort_ind]
+        ref_list = ref_list[electrode_sort_ind]
 
         if lfp_band_sampling_rate is None:
             # if no sampling rate is provided, use the default
@@ -182,7 +188,9 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         lfp_electrode_group_name = lfp_part_table.fetch1(
             "lfp_electrode_group_name"
         )
-        electrode_group_name_list = (
+
+        # get the electrode group names for the electrodes
+        electrode_group_name_list, check_electrode_id_list = (
             LFPElectrodeGroup.LFPElectrode()
             & [
                 {
@@ -192,7 +200,15 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 }
                 for electrode_id in electrode_list
             ]
-        ).fetch("electrode_group_name")
+        ).fetch("electrode_group_name", "electrode_id", order_by="electrode_id")
+
+        # check that the electrode ids match in order to avoid
+        # inserting the wrong electrode group names
+        if not np.array_equal(electrode_list, check_electrode_id_list):
+            raise ValueError(
+                "Electrode IDs do not match the electrode IDs in the "
+                + "LFPElectrodeGroup table"
+            )
 
         for electrode_id, reference_elect_id, electrode_group_name in zip(
             electrode_list, ref_list, electrode_group_name_list
