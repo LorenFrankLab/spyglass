@@ -43,7 +43,7 @@ def mad_artifact_detector(
     lfps = np.asarray(recording.data)
 
     mad = median_abs_deviation(lfps, axis=0, nan_policy="omit", scale="normal")
-    mad = np.where((mad == 0.0) | ~np.isfinite(mad), 1.0, mad)
+    mad = np.where(np.isclose(mad, 0.0) | ~np.isfinite(mad), 1.0, mad)
     is_artifact = _is_above_proportion_thresh(
         _mad_scale_lfps(lfps, mad), mad_thresh, proportion_above_thresh
     )
