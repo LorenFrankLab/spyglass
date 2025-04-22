@@ -17,6 +17,7 @@ schema = dj.schema("behavior_v1_moseq")
 @schema
 class MoseqModelParams(SpyglassMixin, dj.Lookup):
     """Parameters for training a moseq model
+
     Relevant parameters (keys in model_params):
     - skeleton: list of tuples of bodyparts to connect
     - num_ar_iters: number of iterations to run the autoregressive model

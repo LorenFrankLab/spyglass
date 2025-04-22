@@ -18,7 +18,23 @@ schema = dj.schema("mua_v1")
 
 @schema
 class MuaEventsParameters(SpyglassMixin, dj.Manual):
-    """Params to extract times of high mulitunit activity during immobility."""
+    """Params to extract times of high multiunit activity during immobility.
+
+    Parameters
+    ----------
+    mua_param_name : str
+        A name for this set of parameters
+    mua_param_dict : dict
+        Dictionary of parameters, including...
+            minimum_duration : float
+                Minimum duration of MUA event (seconds)
+            zscore_threshold : float
+                Z-score threshold for MUA detection
+            close_event_threshold : float
+                Minimum time between MUA events (seconds)
+            speed_threshold : float
+                Minimum speed for MUA detection (cm/s)
+    """
 
     definition = """
     mua_param_name : varchar(80) # a name for this set of parameters
