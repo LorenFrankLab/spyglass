@@ -99,7 +99,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
         ]
         electrode_keys_to_insert = (
             electrode_table & electrode_restrictions
-        ).fetch(*Electrode.primary_key, as_dict=True)
+        ).fetch("KEY")
         part_keys = [
             {**master_key, **electrode_key}
             for electrode_key in electrode_keys_to_insert
