@@ -48,7 +48,6 @@
     - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD values with 1.0. #1280
     - Refactoring the creation of LFPElectrodeGroup with added input validation and transactional insertion. #1280
     - Updating the LFPBandSelection logic with comprehensive validation and batch insertion for electrodes and references. #1280
-    - Remove ability to decimate LFP data in `LFPBandSelection` using `set_lfp_band_electrodes` #1280
 
 ## [0.5.4] (December 20, 2024)
 
