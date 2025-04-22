@@ -8,21 +8,25 @@ Table update script
 from spyglass.lfp.lfp_imported import ImportedLFP
 from spyglass.lfp.lfp_merge import LFPOutput
 
-if len(ImportedLFP()):
-    raise ValueError("Existing ImportedLFP entries found and would be dropped in update." +
-                     "Please delete entries or contact spyglass support for assistance migrating.")
-if len(LFPOutput.ImportedLFP()):
+if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
     raise ValueError(
-        "Existing ImportedLFP entries found in merge table and would be dropped in update."
-        + "Please delete entries or contact spyglass support for assistance migrating."
+        "Existing entries found and would be dropped in update. Please delete "
+        + "entries or start a GitHub discussion for migration assistance."
+        + f"\nImportedLFP: {len(ImportedLFP())}"
+        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
     )
+
 table = LFPOutput().ImportedLFP()
-if len(drop_list := table.connection.dependencies.descendants(table.full_table_name))>1:
-    drop_list = [x for x in drop_list if x != table.full_table_name]
-    raise ValueError("Downstream tables exist and would be dropped in update." +
-                     "Please drop the following tables first: \n" +
-                     "\n ".join([str(t) for t in drop_list])
+table_name = table.full_table_name
+
+if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
+    drop_list = [x for x in drop_list if x != table_name]
+    raise ValueError(
+        "Downstream tables exist and would be dropped in update."
+        + "Please drop the following tables first: \n"
+        + "\n ".join([str(t) for t in drop_list])
     )
+
 LFPOutput().ImportedLFP().drop_quick()
 ImportedLFP().drop()
 ```
