@@ -513,14 +513,18 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         return analytic_signal_df
 
     def compute_signal_phase(
-        self, electrode_list: list[int] = None, **kwargs
+        self, electrode_list: Optional[list[int]] = None, **kwargs
     ) -> pd.DataFrame:
         """Computes phase of LFPBand signals using the hilbert transform
 
         Parameters
         ----------
         electrode_list : list[int], optional
-            A list of the electrodes to compute the phase of, by default None
+            A list of the electrodes to compute the phase of.
+            If None, all electrodes are computed, by default None
+        **kwargs : dict
+            Additional keyword arguments to pass to the hilbert transform
+            (e.g. axis=0 for the axis to compute the hilbert transform along)
 
         Returns
         -------
@@ -541,14 +545,18 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         )
 
     def compute_signal_power(
-        self, electrode_list: list[int] = None, **kwargs
+        self, electrode_list: Optional[list[int]] = None, **kwargs
     ) -> pd.DataFrame:
         """Computes power LFPBand signals using the hilbert transform
 
         Parameters
         ----------
         electrode_list : list[int], optional
-            A list of the electrodes to compute the power of, by default None
+            A list of the electrodes to compute the power of.
+            If None, all electrodes are computed, by default None
+        **kwargs : dict
+            Additional keyword arguments to pass to the hilbert transform
+            (e.g. axis=0 for the axis to compute the hilbert transform along)
 
         Returns
         -------
