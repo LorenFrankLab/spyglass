@@ -6,7 +6,7 @@ import pandas as pd
 import pynwb
 
 from spyglass.common.common_ephys import Raw
-from spyglass.common.common_interval import IntervalList  # noqa: F401
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
