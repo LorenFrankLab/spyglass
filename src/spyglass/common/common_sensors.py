@@ -26,8 +26,21 @@ class SensorData(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
-    def make(self, key):
-        """Populate SensorData using the analog BehavioralEvents from the NWB."""
+    def make(self, key: dict) -> None:
+        """Populate SensorData using the analog BehavioralEvents from the NWB.
+
+        Parameters
+        ----------
+        key: dict
+            The key for the session to populate the SensorData for.
+            This should include the nwb_file_name and session_id.
+
+        Raises
+        -------
+        ValueError
+            If the number of columns in the description does not match
+            the number of columns in the data.
+        """
 
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
@@ -36,15 +49,28 @@ class SensorData(SpyglassMixin, dj.Imported):
         sensor = get_data_interface(
             nwbf, "analog", pynwb.behavior.BehavioralEvents
         )
+
+        # Validate the sensor data
         if sensor is None:
             logger.info(f"No conforming sensor data found in {nwb_file_name}\n")
             return
 
+        columns = sensor.time_series["analog"].description.split()
+        columns = [col for col in columns if col not in ["time", "timestamps"]]
+        n_cols = sensor.time_series["analog"].data.shape[1]
+        if len(columns) != n_cols:
+            raise ValueError(
+                f"Number of columns in description ({len(columns)}) "
+                f"does not match number of columns in data ({n_cols}). "
+                f"Columns: {sensor.time_series['analog'].description}. "
+                "Please check the NWB file."
+            )
+
+        # Create the NWB file object
         key["sensor_data_object_id"] = sensor.time_series["analog"].object_id
 
         # the valid times for these data are the same as the valid times for
         # the raw ephys data
-
         key["interval_list_name"] = (
             Raw & {"nwb_file_name": nwb_file_name}
         ).fetch1("interval_list_name")
