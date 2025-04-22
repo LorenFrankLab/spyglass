@@ -181,7 +181,32 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
 @schema
 class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
-    """Stores parameters for decoding with sorted spikes"""
+    """Stores parameters for decoding with sorted spikes
+
+    Parameters
+    ----------
+    classifier_param_name: str
+        A name for this set of parameters
+    classifier_params: dict
+        Initialization parameters, including ...
+            environments: list
+            observation_models
+            continuous_transition_types
+            discrete_transition_type: DiagonalDiscrete
+            initial_conditions_type: UniformInitialConditions
+            infer_track_interior: bool
+            clusterless_algorithm: str, optional
+            clusterless_algorithm_params: dict, optional
+            sorted_spikes_algorithm: str, optional
+            sorted_spikes_algorithm_params: dict, optional
+        For more information, see replay_trajectory_classification documentation
+    fit_params: dict, optional
+    predict_params: dict, optional
+        Prediction parameters, including ...
+            is_compute_acausal: bool
+            use_gpu: bool
+            state_names: List[str]
+    """
 
     definition = """
     classifier_param_name : varchar(80) # a name for this set of parameters
