@@ -198,7 +198,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 return
             else:
                 raise ValueError(
-                    "LFPBandSelection already exists for {master_key}; "
+                    f"LFPBandSelection already exists for {master_key}; "
                     + "please delete the existing entry before inserting"
                 )
 
