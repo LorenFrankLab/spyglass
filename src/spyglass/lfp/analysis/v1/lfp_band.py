@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -51,6 +51,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         filter_name: str,
         interval_list_name: str,
         reference_electrode_list: Union[int, list[int]],
+        lfp_band_sampling_rate: Optional[int] = None,
     ) -> None:
         """Sets the electrodes to be filtered for a given LFP
 
@@ -77,6 +78,10 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         lfp_electrode_group_name = lfp_part_table.fetch1(
             "lfp_electrode_group_name"
         )
+        if (LFPOutput & lfp_key).fetch("source") == "CommonLFP":
+            raise ValueError(
+                "LFP data is from CommonLFP; cannot set electrodes for this data"
+            )
         available_electrodes = (
             LFPElectrodeGroup().LFPElectrode()
             & {
@@ -147,13 +152,30 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         # Ensure ref_list is a numpy array of int for zipping later if needed, or keep as list
         ref_list = np.array(ref_list_final, dtype=int)
 
+        if lfp_band_sampling_rate is None:
+            # if no sampling rate is provided, use the default
+            lfp_band_sampling_rate = lfp_sampling_rate
+        else:
+            logger.info(
+                "It is recommended to use the same sampling rate as the original "
+                + "lfp data to avoid aliasing."
+            )
+        if lfp_band_sampling_rate > lfp_sampling_rate:
+            raise ValueError(
+                "lfp_band_sampling_rate must be less than or equal to the "
+                + "lfp sampling rate"
+            )
+        if lfp_band_sampling_rate <= 0:
+            raise ValueError("lfp_band_sampling_rate must be greater than 0")
+        decimation = lfp_sampling_rate // lfp_band_sampling_rate
+
         master_key = dict(
             nwb_file_name=nwb_file_name,
             lfp_merge_id=lfp_merge_id,
             filter_name=filter_name,
             filter_sampling_rate=lfp_sampling_rate,
             target_interval_list_name=interval_list_name,
-            lfp_band_sampling_rate=lfp_sampling_rate,
+            lfp_band_sampling_rate=lfp_sampling_rate // decimation,
         )
         # nwb_file_name, lfp_electrode_group_name, electrode_group_name, electrode_id, reference_elect_id
         part_keys = []
@@ -171,6 +193,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 for electrode_id in electrode_list
             ]
         ).fetch("electrode_group_name")
+
         for electrode_id, reference_elect_id, electrode_group_name in zip(
             electrode_list, ref_list, electrode_group_name_list
         ):
