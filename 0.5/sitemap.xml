@@ -2,574 +2,594 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/CHANGELOG/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/LICENSE/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/Features/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/Features/Export/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/Features/FigURL/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/Features/Merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/Features/Mixin/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Contribute/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/CustomPipelines/</loc>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Management/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Reuse/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Schema/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/TableTypes/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/UsingNWB/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/navigation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/settings/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
-         <loc>https://lorenfranklab.github.io/spyglass/latest/api/cli/cli/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/api/behavior/v1/core/</loc>
+         <lastmod>2025-04-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/api/behavior/v1/moseq/</loc>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_behav/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_dandi/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_device/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_dio/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_ephys/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_filter/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_interval/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_lab/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_nwbfile/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_position/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_region/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_sensors/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_session/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_subject/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_task/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_usage/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/common_version/</loc>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/errors/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/populate_all_common/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/signal_processing/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/common/prepopulate/prepopulate/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/data_import/insert_sessions/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/decoding_merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/clusterless/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/core/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/dj_decoder_conversion/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/sorted_spikes/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/visualization/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/visualization_1D_view/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v0/visualization_2D_view/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/clusterless/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/core/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/dj_decoder_conversion/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/sorted_spikes/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/decoding/v1/waveform_features/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/lfp_electrode/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/lfp_imported/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/lfp_merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/analysis/v1/lfp_band/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/v1/lfp/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/v1/lfp_artifact/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/v1/lfp_artifact_MAD_detection/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lfp/v1/lfp_artifact_difference_detection/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/linearization/merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/linearization/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/linearization/v0/main/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/linearization/v1/main/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/lock/file_lock/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/mua/v1/mua/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/position_merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/dlc_reader/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/dlc_utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/dlc_utils_makevid/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/imported_pose/</loc>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_centroid/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_cohort/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_model/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_orient/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_pose_estimation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_position/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_project/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_selection/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_dlc_training/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/position/v1/position_trodes_position/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/ripple/v1/ripple/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/sharing/sharing_kachery/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/imported/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/spikesorting_merge/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/analysis/v1/group/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/analysis/v1/unit_annotation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/curation_figurl/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/merged_sorting_extractor/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/sortingview/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/sortingview_helper_fn/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/spikesorting_artifact/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/spikesorting_curation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/spikesorting_populator/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/spikesorting_recording/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/spikesorting_sorting/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/figurl_views/SpikeSortingRecordingView/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/figurl_views/SpikeSortingView/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v0/figurl_views/prepare_spikesortingview_data/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/artifact/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/curation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/figurl_curation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/metric_curation/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/metric_utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/recording/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/sorting/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/spikesorting/v1/utils/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/database_settings/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/dj_graph/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/dj_helper_fn/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/dj_merge_tables/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/dj_mixin/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/logging/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/nwb_helper_fn/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/position/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/spikesorting/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/sql_helper_fn/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/api/utils/mixins/export/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Concepts/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/02_Insert_Data/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/03_Data_Sync/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/04_Merge_Tables/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/05_Export/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV0/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/10_Spike_SortingV1/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/11_Spike_Sorting_Analysis/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/20_Position_Trodes/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/21_DLC/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/22_DLC_Loop/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/24_Linearization/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/30_LFP/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/31_Theta/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/32_Ripple_Detection/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/40_Extracting_Clusterless_Waveform_Features/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/41_Decoding_Clusterless/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/42_Decoding_SortedSpikes/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
     </url>
     <url>
          <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/50_MUA_Detection/</loc>
-         <lastmod>2024-12-20</lastmod>
+         <lastmod>2025-04-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lorenfranklab.github.io/spyglass/latest/notebooks/60_MoSeq/</loc>
+         <lastmod>2025-04-22</lastmod>
     </url>
 </urlset>
