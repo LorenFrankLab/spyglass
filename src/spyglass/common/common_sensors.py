@@ -57,8 +57,8 @@ class SensorData(SpyglassMixin, dj.Imported):
         Parameters
         ----------
         interval_list_name: str, optional
-            The name of the interval list to filter the data by. If None, no filtering is applied.
-            If the interval list is not found, a ValueError is raised.
+            The name of the interval list to filter the data by.
+            If None, no filtering is applied.
 
         Returns
         -------
@@ -69,7 +69,8 @@ class SensorData(SpyglassMixin, dj.Imported):
         Raises
         -------
         ValueError
-            If more than one sensor data object is found or if the specified interval list is not found.
+            If more than one sensor data object is found or
+            if the specified interval list is not found.
 
         """
         if len(self) == 0:
