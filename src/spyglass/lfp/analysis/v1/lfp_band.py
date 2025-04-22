@@ -1,3 +1,5 @@
+from typing import Union
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -48,9 +50,8 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         electrode_list: list[int],
         filter_name: str,
         interval_list_name: str,
-        reference_electrode_list: list[int],
-        lfp_band_sampling_rate: int,
-    ):
+        reference_electrode_list: Union[int, list[int]],
+    ) -> None:
         """Sets the electrodes to be filtered for a given LFP
 
         Parameters
@@ -65,18 +66,24 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             The name of the filter to be used
         interval_list_name: str
             The name of the interval list to be used
-        reference_electrode_list: list
-            A list of the reference electrodes to be used
-        lfp_band_sampling_rate: int
+        reference_electrode_list: int or list[int]
+            A list of the reference electrodes to be used.
+            If a single int is provided, it will be used for all electrodes.
         """
-        # Error checks on parameters
-        # electrode_list
-
         lfp_key = {"merge_id": lfp_merge_id}
         lfp_part_table = LFPOutput.merge_get_part(lfp_key)
 
-        query = LFPElectrodeGroup().LFPElectrode() & lfp_key
-        available_electrodes = query.fetch("electrode_id")
+        # Validate inputs
+        lfp_electrode_group_name = lfp_part_table.fetch1(
+            "lfp_electrode_group_name"
+        )
+        available_electrodes = (
+            LFPElectrodeGroup().LFPElectrode()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "lfp_electrode_group_name": lfp_electrode_group_name,
+            }
+        ).fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
             raise ValueError(
                 "All elements in electrode_list must be valid electrode_ids in"
@@ -87,7 +94,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
             "lfp_sampling_rate"
         )
-        decimation = lfp_sampling_rate // lfp_band_sampling_rate
         # filter
         filter_query = FirFilterParameters() & {
             "filter_name": filter_name,
@@ -109,57 +115,99 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 " table; the list must be added before this function is called"
             )
         # reference_electrode_list
-        if len(reference_electrode_list) != 1 and len(
-            reference_electrode_list
-        ) != len(electrode_list):
-            raise ValueError(
-                "reference_electrode_list must contain either 1 or "
-                + "len(electrode_list) elements"
-            )
-        # add a -1 element to the list to allow for the no reference option
-        available_electrodes = np.append(available_electrodes, [-1])
-        if not np.all(np.isin(reference_electrode_list, available_electrodes)):
-            raise ValueError(
-                "All elements in reference_electrode_list must be valid "
-                "electrode_ids in the LFPSelection table"
+        ref_list_final = []
+        if isinstance(reference_electrode_list, int):
+            ref_list_final = [reference_electrode_list] * len(electrode_list)
+        elif isinstance(reference_electrode_list, (list, np.ndarray)):
+            temp_ref_list = list(reference_electrode_list)
+            if len(temp_ref_list) == 1:
+                ref_list_final = [temp_ref_list[0]] * len(
+                    electrode_list
+                )  # Broadcast list of 1
+            elif len(temp_ref_list) == len(electrode_list):
+                ref_list_final = temp_ref_list
+            else:
+                raise ValueError(
+                    "reference_electrode_list (if list/array) must contain either 1 or len(electrode_list) elements"
+                )
+        else:
+            raise TypeError(
+                "reference_electrode_list must be an int, list, or numpy array."
             )
 
-        # make a list of all the references
-        ref_list = np.zeros((len(electrode_list),))
-        ref_list[:] = reference_electrode_list
+        # Now validate the contents of ref_list_final
+        available_electrodes_check = np.append(
+            available_electrodes.copy(), [-1]
+        )  # Use original available_electrodes
+        if not np.all(np.isin(ref_list_final, available_electrodes_check)):
+            raise ValueError(
+                "All elements in reference_electrode_list must be valid electrode_ids or -1."
+            )
 
-        key = dict(
+        # Ensure ref_list is a numpy array of int for zipping later if needed, or keep as list
+        ref_list = np.array(ref_list_final, dtype=int)
+
+        master_key = dict(
             nwb_file_name=nwb_file_name,
             lfp_merge_id=lfp_merge_id,
             filter_name=filter_name,
             filter_sampling_rate=lfp_sampling_rate,
             target_interval_list_name=interval_list_name,
-            lfp_band_sampling_rate=lfp_sampling_rate // decimation,
+            lfp_band_sampling_rate=lfp_sampling_rate,
         )
-        # insert an entry into the main LFPBandSelectionTable
-        self.insert1(key, skip_duplicates=True)
-
-        key["lfp_electrode_group_name"] = lfp_part_table.fetch1(
+        # nwb_file_name, lfp_electrode_group_name, electrode_group_name, electrode_id, reference_elect_id
+        part_keys = []
+        lfp_electrode_group_name = lfp_part_table.fetch1(
             "lfp_electrode_group_name"
         )
-        # iterate through all of the new elements and add them
-        for e, r in zip(electrode_list, ref_list):
-            elect_key = (
-                LFPElectrodeGroup.LFPElectrode
-                & {
+        electrode_group_name_list = (
+            LFPElectrodeGroup.LFPElectrode()
+            & [
+                {
                     "nwb_file_name": nwb_file_name,
-                    "lfp_electrode_group_name": key["lfp_electrode_group_name"],
-                    "electrode_id": e,
+                    "lfp_electrode_group_name": lfp_electrode_group_name,
+                    "electrode_id": electrode_id,
                 }
-            ).fetch1("KEY")
-            for item in elect_key:
-                key[item] = elect_key[item]
-            query = Electrode & {
-                "nwb_file_name": nwb_file_name,
-                "electrode_id": e,
-            }
-            key["reference_elect_id"] = r
-            self.LFPBandElectrode().insert1(key, skip_duplicates=True)
+                for electrode_id in electrode_list
+            ]
+        ).fetch("electrode_group_name")
+        for electrode_id, reference_elect_id, electrode_group_name in zip(
+            electrode_list, ref_list, electrode_group_name_list
+        ):
+            part_keys.append(
+                {
+                    **master_key,
+                    "lfp_electrode_group_name": lfp_electrode_group_name,
+                    "electrode_group_name": electrode_group_name,
+                    "electrode_id": electrode_id,
+                    "reference_elect_id": reference_elect_id,
+                }
+            )
+
+        # check if the LFPBandSelection table already has this entry
+        if self & master_key:
+            # if it does, check if the electrodes are the same
+            existing_electrodes = (self.LFPBandElectrode() & master_key).fetch(
+                "electrode_id"
+            )
+            if set(existing_electrodes) == set(electrode_list):
+                logger.info(
+                    f"LFPBandSelection already exists for {master_key}; "
+                    + "not inserting"
+                )
+                return
+            else:
+                raise ValueError(
+                    "LFPBandSelection already exists for {master_key}; "
+                    + "please delete the existing entry before inserting"
+                )
+
+        connection = self.connection
+        with connection.transaction:
+            # insert the main entry into the LFPBandSelection table
+            self.insert1(master_key, skip_duplicates=True)
+            # insert the part entries into the LFPBandElectrode table
+            self.LFPBandElectrode().insert(part_keys, skip_duplicates=True)
 
 
 @schema
