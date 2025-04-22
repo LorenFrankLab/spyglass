@@ -2,7 +2,6 @@ from typing import Union
 
 import datajoint as dj
 import numpy as np
-import pandas as pd
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_session import Session  # noqa: F401
@@ -95,13 +94,16 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "lfp_electrode_group_name": group_name,
         }
-        electrode_table = pd.DataFrame(electrode_table)
-        part_list = electrode_table.loc[
-            electrode_table["electrode_id"].isin(electrode_list),
-            Electrode.primary_key,
+        electrode_restrictions = [
+            {"electrode_id": eid} for eid in electrode_list
         ]
-        for key_name in master_key:
-            part_list[key_name] = master_key[key_name]
+        electrode_keys_to_insert = (
+            electrode_table & electrode_restrictions
+        ).fetch(*Electrode.primary_key, as_dict=True)
+        part_keys = [
+            {**master_key, **electrode_key}
+            for electrode_key in electrode_keys_to_insert
+        ]
 
         # Insert within a transaction for atomicity
         # (Ensures master and parts are inserted together or not at all)
@@ -111,7 +113,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             LFPElectrodeGroup().insert1(master_key, skip_duplicates=True)
             # Insert part table entries (skips duplicates)
             LFPElectrodeGroup.LFPElectrode.insert(
-                part_list.to_dict(orient="records"), skip_duplicates=True
+                part_keys, skip_duplicates=True
             )
 
         logger.info(
