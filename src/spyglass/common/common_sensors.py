@@ -48,7 +48,8 @@ class SensorData(SpyglassMixin, dj.Imported):
         key["interval_list_name"] = (
             Raw & {"nwb_file_name": nwb_file_name}
         ).fetch1("interval_list_name")
-        self.insert1(key)
+
+        self.insert1(key, allow_direct_insert=True)
 
     def fetch1_dataframe(self, interval_list_name=None):
         """Fetch the sensor data as a DataFrame.

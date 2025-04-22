@@ -14,6 +14,18 @@ schema = dj.schema("position_v1_dlc_training")
 
 @schema
 class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
+    """Parameters for training a DLC model.
+
+    Parameters
+    ----------
+    dlc_training_params_name : str
+        Descriptive name of parameter set
+    params : dict
+        Parameters to pass to DLC training functions. Must include shuffle,
+        trainingsetindex, net_type, and gputouse. Project_path and video_sets
+        will be ignored in favor of spyglass-managed config.yaml.
+    """
+
     definition = """
     # Parameters to specify a DLC model training instance
     # For DLC ≤ v2.0, include scorer_lecacy = True in params

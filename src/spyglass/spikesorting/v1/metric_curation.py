@@ -50,6 +50,30 @@ _comparison_to_function = {
 
 @schema
 class WaveformParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for extracting waveforms from the recording based on sorting.
+
+    Parameters
+    ----------
+    waveform_param_name : str
+        Name of the waveform extraction parameters.
+    waveform_params : dict
+        A dictionary of waveform extraction parameters, including...
+        ms_before : float
+            Number of milliseconds before the spike time to include in the
+            waveform.
+        ms_after : float
+            Number of milliseconds after the spike time to include in the
+            waveform.
+        max_spikes_per_unit : int
+            Maximum number of spikes to include in the waveform for each unit.
+        n_jobs : int
+            Number of parallel jobs to use for waveform extraction.
+        total_memory : str
+            Total memory available for waveform extraction e.g. "5G".
+        whiten : bool
+            Whether to whiten the waveforms or not.
+    """
+
     definition = """
     # Parameters for extracting waveforms from the recording based on the sorting.
     waveform_param_name: varchar(80) # name of waveform extraction parameters
@@ -57,29 +81,16 @@ class WaveformParameters(SpyglassMixin, dj.Lookup):
     waveform_params: blob # a dict of waveform extraction parameters
     """
 
+    default_params = {
+        "ms_before": 0.5,
+        "ms_after": 0.5,
+        "max_spikes_per_unit": 5000,
+        "n_jobs": 5,
+        "total_memory": "5G",
+    }
     contents = [
-        [
-            "default_not_whitened",
-            {
-                "ms_before": 0.5,
-                "ms_after": 0.5,
-                "max_spikes_per_unit": 5000,
-                "n_jobs": 5,
-                "total_memory": "5G",
-                "whiten": False,
-            },
-        ],
-        [
-            "default_whitened",
-            {
-                "ms_before": 0.5,
-                "ms_after": 0.5,
-                "max_spikes_per_unit": 5000,
-                "n_jobs": 5,
-                "total_memory": "5G",
-                "whiten": True,
-            },
-        ],
+        ["default_not_whitened", {**default_params, "whiten": False}],
+        ["default_whitened", {**default_params, "whiten": True}],
     ]
 
     @classmethod
@@ -90,6 +101,12 @@ class WaveformParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class MetricParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for computing quality metrics of sorted units.
+
+    See MetricParameters().show_available_metrics() for a list of available
+    metrics and their descriptions.
+    """
+
     definition = """
     # Parameters for computing quality metrics of sorted units.
     metric_param_name: varchar(200)
@@ -143,6 +160,19 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
 
 @schema
 class MetricCurationParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for automatic curation of spike sorting
+
+    Parameters
+    ----------
+    metric_curation_params_name : str
+        Name of the automatic curation parameters
+    label_params : dict, optional
+        Dictionary of parameters for labeling units
+    merge_params : dict, optional
+        Dictionary of parameters for merging units. May include nn_noise_overlap
+        List[comparison operator: str, threshold: float, labels: List[str]]
+    """
+
     definition = """
     # Parameters for curating a spike sorting based on the metrics.
     metric_curation_param_name: varchar(200)
