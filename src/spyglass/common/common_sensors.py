@@ -83,6 +83,7 @@ class SensorData(SpyglassMixin, dj.Imported):
         columns = [col for col in columns if col not in ["time", "timestamps"]]
 
         if interval_list_name is None:
+            # corresponds to `raw data valid times` interval
             return pd.DataFrame(
                 nwb["sensor_data"].data,
                 index=pd.Index(nwb["sensor_data"].timestamps, name="time"),
