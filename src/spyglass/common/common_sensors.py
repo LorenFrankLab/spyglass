@@ -1,5 +1,7 @@
 """Schema for headstage or other environmental sensors."""
 
+from typing import Optional
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -77,7 +79,9 @@ class SensorData(SpyglassMixin, dj.Imported):
 
         self.insert1(key, allow_direct_insert=True)
 
-    def fetch1_dataframe(self, interval_list_name=None):
+    def fetch1_dataframe(
+        self, interval_list_name: Optional[str] = None
+    ) -> Optional[pd.DataFrame]:
         """Fetch the sensor data as a DataFrame.
 
         Parameters
