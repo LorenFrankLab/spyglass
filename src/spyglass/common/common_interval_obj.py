@@ -25,13 +25,48 @@ class Interval:
             of indices (integers).
         """
         self.key = None
-        self.valid_times = self._extract(interval_list, from_inds=from_inds)
+        self.times = self._extract(interval_list, from_inds=from_inds)
+
+    def __repr__(self):
+        joined = "\n\t".join(self.times.astype(str))
+        return f"Interval({joined})"
+
+    def __len__(self):
+        return len(self.times)
+
+    def __getitem__(self, item):
+        """Get item from the interval list."""
+        if isinstance(item, int):
+            return Interval(self.times[item])
+        elif isinstance(item, slice):
+            return Interval(self.times[item])
+        else:
+            raise ValueError(
+                f"Unrecognized item type: {type(item)}. Must be int or slice."
+            )
+
+    def __iter__(self):
+        """Iterate over the intervals in the interval list."""
+        for interval in self.times:
+            yield Interval(interval)
+
+    def __eq__(self, other):
+        """Check if two interval lists are equal."""
+        return np.array_equal(self.times, self._extract(other))
+
+    def __lt__(self, other):
+        """Check if this interval list is less than another."""
+        return np.all(self.times < self._extract(other))
+
+    def __gt__(self, other):
+        """Check if this interval list is greater than another."""
+        return np.all(self.times > self._extract(other))
 
     def _extract(self, interval_list, from_inds=False):
         """Extract interval_list from a given object."""
         if from_inds:
             return self.from_inds(interval_list)
-        elif interval := getattr(interval_list, "valid_times", None):
+        elif interval := getattr(interval_list, "times", None):
             return interval
         elif isinstance(interval_list, dict):
             return self._import_from_table(interval_list)
@@ -77,7 +112,7 @@ class Interval:
         max_length : float, optional
             Maximum interval length in seconds. Defaults to 1e10.
         """
-        return self._x_by_length(self.valid_times, min_length, max_length)
+        return Interval(self._x_by_length(self.times, min_length, max_length))
 
     def contains(self, timestamps, as_indices=False):
         """Find timestamps that are contained in an interval list.
@@ -90,7 +125,7 @@ class Interval:
             If False, return the timestamps themselves. Defaults to False.
         """
         ind = []
-        for interval in self.valid_times:
+        for interval in self.times:
             ind += np.ravel(
                 np.argwhere(
                     np.logical_and(
@@ -98,7 +133,8 @@ class Interval:
                     )
                 )
             ).tolist()
-        return np.asarray(ind) if as_indices else timestamps[ind]
+        ret = np.asarray(ind) if as_indices else timestamps[ind]
+        return Interval(ret)
 
     def excludes(self, timestamps, as_indices=False):
         """Find timestamps that are not contained in an interval list.
@@ -107,10 +143,10 @@ class Interval:
         ----------
         timestamps : array_like
         """
-        contained_times = self.contains(timestamps, as_indices=as_indices)
+        contained_times = self.contains(timestamps, as_indices=as_indices).times
         if as_indices:
             timestamps = np.arange(len(timestamps))
-        return np.setdiff1d(timestamps, contained_times)
+        return Interval(np.setdiff1d(timestamps, contained_times))
 
     @staticmethod
     def _expand_1d(interval_list):
@@ -131,7 +167,7 @@ class Interval:
         return self._expand_1d(interval_list)
 
     def consolidate(self):
-        return self._consolidate(self.valid_times)
+        return Interval(self._consolidate(self.times))
 
     @staticmethod
     def _set_intersect(interval1, interval2):
@@ -180,9 +216,9 @@ class Interval:
         -------
         interval_list: np.array, (N,2)
         """
-        interval_list1 = self.valid_times
-        interval_list2 = self._extract(other)
-        return self._intersect(interval_list1, interval_list2, min_length)
+        return Interval(
+            self._intersect(self.times, self._extract(other), min_length)
+        )
 
     def _union_concat(self, interval1, interval2):
         """Compare last interval of interval list to given interval.
@@ -214,14 +250,14 @@ class Interval:
         interval1 : np.array
         interval2 : np.array
         """
-        interval1 = np.atleast_2d(self.valid_times)
+        interval1 = np.atleast_2d(self.times)
         interval2 = np.atleast_2d(self._extract(other))
 
         if not (
             interval1[-1][1] + 1 == interval2[0][0]
             or interval2[0][1] + 1 == interval1[-1][0]
         ):
-            return np.concatenate((interval1, interval2), axis=0)
+            return Interval(np.concatenate((interval1, interval2), axis=0))
 
         x = np.array(
             [
@@ -231,7 +267,7 @@ class Interval:
                 ]
             ]
         )
-        return np.concatenate((interval1[:-1], x), axis=0)
+        return Interval(np.concatenate((interval1[:-1], x), axis=0))
 
     def union(
         self,
@@ -257,7 +293,7 @@ class Interval:
         np.ndarray
             Array of intervals [start, stop]
         """
-        interval_list1 = self.valid_times
+        interval_list1 = self.times
         interval_list2 = self._extract(other)
 
         def _parallel_union(interval_list):
@@ -288,7 +324,7 @@ class Interval:
             for start, stop in zip(union_starts, union_stops)
         ]
 
-        return np.asarray(union)
+        return Interval(np.asarray(union))
 
     def censor(self, timestamps):
         """Returns new interval list that starts/ends at first/last timestamp
@@ -303,13 +339,13 @@ class Interval:
         -------
         interval_list (numpy array of intervals [start, stop])
         """
-        interval_list = self.valid_times
+        interval_list = self.times
         # check that all timestamps are in the interval list
         if len(self.contains(timestamps, as_indices=True)) != len(timestamps):
             raise ValueError("Interval_list must contain all timestamps")
 
         timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
-        return self._intersect(interval_list, timestamps_interval)
+        return Interval(self._intersect(interval_list, timestamps_interval))
 
     def set_difference_inds(self, other):
         """Find the indices of self not in other
@@ -328,7 +364,7 @@ class Interval:
         -------
         List[Tuple[int, int]]
         """
-        intervals1 = self.valid_times
+        intervals1 = self.times
         intervals2 = self._extract(other)
 
         result = []
@@ -348,7 +384,7 @@ class Interval:
                 else:
                     i += 1
         result += intervals1[i:]
-        return result
+        return Interval(result)
 
     def complement(self, other, min_length=0.0):
         """
@@ -359,7 +395,7 @@ class Interval:
         min_length : float, optional
             Minimum interval length in seconds. Defaults to 0.0.
         """
-        intervals1 = self.valid_times
+        intervals1 = self.times
         intervals2 = self._extract(other)
 
         result = []
@@ -385,8 +421,10 @@ class Interval:
 
             result.extend(subtracted)
 
-        return self._x_by_length(
-            np.asarray(result), min_length=min_length, max_length=1e100
+        return Interval(
+            self._x_by_length(
+                np.asarray(result), min_length=min_length, max_length=1e100
+            )
         )
 
     # ---------------------------- Requiring Table ----------------------------
