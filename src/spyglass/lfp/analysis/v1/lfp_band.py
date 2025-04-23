@@ -50,7 +50,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         electrode_list: list[int],
         filter_name: str,
         interval_list_name: str,
-        reference_electrode_list: Union[int, list[int], np.ndarray],
+        reference_electrode_list: Union[int, list[int], np.ndarray] = -1,
         lfp_band_sampling_rate: Optional[int] = None,
     ) -> None:
         """Sets the electrodes to be filtered for a given LFP
@@ -70,6 +70,11 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         reference_electrode_list: int or list[int] or np.ndarray
             A list of the reference electrodes to be used.
             If a single int is provided, it will be used for all electrodes.
+            If -1, no reference will be used.
+            If a list is provided, it must be the same length as electrode_list.
+            If a numpy array is provided, it must be 1D and the same length as
+            electrode_list.
+            If not provided, -1 will be used for all electrodes.
         lfp_band_sampling_rate: int, optional
             The sampling rate for the filtered data. If not provided,
             the original sampling rate will be used.
@@ -157,12 +162,27 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             )
 
         # Ensure reference_electrode_list is a 1D array
-        reference_electrode_list = reference_electrode_list.astype(
-            int
-        ).squeeze()
+        reference_electrode_list = reference_electrode_list.astype(int)
+        if len(reference_electrode_list) == 1:
+            reference_electrode_list = (
+                np.ones((n_electrodes,), dtype=int)
+                * reference_electrode_list[0]
+            )
+
+        # Check if the length of reference_electrode_list matches electrode_list
+        if len(reference_electrode_list) != n_electrodes:
+            raise ValueError(
+                "reference_electrode_list must be the same length as "
+                + "electrode_list."
+            )
+
+        # Ensure reference_electrode_list is a 1D array
+        reference_electrode_list = np.atleast_1d(
+            reference_electrode_list
+        ).squeeze(axis=1)
         if reference_electrode_list.ndim > 1:
             raise ValueError(
-                "reference_electrode_list must be a 1D array or list."
+                "reference_electrode_list must be a 1D array or list or int."
             )
 
         # Now validate the contents of ref_list_final
