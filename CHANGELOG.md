@@ -59,6 +59,7 @@ ImportedLFP().drop()
     - Allow ingestion of multi-row task epoch tables #1278
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -77,7 +78,7 @@ ImportedLFP().drop()
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
-    - Implement `ImportedLFP.make()`  for ingestion from nwb files #1278
+    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278
 
 ## [0.5.4] (December 20, 2024)
 
