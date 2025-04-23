@@ -136,53 +136,61 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 f"interval list {interval_list_name} is not in the IntervalList"
                 " table; the list must be added before this function is called"
             )
-        # reference_electrode_list
-        ref_list_final = []
+        # Validate reference_electrode_list
+        # If a single int is provided, it will be used for all electrodes
+        n_electrodes = len(electrode_list)
         if isinstance(reference_electrode_list, int):
-            ref_list_final = [reference_electrode_list] * len(electrode_list)
-        elif isinstance(reference_electrode_list, (list, np.ndarray)):
-            temp_ref_list = list(reference_electrode_list)
-            if len(temp_ref_list) == 1:
-                ref_list_final = [temp_ref_list[0]] * len(
-                    electrode_list
-                )  # Broadcast list of 1
-            elif len(temp_ref_list) == len(electrode_list):
-                ref_list_final = temp_ref_list
-            else:
-                raise ValueError(
-                    "reference_electrode_list (if list/array) must contain either 1 or len(electrode_list) elements"
-                )
-        else:
+            reference_electrode_list = (
+                np.ones((n_electrodes,), dtype=int) * reference_electrode_list
+            )
+
+        # If list, then convert to numpy array
+        if isinstance(reference_electrode_list, list):
+            reference_electrode_list = np.array(
+                reference_electrode_list, dtype=int
+            )
+
+        # If not a numpy array, raise an error
+        if not isinstance(reference_electrode_list, np.ndarray):
             raise TypeError(
                 "reference_electrode_list must be an int, list, or numpy array."
+            )
+
+        # Ensure reference_electrode_list is a 1D array
+        reference_electrode_list = reference_electrode_list.astype(
+            int
+        ).squeeze()
+        if reference_electrode_list.ndim > 1:
+            raise ValueError(
+                "reference_electrode_list must be a 1D array or list."
             )
 
         # Now validate the contents of ref_list_final
         available_electrodes_check = np.append(
             available_electrodes.copy(), [-1]
         )  # Use original available_electrodes
-        if not np.all(np.isin(ref_list_final, available_electrodes_check)):
+        if not np.all(
+            np.isin(reference_electrode_list, available_electrodes_check)
+        ):
             raise ValueError(
                 "All elements in reference_electrode_list must be valid electrode_ids or -1."
             )
 
-        # Ensure ref_list is a numpy array of int for zipping later
-        ref_list = np.array(ref_list_final, dtype=int)
-
-        # Sort electrode_list and ref_list together
+        # Sort electrode_list and reference_electrode_list together
         # This ensures that the order of electrodes and references is consistent
         electrode_sort_ind = np.argsort(np.array(electrode_list, dtype=int))
         electrode_list = np.array(electrode_list, dtype=int)[electrode_sort_ind]
-        ref_list = ref_list[electrode_sort_ind]
+        reference_electrode_list = reference_electrode_list[electrode_sort_ind]
 
-        if lfp_band_sampling_rate is None:
-            # if no sampling rate is provided, use the default
-            lfp_band_sampling_rate = lfp_sampling_rate
-        else:
+        # Warn if the sampling rate is not the same as the original
+        if lfp_band_sampling_rate is not None:
             logger.info(
                 "It is recommended to use the same sampling rate as the original "
                 + "lfp data to avoid aliasing."
             )
+        # if no sampling rate is provided, use the default
+        lfp_band_sampling_rate = lfp_band_sampling_rate or lfp_sampling_rate
+
         if lfp_band_sampling_rate > lfp_sampling_rate:
             raise ValueError(
                 "lfp_band_sampling_rate must be less than or equal to the "
@@ -201,7 +209,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             lfp_band_sampling_rate=lfp_sampling_rate // decimation,
         )
         # nwb_file_name, lfp_electrode_group_name, electrode_group_name, electrode_id, reference_elect_id
-        part_keys = []
         lfp_electrode_group_name = lfp_part_table.fetch1(
             "lfp_electrode_group_name"
         )
@@ -226,19 +233,20 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 "Electrode IDs do not match the electrode IDs in the "
                 + "LFPElectrodeGroup table"
             )
-
-        for electrode_id, reference_elect_id, electrode_group_name in zip(
-            electrode_list, ref_list, electrode_group_name_list
-        ):
-            part_keys.append(
-                {
-                    **master_key,
-                    "lfp_electrode_group_name": lfp_electrode_group_name,
-                    "electrode_group_name": electrode_group_name,
-                    "electrode_id": electrode_id,
-                    "reference_elect_id": reference_elect_id,
-                }
+        part_keys = [
+            {
+                "nwb_file_name": nwb_file_name,
+                "lfp_electrode_group_name": lfp_electrode_group_name,
+                "electrode_group_name": electrode_group_name,
+                "electrode_id": electrode_id,
+                "reference_elect_id": reference_elect_id,
+            }
+            for electrode_id, reference_elect_id, electrode_group_name in zip(
+                electrode_list,
+                reference_electrode_list,
+                electrode_group_name_list,
             )
+        ]
 
         # check if the LFPBandSelection table already has this entry
         if self & master_key:
