@@ -1,4 +1,4 @@
-from typing import Union
+from typing import List, Union
 
 import datajoint as dj
 import numpy as np
@@ -114,3 +114,50 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
             f"with {len(electrode_list)} electrodes."
         )
+
+    def cautious_insert(
+        self, session_key: dict, electrode_ids: List[int], group_name: str
+    ) -> str:
+        """Insert the electrode group, or return name if it already exists.
+
+        Parameters
+        ----------
+        session_key : dict
+            The session key associated with the electrode group.
+        electrode_ids : list
+            The set of electrode ids to insert into the group.
+        group_name : str
+            The name of the electrode group to insert.
+
+        Returns
+        ----------
+        dictionary
+            The key of the inserted group, or the existing group if it already exists.
+        """
+        e_ids = set(electrode_ids)  # remove duplicates
+
+        # Collect existing ids into comma separated string to avoid multi-fetch
+        aggregated = (self & session_key).aggr(
+            self.LFPElectrode,
+            ids="GROUP_CONCAT(electrode_id ORDER BY electrode_id ASC)",
+        )
+
+        # group for this set of electrodes already exists
+        sorted_str = ",".join(map(str, sorted(e_ids)))
+        if len(query := aggregated & f"ids='{sorted_str}'"):
+            return query.fetch("KEY")[0]  # could be mult
+
+        # group with this name already exists for a different set of electrodes
+        if len(aggregated & {"lfp_electrode_group_name": group_name}):
+            raise ValueError(
+                f"LFP Group name {group_name} already exists"
+                + "for a different set of electrode ids."
+            )
+
+        # Unique group and set of electrodes, insert
+        master_insert = dict(**session_key, lfp_electrode_group_name=group_name)
+        electrode_inserts = [dict(master_insert, electrode_id=e) for e in e_ids]
+
+        self.insert1(master_insert)
+        self.LFPElectrode.insert(electrode_inserts)
+        return master_insert

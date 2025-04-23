@@ -121,6 +121,7 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
@@ -141,6 +142,7 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            ImportedLFP,  # Depends on Session
             SensorData,  # Depends on Session
             # NwbfileKachery, # Not used by default
         ],
