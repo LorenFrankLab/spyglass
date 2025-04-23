@@ -491,7 +491,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             raise ValueError("No filtered data found for this LFPBandSelection")
         if len(filtered_nwb) > 1:
             raise ValueError(
-                "Multiple filtered data found for this LFPBandSelection"
+                "Multiple filtered data found for this LFPBandSelection. Expected 1"
             )
 
         filtered_nwb = filtered_nwb[0]
