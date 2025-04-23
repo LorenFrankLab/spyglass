@@ -69,7 +69,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             electrode_list = electrode_list.astype(int).ravel().tolist()
 
         # Sort and remove duplicates
-        electrode_list = sorted(list(set(electrode_list)))
+        electrode_list = sorted(set(electrode_list))
 
         # Check against valid electrodes for this session in the database
         electrode_table = Electrode() & session_key
