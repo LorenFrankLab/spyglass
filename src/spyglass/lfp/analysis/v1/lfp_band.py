@@ -527,8 +527,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         filtered_band = self.fetch_nwb()[0]["lfp_band"]
         band_electrodes = filtered_band.electrodes.data[:]
 
-        if electrode_list is None:
-            electrode_list = band_electrodes
+        electrode_list = electrode_list or band_electrodes
 
         if not isinstance(electrode_list, (list, np.ndarray)):
             raise ValueError(

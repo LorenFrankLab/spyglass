@@ -94,11 +94,8 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "lfp_electrode_group_name": group_name,
         }
-        electrode_restrictions = [
-            {"electrode_id": eid} for eid in electrode_list
-        ]
         electrode_keys_to_insert = (
-            electrode_table & electrode_restrictions
+            electrode_table & f"electrode_id in {tuple(electrode_list)}"
         ).fetch("KEY")
         part_keys = [
             {**master_key, **electrode_key}
@@ -107,14 +104,11 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
 
         # Insert within a transaction for atomicity
         # (Ensures master and parts are inserted together or not at all)
-        connection = LFPElectrodeGroup.connection
-        with connection.transaction:
-            # Insert master table entry (skips if already exists)
-            LFPElectrodeGroup().insert1(master_key, skip_duplicates=True)
-            # Insert part table entries (skips duplicates)
-            LFPElectrodeGroup.LFPElectrode.insert(
-                part_keys, skip_duplicates=True
-            )
+        with LFPElectrodeGroup.connection.transaction:
+            # Insert master table entry
+            LFPElectrodeGroup().insert1(master_key)
+            # Insert part table entries
+            LFPElectrodeGroup.LFPElectrode.insert(part_keys)
 
         logger.info(
             f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
