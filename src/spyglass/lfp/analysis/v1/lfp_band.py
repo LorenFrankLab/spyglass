@@ -70,6 +70,23 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         reference_electrode_list: int or list[int]
             A list of the reference electrodes to be used.
             If a single int is provided, it will be used for all electrodes.
+        lfp_band_sampling_rate: int, optional
+            The sampling rate for the filtered data. If not provided,
+            the original sampling rate will be used.
+            It is recommended to use the same sampling rate as the original
+            lfp data to avoid aliasing.
+
+        Raises
+        ------
+        ValueError
+            If the LFP data is from CommonLFP, or if the electrode list is empty,
+            or if the electrodes are not valid for this session, or
+            if the filter is not valid for this session, or if the interval list
+            is not valid for this session, or if the reference electrode list
+            is not valid for this session, or if the sampling rate is invalid.
+        TypeError
+            If the reference electrode list is not an int, list, or numpy array.
+
         """
         lfp_key = {"merge_id": lfp_merge_id}
         lfp_part_table = LFPOutput.merge_get_part(lfp_key)
