@@ -17,10 +17,7 @@ except (ImportError, ModuleNotFoundError) as e:
     logger.warning(e)
 
 from spyglass.common.common_behav import PositionIntervalMap, RawPosition
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 
 
 def get_valid_ephys_position_times_from_interval(
@@ -39,22 +36,15 @@ def get_valid_ephys_position_times_from_interval(
     Returns
     -------
     valid_ephys_position_times : np.ndarray, shape (n_valid_times, 2)
-
     """
-    interval_valid_times = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": interval_list_name,
-        }
-    ).fetch1("valid_times")
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
+    i_pk = "interval_list_name"
 
-    position_interval_names = (
-        RawPosition
-        & {
-            "nwb_file_name": nwb_file_name,
-        }
-    ).fetch("interval_list_name")
+    interval_valid_times = (
+        IntervalList & {**nwb_dict, i_pk: interval_list_name}
+    ).fetch_interval()
+
+    position_interval_names = (RawPosition & nwb_dict).fetch(i_pk)
     position_interval_names = position_interval_names[
         np.argsort(
             [
@@ -63,28 +53,21 @@ def get_valid_ephys_position_times_from_interval(
             ]
         )
     ]
-    valid_pos_times = [
-        (
-            IntervalList
-            & {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": pos_interval_name,
-            }
-        ).fetch1("valid_times")
+    valid_pos_times = [  # TODO: replace fetch1 with single query
+        (IntervalList & {**nwb_dict, i_pk: pos_interval_name}).fetch1(
+            "valid_times"
+        )
         for pos_interval_name in position_interval_names
     ]
 
     valid_ephys_times = (
-        IntervalList
-        & {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "raw data valid times",
-        }
-    ).fetch1("valid_times")
+        IntervalList & {**nwb_dict, i_pk: "raw data valid times"}
+    ).fetch_interval()
 
-    return interval_list_intersect(
-        interval_list_intersect(interval_valid_times, valid_ephys_times),
-        np.concatenate(valid_pos_times),
+    return (
+        interval_valid_times.intersect(valid_ephys_times)
+        .intersect(np.concatenate(valid_pos_times))
+        .times
     )
 
 

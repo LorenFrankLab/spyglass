@@ -6,12 +6,7 @@ from scipy.signal import hilbert
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_censor,
-    interval_list_contains_ind,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList, interval_list_censor
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
@@ -216,10 +211,11 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": lfp_interval_list,
             }
-        ).fetch1("valid_times")
-        min_length = (LFPBandSelection & key).fetch1("min_interval_len")
-        lfp_band_valid_times = interval_list_intersect(
-            valid_times, lfp_valid_times, min_length=min_length
+        ).fetch_interval()
+
+        lfp_band_valid_times = valid_times.intersect(
+            lfp_valid_times,
+            min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
         )
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
@@ -234,14 +230,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
-        included_indices = interval_list_contains_ind(
-            lfp_band_valid_times, timestamps
-        )
-        # pad the indices by 1 on each side to avoid message in filter_data
-        if included_indices[0] > 0:
-            included_indices[0] -= 1
-        if included_indices[-1] != len(timestamps) - 1:
-            included_indices[-1] += 1
+        included_indices = lfp_band_valid_times.contains(
+            timestamps, as_indices=True, padding=1
+        ).times
 
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 
@@ -344,7 +335,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch("valid_times")
-        if len(tmp_valid_times) == 0:
+        if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
             lfp_band_valid_times = interval_list_censor(
                 lfp_band_valid_times, new_timestamps
             )

@@ -97,7 +97,7 @@ class Interval:
         return np.asarray(interval_list)
 
     @staticmethod
-    def _x_by_length(x, min_length=0.0, max_length=1e10):
+    def _by_length(x, min_length=0.0, max_length=1e10):
         """Select intervals of certain lengths from an interval list."""
         lengths = np.ravel(np.diff(x))
         return x[np.logical_and(lengths > min_length, lengths < max_length)]
@@ -112,9 +112,9 @@ class Interval:
         max_length : float, optional
             Maximum interval length in seconds. Defaults to 1e10.
         """
-        return Interval(self._x_by_length(self.times, min_length, max_length))
+        return Interval(self._by_length(self.times, min_length, max_length))
 
-    def contains(self, timestamps, as_indices=False):
+    def contains(self, timestamps, as_indices=False, padding: int = None):
         """Find timestamps that are contained in an interval list.
 
         Parameters
@@ -123,6 +123,8 @@ class Interval:
         as_indices : bool, optional
             If True, return indices of timestamps in the interval list.
             If False, return the timestamps themselves. Defaults to False.
+        padding : int, optional
+            If True, pad the first and last timestamps by val. Defaults to None.
         """
         ind = []
         for interval in self.times:
@@ -134,6 +136,13 @@ class Interval:
                 )
             ).tolist()
         ret = np.asarray(ind) if as_indices else timestamps[ind]
+
+        if padding:
+            if ret[0] > 0:
+                ret[0] -= padding
+            if ret[-1] != len(timestamps) - padding:
+                ret[-1] += padding
+
         return Interval(ret)
 
     def excludes(self, timestamps, as_indices=False):
@@ -155,13 +164,19 @@ class Interval:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
+    def _union_consolidate(self, interval_list):
+        return Interval(reduce(self._union_concat, interval_list))
+
+    def union_consolidate(self):
+        return Interval(self._union_consolidate(self.times))
+
     def _consolidate(self, interval_list):
         """Consolidate overlapping intervals in an interval list."""
         if interval_list.ndim == 1:
             return self._expand_1d(interval_list)
 
         interval_list = interval_list[np.argsort(interval_list[:, 0])]
-        interval_list = reduce(self._union_concat, interval_list)
+        interval_list = self._union_consolidate(interval_list).times
 
         # reduce may convert to 1D, so check and expand
         return self._expand_1d(interval_list)
@@ -198,7 +213,7 @@ class Interval:
         intersection = np.asarray(intersection)
         intersection = intersection[np.argsort(intersection[:, 0])]
 
-        return self._x_by_length(intersection, min_length=min_length)
+        return self._by_length(intersection, min_length=min_length)
 
     def intersect(self, other, min_length=0):
         """Finds the intersections between this and another interval list.
@@ -422,7 +437,7 @@ class Interval:
             result.extend(subtracted)
 
         return Interval(
-            self._x_by_length(
+            self._by_length(
                 np.asarray(result), min_length=min_length, max_length=1e100
             )
         )

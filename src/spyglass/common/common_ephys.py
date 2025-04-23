@@ -9,11 +9,7 @@ import pynwb
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import interval_list_censor  # noqa: F401
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_contains_ind,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
@@ -813,10 +809,12 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": lfp_interval_list,
             }
-        ).fetch1("valid_times")
-        min_length = (LFPBandSelection & key).fetch1("min_interval_len")
-        lfp_band_valid_times = interval_list_intersect(
-            valid_times, lfp_valid_times, min_length=min_length
+        ).fetch_interval()
+
+        (LFPBandSelection & key).fetch1("min_interval_len")
+        lfp_band_valid_times = valid_times.intersect(
+            lfp_valid_times,
+            min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
         )
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
@@ -832,14 +830,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
-        included_indices = interval_list_contains_ind(
-            lfp_band_valid_times, timestamps
-        )
-        # pad the indices by 1 on each side to avoid message in filter_data
-        if included_indices[0] > 0:
-            included_indices[0] -= 1
-        if included_indices[-1] != len(timestamps) - 1:
-            included_indices[-1] += 1
+        included_indices = lfp_band_valid_times.contains(
+            timestamps, as_indices=True, padding=1
+        ).times
 
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 

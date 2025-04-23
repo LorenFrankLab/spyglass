@@ -71,7 +71,9 @@ class ActivityLog(dj.Manual):
         """Log a deprecation warning for a feature."""
         if warning:
             logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
-        cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
+        cls.insert1(
+            dict(dj_user=dj.config["database.user"], function=name[:64])
+        )
 
 
 @schema

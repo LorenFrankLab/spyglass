@@ -13,9 +13,8 @@ from tqdm import tqdm
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
 from spyglass.common.common_interval import (
+    Interval,
     IntervalList,
-    interval_list_intersect,
-    intervals_by_length,
     union_adjacent_index,
 )
 from spyglass.common.common_lab import LabTeam  # noqa: F401
@@ -245,6 +244,12 @@ class SortInterval(SpyglassMixin, dj.Manual):
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
 
+    def fetch_interval(self):
+        """Fetch interval list object for a given key."""
+        if not len(self) == 1:
+            raise ValueError(f"Expected one row, got {len(self)}")
+        return Interval(self.fetch1("sort_interval"))
+
     # NOTE: See #630, #664. Excessive key length.
 
 
@@ -349,7 +354,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": recording_name,
-                "valid_times": sort_interval_valid_times,
+                "valid_times": sort_interval_valid_times.times,
                 "pipeline": "spikesorting_recording_v0",
             },
             replace=True,
@@ -410,7 +415,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "sort_interval_name": sort_interval_name,
             }
-        ).fetch1("sort_interval")
+        ).fetch_interval()
 
         valid_interval_times = (
             IntervalList
@@ -418,16 +423,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
-        valid_sort_times = interval_list_intersect(
-            sort_interval, valid_interval_times
-        )
+        valid_sort_times = sort_interval.intersect(valid_interval_times)
+
         # Exclude intervals shorter than specified length
-        if "min_segment_length" in params:
-            valid_sort_times = intervals_by_length(
-                valid_sort_times, min_length=params["min_segment_length"]
-            )
+        if min_length := params.get("min_segment_length"):
+            valid_sort_times = valid_sort_times.by_length(min_length=min_length)
+
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
@@ -452,7 +455,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             nwb_file_abs_path, load_time_vector=True
         )
 
-        valid_sort_times = self._get_sort_interval_valid_times(key)
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
         # shape is (N, 2)
         valid_sort_times_indices = np.array(
             [

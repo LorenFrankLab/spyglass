@@ -227,6 +227,10 @@ def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
     max_length : float, optional
         Maximum interval length in seconds. Defaults to 1e10.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("intervals_by_length. Use Interval instead.")
+
     return Interval(interval_list).by_length(min_length, max_length).times
 
 
@@ -239,6 +243,12 @@ def interval_list_contains_ind(interval_list, timestamps):
         Each element is (start time, stop time), i.e. an interval in seconds.
     timestamps : array_like
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "interval_list_contains_ind. Use Interval instead."
+    )
+
     return Interval(interval_list).contains(timestamps, as_indices=True).times
 
 
@@ -251,6 +261,9 @@ def interval_list_contains(interval_list, timestamps):
         Each element is (start time, stop time), i.e. an interval in seconds.
     timestamps : array_like
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_contains. Use Interval instead.")
     return Interval(interval_list).contains(timestamps).times
 
 
@@ -263,6 +276,11 @@ def interval_list_excludes_ind(interval_list, timestamps):
         Each element is (start time, stop time), i.e. an interval in seconds.
     timestamps : array_like
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "interval_list_excludes_ind. Use Interval instead."
+    )
     return Interval(interval_list).excludes(timestamps, as_indices=True).times
 
 
@@ -275,11 +293,17 @@ def interval_list_excludes(interval_list, timestamps):
         Each element is (start time, stop time), i.e. an interval in seconds.
     timestamps : array_like
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_excludes. Use Interval instead.")
     return Interval(interval_list).excludes(timestamps).times
 
 
 def consolidate_intervals(interval_list):
     """Consolidate overlapping intervals in an interval list."""
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_excludes. Use Interval instead.")
     return Interval(interval_list).consolidate().times
 
 
