@@ -141,7 +141,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 f"interval list {interval_list_name} is not in the IntervalList"
                 " table; the list must be added before this function is called"
             )
-        # Validate reference_electrode_list
+        # ---- Validate reference_electrode_list ----
         # If a single int is provided, it will be used for all electrodes
         n_electrodes = len(electrode_list)
         if isinstance(reference_electrode_list, int):
@@ -162,7 +162,9 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             )
 
         # Ensure reference_electrode_list is a 1D array
-        reference_electrode_list = reference_electrode_list.astype(int)
+        reference_electrode_list = np.atleast_1d(
+            reference_electrode_list
+        ).astype(int)
         if len(reference_electrode_list) == 1:
             reference_electrode_list = (
                 np.ones((n_electrodes,), dtype=int)
@@ -176,10 +178,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 + "electrode_list."
             )
 
-        # Ensure reference_electrode_list is a 1D array
-        reference_electrode_list = np.atleast_1d(
-            reference_electrode_list
-        ).squeeze(axis=1)
         if reference_electrode_list.ndim > 1:
             raise ValueError(
                 "reference_electrode_list must be a 1D array or list or int."
