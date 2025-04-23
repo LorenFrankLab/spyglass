@@ -335,6 +335,7 @@ def get_valid_intervals(
     timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
 ):
     """Finds the set of all valid intervals in a list of timestamps.
+
     Valid interval: (start time, stop time) during which there are
     no gaps (i.e. missing samples).
 

@@ -362,7 +362,7 @@ class Interval:
         timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
         return Interval(self._intersect(interval_list, timestamps_interval))
 
-    def set_difference_inds(self, other):
+    def set_difference_inds(self, other, reverse=False):
         """Find the indices of self not in other
 
         e.g.
@@ -374,13 +374,15 @@ class Interval:
         Parameters
         ----------
         other : Union[Intervals, np.ndarray]
+        reverse : bool, optional
+            If True, reverse the order of the intervals. Defaults to False.
 
         Returns
         -------
         List[Tuple[int, int]]
         """
-        intervals1 = self.times
-        intervals2 = self._extract(other)
+        intervals1 = self.times if not reverse else self._extract(other)
+        intervals2 = self._extract(other) if not reverse else self.times
 
         result = []
         i = j = 0
@@ -442,6 +444,61 @@ class Interval:
             )
         )
 
+    def add_removal_window(self, removal_window_ms, timestamps):
+        """Add half of a removal window to start/end of each interval"""
+        half_win = removal_window_ms / 1000 * 0.5
+        new_interval = np.zeros((len(self.times), 2), dtype=np.float64)
+        # for each interval, add half removal window to start and end
+        for idx, interval in enumerate(self.times):
+            start, end = interval[0], interval[1]
+            new_interval[idx] = [
+                timestamps[start] - half_win,
+                np.minimum(timestamps[end] + half_win, timestamps[-1]),
+            ]
+        # NOTE: np.min and if len cond were in
+        # spikesorting_artifact, but not lfp_artifact
+        return (
+            self._union_consolidate(new_interval)
+            if len(new_interval) > 1
+            else Interval(new_interval)
+        )
+
+    def to_indices(self, timestamps):
+        """Convert intervals to indices in the given timestamps.
+
+        Parameters
+        ----------
+        timestamps : array_like
+            The timestamps to convert the intervals to indices in.
+
+        Returns
+        -------
+        np.ndarray
+            The indices of the intervals in the given timestamps.
+        """
+        starts = np.searchsorted(timestamps, self.times[:, 0])
+        ends = np.searchsorted(timestamps, self.times[:, 1])
+        return np.column_stack((starts, ends))
+        # # Prev approach:
+        # return [
+        #     np.searchsorted(timestamps, interval) for interval in self.times
+        # ]
+
+    def to_seconds(self, timestamps):
+        """Convert intervals to seconds in the given timestamps.
+
+        Parameters
+        ----------
+        timestamps : array_like
+            The timestamps to convert the intervals to seconds in.
+
+        Returns
+        -------
+        np.ndarray
+            The seconds of the intervals in the given timestamps.
+        """
+        return [(timestamps[i[0]], timestamps[i[1]]) for i in self.times]
+
     # ---------------------------- Requiring Table ----------------------------
 
     def _import_from_table(self, interval_key, return_table=False):
@@ -467,88 +524,3 @@ class Interval:
                 "Must initialize with a key run table-based operations"
             )
         return self._import_from_table(self.key, return_table=True)
-
-    def plot(self, figsize=(20, 5), return_fig=False):
-        interval_list = pd.DataFrame(self._get_table())
-        fig, ax = plt.subplots(figsize=figsize)
-        interval_count = 0
-        for row in interval_list.itertuples(index=False):
-            for interval in row.valid_times:
-                ax.plot(interval, [interval_count, interval_count])
-                ax.scatter(
-                    interval,
-                    [interval_count, interval_count],
-                    alpha=0.8,
-                    zorder=2,
-                )
-            interval_count += 1
-        ax.set_yticks(np.arange(interval_list.shape[0]))
-        ax.set_yticklabels(interval_list.interval_list_name)
-        ax.set_xlabel("Time [s]")
-        ax.grid(True)
-        if return_fig:
-            return fig
-
-    def plot_epoch_pos_raw_intervals(self, figsize=(20, 5), return_fig=False):
-        """Plot an epoch's position, raw data, and valid times intervals."""
-        interval_list = pd.DataFrame(self._get_table())
-        fig, ax = plt.subplots(figsize=(30, 3))
-
-        raw_data_valid_times = interval_list.loc[
-            interval_list.interval_list_name == "raw data valid times"
-        ].valid_times
-        interval_y = 1
-
-        for interval in np.asarray(raw_data_valid_times)[0]:
-            ax.plot(interval, [interval_y, interval_y])
-            ax.scatter(interval, [interval_y, interval_y], alpha=0.8, zorder=2)
-
-        epoch_valid_times = (
-            interval_list.set_index("interval_list_name")
-            .filter(regex=r"^[0-9]", axis=0)
-            .valid_times
-        )
-        interval_y = 2
-        for epoch, valid_times in zip(
-            epoch_valid_times.index, epoch_valid_times
-        ):
-            for interval in valid_times:
-                ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(
-                    interval, [interval_y, interval_y], alpha=0.8, zorder=2
-                )
-                ax.text(
-                    interval[0] + np.diff(interval)[0] / 2,
-                    interval_y,
-                    epoch,
-                    ha="center",
-                    va="bottom",
-                )
-
-        pos_valid_times = (
-            interval_list.set_index("interval_list_name")
-            .filter(regex=r"^pos \d+ valid times$", axis=0)
-            .valid_times
-        ).sort_index(key=lambda index: [int(name.split()[1]) for name in index])
-        interval_y = 0
-        for epoch, valid_times in zip(pos_valid_times.index, pos_valid_times):
-            for interval in valid_times:
-                ax.plot(interval, [interval_y, interval_y])
-                ax.scatter(
-                    interval, [interval_y, interval_y], alpha=0.8, zorder=2
-                )
-                ax.text(
-                    interval[0] + np.diff(interval)[0] / 2,
-                    interval_y,
-                    epoch.replace(" valid times", ""),
-                    ha="center",
-                    va="bottom",
-                )
-
-        ax.set_ylim((-0.25, 2.25))
-        ax.set_yticks(np.arange(3))
-        ax.set_yticklabels(["pos valid times", "raw data valid times", "epoch"])
-        ax.set_xlabel("Time [s]")
-        ax.grid(True)
-        if return_fig:
-            return fig

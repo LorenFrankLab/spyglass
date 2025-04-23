@@ -491,17 +491,13 @@ class LFP(SpyglassMixin, dj.Imported):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
         # keep only the intervals > 1 second long
-        min_interval_length = 1.0
-        valid = []
-        for count, interval in enumerate(valid_times):
-            if interval[1] - interval[0] > min_interval_length:
-                valid.append(count)
-        valid_times = valid_times[valid]
+        orig_len = len(valid_times)
+        valid_times = valid_times.by_length(min_length=1.0)
         logger.info(
-            f"LFP: found {len(valid)} of {count+1} intervals > "
-            + f"{min_interval_length} sec long."
+            f"LFP: found {len(valid_times)} of {orig_len} intervals > "
+            + "1.0 sec long."
         )
 
         # target 1 KHz sampling rate
@@ -540,7 +536,7 @@ class LFP(SpyglassMixin, dj.Imported):
             lfp_file_abspath,
             rawdata,
             filter_coeff,
-            valid_times,
+            valid_times.times,
             electrode_id_list,
             decimation,
         )
@@ -555,14 +551,14 @@ class LFP(SpyglassMixin, dj.Imported):
         key["lfp_sampling_rate"] = sampling_rate // decimation
 
         # finally, censor the valid times to account for the downsampling
-        lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
+        lfp_valid_times = valid_times.censor(timestamp_interval)
         # add an interval list for the LFP valid times, skipping duplicates
         key["interval_list_name"] = "lfp valid times"
         IntervalList.insert1(
             {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
-                "valid_times": lfp_valid_times,
+                "valid_times": lfp_valid_times.times,
                 "pipeline": "lfp_v0",
             },
             replace=True,
@@ -935,17 +931,15 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
             }
-        ).fetch("valid_times")
+        ).fetch_interval()
         if len(tmp_valid_times) == 0:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
+            lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
             # add an interval list for the LFP valid times
             IntervalList.insert1(
                 {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times,
+                    "valid_times": lfp_band_valid_times.times,
                     "pipeline": "lfp_band",
                 }
             )

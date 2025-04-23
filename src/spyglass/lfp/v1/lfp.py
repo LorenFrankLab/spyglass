@@ -6,7 +6,7 @@ import pandas as pd
 
 from spyglass.common.common_ephys import Raw
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import IntervalList, interval_list_censor
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup

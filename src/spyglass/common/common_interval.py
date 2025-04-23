@@ -229,7 +229,7 @@ def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("intervals_by_length. Use Interval instead.")
+    ActivityLog().deprecate_log("intervals_by_length")
 
     return Interval(interval_list).by_length(min_length, max_length).times
 
@@ -245,9 +245,7 @@ def interval_list_contains_ind(interval_list, timestamps):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log(
-        "interval_list_contains_ind. Use Interval instead."
-    )
+    ActivityLog().deprecate_log("interval_list_contains_ind")
 
     return Interval(interval_list).contains(timestamps, as_indices=True).times
 
@@ -263,7 +261,7 @@ def interval_list_contains(interval_list, timestamps):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("interval_list_contains. Use Interval instead.")
+    ActivityLog().deprecate_log("interval_list_contains")
     return Interval(interval_list).contains(timestamps).times
 
 
@@ -278,9 +276,7 @@ def interval_list_excludes_ind(interval_list, timestamps):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log(
-        "interval_list_excludes_ind. Use Interval instead."
-    )
+    ActivityLog().deprecate_log("interval_list_excludes_ind")
     return Interval(interval_list).excludes(timestamps, as_indices=True).times
 
 
@@ -295,7 +291,7 @@ def interval_list_excludes(interval_list, timestamps):
     """
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("interval_list_excludes. Use Interval instead.")
+    ActivityLog().deprecate_log("interval_list_excludes")
     return Interval(interval_list).excludes(timestamps).times
 
 
@@ -303,7 +299,7 @@ def consolidate_intervals(interval_list):
     """Consolidate overlapping intervals in an interval list."""
     from spyglass.common.common_usage import ActivityLog
 
-    ActivityLog().deprecate_log("interval_list_excludes. Use Interval instead.")
+    ActivityLog().deprecate_log("interval_list_excludes")
     return Interval(interval_list).consolidate().times
 
 
@@ -324,42 +320,6 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     interval_list: np.array, (N,2)
     """
     return Interval(interval_list1).intersect(interval_list2, min_length).times
-
-
-def _union_concat(interval_list, interval):
-    """Compare last interval of interval list to given interval.
-
-    If overlapping, take union. If not, concatenate interval to interval list.
-
-    Recursively called with `reduce`.
-    """
-
-    # _union_concat GETS CALLED BY reduce - will be trickier to replace
-
-    def _intersection(interval1, interval2):
-        """Takes the (set-theoretic) intersection of two intervals"""
-        start = max(interval1[0], interval2[0])
-        end = min(interval1[1], interval2[1])
-        intersection = np.array([start, end]) if end > start else None
-        return intersection
-
-    def _union(interval1, interval2):
-        """Takes the (set-theoretic) union of two intervals"""
-        if _intersection(interval1, interval2) is None:
-            return np.array([interval1, interval2])
-        return np.array(
-            [min(interval1[0], interval2[0]), max(interval1[1], interval2[1])]
-        )
-
-    if interval_list.ndim == 1:
-        interval_list = np.expand_dims(interval_list, 0)
-    if interval.ndim == 1:
-        interval = np.expand_dims(interval, 0)
-
-    x = _union(interval_list[-1], interval[0])
-    x = np.expand_dims(x, 0) if x.ndim == 1 else x
-
-    return np.concatenate((interval_list[:-1], x), axis=0)
 
 
 def union_adjacent_index(interval1, interval2):
@@ -399,6 +359,10 @@ def interval_list_union(
     np.ndarray
         Array of intervals [start, stop]
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_union")
+
     return (
         Interval(interval_list1)
         .union(interval_list2, min_length, max_length)
@@ -419,6 +383,9 @@ def interval_list_censor(interval_list, timestamps):
     -------
     interval_list (numpy array of intervals [start, stop])
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_censor")
     return Interval(interval_list).censor(timestamps).times
 
 
@@ -454,6 +421,9 @@ def interval_set_difference_inds(intervals1, intervals2):
     _type_
         _description_
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_set_difference_inds")
     return Interval(intervals1).set_difference_inds(intervals2).times
 
 
@@ -466,4 +436,7 @@ def interval_list_complement(intervals1, intervals2, min_length=0.0):
     min_length : float, optional
         Minimum interval length in seconds. Defaults to 0.0.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_complement")
     return Interval(intervals1).complement(intervals2, min_length).times

@@ -6,7 +6,7 @@ from scipy.signal import hilbert
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import IntervalList, interval_list_censor
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
@@ -280,7 +280,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             timestamps,
             lfp_data,
             filter_coeff,
-            lfp_band_valid_times,
+            lfp_band_valid_times.times,
             lfp_band_elect_index,
             decimation,
         )
@@ -335,26 +335,21 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch("valid_times")
+        lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
         if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
             # add an interval list for the LFP valid times
             IntervalList.insert1(
                 {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times,
+                    "valid_times": lfp_band_valid_times.times,
                     "pipeline": "lfp band",
                 }
             )
         else:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
             # check that the valid times are the same
             assert np.isclose(
-                tmp_valid_times[0], lfp_band_valid_times
+                tmp_valid_times[0], lfp_band_valid_times.times
             ).all(), (
                 "previously saved lfp band times do not match current times"
             )
