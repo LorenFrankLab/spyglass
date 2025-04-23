@@ -1,4 +1,4 @@
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -286,9 +286,9 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
 
         with self.connection.transaction:
             # insert the main entry into the LFPBandSelection table
-            self.insert1(master_key, skip_duplicates=True)
+            self.insert1(master_key)
             # insert the part entries into the LFPBandElectrode table
-            self.LFPBandElectrode().insert(part_keys, skip_duplicates=True)
+            self.LFPBandElectrode().insert(part_keys)
 
 
 @schema
