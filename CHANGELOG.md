@@ -41,6 +41,13 @@ ImportedLFP().drop()
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Track Spyglass version in dedicated table for enforcing updates #1281
+- Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
+
+### Documentation
+
+- Add documentation for custom pipeline #1281
+- Add developer note on initializing `hatch` #1281
 
 ### Pipelines
 
@@ -50,18 +57,23 @@ ImportedLFP().drop()
     - Make `Nwbfile.fetch_nwb` functional # 1256
     - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
     - Allow ingestion of multi-row task epoch tables #1278
+    - Add `SensorData` to `populate_all_common` #1281
+    - Add `fetch1_dataframe` to `SensorData` #1291
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
+    - Sanitize new project names for unix file system #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
     - Add cleanup for `v0.SpikeSortingRecording` #1263
+    - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
+    - Disable make transactionsfor `CuratedSpikeSorting` #1288
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP

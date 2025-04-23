@@ -22,7 +22,18 @@ schema = dj.schema("decoding_core_v1")
 
 @schema
 class DecodingParameters(SpyglassMixin, dj.Lookup):
-    """Params for decoding mental position and some category of interest"""
+    """Params for decoding mental position and some category of interest
+
+    Parameters
+    ----------
+    decoding_param_name : str
+        name of the decoding parameters
+    decoding_params : dict
+        Initialization parameters for model. See non_local_detector
+        documentation for details.
+    decoding_kwargs : dict, optional
+        additional keyword arguments
+    """
 
     definition = """
     decoding_param_name : varchar(80)  # a name for this set of parameters

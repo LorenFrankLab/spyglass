@@ -1,4 +1,4 @@
-default_stages: [commit, push]
+default_stages: [pre-commit, pre-push]
 exclude: (^.github/|^docs/site/|^images/)
 
 repos:
@@ -14,11 +14,11 @@ repos:
         args: [--wrap, "80", --number]
         additional_dependencies:
           - mdformat-mkdocs
+          - mdformat-footnote
           - mdformat-toc
           - mdformat-beautysh
           - mdformat-config
           - mdformat-black
-          - mdformat-web
           - mdformat-gfm
 
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -14,6 +14,8 @@ regularly as cron jobs.
         removing orphans, unreferenced files, and old temp files.
     - The function for cleaning up temp files requires that this directory be
         called either `temp` or `tmp`.
+    - This script also fetches the latest version information from PyPI to update
+        the `SpyglassVersions` table.
 - `populate.py` - This script provides an example of how to run computations as
     part of cron jobs. This is not currently in use.
 - `run_jobs.sh` - This script ...
@@ -39,11 +41,16 @@ regularly as cron jobs.
     and fill in the necessary information, including...
 4. Set up a cron job to run `run_jobs.sh` at the desired interval by running
     - Items for running cleanup jobs:
+        - `SPYGLASS_CHMOD_FILES`: if `true`, the script will set the permissions of
+            all files in the data directory to 644. This is limited to files
+            generated in the last week to save time. If `false`, the script will
+            skip this step.[^1]
+        - `SPYGLASS_BASE_PATH`: the path to the Spyglass-managed data.
         - `SPYGLASS_CONDA_PATH`: Path to conda initialization script. To find the
             root directory, run `which conda` and follow the relative path in
             `example.env`
         - `SPYGLASS_CONDA_ENV`: the name of the conda environment with Spyglass and
-            DataJoint installed.
+            DataJoint installed.[^2]
         - `SPYGLASS_REPO_PATH`: the path to the Spyglass repository.
         - `SPYGLASS_LOG`: the path to the log file.
         - Optional email settings. If not set, email notifications will not be
@@ -101,3 +108,9 @@ a common choice. To use Gmail, you will need to ...
 
 `curl` will not work with your master Gmail password, so you will need to use
 the app password instead.
+
+[^1]: Depending your system, you may need to run the script as `sudo` to set the
+    permissions.
+
+[^2]: You may want to run the cronjob from a dedicated conda environment to avoid
+    issues with local editable installs or other package conflicts.

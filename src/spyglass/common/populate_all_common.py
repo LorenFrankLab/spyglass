@@ -17,6 +17,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
@@ -142,8 +143,8 @@ def populate_all_common(
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
             ImportedLFP,  # Depends on Session
+            SensorData,  # Depends on Session
             # NwbfileKachery, # Not used by default
-            # SensorData, # Not used by default. Generates large files
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
