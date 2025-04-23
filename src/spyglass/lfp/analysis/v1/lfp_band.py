@@ -235,7 +235,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             )
         part_keys = [
             {
-                "nwb_file_name": nwb_file_name,
+                **master_key,
                 "lfp_electrode_group_name": lfp_electrode_group_name,
                 "electrode_group_name": electrode_group_name,
                 "electrode_id": electrode_id,
