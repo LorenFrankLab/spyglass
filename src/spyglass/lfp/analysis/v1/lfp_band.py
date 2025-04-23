@@ -50,7 +50,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         electrode_list: list[int],
         filter_name: str,
         interval_list_name: str,
-        reference_electrode_list: Union[int, list[int]],
+        reference_electrode_list: Union[int, list[int], np.ndarray],
         lfp_band_sampling_rate: Optional[int] = None,
     ) -> None:
         """Sets the electrodes to be filtered for a given LFP
@@ -67,7 +67,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             The name of the filter to be used
         interval_list_name: str
             The name of the interval list to be used
-        reference_electrode_list: int or list[int]
+        reference_electrode_list: int or list[int] or np.ndarray
             A list of the reference electrodes to be used.
             If a single int is provided, it will be used for all electrodes.
         lfp_band_sampling_rate: int, optional
