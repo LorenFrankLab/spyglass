@@ -2,6 +2,35 @@
 
 ## [0.5.5] (Unreleased)
 
+Table update script
+
+```py
+from spyglass.lfp.lfp_imported import ImportedLFP
+from spyglass.lfp.lfp_merge import LFPOutput
+
+if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
+    raise ValueError(
+        "Existing entries found and would be dropped in update. Please delete "
+        + "entries or start a GitHub discussion for migration assistance."
+        + f"\nImportedLFP: {len(ImportedLFP())}"
+        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
+    )
+
+table = LFPOutput().ImportedLFP()
+table_name = table.full_table_name
+
+if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
+    drop_list = [x for x in drop_list if x != table_name]
+    raise ValueError(
+        "Downstream tables exist and would be dropped in update."
+        + "Please drop the following tables first: \n"
+        + "\n ".join([str(t) for t in drop_list])
+    )
+
+LFPOutput().ImportedLFP().drop_quick()
+ImportedLFP().drop()
+```
+
 ### Infrastructure
 
 - Ensure merge tables are declared during file insertion #1205
@@ -12,6 +41,13 @@
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Track Spyglass version in dedicated table for enforcing updates #1281
+- Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
+
+### Documentation
+
+- Add documentation for custom pipeline #1281
+- Add developer note on initializing `hatch` #1281
 
 ### Pipelines
 
@@ -19,11 +55,16 @@
     - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
+    - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
+    - Allow ingestion of multi-row task epoch tables #1278
+    - Add `SensorData` to `populate_all_common` #1281
+    - Add `fetch1_dataframe` to `SensorData` #1291
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
+    - Sanitize new project names for unix file system #1247
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -35,6 +76,8 @@
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+- LFP
+    - Implement `ImportedLFP.make()`  for ingestion from nwb files #1278
 
 ## [0.5.4] (December 20, 2024)
 

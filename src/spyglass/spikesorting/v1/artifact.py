@@ -31,6 +31,33 @@ schema = dj.schema("spikesorting_v1_artifact")
 
 @schema
 class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for detecting artifacts (non-neural high amplitude events).
+
+    Parameters
+    ----------
+    artifact_param_name : str
+        Name of the artifact detection parameters.
+    artifact_params : dict
+        Dictionary of parameters for artifact detection, which may include:
+        zscore_thresh: float, optional
+            Stdev threshold for exclusion, should be >=0, defaults to None
+        amplitude_thresh_uV: float, optional
+            Amplitude threshold for exclusion, should be >=0, defaults to None
+        proportion_above_thresh: float, optional, should be>0 and <=1
+            Proportion of electrodes that need to have threshold crossings,
+            defaults to 1
+        removal_window_ms: float, optional
+            Width of the window in milliseconds to mask out per artifact
+            (window/2 removed on each side of threshold crossing),
+            defaults to 1 ms
+        chunk_duration: str, optional
+            Duration of chunks to process in seconds, defaults to "10s"
+        n_jobs: int, optional
+            Number of parallel jobs to use, defaults to 4
+        progress_bar: bool, optional
+            Whether to show a progress bar, defaults to True
+    """
+
     definition = """
     # Parameters for detecting artifacts (non-neural high amplitude events).
     artifact_param_name : varchar(200)

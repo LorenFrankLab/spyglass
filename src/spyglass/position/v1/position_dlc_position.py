@@ -27,22 +27,26 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
-    Attributes
+    Parameters
     ----------
-    interpolate : bool, default True
-        whether to interpolate over NaN spans
-    smooth : bool, default True
-        whether to smooth the dataset
-    smoothing_params : dict
-        smoothing_duration : float, default 0.05
-            number of frames to smooth over:
-            sampling_rate*smoothing_duration = num_frames
-    interp_params : dict
-        max_cm_to_interp : int, default 20
-            maximum distance between high likelihood points on either side of a
-            NaN span to interpolate over
-    likelihood_thresh : float, default 0.95
-        likelihood below which to NaN and interpolate over
+    dlc_si_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        interpolate : bool, default True
+            whether to interpolate over NaN spans
+        smooth : bool, default True
+            whether to smooth the dataset
+        smoothing_params : dict
+            smoothing_duration : float, default 0.05
+                number of frames to smooth over:
+                sampling_rate*smoothing_duration = num_frames
+        interp_params : dict
+            max_cm_to_interp : int, default 20
+                maximum distance between high likelihood points on either side
+                of a NaN span to interpolate over
+        likelihood_thresh : float, default 0.95
+            likelihood below which to NaN and interpolate over
     """
 
     definition = """

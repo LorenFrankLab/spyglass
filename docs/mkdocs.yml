@@ -82,6 +82,7 @@ nav:
     - Code Reuse: ForDevelopers/Reuse.md
     - Table Types: ForDevelopers/TableTypes.md
     - Understanding a Schema: ForDevelopers/Schema.md
+    - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - Change Log: CHANGELOG.md
@@ -124,6 +125,7 @@ plugins:
       include_source: False
       ignore_h1_titles: True
       ignore: ["*make_pages.py", "**checkpoints**", "*/py_scripts/*"]
+  - mermaid2 # for graphs
 
 markdown_extensions:
   - attr_list

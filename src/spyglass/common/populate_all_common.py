@@ -17,6 +17,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
@@ -120,6 +121,7 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.lfp.lfp_imported import ImportedLFP
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
@@ -140,8 +142,9 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            ImportedLFP,  # Depends on Session
+            SensorData,  # Depends on Session
             # NwbfileKachery, # Not used by default
-            # SensorData, # Not used by default. Generates large files
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
