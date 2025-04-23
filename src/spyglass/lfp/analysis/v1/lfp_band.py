@@ -276,7 +276,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
         """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
@@ -475,7 +475,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()
 
@@ -492,15 +492,18 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),
         )
 
-    def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
+    def compute_analytic_signal(
+        self, electrode_list: Optional[list[int]] = None
+    ) -> pd.DataFrame:
         """Computes the hilbert transform of a given LFPBand signal
 
         Uses scipy.signal.hilbert to compute the hilbert transform
 
         Parameters
         ----------
-        electrode_list: list[int]
+        electrode_list: list[int], optional
             A list of the electrodes to compute the hilbert transform of
+            If None, all electrodes are computed, by default None
 
         Returns
         -------
@@ -514,9 +517,19 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         """
 
         filtered_band = self.fetch_nwb()[0]["lfp_band"]
-        electrode_index = np.isin(
-            filtered_band.electrodes.data[:], electrode_list
-        )
+        band_electrodes = filtered_band.electrodes.data[:]
+
+        if electrode_list is None:
+            electrode_list = band_electrodes
+
+        if not isinstance(electrode_list, (list, np.ndarray)):
+            raise ValueError(
+                "electrode_list must be a list or numpy array of integers."
+            )
+
+        # get the indices of the electrodes to be filtered
+        electrode_list = np.array(electrode_list, dtype=int)
+        electrode_index = np.isin(band_electrodes, electrode_list)
         if len(electrode_list) != np.sum(electrode_index):
             raise ValueError(
                 "Some of the electrodes specified in electrode_list are missing"
@@ -527,10 +540,11 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             index=pd.Index(filtered_band.timestamps, name="time"),
             columns=[f"electrode {e}" for e in electrode_list],
         )
+
         return analytic_signal_df
 
     def compute_signal_phase(
-        self, electrode_list: Optional[list[int]] = None, **kwargs
+        self, electrode_list: Optional[list[int]] = None
     ) -> pd.DataFrame:
         """Computes phase of LFPBand signals using the hilbert transform
 
@@ -539,30 +553,23 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         electrode_list : list[int], optional
             A list of the electrodes to compute the phase of.
             If None, all electrodes are computed, by default None
-        **kwargs : dict
-            Additional keyword arguments to pass to the hilbert transform
-            (e.g. axis=0 for the axis to compute the hilbert transform along)
 
         Returns
         -------
         signal_phase_df : pd.DataFrame
             DataFrame containing the phase of the signals
         """
-        if electrode_list is None:
-            electrode_list = []
-
-        analytic_signal_df = self.compute_analytic_signal(
-            electrode_list, **kwargs
-        )
+        analytic_signal_df = self.compute_analytic_signal(electrode_list)
 
         return pd.DataFrame(
-            np.angle(analytic_signal_df) + np.pi,
+            np.angle(analytic_signal_df) + np.pi,  # shift to [0, 2pi]
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
 
     def compute_signal_power(
-        self, electrode_list: Optional[list[int]] = None, **kwargs
+        self,
+        electrode_list: Optional[list[int]] = None,
     ) -> pd.DataFrame:
         """Computes power LFPBand signals using the hilbert transform
 
@@ -571,21 +578,13 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         electrode_list : list[int], optional
             A list of the electrodes to compute the power of.
             If None, all electrodes are computed, by default None
-        **kwargs : dict
-            Additional keyword arguments to pass to the hilbert transform
-            (e.g. axis=0 for the axis to compute the hilbert transform along)
 
         Returns
         -------
         signal_power_df : pd.DataFrame
             DataFrame containing the power of the signals
         """
-        if electrode_list is None:
-            electrode_list = []
-
-        analytic_signal_df = self.compute_analytic_signal(
-            electrode_list, **kwargs
-        )
+        analytic_signal_df = self.compute_analytic_signal(electrode_list)
 
         return pd.DataFrame(
             np.abs(analytic_signal_df) ** 2,
