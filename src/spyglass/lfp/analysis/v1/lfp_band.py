@@ -266,8 +266,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                     + "please delete the existing entry before inserting"
                 )
 
-        connection = self.connection
-        with connection.transaction:
+        with self.connection.transaction:
             # insert the main entry into the LFPBandSelection table
             self.insert1(master_key, skip_duplicates=True)
             # insert the part entries into the LFPBandElectrode table
