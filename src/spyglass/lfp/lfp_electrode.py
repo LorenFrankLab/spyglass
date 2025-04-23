@@ -94,9 +94,16 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             "nwb_file_name": nwb_file_name,
             "lfp_electrode_group_name": group_name,
         }
-        electrode_keys_to_insert = (
-            electrode_table & f"electrode_id in {tuple(electrode_list)}"
-        ).fetch("KEY")
+
+        restriction_str = (
+            f"electrode_id = {electrode_list[0]}"
+            if len(electrode_list) == 1
+            else f"electrode_id in {tuple(electrode_list)}"
+        )
+
+        electrode_keys_to_insert = (electrode_table & restriction_str).fetch(
+            "KEY"
+        )
         part_keys = [
             {**master_key, **electrode_key}
             for electrode_key in electrode_keys_to_insert
