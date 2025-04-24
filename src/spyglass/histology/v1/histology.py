@@ -2,7 +2,7 @@ import datajoint as dj
 
 from spyglass.common import (  # noqa: F401
     AnalysisNwbfile,
-    CoordinateSystem,
+    BrainCoordinateSystem,
     LabMember,
     Subject,
 )
@@ -52,7 +52,7 @@ class Histology(SpyglassMixin, dj.Manual):
             "histochemical",
             "in_situ_hybridization",
             "other"
-        ) = "other"
+        ) = "anatomical"
         stain_protocol_name=NULL: varchar(128) # Optional: name of the protocol used
         antibody_details=NULL: varchar(255)    # Optional: specific antibody info (e.g. company, cat#, lot#)
         stain_notes="": varchar(1024)          # Optional notes about this specific stain (e.g., concentration)
@@ -124,7 +124,7 @@ class HistologyRegistration(SpyglassMixin, dj.Manual):
     -> HistologyImages                  # Link to the source histology NWB file info
     registration_id: varchar(32)        # Unique ID for this registration instance/parameters
     ---
-    -> CoordinateSystem                 # The TARGET coordinate system (e.g., 'allen_ccf_v3_ras_um')
+    -> BrainCoordinateSystem                 # The TARGET coordinate system (e.g., 'allen_ccf_v3_ras_um')
 
     # --- Registration Parameters ---
     registration_method: varchar(128)   # Algorithmic approach (e.g. 'affine+bspline', 'manual_landmark')

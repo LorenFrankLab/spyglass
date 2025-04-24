@@ -67,9 +67,9 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
 
 
 @schema
-class CoordinateSystem(dj.Lookup):
+class BrainCoordinateSystem(dj.Lookup):
     definition = """
-    # Defines standard coordinate systems used for spatial data.
+    # Defines standard coordinate systems used for brain spatial data.
     coordinate_system_id: varchar(64) # Primary key (e.g., 'Allen_CCFv3_RAS_um')
     ---
     description: varchar(255)         # Description of the coordinate system
