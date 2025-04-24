@@ -73,48 +73,32 @@ class CoordinateSystem(dj.Lookup):
     coordinate_system_id: varchar(64) # Primary key (e.g., 'Allen_CCFv3_RAS_um')
     ---
     description: varchar(255)         # Description of the coordinate system
-    orientation: enum(                # Anatomical orientation convention
-        "RAS", "LPS", "PIR", "ASL", "XYZ", "Other"
-        )
-    unit: enum(                       # Spatial unit
-        "um", "mm", "pixels", "voxels"
-        )
     atlas_source=NULL: varchar(128)   # Source if based on an atlas (e.g., 'Allen CCF v3', 'WHS Rat v4')
     """
     contents = [
         [
             "Allen_CCFv3_RAS_um",
             "Allen CCF v3 Mouse Atlas, RAS orientation, micrometers",
-            "RAS",
-            "um",
             "Allen CCF v3",
         ],
         [
             "Paxinos_Rat_6th_PIR_um",
             "Paxinos & Watson Rat Atlas 6th Ed, PIR orientation, micrometers",
-            "PIR",
-            "um",
             "Paxinos Rat 6th Ed",
         ],
         [
             "WHS_Rat_v4_RAS_um",
             "Waxholm Space Sprague Dawley Rat Atlas v4, RAS orientation, micrometers",
-            "RAS",
-            "um",
             "WHS Rat v4",
         ],
         [
             "Histology_Image_Pixels",
             "2D Pixels from processed histology image (Origin/Orientation Varies)",
-            "Other",
-            "pixels",
             None,
         ],
         [
             "MicroCT_Voxel_Scan",
             "3D Voxel space from raw microCT scan (Orientation relative to scanner)",
-            "XYZ",  # Or 'Other' depending on context
-            "voxels",
             None,
         ],
     ]
