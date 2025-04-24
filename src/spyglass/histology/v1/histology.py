@@ -73,10 +73,11 @@ class HistologyRegistration(SpyglassMixin, dj.Manual):
      registration_id: varchar(32) # Unique ID for this specific registration instance/parameters (e.g., 'Elastix_Default_v1')
      ---
      -> CoordinateSystem       # The TARGET coordinate system achieved by this registration (e.g., 'allen_ccf_v3_ras_um')
-     registration_method: varchar(128) # Name of algorithm/tool used (e.g., 'Manual Landmark', 'Elastix', 'BRAINRegistration', 'ABBA', 'QuickNII')
-     registration_params = NULL: blob   # Store parameters as dict/json blob, or link -> registrationParams table if complex/reused
+     registration_method       : varchar(128)    # algorithmic approach, e.g. 'affine+bspline'
+     registration_software     : varchar(128)    # e.g. 'ANTs', 'elastix', 'SimpleITK'
+     registration_software_version : varchar(64)  # e.g. '2.3.5', '1.3.0'
      transformation_matrix = NULL: blob # Store affine matrix if computed/applicable (e.g., 4x4 np.array.tobytes())
-     warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear (@external store might be better long term)
+     warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear
      registration_quality = NULL: float   # Optional QC metric for the registration (e.g., Dice score, landmark error)
      registration_time = CURRENT_TIMESTAMP: timestamp  # Time this registration entry was created/run
      registration_notes = "": varchar(2048) # Any specific notes about this registration run

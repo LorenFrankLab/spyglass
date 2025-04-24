@@ -38,9 +38,9 @@ class MicroCTScan(SpyglassMixin, dj.Manual):
 
     # Reconstruction Details (often from scanner software)
     reconstruction_software = NULL: varchar(128) # e.g., 'CT Pro (Nikon)'
-    voxel_size_x: float                          # (um) Reconstructed voxel size X (CRITICAL)
-    voxel_size_y: float                          # (um) Reconstructed voxel size Y (CRITICAL)
-    voxel_size_z: float                          # (um) Reconstructed voxel size Z (CRITICAL)
+    voxel_size_x: float                          # (um) Reconstructed voxel size X
+    voxel_size_y: float                          # (um) Reconstructed voxel size Y
+    voxel_size_z: float                          # (um) Reconstructed voxel size Z
     output_format = 'TIFF stack': varchar(64)    # Format of raw reconstructed data
 
     # Raw Data Location (Essential Input for downstream processing)
@@ -78,7 +78,9 @@ class MicroCTRegistration(SpyglassMixin, dj.Manual):
      registration_id: varchar(32) # Unique ID for this specific registration instance/parameters
      ---
      -> CoordinateSystem       # The TARGET coordinate system achieved by this registration
-     registration_method: varchar(128) # Name of algorithm/tool used
+     registration_method       : varchar(128)    # algorithmic approach, e.g. 'affine+bspline'
+     registration_software     : varchar(128)    # e.g. 'ANTs', 'elastix', 'SimpleITK'
+     registration_software_version : varchar(64)  # e.g. '2.3.5', '1.3.0'
      registration_params = NULL: blob   # Store parameters dict/json
      transformation_matrix = NULL: blob # Store affine matrix if applicable
      warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear
