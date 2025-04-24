@@ -237,7 +237,7 @@ class Interval:
         self.times = self._extract(interval_list, from_inds=from_inds)
 
     def __repr__(self):
-        joined = "\n\t".join(self.times.astype(str))
+        joined = "\n\t".join([np.array2string(i) for i in np.array(self.times)])
         return f"Interval({joined})"
 
     def __len__(self):
@@ -275,8 +275,8 @@ class Interval:
         """Extract interval_list from a given object."""
         if from_inds:
             return self.from_inds(interval_list)
-        elif interval := getattr(interval_list, "times", None):
-            return interval
+        elif hasattr(interval_list, "times"):
+            return interval_list.times
         elif isinstance(interval_list, dict):
             return self._import_from_table(interval_list)
         elif isinstance(interval_list, (list, np.ndarray)):

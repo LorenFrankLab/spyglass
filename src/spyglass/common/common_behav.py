@@ -10,7 +10,11 @@ import pynwb
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
-from spyglass.common.common_interval import Interval, IntervalList
+from spyglass.common.common_interval import (
+    Interval,
+    IntervalList,
+    interval_list_contains,
+)
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
@@ -408,9 +412,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch_interval()
-        assert isinstance(
-            valid_times, Interval
-        ), f"Expected IntervalList, got {type(valid_times)}"
 
         cam_device_str = r"camera_device (\d+)"
         is_found = False
@@ -422,8 +423,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 # overlapping with the task epoch times
 
                 timestamps = video_obj.timestamps
-                valid_times = valid_times.contains(timestamps).times
-                if not len(valid_times > 0.9 * len(timestamps)):
+                these_times = valid_times.contains(timestamps).times
+
+                if not len(these_times > 0.9 * len(timestamps)):
                     continue
 
                 nwb_cam_device = video_obj.device.name

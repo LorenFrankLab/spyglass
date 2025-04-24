@@ -76,4 +76,4 @@ jobs:
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc --maxfail=1 tests/
+        pytest --no-docker --no-dlc tests/
