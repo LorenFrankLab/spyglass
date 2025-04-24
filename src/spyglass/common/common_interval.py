@@ -77,7 +77,10 @@ class IntervalList(SpyglassMixin, dj.Manual):
         """Fetch interval list object for a given key."""
         if not len(self) == 1:
             raise ValueError(f"Expected one row, got {len(self)}")
-        return Interval(self.fetch1("valid_times"))
+        ret = Interval(self.fetch1("valid_times"))
+        assert isinstance(ret, Interval), "Expected Interval object"
+        assert hasattr(ret, "contains"), "Expected contains method"
+        return ret
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         """Plot the intervals in the interval list."""
