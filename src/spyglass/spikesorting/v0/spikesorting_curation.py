@@ -284,6 +284,28 @@ class Curation(SpyglassMixin, dj.Manual):
 
 @schema
 class WaveformParameters(SpyglassMixin, dj.Manual):
+    """Parameters for extracting waveforms from a sorting extractor
+
+    Parameters
+    ----------
+    waveform_params_name : str
+        Name of the waveform extraction parameters
+    waveform_params : dict
+        Dictionary of waveform extraction parameters, including...
+        ms_before : float
+            Number of milliseconds before the spike time to include
+        ms_after : float
+            Number of milliseconds after the spike time to include
+        max_spikes_per_unit : int
+            Maximum number of spikes to extract for each unit
+        n_jobs : int
+            Number of parallel jobs to use for extraction
+        total_memory : str
+            Total memory to use for extraction (e.g. "5G")
+        whiten : bool
+            Whether to whiten the waveforms or not
+    """
+
     definition = """
     waveform_params_name: varchar(80) # name of waveform extraction parameters
     ---
@@ -292,29 +314,19 @@ class WaveformParameters(SpyglassMixin, dj.Manual):
 
     def insert_default(self):
         """Inserts default waveform parameters"""
-        waveform_params_name = "default_not_whitened"
-        waveform_params = {
+        default = {
             "ms_before": 0.5,
             "ms_after": 0.5,
             "max_spikes_per_unit": 5000,
             "n_jobs": 5,
             "total_memory": "5G",
-            "whiten": False,
         }
-        self.insert1(
-            [waveform_params_name, waveform_params], skip_duplicates=True
-        )
-        waveform_params_name = "default_whitened"
-        waveform_params = {
-            "ms_before": 0.5,
-            "ms_after": 0.5,
-            "max_spikes_per_unit": 5000,
-            "n_jobs": 5,
-            "total_memory": "5G",
-            "whiten": True,
-        }
-        self.insert1(
-            [waveform_params_name, waveform_params], skip_duplicates=True
+        self.insert(
+            (
+                ["default_whitened", dict(**default, whiten=True)],
+                ["default_not_whitened", dict(**default, whiten=False)],
+            ),
+            skip_duplicates=True,
         )
 
 
@@ -329,7 +341,7 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Waveforms(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     definition = """
     -> WaveformSelection
@@ -420,6 +432,11 @@ class Waveforms(SpyglassMixin, dj.Computed):
 
 @schema
 class MetricParameters(SpyglassMixin, dj.Manual):
+    """Parameters for computing quality metrics of sorted units
+
+    See MetricParameters.get_available_metrics() for a list of available metrics
+    """
+
     definition = """
     # Parameters for computing quality metrics of sorted units
     metric_params_name: varchar(64)
@@ -529,7 +546,7 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class QualityMetrics(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     definition = """
     -> MetricSelection
@@ -715,6 +732,19 @@ _metric_name_to_func = {
 
 @schema
 class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
+    """Parameters for automatic curation of spike sorting
+
+    Parameters
+    ----------
+    auto_curation_params_name : str
+        Name of the automatic curation parameters
+    merge_params : dict, optional
+        Dictionary of parameters for merging units. May include nn_noise_overlap
+        List[comparison operator: str, threshold: float, labels: List[str]]
+    label_params : dict, optional
+        Dictionary of parameters for labeling units
+    """
+
     definition = """
     auto_curation_params_name: varchar(36)   # name of this parameter set
     ---
@@ -921,31 +951,31 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         # 2. Append labels to current labels, checking for inconsistencies
         if not label_params:
             return parent_labels
-        else:
-            for metric in label_params:
-                if metric not in quality_metrics:
-                    Warning(f"{metric} not found in quality metrics; skipping")
-                else:
-                    compare = _comparison_to_function[label_params[metric][0]]
 
-                    for unit_id in quality_metrics[metric].keys():
-                        # compare the quality metric to the threshold with the specified operator
-                        # note that label_params[metric] is a three element list with a comparison operator as a string,
-                        # the threshold value, and a list of labels to be applied if the comparison is true
-                        if compare(
-                            quality_metrics[metric][unit_id],
-                            label_params[metric][1],
-                        ):
-                            if unit_id not in parent_labels:
-                                parent_labels[unit_id] = label_params[metric][2]
-                            # check if the label is already there, and if not, add it
-                            elif (
-                                label_params[metric][2]
-                                not in parent_labels[unit_id]
-                            ):
-                                parent_labels[unit_id].extend(
-                                    label_params[metric][2]
-                                )
+        for metric in label_params:
+            if metric not in quality_metrics:
+                Warning(f"{metric} not found in quality metrics; skipping")
+                continue
+
+            compare = _comparison_to_function[label_params[metric][0]]
+
+            for unit_id in quality_metrics[metric]:
+
+                # compare the quality metric to the threshold with the
+                # specified operator note that label_params[metric] is a three
+                # element list with a comparison operator as a string, the
+                # threshold value, and a list of labels to be applied if the
+                # comparison is true
+
+                label = label_params[metric]
+
+                if compare(quality_metrics[metric][unit_id], label[1]):
+                    if unit_id not in parent_labels:
+                        parent_labels[unit_id] = label[2]
+                    # check if the label is already there, and if not, add it
+                    elif label[2] not in parent_labels[unit_id]:
+                        parent_labels[unit_id].extend(label[2])
+
             return parent_labels
 
 
@@ -964,6 +994,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)
     """
+    _use_transaction, _allow_insert = False, True
 
     class Unit(SpyglassMixin, dj.Part):
         definition = """

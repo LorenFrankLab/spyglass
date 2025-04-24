@@ -30,6 +30,30 @@ def _import_ghostipy():
 
 @schema
 class FirFilterParameters(SpyglassMixin, dj.Manual):
+    """Filter parameters for filtering continuous time data.
+
+    Parameters
+    ----------
+    filter_name: str
+        The name of the filter.
+    filter_sampling_rate: int
+        The sampling rate of the filter.
+    filter_type: str
+        The type of filter ('lowpass', 'highpass', or 'bandpass').
+    filter_low_stop: float
+        The lowest frequency for the stop band for low filter.
+    filter_low_pass: float
+        The lowest frequency for the pass band of low filter.
+    filter_high_pass: float
+        The highest frequency for the pass band of high filter.
+    filter_high_stop: float
+        The highest frequency for the stop band of high filter.
+    filter_comments: str
+        Comments about the filter.
+    filter_band_edges: np.ndarray
+        A numpy array of filter coefficients.
+    """
+
     definition = """
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter

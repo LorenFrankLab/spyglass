@@ -255,6 +255,24 @@ class SortInterval(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
+    """Preprocessing parameters for spike sorting.
+
+    Parameters
+    ----------
+    preproc_params_name : str
+        Name of the preprocessing parameters.
+    preproc_params : dict
+        Dictionary of preprocessing parameters.
+        frequency_min : float
+            High pass filter value in Hz.
+        frequency_max : float
+            Low pass filter value in Hz.
+        margin_ms : float
+            Margin in ms on border to avoid border effect.
+        seed : int
+            Random seed for whitening.
+    """
+
     definition = """
     preproc_params_name: varchar(32)
     ---
@@ -297,6 +315,7 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
+
     definition = """
     -> SpikeSortingRecordingSelection
     ---
@@ -306,7 +325,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populates the SpikeSortingRecording table with the recording data.
