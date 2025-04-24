@@ -1,3 +1,5 @@
+"""MicroCT-derived coordinates and region assignment for an electrode"""
+
 import datajoint as dj
 
 from spyglass.common import (
@@ -6,7 +8,7 @@ from spyglass.common import (
     Electrode,
 )  # noqa: F401
 from spyglass.micro_ct.v1.micro_ct import (  # noqa: F401
-    MicroCTImage,
+    MicroCTImages,
     MicroCTRegistration,
 )
 from spyglass.utils import SpyglassMixin
@@ -19,7 +21,7 @@ class ChannelBrainLocationMicroCTV1(SpyglassMixin, dj.Manual):
     definition = """
     # MicroCT-derived coordinates and region assignment for an electrode
     -> Electrode                   # Electrode being localized
-    -> MicroCTImage                # Source NWB file link for microCT data
+    -> MicroCTImages                # Source NWB file link for microCT data
     -> MicroCTRegistration             # Alignment parameters used
     ---
     -> CoordinateSystem            # Defines the space for pos_x,y,z

@@ -25,6 +25,11 @@ class Histology(SpyglassMixin, dj.Manual):
     experiment_purpose: varchar(1024) # e.g., 'Probe track recovery for Neuropixel P0', 'ChR2 expression check in mPFC', 'General anatomical reference'
     notes = "": varchar(2048)  # Optional general notes about the preparation
     -> [nullable] LabMember.proj(histology_experimenter='user_name') # Optional: who did the prep?
+
+    output_format = 'TIFF stack': varchar(64)    # Format of raw reconstructed data
+
+    # Raw Data Location (Essential Input for downstream processing)
+    raw_scan_path: varchar(512)                  # Path to the raw output (e.g., folder containing TIFF stack)
     """
 
     class HistologyStain(SpyglassMixin, dj.Part):
@@ -49,13 +54,13 @@ class HistologyImages(SpyglassMixin, dj.Computed):
    images_id: varchar(32) # User-defined ID for these images (e.g., 'probe_track_run1', 'anatomy_stain_seriesA')
    ---
    -> AnalysisNwbfile
+   processing_time=CURRENT_TIMESTAMP: timestamp
    color_to_stain = NULL: blob # Mapping of color channels to stains (e.g., {'DAPI': 'blue', 'GFAP': 'green'})
    pixel_size_x: float # (um) Pixel size in X direction
    pixel_size_y: float # (um) Pixel size in Y direction
    pixel_size_z: float # (um) Pixel size in Z direction
    objective_magnification: float # Magnification of the objective lens used (e.g., 20x, 40x)
-   scale: float # Scale factor for the image (e.g., 1.0 for no scaling, 2.0 for double size)
-   image_modality: enum("fluorescence", "brightfield", "other") # Modality of the image (e.g., 'fluorescence', 'brightfield')
+   image_modality: enum("fluorescence", "brightfield", "other") # Modality of the image
    """
 
     def make(self, key: dict) -> None:
@@ -76,6 +81,7 @@ class HistologyRegistration(SpyglassMixin, dj.Manual):
      registration_method       : varchar(128)    # algorithmic approach, e.g. 'affine+bspline'
      registration_software     : varchar(128)    # e.g. 'ANTs', 'elastix', 'SimpleITK'
      registration_software_version : varchar(64)  # e.g. '2.3.5', '1.3.0'
+     registration_parameters = NULL: blob # Store parameters used for registration (e.g., JSON, YAML)
      transformation_matrix = NULL: blob # Store affine matrix if computed/applicable (e.g., 4x4 np.array.tobytes())
      warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear
      registration_quality = NULL: float   # Optional QC metric for the registration (e.g., Dice score, landmark error)

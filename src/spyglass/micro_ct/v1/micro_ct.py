@@ -59,7 +59,6 @@ class MicroCTImages(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     processing_time=CURRENT_TIMESTAMP: timestamp
-    processing_notes = "": varchar(1024)
     """
 
     def make(self, key: dict) -> None:
@@ -75,16 +74,16 @@ class MicroCTRegistration(SpyglassMixin, dj.Manual):
     definition = """
      # Stores results and parameters of aligning microCT image data to a target coordinate system
      -> MicroCTImages          # Link to the source microCT NWB file info
-     registration_id: varchar(32) # Unique ID for this specific registration instance/parameters
+     registration_id: varchar(32) # Unique ID for this specific registration instance/parameters (e.g., 'Elastix_Default_v1')
      ---
-     -> CoordinateSystem       # The TARGET coordinate system achieved by this registration
+     -> CoordinateSystem       # The TARGET coordinate system achieved by this registration (e.g., 'allen_ccf_v3_ras_um')
      registration_method       : varchar(128)    # algorithmic approach, e.g. 'affine+bspline'
      registration_software     : varchar(128)    # e.g. 'ANTs', 'elastix', 'SimpleITK'
      registration_software_version : varchar(64)  # e.g. '2.3.5', '1.3.0'
-     registration_params = NULL: blob   # Store parameters dict/json
-     transformation_matrix = NULL: blob # Store affine matrix if applicable
+     registration_parameters = NULL: blob # Store parameters used for registration (e.g., JSON, YAML)
+     transformation_matrix = NULL: blob # Store affine matrix if computed/applicable (e.g., 4x4 np.array.tobytes())
      warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear
-     registration_quality = NULL: float   # Optional QC metric for the registration
-     registration_time = CURRENT_TIMESTAMP: timestamp
-     registration_notes = "": varchar(2048)
+     registration_quality = NULL: float   # Optional QC metric for the registration (e.g., Dice score, landmark error)
+     registration_time = CURRENT_TIMESTAMP: timestamp  # Time this registration entry was created/run
+     registration_notes = "": varchar(2048) # Any specific notes about this registration run
      """

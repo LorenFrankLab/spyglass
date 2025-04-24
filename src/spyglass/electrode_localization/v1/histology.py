@@ -1,3 +1,5 @@
+"""Histology-derived coordinates and region assignment for an electrode"""
+
 import datajoint as dj
 
 from spyglass.common import (
@@ -6,7 +8,7 @@ from spyglass.common import (
     Electrode,
 )  # noqa: F401
 from spyglass.histology.v1.histology import (  # noqa: F401
-    HistologyImage,
+    HistologyImages,
     HistologyRegistration,
 )
 from spyglass.utils import SpyglassMixin
@@ -19,7 +21,7 @@ class ChannelBrainLocationHistologyV1(SpyglassMixin, dj.Manual):
     definition = """
     # Histology-derived coordinates and region assignment for an electrode
     -> Electrode                   # Electrode being localized
-    -> HistologyImage              # Source NWB file link for histology images
+    -> HistologyImages              # Source NWB file link for histology images
     -> HistologyRegistration       # Alignment parameters used
     ---
     -> CoordinateSystem            # Defines the space for pos_x,y,z (e.g., Allen CCF RAS um)
