@@ -16,7 +16,7 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
     subregion_abbr=NULL: varchar(64)  # Subregion abbreviation (e.g., 'CA1')
     subsubregion_name=NULL: varchar(200) # Sub-subregion name (e.g., 'stratum pyramidale')
     subsubregion_abbr=NULL: varchar(64) # Sub-subregion abbreviation (e.g., 'sp')
-    atlas_source: varchar(128)      # Source atlas (e.g., 'Allen CCF v3', 'Paxinos Rat 6th Ed')
+    atlas_source=NULL: varchar(128)      # Source atlas (e.g., 'Allen CCF v3', 'Paxinos Rat 6th Ed')
     """
 
     # TODO consider making (region_name, subregion_name, subsubregion_name) a
