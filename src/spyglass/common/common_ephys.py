@@ -339,7 +339,7 @@ class Raw(SpyglassMixin, dj.Imported):
                 min_valid_len=0,
             )
 
-        IntervalList().cautious_insert(interval_dict)
+        IntervalList().cautious_insert(interval_dict, update=True)
 
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id
@@ -925,6 +925,12 @@ class LFPBand(SpyglassMixin, dj.Computed):
             + str(lfp_band_sampling_rate)
             + "Hz"
         )
+
+        # TODO: why does this check against existing one set of times, but
+        # then insert censored times? Shouldn't it check against the censored
+        # times? Doesn't match `lfp_band.py`
+        # If it should be censored, can replace block for `cautious_insert`
+
         tmp_valid_times = (
             IntervalList
             & {

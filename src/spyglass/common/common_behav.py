@@ -10,11 +10,7 @@ import pynwb
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
-from spyglass.common.common_interval import (
-    Interval,
-    IntervalList,
-    interval_list_contains,
-)
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
@@ -116,7 +112,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls._safe_context():
-            IntervalList().cautious_insert(intervals)
+            IntervalList().cautious_insert(intervals, update=True)
             cls.insert(sources, skip_duplicates=skip_duplicates)
             cls.SpatialSeries.insert(
                 spat_series, skip_duplicates=skip_duplicates
@@ -424,7 +420,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
                 timestamps = video_obj.timestamps
                 these_times = valid_times.contains(timestamps).times
-
                 if not len(these_times > 0.9 * len(timestamps)):
                     continue
 

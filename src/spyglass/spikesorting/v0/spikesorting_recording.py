@@ -1,6 +1,5 @@
 import os
 import shutil
-from functools import reduce
 from pathlib import Path
 
 import datajoint as dj
@@ -12,11 +11,7 @@ from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
-from spyglass.common.common_interval import (
-    Interval,
-    IntervalList,
-    union_adjacent_index,
-)
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_lab import LabTeam  # noqa: F401
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
@@ -464,13 +459,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
         )
         # join intervals of indices that are adjacent
-        valid_sort_times_indices = reduce(
-            union_adjacent_index, valid_sort_times_indices
+        valid_sort_times_indices = (
+            Interval(valid_sort_times_indices)
+            .union_adjacent_consolidate()
+            .times
         )
-        if valid_sort_times_indices.ndim == 1:
-            valid_sort_times_indices = np.expand_dims(
-                valid_sort_times_indices, 0
-            )
 
         # create an AppendRecording if there is more than one disjoint sort interval
         if len(valid_sort_times_indices) > 1:

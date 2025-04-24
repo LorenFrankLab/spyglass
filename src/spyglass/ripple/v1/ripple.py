@@ -10,10 +10,7 @@ from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 from scipy.stats import zscore
 
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput

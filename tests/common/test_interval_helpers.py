@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+# TODO: revise for new Interval class
+
 
 @pytest.fixture(scope="session")
 def list_intersect(common):

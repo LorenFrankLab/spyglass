@@ -77,10 +77,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         """Fetch interval list object for a given key."""
         if not len(self) == 1:
             raise ValueError(f"Expected one row, got {len(self)}")
-        ret = Interval(self.fetch1("valid_times"))
-        assert isinstance(ret, Interval), "Expected Interval object"
-        assert hasattr(ret, "contains"), "Expected contains method"
-        return ret
+        return Interval(self.fetch1("valid_times"))
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         """Plot the intervals in the interval list."""
@@ -168,7 +165,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if return_fig:
             return fig
 
-    def cautious_insert(self, inserts, **kwargs):
+    def cautious_insert(self, inserts, update=False, **kwargs):
         """On existing primary key, check secondary key and update if needed.
 
         `replace=True` will attempt to delete/replace the existing entry. When
@@ -179,6 +176,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
         ----------
         inserts : list of dict
             List of dictionaries to insert.
+        update : bool, optional
+            If True, update the existing entry. Defaults to False.
         **kwargs : dict
             Additional keyword arguments to pass to `insert`.
         """
@@ -208,8 +207,15 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 need_update.append(row)
 
         self.insert(basic_inserts, **kwargs)
-        for row in need_update:
-            self.update1(row)
+
+        if update:
+            for row in need_update:
+                self.update1(row)
+        else:
+            raise ValueError(
+                f"Found {len(need_update)} rows with existing names, but "
+                + f"different times:{need_update}"
+            )
 
     def cleanup(self, dry_run=True):
         """Clean up orphaned IntervalList entries."""
@@ -220,7 +226,15 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
 
 class Interval:
-    """Class to handle interval lists"""
+    """Class to handle interval lists
+
+    NOTE: methods with _-prefix are for internal use comparing two interval
+    lists to allow for inverting non-communicative methods (i.g., AxB!=BxA).
+    External use runs these methods on self vs other.
+    """
+
+    # TODO: Class currently isn't aware of whether intervals are indices or
+    # timestamps. This should be fixed in the future.
 
     def __init__(
         self, interval_list: Union[List[int], dict, np.ndarray], from_inds=False
@@ -492,6 +506,11 @@ class Interval:
             ]
         )
         return Interval(np.concatenate((interval1[:-1], x), axis=0))
+
+    def union_adjacent_consolidate(self):
+        return Interval(
+            self._expand_1d(reduce(self.union_adjacent_index, self.times))
+        )
 
     def union(
         self,
@@ -839,6 +858,9 @@ def interval_list_intersect(interval_list1, interval_list2, min_length=0):
     -------
     interval_list: np.array, (N,2)
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_list_intersect")
     return Interval(interval_list1).intersect(interval_list2, min_length).times
 
 
@@ -852,6 +874,9 @@ def union_adjacent_index(interval1, interval2):
     interval1 : np.array
     interval2 : np.array
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("union_adjacent_index")
     return Interval(interval1).union_adjacent_index(interval2).times
 
 
@@ -918,6 +943,9 @@ def interval_from_inds(list_frames):
     ----------
     list_frames : array_like of int
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("interval_from_inds")
     return Interval(list_frames, from_inds=True).times
 
 
