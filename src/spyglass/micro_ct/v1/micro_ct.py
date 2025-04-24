@@ -1,8 +1,12 @@
 import datajoint as dj
 
-from spyglass.common.common_lab import LabMember  # noqa: F401
-from spyglass.common.common_subject import Subject  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.common import (  # noqa: F401
+    AnalysisNwbfile,
+    CoordinateSystem,
+    LabMember,
+    Subject,
+)
+from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("microct_v1")
 
@@ -56,3 +60,28 @@ class MicroCTImage(SpyglassMixin, dj.Computed):
     processing_time=CURRENT_TIMESTAMP: timestamp
     processing_notes = "": varchar(1024)
     """
+
+    def make(self, key: dict) -> None:
+        """Populate MicroCTImage table with NWB file links and metadata"""
+        # Placeholder for actual implementation
+        # This function should create an AnalysisNwbfile entry and link it to the MicroCTScan entry
+        # It should also populate the processing_time and processing_notes fields based on the image data
+        pass
+
+
+@schema
+class MicroCTRegistration(SpyglassMixin, dj.Manual):
+    definition = """
+     # Stores results and parameters of aligning microCT image data to a target coordinate system
+     -> MicroCTImage           # Link to the source microCT NWB file info
+     registration_id: varchar(32) # Unique ID for this specific registration instance/parameters
+     ---
+     -> CoordinateSystem       # The TARGET coordinate system achieved by this registration
+     registration_method: varchar(128) # Name of algorithm/tool used
+     registration_params = NULL: blob   # Store parameters dict/json
+     transformation_matrix = NULL: blob # Store affine matrix if applicable
+     warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear
+     registration_quality = NULL: float   # Optional QC metric for the registration
+     registration_time = CURRENT_TIMESTAMP: timestamp
+     registration_notes = "": varchar(2048)
+     """

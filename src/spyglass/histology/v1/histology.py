@@ -1,11 +1,12 @@
-from pathlib import Path
-
 import datajoint as dj
 
-from spyglass.common.common_lab import LabMember  # noqa: F401
-from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.common.common_subject import Subject  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.common import (  # noqa: F401
+    AnalysisNwbfile,
+    CoordinateSystem,
+    LabMember,
+    Subject,
+)
+from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("histology_v1")
 
@@ -41,29 +42,37 @@ class Histology(SpyglassMixin, dj.Manual):
         """
 
 
-# Store the image file path and modality?
-# Store the scale and color_to_stain mapping?
-# Store in analysis nwb file?
-class HistologyImage(dj.Manual):
+class HistologyImage(SpyglassMixin, dj.Computed):
     definition = """
+    # Links Histology info to the Analysis NWB file containing the image volume data/links
    -> Histology
-   image_id: int unsigned auto_increment
    ---
-   image_file_path: varchar(255) # Path to image file
-   image_modality: enum("brightfield", "epifluorescence", "confocal", "slide_scanner", "other")
-
+   -> AnalysisNwbfile
+   color_to_stain = NULL: blob # Mapping of color channels to stains (e.g., {'DAPI': 'blue', 'GFAP': 'green'})
+   scale = NULL: blob # Scale of the image (e.g., {'x': 0.5, 'y': 0.5, 'z': 1.0})
+   image_modality: enum("fluorescence", "brightfield", "other") # Modality of the image (e.g., 'fluorescence', 'brightfield')
    """
 
+    def make(self, key: dict) -> None:
+        """Populate HistologyImage table with NWB file links and metadata"""
+        # Placeholder for actual implementation
+        # This function should create an AnalysisNwbfile entry and link it to the Histology entry
+        # It should also populate the color_to_stain and scale fields based on the image data
+        pass
 
-# # Example: Electrode Localization Element might have:
-# class ElectrodePosition(dj.Computed):
-#     definition = """
-#    -> Electrode
-#    -> Histology
-#    ---
-#    # Coordinates in some defined space (histology image, atlas, etc.)
-#    pos_x: float
-#    pos_y: float
-#    pos_z: float
-#    -> BrainRegion # Final assigned region
-#    """
+
+class HistologyRegistration(SpyglassMixin, dj.Manual):
+    definition = """
+     # Stores results and parameters of aligning histology image data to a target coordinate system
+     -> HistologyImage         # Link to the source histology NWB file info
+     registration_id: varchar(32) # Unique ID for this specific registration instance/parameters (e.g., 'Elastix_Default_v1')
+     ---
+     -> CoordinateSystem       # The TARGET coordinate system achieved by this registration (e.g., 'allen_ccf_v3_ras_um')
+     registration_method: varchar(128) # Name of algorithm/tool used (e.g., 'Manual Landmark', 'Elastix', 'BRAINRegistration', 'ABBA', 'QuickNII')
+     registration_params = NULL: blob   # Store parameters as dict/json blob, or link -> registrationParams table if complex/reused
+     transformation_matrix = NULL: blob # Store affine matrix if computed/applicable (e.g., 4x4 np.array.tobytes())
+     warp_field_path = NULL: varchar(512) # Store path to warp field file if non-linear (@external store might be better long term)
+     registration_quality = NULL: float   # Optional QC metric for the registration (e.g., Dice score, landmark error)
+     registration_time = CURRENT_TIMESTAMP: timestamp  # Time this registration entry was created/run
+     registration_notes = "": varchar(2048) # Any specific notes about this registration run
+     """
