@@ -42,14 +42,19 @@ class Histology(SpyglassMixin, dj.Manual):
         """
 
 
-class HistologyImage(SpyglassMixin, dj.Computed):
+class HistologyImages(SpyglassMixin, dj.Computed):
     definition = """
     # Links Histology info to the Analysis NWB file containing the image volume data/links
    -> Histology
+   images_id: varchar(32) # User-defined ID for these images (e.g., 'probe_track_run1', 'anatomy_stain_seriesA')
    ---
    -> AnalysisNwbfile
    color_to_stain = NULL: blob # Mapping of color channels to stains (e.g., {'DAPI': 'blue', 'GFAP': 'green'})
-   scale = NULL: blob # Scale of the image (e.g., {'x': 0.5, 'y': 0.5, 'z': 1.0})
+   pixel_size_x: float # (um) Pixel size in X direction
+   pixel_size_y: float # (um) Pixel size in Y direction
+   pixel_size_z: float # (um) Pixel size in Z direction
+   objective_magnification: float # Magnification of the objective lens used (e.g., 20x, 40x)
+   scale: float # Scale factor for the image (e.g., 1.0 for no scaling, 2.0 for double size)
    image_modality: enum("fluorescence", "brightfield", "other") # Modality of the image (e.g., 'fluorescence', 'brightfield')
    """
 
@@ -64,7 +69,7 @@ class HistologyImage(SpyglassMixin, dj.Computed):
 class HistologyRegistration(SpyglassMixin, dj.Manual):
     definition = """
      # Stores results and parameters of aligning histology image data to a target coordinate system
-     -> HistologyImage         # Link to the source histology NWB file info
+     -> HistologyImages         # Link to the source histology NWB file info
      registration_id: varchar(32) # Unique ID for this specific registration instance/parameters (e.g., 'Elastix_Default_v1')
      ---
      -> CoordinateSystem       # The TARGET coordinate system achieved by this registration (e.g., 'allen_ccf_v3_ras_um')

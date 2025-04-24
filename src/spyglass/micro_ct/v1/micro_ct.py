@@ -51,10 +51,11 @@ class MicroCTScan(SpyglassMixin, dj.Manual):
     """
 
 
-class MicroCTImage(SpyglassMixin, dj.Computed):
+class MicroCTImages(SpyglassMixin, dj.Computed):
     definition = """
     # Links MicroCTScan info to the Analysis NWB file containing the image volume data/links
     -> MicroCTScan
+    images_id: varchar(32) # User-defined ID for these images (e.g., 'SubjX_OsO4_Scan1')
     ---
     -> AnalysisNwbfile
     processing_time=CURRENT_TIMESTAMP: timestamp
@@ -73,7 +74,7 @@ class MicroCTImage(SpyglassMixin, dj.Computed):
 class MicroCTRegistration(SpyglassMixin, dj.Manual):
     definition = """
      # Stores results and parameters of aligning microCT image data to a target coordinate system
-     -> MicroCTImage           # Link to the source microCT NWB file info
+     -> MicroCTImages          # Link to the source microCT NWB file info
      registration_id: varchar(32) # Unique ID for this specific registration instance/parameters
      ---
      -> CoordinateSystem       # The TARGET coordinate system achieved by this registration
