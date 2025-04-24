@@ -331,7 +331,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
         # the valid_times for this interval may be slightly beyond the valid
         # times for the lfp itself, so we have to intersect the two lists
         lfp_valid_times = (
