@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_mixin import SpyglassMixin, logger
 
 schema = dj.schema("common_region")
 
@@ -10,10 +10,13 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
     definition = """
     region_id: smallint auto_increment
     ---
-    region_name: varchar(200)             # the name of the brain region
-    subregion_name=NULL: varchar(200)     # subregion name
-    subsubregion_name=NULL: varchar(200)  # subregion within subregion
-    atlas_name=NULL: varchar(200)         # name of the atlas
+    region_name: varchar(200)       # Name of the region (e.g., 'Hippocampal formation')
+    region_abbr=NULL: varchar(64)   # Standard abbreviation (e.g., 'HPF')
+    subregion_name=NULL: varchar(200) # Subregion name (e.g., 'Cornu Ammonis 1')
+    subregion_abbr=NULL: varchar(64)  # Subregion abbreviation (e.g., 'CA1')
+    subsubregion_name=NULL: varchar(200) # Sub-subregion name (e.g., 'stratum pyramidale')
+    subsubregion_abbr=NULL: varchar(64) # Sub-subregion abbreviation (e.g., 'sp')
+    atlas_source: varchar(128)      # Source atlas (e.g., 'Allen CCF v3', 'Paxinos Rat 6th Ed')
     """
 
     # TODO consider making (region_name, subregion_name, subsubregion_name) a
@@ -53,6 +56,11 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
         )
         query = BrainRegion & key
         if not query:
+            logger.info(
+                f"Brain region '{region_name}' not found. Adding to BrainRegion. "
+                "Please make sure to check the spelling and format."
+                "Remove any extra spaces or special characters."
+            )
             cls.insert1(key)
             query = BrainRegion & key
         return query.fetch1("region_id")
@@ -61,18 +69,52 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
 @schema
 class CoordinateSystem(dj.Lookup):
     definition = """
-    # Defines standard coordinate systems used for spatial data
-    coordinate_system_id: varchar(32) # e.g., 'Allen_CCF_v3_RAS_um'
+    # Defines standard coordinate systems used for spatial data.
+    coordinate_system_id: varchar(64) # Primary key (e.g., 'Allen_CCFv3_RAS_um')
     ---
-    description: varchar(255)
+    description: varchar(255)         # Description of the coordinate system
+    orientation: enum(                # Anatomical orientation convention
+        "RAS", "LPS", "PIR", "ASL", "XYZ", "Other"
+        )
+    unit: enum(                       # Spatial unit
+        "um", "mm", "pixels", "voxels"
+        )
+    atlas_source=NULL: varchar(128)   # Source if based on an atlas (e.g., 'Allen CCF v3', 'WHS Rat v4')
     """
-    # Maybe use https://brainglobe.info/documentation/brainglobe-atlasapi/usage/atlas-details.html
     contents = [
         [
-            "Allen_CCF_v3_RAS_um",
-            "Allen CCF v3 Reference Atlas Space, RAS orientation, unit um",
+            "Allen_CCFv3_RAS_um",
+            "Allen CCF v3 Mouse Atlas, RAS orientation, micrometers",
+            "RAS",
+            "um",
+            "Allen CCF v3",
         ],
-        ["Histology_Image_Pixels", "2D Pixels from processed histology image"],
-        ["MicroCT_Voxel", "3D Voxel space from microCT scan"],
-        ["whs_sd_rat_39um", "3D Voxel space from Waxholm atlas"],
+        [
+            "Paxinos_Rat_6th_PIR_um",
+            "Paxinos & Watson Rat Atlas 6th Ed, PIR orientation, micrometers",
+            "PIR",
+            "um",
+            "Paxinos Rat 6th Ed",
+        ],
+        [
+            "WHS_Rat_v4_RAS_um",
+            "Waxholm Space Sprague Dawley Rat Atlas v4, RAS orientation, micrometers",
+            "RAS",
+            "um",
+            "WHS Rat v4",
+        ],
+        [
+            "Histology_Image_Pixels",
+            "2D Pixels from processed histology image (Origin/Orientation Varies)",
+            "Other",
+            "pixels",
+            None,
+        ],
+        [
+            "MicroCT_Voxel_Scan",
+            "3D Voxel space from raw microCT scan (Orientation relative to scanner)",
+            "XYZ",  # Or 'Other' depending on context
+            "voxels",
+            None,
+        ],
     ]
