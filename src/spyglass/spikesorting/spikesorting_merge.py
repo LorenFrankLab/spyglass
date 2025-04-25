@@ -1,7 +1,6 @@
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
-from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
