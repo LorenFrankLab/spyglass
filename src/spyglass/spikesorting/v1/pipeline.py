@@ -7,7 +7,13 @@ import numpy as np
 
 # --- Spyglass Imports ---
 # Import tables and classes directly used by these functions
-from spyglass.common import ElectrodeGroup, IntervalList, LabTeam, Nwbfile
+from spyglass.common import (
+    ElectrodeGroup,
+    IntervalList,
+    LabTeam,
+    Nwbfile,
+    Probe,
+)
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import (
     ArtifactDetection,
@@ -43,6 +49,9 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
     initial curation, optional metric curation, and insertion into the
     SpikeSortingOutput merge table.
 
+    This function is designed to be called in parallel for each sort group
+    so the input arguments are passed as a tuple.
+
     Parameters
     ----------
     args_tuple : tuple
@@ -74,6 +83,8 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
         kwargs,
     ) = args_tuple
 
+    reserve_jobs = True
+
     # Base key for this specific sort group run
     base_key = {
         "nwb_file_name": nwb_file_name,
@@ -98,6 +109,14 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
         recording_id_dict = SpikeSortingRecordingSelection.insert_selection(
             recording_selection_key
         )
+        if isinstance(recording_id_dict, list):
+            if len(recording_id_dict) > 1:
+                logger.error(
+                    f"Multiple recording selections found for {sg_description}"
+                )
+                return False
+            recording_id_dict = recording_id_dict[0]  # Unpack single entry
+
         if not recording_id_dict:
             logger.warning(
                 "Skipping recording step due to potential duplicate or"
@@ -118,11 +137,11 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                     f"Populating existing recording selection for {sg_description}"
                 )
                 SpikeSortingRecording.populate(
-                    recording_id_dict, reserve_jobs=True, **kwargs
+                    recording_id_dict, reserve_jobs=reserve_jobs, **kwargs
                 )
         else:
             SpikeSortingRecording.populate(
-                recording_id_dict, reserve_jobs=True, **kwargs
+                recording_id_dict, reserve_jobs=reserve_jobs, **kwargs
             )
 
         # --- 2. Artifact Detection Selection and Population ---
@@ -154,11 +173,18 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                     f"Populating existing artifact selection for {sg_description}"
                 )
                 ArtifactDetection.populate(
-                    artifact_id_dict, reserve_jobs=True, **kwargs
+                    artifact_id_dict, reserve_jobs=reserve_jobs, **kwargs
                 )
         else:
+            if isinstance(artifact_id_dict, list):
+                if len(artifact_id_dict) > 1:
+                    logger.error(
+                        f"Multiple artifact selections found for {sg_description}"
+                    )
+                    return False
+                artifact_id_dict = artifact_id_dict[0]
             ArtifactDetection.populate(
-                artifact_id_dict, reserve_jobs=True, **kwargs
+                artifact_id_dict, reserve_jobs=reserve_jobs, **kwargs
             )
 
         # --- 3. Spike Sorting Selection and Population ---
@@ -193,10 +219,19 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                     f"Populating existing sorting selection for {sg_description}"
                 )
                 SpikeSorting.populate(
-                    sorting_id_dict, reserve_jobs=True, **kwargs
+                    sorting_id_dict, reserve_jobs=reserve_jobs, **kwargs
                 )
         else:
-            SpikeSorting.populate(sorting_id_dict, reserve_jobs=True, **kwargs)
+            if isinstance(sorting_id_dict, list):
+                if len(sorting_id_dict) > 1:
+                    logger.error(
+                        f"Multiple sorting selections found for {sg_description}"
+                    )
+                    return False
+                sorting_id_dict = sorting_id_dict[0]
+            SpikeSorting.populate(
+                sorting_id_dict, reserve_jobs=reserve_jobs, **kwargs
+            )
 
         # --- 4. Initial Curation ---
         logger.info(f"---- Step 4: Initial Curation | {sg_description} ----")
@@ -222,6 +257,14 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                     f"Failed to insert initial curation for {sg_description}"
                 )
                 return False
+            else:
+                if isinstance(initial_curation_key, list):
+                    if len(initial_curation_key) > 1:
+                        logger.error(
+                            f"Multiple initial curation keys found for {sg_description}"
+                        )
+                        return False
+                    initial_curation_key = initial_curation_key[0]
         final_curation_key = initial_curation_key  # Default final key
 
         # --- 5. Metric-Based Curation (Optional) ---
@@ -255,11 +298,20 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                         f"Populating existing metric curation selection for {sg_description}"
                     )
                     MetricCuration.populate(
-                        metric_curation_id_dict, reserve_jobs=True, **kwargs
+                        metric_curation_id_dict,
+                        reserve_jobs=reserve_jobs,
+                        **kwargs,
                     )
             else:
+                if isinstance(metric_curation_id_dict, list):
+                    if len(metric_curation_id_dict) > 1:
+                        logger.error(
+                            f"Multiple metric curation selections found for {sg_description}"
+                        )
+                        return False
+                    metric_curation_id_dict = metric_curation_id_dict[0]
                 MetricCuration.populate(
-                    metric_curation_id_dict, reserve_jobs=True, **kwargs
+                    metric_curation_id_dict, reserve_jobs=reserve_jobs, **kwargs
                 )
 
             # Check if the MetricCuration output exists before inserting final curation
@@ -279,8 +331,6 @@ def _process_single_sort_group(args_tuple: tuple) -> bool:
                 "parent_curation_id": initial_curation_key["curation_id"],
                 "description": f"metric_curation_id: {metric_curation_id_dict['metric_curation_id']}",
             }
-            # Note: This check might be too simple if descriptions vary slightly.
-            # Relying on insert_curation's internal checks might be better.
             if CurationV1 & metric_curation_result_check_key:
                 logger.warning(
                     f"Metric curation result already exists for {sg_description}, fetching key."
@@ -413,7 +463,7 @@ def populate_spyglass_spike_sorting_v1(
     """
 
     # --- Input Validation ---
-    required_tables = [Nwbfile, IntervalList, LabTeam, SortGroup]
+    required_tables = [Nwbfile, IntervalList, LabTeam]
     required_keys = [
         {"nwb_file_name": nwb_file_name},
         {
@@ -421,13 +471,19 @@ def populate_spyglass_spike_sorting_v1(
             "interval_list_name": sort_interval_name,
         },
         {"team_name": team_name},
-        {"nwb_file_name": nwb_file_name},  # Check if any sort group exists
     ]
     for TableClass, check_key in zip(required_tables, required_keys):
         if not (TableClass & check_key):
             raise ValueError(
                 f"Required entry not found in {TableClass.__name__} for key: {check_key}"
             )
+
+    if SortGroup & {"nwb_file_name": nwb_file_name}:
+        logger.info(
+            f"Sort groups already exist for {nwb_file_name}, skipping group creation."
+        )
+    else:
+        SortGroup.set_group_by_shank(nwb_file_name=nwb_file_name)
 
     # Check parameter tables exist (if defaults aren't guaranteed by DB setup)
     # Minimal check - assumes defaults exist or user provided valid names
@@ -452,6 +508,9 @@ def populate_spyglass_spike_sorting_v1(
         raise ValueError(
             f"Sorting parameters not found: {sorter_name}, {sorting_param_name}"
         )
+
+    # Make sure Electrode can be joined with Probe
+
     if run_metric_curation:
         if not (
             WaveformParameters & {"waveform_param_name": waveform_param_name}
@@ -477,6 +536,13 @@ def populate_spyglass_spike_sorting_v1(
     }
     if probe_restriction:
         sort_group_query &= probe_restriction
+
+    # Ensure this can be joined with the probe
+    if not (Probe & sort_group_query):
+        raise ValueError(
+            "Probe id not found in ElectrodeGroup for the provided probe_restriction."
+            f"Please check that the Electrodes table has the correct `probe_id` for {nwb_file_name}."
+        )
 
     sort_group_ids = np.unique(sort_group_query.fetch("sort_group_id"))
 
