@@ -376,7 +376,7 @@ def get_valid_intervals(
     # all true entries of gap represent gaps.
     # Get the times bounding these intervals.
     gapind = np.asarray(np.where(gap))
-    # The end of each valid interv are the indices of gaps and the final value
+    # The end of each valid interval are the indices of gaps and the final value
     valid_end = np.append(gapind, np.asarray(len(timestamps) - 1))
 
     # the beginning of the gaps are the first element and gapind+1
