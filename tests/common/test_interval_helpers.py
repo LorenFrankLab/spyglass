@@ -1,12 +1,10 @@
 import numpy as np
 import pytest
 
-# TODO: revise for new Interval class
-
 
 @pytest.fixture(scope="session")
-def list_intersect(common):
-    yield common.common_interval.interval_list_intersect
+def interval_obj(common):
+    yield common.common_interval.Interval
 
 
 @pytest.mark.parametrize(
@@ -24,19 +22,14 @@ def list_intersect(common):
         ),
     ],
 )
-def test_list_intersect(list_intersect, one, two, result):
+def test_list_intersect(interval_obj, one, two, result):
     assert np.array_equal(
-        list_intersect(one, two), result
-    ), "Problem with common_interval.interval_list_intersect"
-
-
-@pytest.fixture(scope="session")
-def set_difference(common):
-    yield common.common_interval.interval_set_difference_inds
+        interval_obj(one).intersect(two).times, result
+    ), "Problem with common_interval.Interval.intersect"
 
 
 @pytest.mark.parametrize(
-    "one, two, expected_result",
+    "one, two, exp_result",
     [
         (  # No overlap
             [(0, 5), (8, 10)],
@@ -70,77 +63,70 @@ def set_difference(common):
         ),
     ],
 )
-def test_set_difference(set_difference, one, two, expected_result):
+def test_set_difference(interval_obj, one, two, exp_result):
     assert (
-        set_difference(one, two) == expected_result
-    ), "Problem with common_interval.interval_set_difference_inds"
+        interval_obj(one).set_difference_inds(two).times == exp_result
+    ), "Problem with Interval.set_difference"
 
 
 @pytest.mark.parametrize(
-    "expected_result, min_len, max_len",
+    "exp_result, min_len, max_len",
     [
         (np.array([[0, 1]]), 0.0, 10),
         (np.array([[0, 1], [0, 1e11]]), 0.0, 1e12),
         (np.array([[0, 0], [0, 1]]), -1, 10),
     ],
 )
-def test_intervals_by_length(common, expected_result, min_len, max_len):
-    # input is the same across all tests. Could be parametrized as above
-    inds = common.common_interval.intervals_by_length(
-        interval_list=np.array([[0, 0], [0, 1], [0, 1e11]]),
-        min_length=min_len,
-        max_length=max_len,
+def test_intervals_by_length(interval_obj, exp_result, min_len, max_len):
+    inds = interval_obj(np.array([[0, 0], [0, 1], [0, 1e11]])).by_length(
+        min_length=min_len, max_length=max_len
     )
     assert np.array_equal(
-        inds, expected_result
-    ), "Problem with common_interval.intervals_by_length"
+        inds.times, exp_result
+    ), "Problem with Interval.by_length"
 
 
 @pytest.fixture
-def interval_list_dict():
+def il_dict():
     yield {
-        "interval_list": np.array([[1, 4], [6, 8]]),
-        "timestamps": np.array([0, 1, 5, 7, 8, 9]),
+        "il": np.array([[1, 4], [6, 8]]),
+        "ts": np.array([0, 1, 5, 7, 8, 9]),
     }
 
 
-def test_interval_list_contains_ind(common, interval_list_dict):
-    idxs = common.common_interval.interval_list_contains_ind(
-        **interval_list_dict
-    )
+def test_interval_list_contains_ind(interval_obj, il_dict):
+    idxs = interval_obj(il_dict["il"]).contains(il_dict["ts"], as_indices=True)
     assert np.array_equal(
-        idxs, np.array([1, 3, 4])
-    ), "Problem with common_interval.interval_list_contains_ind"
+        idxs.times, np.array([1, 3, 4])
+    ), "Problem with Interval.contains"
 
 
-def test_interval_list_contains(common, interval_list_dict):
-    idxs = common.common_interval.interval_list_contains(**interval_list_dict)
+def test_interval_list_contains(interval_obj, il_dict):
+    idxs = interval_obj(il_dict["il"]).contains(il_dict["ts"])
     assert np.array_equal(
-        idxs, np.array([1, 7, 8])
-    ), "Problem with common_interval.interval_list_contains"
+        idxs.times, np.array([1, 7, 8])
+    ), "Problem with Interval.contains"
 
 
-def test_interval_list_excludes_ind(common, interval_list_dict):
-    idxs = common.common_interval.interval_list_excludes_ind(
-        **interval_list_dict
-    )
+def test_interval_list_excludes_ind(interval_obj, il_dict):
+    idxs = interval_obj(il_dict["il"]).excludes(il_dict["ts"], as_indices=True)
     assert np.array_equal(
-        idxs, np.array([0, 2, 5])
-    ), "Problem with common_interval.interval_list_excludes_ind"
+        idxs.times, np.array([0, 2, 5])
+    ), "Problem with Interval.excludes"
 
 
-def test_interval_list_excludes(common, interval_list_dict):
-    idxs = common.common_interval.interval_list_excludes(**interval_list_dict)
+def test_interval_list_excludes(interval_obj, il_dict):
+    idxs = interval_obj(il_dict["il"]).excludes(il_dict["ts"])
     assert np.array_equal(
-        idxs, np.array([0, 5, 9])
-    ), "Problem with common_interval.interval_list_excludes"
+        idxs.times, np.array([0, 5, 9])
+    ), "Problem with Interval.excludes"
 
 
-def test_consolidate_intervals_1dim(common):
-    exp = common.common_interval.consolidate_intervals(np.array([0, 1]))
+def test_consolidate_intervals_1dim(interval_obj):
+    exp = interval_obj(np.array([0, 1])).consolidate().times
     assert np.array_equal(
         exp, np.array([[0, 1]])
-    ), "Problem with common_interval.consolidate_intervals"
+    ), "Problem with Interval.consolidate"
 
 
 @pytest.mark.parametrize(
@@ -163,11 +149,11 @@ def test_consolidate_intervals_1dim(common):
         ),
     ],
 )
-def test_union_adjacent_index(common, interval1, interval2, exp_result):
+def test_union_adjacent_index(interval_obj, interval1, interval2, exp_result):
+    ret = interval_obj(interval1).union_adjacent_index(interval2).times
     assert np.array_equal(
-        common.common_interval.union_adjacent_index(interval1, interval2),
-        exp_result,
-    ), "Problem with common_interval.union_adjacent_index"
+        ret, exp_result
+    ), "Problem with Interval.union_adjacent_index"
 
 
 @pytest.mark.parametrize(
@@ -190,27 +176,21 @@ def test_union_adjacent_index(common, interval1, interval2, exp_result):
         ),
     ],
 )
-def test_interval_list_union(common, interval1, interval2, exp_result):
-    assert np.array_equal(
-        common.common_interval.interval_list_union(interval1, interval2),
-        exp_result,
-    ), "Problem with common_interval.interval_list_union"
+def test_interval_list_union(interval_obj, interval1, interval2, exp_result):
+    ret = interval_obj(interval1).union(interval2).times
+    assert np.array_equal(ret, exp_result), "Problem with Interval.union"
 
 
-def test_interval_list_censor_error(common):
+def test_interval_list_censor_error(interval_obj):
     with pytest.raises(ValueError):
-        common.common_interval.interval_list_censor(
-            np.array([[0, 1]]), np.array([2])
-        )
+        interval_obj(np.array([[0, 1]])).censor(np.array([2]))
 
 
-def test_interval_list_censor(common):
+def test_interval_list_censor(interval_obj):
+    ret = interval_obj(np.array([[0, 2], [4, 5]])).censor(np.array([1, 2, 4]))
     assert np.array_equal(
-        common.common_interval.interval_list_censor(
-            np.array([[0, 2], [4, 5]]), np.array([1, 2, 4])
-        ),
-        np.array([[1, 2]]),
-    ), "Problem with common_interval.interval_list_censor"
+        ret.times, np.array([[1, 2]])
+    ), "Problem with Interval.censor"
 
 
 @pytest.mark.parametrize(
@@ -234,11 +214,10 @@ def test_interval_list_censor(common):
         ),
     ],
 )
-def test_interval_from_inds(common, interval_list, exp_result):
+def test_interval_from_inds(interval_obj, interval_list, exp_result):
     assert np.array_equal(
-        common.common_interval.interval_from_inds(interval_list),
-        exp_result,
-    ), "Problem with common_interval.interval_from_inds"
+        interval_obj(interval_list, from_inds=True).times, exp_result
+    ), "Problem with Interval(x, from_inds=True)"
 
 
 @pytest.mark.parametrize(
@@ -265,10 +244,7 @@ def test_interval_from_inds(common, interval_list, exp_result):
     ],
 )
 def test_interval_list_complement(
-    common, intervals1, intervals2, min_length, exp_result
+    interval_obj, intervals1, intervals2, min_length, exp_result
 ):
-    ic = common.common_interval.interval_list_complement
-    assert np.array_equal(
-        ic(intervals1, intervals2, min_length),
-        exp_result,
-    ), "Problem with common_interval.interval_list_compliment"
+    ret = interval_obj(intervals1).complement(intervals2, min_length).times
+    assert np.array_equal(ret, exp_result), "Problem with Interval.compliment"
