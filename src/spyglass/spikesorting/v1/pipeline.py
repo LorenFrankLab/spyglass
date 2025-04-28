@@ -10,6 +10,7 @@ import numpy as np
 from spyglass.common import (
     ElectrodeGroup,
     IntervalList,
+    LabMember,
     LabTeam,
     Nwbfile,
     Probe,
@@ -513,10 +514,27 @@ def populate_spyglass_spike_sorting_v1(
             f"IntervalList not found: {nwb_file_name}, {sort_interval_name}"
         )
     if not (LabTeam & {"team_name": team_name}):
-        raise ValueError(
-            f"LabTeam not found: {team_name}. Use `sgc.LabTeam().create_new_team` "
-            "to add your spikesorting team."
-        )
+        msg = "No LabTeam found. Do you want to create a new one with your username?"
+        if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
+            raise ValueError(
+                f"LabTeam not found: {team_name}. Use `sgc.LabTeam().create_new_team` "
+                "to add your spikesorting team."
+            )
+        else:
+            logger.info(
+                f"Creating new LabTeam entry for {team_name} with username."
+            )
+            # Create a new LabTeam entry with the current username
+            team_members = [
+                (LabMember & {"username": dj.config["user"]}).fetch1(
+                    "lab_member_name"
+                )
+            ]
+            LabTeam.create_new_team(
+                team_name=team_name,
+                team_members=team_members,
+                team_description="",
+            )
 
     if not (SortGroup & {"nwb_file_name": nwb_file_name}):
         logger.info(
