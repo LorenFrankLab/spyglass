@@ -1,3 +1,5 @@
+from typing import List, Optional, Union
+
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -48,9 +50,9 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         electrode_list: list[int],
         filter_name: str,
         interval_list_name: str,
-        reference_electrode_list: list[int],
-        lfp_band_sampling_rate: int,
-    ):
+        reference_electrode_list: Union[int, list[int], np.ndarray] = -1,
+        lfp_band_sampling_rate: Optional[int] = None,
+    ) -> None:
         """Sets the electrodes to be filtered for a given LFP
 
         Parameters
@@ -65,18 +67,50 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             The name of the filter to be used
         interval_list_name: str
             The name of the interval list to be used
-        reference_electrode_list: list
-            A list of the reference electrodes to be used
-        lfp_band_sampling_rate: int
-        """
-        # Error checks on parameters
-        # electrode_list
+        reference_electrode_list: int or list[int] or np.ndarray
+            A list of the reference electrodes to be used.
+            If a single int is provided, it will be used for all electrodes.
+            If -1, no reference will be used.
+            If a list is provided, it must be the same length as electrode_list.
+            If a numpy array is provided, it must be 1D and the same length as
+            electrode_list.
+            If not provided, -1 will be used for all electrodes.
+        lfp_band_sampling_rate: int, optional
+            The sampling rate for the filtered data. If not provided,
+            the original sampling rate will be used.
+            It is recommended to use the same sampling rate as the original
+            lfp data to avoid aliasing.
 
+        Raises
+        ------
+        ValueError
+            If the LFP data is from CommonLFP, or if the electrode list is empty,
+            or if the electrodes are not valid for this session, or
+            if the filter is not valid for this session, or if the interval list
+            is not valid for this session, or if the reference electrode list
+            is not valid for this session, or if the sampling rate is invalid.
+        TypeError
+            If the reference electrode list is not an int, list, or numpy array.
+
+        """
         lfp_key = {"merge_id": lfp_merge_id}
         lfp_part_table = LFPOutput.merge_get_part(lfp_key)
 
-        query = LFPElectrodeGroup().LFPElectrode() & lfp_key
-        available_electrodes = query.fetch("electrode_id")
+        # Validate inputs
+        lfp_electrode_group_name = lfp_part_table.fetch1(
+            "lfp_electrode_group_name"
+        )
+        if (LFPOutput & lfp_key).fetch("source") == "CommonLFP":
+            raise ValueError(
+                "LFP data is from CommonLFP; cannot set electrodes for this data"
+            )
+        available_electrodes = (
+            LFPElectrodeGroup().LFPElectrode()
+            & {
+                "nwb_file_name": nwb_file_name,
+                "lfp_electrode_group_name": lfp_electrode_group_name,
+            }
+        ).fetch("electrode_id")
         if not np.all(np.isin(electrode_list, available_electrodes)):
             raise ValueError(
                 "All elements in electrode_list must be valid electrode_ids in"
@@ -87,7 +121,6 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         lfp_sampling_rate = LFPOutput.merge_get_parent(lfp_key).fetch1(
             "lfp_sampling_rate"
         )
-        decimation = lfp_sampling_rate // lfp_band_sampling_rate
         # filter
         filter_query = FirFilterParameters() & {
             "filter_name": filter_name,
@@ -108,27 +141,84 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 f"interval list {interval_list_name} is not in the IntervalList"
                 " table; the list must be added before this function is called"
             )
-        # reference_electrode_list
-        if len(reference_electrode_list) != 1 and len(
+        # ---- Validate reference_electrode_list ----
+        # If a single int is provided, it will be used for all electrodes
+        n_electrodes = len(electrode_list)
+        if isinstance(reference_electrode_list, int):
+            reference_electrode_list = (
+                np.ones((n_electrodes,), dtype=int) * reference_electrode_list
+            )
+
+        # If list, then convert to numpy array
+        if isinstance(reference_electrode_list, list):
+            reference_electrode_list = np.array(
+                reference_electrode_list, dtype=int
+            )
+
+        # If not a numpy array, raise an error
+        if not isinstance(reference_electrode_list, np.ndarray):
+            raise TypeError(
+                "reference_electrode_list must be an int, list, or numpy array."
+            )
+
+        # Ensure reference_electrode_list is a 1D array
+        reference_electrode_list = np.atleast_1d(
             reference_electrode_list
-        ) != len(electrode_list):
-            raise ValueError(
-                "reference_electrode_list must contain either 1 or "
-                + "len(electrode_list) elements"
-            )
-        # add a -1 element to the list to allow for the no reference option
-        available_electrodes = np.append(available_electrodes, [-1])
-        if not np.all(np.isin(reference_electrode_list, available_electrodes)):
-            raise ValueError(
-                "All elements in reference_electrode_list must be valid "
-                "electrode_ids in the LFPSelection table"
+        ).astype(int)
+        if len(reference_electrode_list) == 1:
+            reference_electrode_list = (
+                np.ones((n_electrodes,), dtype=int)
+                * reference_electrode_list[0]
             )
 
-        # make a list of all the references
-        ref_list = np.zeros((len(electrode_list),))
-        ref_list[:] = reference_electrode_list
+        # Check if the length of reference_electrode_list matches electrode_list
+        if len(reference_electrode_list) != n_electrodes:
+            raise ValueError(
+                "reference_electrode_list must be the same length as "
+                + "electrode_list."
+            )
 
-        key = dict(
+        if reference_electrode_list.ndim > 1:
+            raise ValueError(
+                "reference_electrode_list must be a 1D array or list or int."
+            )
+
+        # Now validate the contents of ref_list_final
+        available_electrodes_check = np.append(
+            available_electrodes.copy(), [-1]
+        )  # Use original available_electrodes
+        if not np.all(
+            np.isin(reference_electrode_list, available_electrodes_check)
+        ):
+            raise ValueError(
+                "All elements in reference_electrode_list must be valid electrode_ids or -1."
+            )
+
+        # Sort electrode_list and reference_electrode_list together
+        # This ensures that the order of electrodes and references is consistent
+        electrode_sort_ind = np.argsort(np.array(electrode_list, dtype=int))
+        electrode_list = np.array(electrode_list, dtype=int)[electrode_sort_ind]
+        reference_electrode_list = reference_electrode_list[electrode_sort_ind]
+
+        # Warn if the sampling rate is not the same as the original
+        if lfp_band_sampling_rate is not None:
+            logger.info(
+                "It is recommended to use the same sampling rate as the original "
+                + "lfp data to avoid aliasing."
+            )
+        # if no sampling rate is provided, use the default
+        lfp_band_sampling_rate = lfp_band_sampling_rate or lfp_sampling_rate
+
+        if lfp_band_sampling_rate > lfp_sampling_rate:
+            raise ValueError(
+                "lfp_band_sampling_rate must be less than or equal to the "
+                + "lfp sampling rate"
+            )
+        if lfp_band_sampling_rate <= 0:
+            raise ValueError("lfp_band_sampling_rate must be greater than 0")
+        decimation = lfp_sampling_rate // lfp_band_sampling_rate
+
+        master_key = dict(
             nwb_file_name=nwb_file_name,
             lfp_merge_id=lfp_merge_id,
             filter_name=filter_name,
@@ -136,30 +226,69 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
             target_interval_list_name=interval_list_name,
             lfp_band_sampling_rate=lfp_sampling_rate // decimation,
         )
-        # insert an entry into the main LFPBandSelectionTable
-        self.insert1(key, skip_duplicates=True)
-
-        key["lfp_electrode_group_name"] = lfp_part_table.fetch1(
+        # nwb_file_name, lfp_electrode_group_name, electrode_group_name, electrode_id, reference_elect_id
+        lfp_electrode_group_name = lfp_part_table.fetch1(
             "lfp_electrode_group_name"
         )
-        # iterate through all of the new elements and add them
-        for e, r in zip(electrode_list, ref_list):
-            elect_key = (
-                LFPElectrodeGroup.LFPElectrode
-                & {
+
+        # get the electrode group names for the electrodes
+        electrode_group_name_list, check_electrode_id_list = (
+            LFPElectrodeGroup.LFPElectrode()
+            & [
+                {
                     "nwb_file_name": nwb_file_name,
-                    "lfp_electrode_group_name": key["lfp_electrode_group_name"],
-                    "electrode_id": e,
+                    "lfp_electrode_group_name": lfp_electrode_group_name,
+                    "electrode_id": electrode_id,
                 }
-            ).fetch1("KEY")
-            for item in elect_key:
-                key[item] = elect_key[item]
-            query = Electrode & {
-                "nwb_file_name": nwb_file_name,
-                "electrode_id": e,
+                for electrode_id in electrode_list
+            ]
+        ).fetch("electrode_group_name", "electrode_id", order_by="electrode_id")
+
+        # check that the electrode ids match in order to avoid
+        # inserting the wrong electrode group names
+        if not np.array_equal(electrode_list, check_electrode_id_list):
+            raise ValueError(
+                "Electrode IDs do not match the electrode IDs in the "
+                + "LFPElectrodeGroup table"
+            )
+        part_keys = [
+            {
+                **master_key,
+                "lfp_electrode_group_name": lfp_electrode_group_name,
+                "electrode_group_name": electrode_group_name,
+                "electrode_id": electrode_id,
+                "reference_elect_id": reference_elect_id,
             }
-            key["reference_elect_id"] = r
-            self.LFPBandElectrode().insert1(key, skip_duplicates=True)
+            for electrode_id, reference_elect_id, electrode_group_name in zip(
+                electrode_list,
+                reference_electrode_list,
+                electrode_group_name_list,
+            )
+        ]
+
+        # check if the LFPBandSelection table already has this entry
+        if self & master_key:
+            # if it does, check if the electrodes are the same
+            existing_electrodes = (self.LFPBandElectrode() & master_key).fetch(
+                "electrode_id"
+            )
+            if set(existing_electrodes) == set(electrode_list):
+                logger.info(
+                    f"LFPBandSelection already exists for {master_key}; "
+                    + "not inserting"
+                )
+                return
+            else:
+                raise ValueError(
+                    f"LFPBandSelection already exists for {master_key}; "
+                    + "please delete the existing entry before inserting"
+                )
+
+        with self.connection.transaction:
+            # insert the main entry into the LFPBandSelection table
+            self.insert1(master_key)
+            # insert the part entries into the LFPBandElectrode table
+            self.LFPBandElectrode().insert(part_keys)
 
 
 @schema
@@ -172,7 +301,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
         """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
         lfp_band_file_name = AnalysisNwbfile().create(  # logged
@@ -371,23 +500,35 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    def fetch1_dataframe(self, *attrs, **kwargs):
+    def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetches the filtered data as a dataframe"""
-        filtered_nwb = self.fetch_nwb()[0]
+        filtered_nwb = self.fetch_nwb()
+
+        if len(filtered_nwb) == 0:
+            raise ValueError("No filtered data found for this LFPBandSelection")
+        if len(filtered_nwb) > 1:
+            raise ValueError(
+                "Multiple filtered data found for this LFPBandSelection. Expected 1"
+            )
+
+        filtered_nwb = filtered_nwb[0]
         return pd.DataFrame(
             filtered_nwb["lfp_band"].data,
             index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),
         )
 
-    def compute_analytic_signal(self, electrode_list: list[int], **kwargs):
+    def compute_analytic_signal(
+        self, electrode_list: Optional[list[int]] = None
+    ) -> pd.DataFrame:
         """Computes the hilbert transform of a given LFPBand signal
 
         Uses scipy.signal.hilbert to compute the hilbert transform
 
         Parameters
         ----------
-        electrode_list: list[int]
+        electrode_list: list[int], optional
             A list of the electrodes to compute the hilbert transform of
+            If None, all electrodes are computed, by default None
 
         Returns
         -------
@@ -401,9 +542,18 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         """
 
         filtered_band = self.fetch_nwb()[0]["lfp_band"]
-        electrode_index = np.isin(
-            filtered_band.electrodes.data[:], electrode_list
-        )
+        band_electrodes = filtered_band.electrodes.data[:]
+
+        electrode_list = electrode_list or band_electrodes
+
+        if not isinstance(electrode_list, (list, np.ndarray)):
+            raise ValueError(
+                "electrode_list must be a list or numpy array of integers."
+            )
+
+        # get the indices of the electrodes to be filtered
+        electrode_list = np.array(electrode_list, dtype=int)
+        electrode_index = np.isin(band_electrodes, electrode_list)
         if len(electrode_list) != np.sum(electrode_index):
             raise ValueError(
                 "Some of the electrodes specified in electrode_list are missing"
@@ -414,57 +564,51 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             index=pd.Index(filtered_band.timestamps, name="time"),
             columns=[f"electrode {e}" for e in electrode_list],
         )
+
         return analytic_signal_df
 
     def compute_signal_phase(
-        self, electrode_list: list[int] = None, **kwargs
+        self, electrode_list: Optional[list[int]] = None
     ) -> pd.DataFrame:
         """Computes phase of LFPBand signals using the hilbert transform
 
         Parameters
         ----------
         electrode_list : list[int], optional
-            A list of the electrodes to compute the phase of, by default None
+            A list of the electrodes to compute the phase of.
+            If None, all electrodes are computed, by default None
 
         Returns
         -------
         signal_phase_df : pd.DataFrame
             DataFrame containing the phase of the signals
         """
-        if electrode_list is None:
-            electrode_list = []
-
-        analytic_signal_df = self.compute_analytic_signal(
-            electrode_list, **kwargs
-        )
+        analytic_signal_df = self.compute_analytic_signal(electrode_list)
 
         return pd.DataFrame(
-            np.angle(analytic_signal_df) + np.pi,
+            np.angle(analytic_signal_df) + np.pi,  # shift to [0, 2pi]
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
 
     def compute_signal_power(
-        self, electrode_list: list[int] = None, **kwargs
+        self,
+        electrode_list: Optional[list[int]] = None,
     ) -> pd.DataFrame:
         """Computes power LFPBand signals using the hilbert transform
 
         Parameters
         ----------
         electrode_list : list[int], optional
-            A list of the electrodes to compute the power of, by default None
+            A list of the electrodes to compute the power of.
+            If None, all electrodes are computed, by default None
 
         Returns
         -------
         signal_power_df : pd.DataFrame
             DataFrame containing the power of the signals
         """
-        if electrode_list is None:
-            electrode_list = []
-
-        analytic_signal_df = self.compute_analytic_signal(
-            electrode_list, **kwargs
-        )
+        analytic_signal_df = self.compute_analytic_signal(electrode_list)
 
         return pd.DataFrame(
             np.abs(analytic_signal_df) ** 2,

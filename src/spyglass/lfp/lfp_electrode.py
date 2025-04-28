@@ -1,10 +1,11 @@
-from typing import List
+from typing import List, Union
 
 import datajoint as dj
-from numpy import ndarray
+import numpy as np
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("lfp_electrode")
@@ -25,8 +26,10 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def create_lfp_electrode_group(
-        nwb_file_name: str, group_name: str, electrode_list: list[int]
-    ):
+        nwb_file_name: str,
+        group_name: str,
+        electrode_list: Union[list[int], np.ndarray],
+    ) -> None:
         """Adds an LFPElectrodeGroup and the individual electrodes
 
         Parameters
@@ -35,33 +38,89 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             The name of the nwb file (e.g. the session)
         group_name : str
             The name of this group (< 200 char)
-        electrode_list : list
+        electrode_list : list[int] or np.ndarray
             A list of the electrode ids to include in this group.
+
+
+        Raises
+        ------
+        ValueError
+            If the session is not found in the Session table or
+            if the electrode list is empty or
+            if the electrodes are not valid for this session.
         """
-        # remove the session and then recreate the session and Electrode list
-        # check to see if the user allowed the deletion
-        key = {
+        # Validate inputs
+        session_key = {"nwb_file_name": nwb_file_name}
+        if not (Session() & session_key):
+            raise ValueError(
+                f"Session '{nwb_file_name}' not found in Session table."
+            )
+
+        if not isinstance(electrode_list, (list, np.ndarray)):
+            raise ValueError(
+                "electrode_list must be a list or numpy array of integers."
+            )
+
+        if len(electrode_list) == 0:
+            raise ValueError("electrode_list cannot be empty.")
+
+        if isinstance(electrode_list, np.ndarray):
+            # convert to list[int] if numpy array
+            electrode_list = electrode_list.astype(int).ravel().tolist()
+
+        # Sort and remove duplicates
+        electrode_list = sorted(set(electrode_list))
+
+        # Check against valid electrodes for this session in the database
+        electrode_table = Electrode() & session_key
+        if not electrode_table:
+            raise ValueError(
+                f"No electrodes found for session '{nwb_file_name}'."
+            )
+        if np.any(
+            np.isin(
+                electrode_list,
+                electrode_table.fetch("electrode_id"),
+                invert=True,
+            )
+        ):
+            raise ValueError(
+                f"Invalid electrode_id(s) provided for "
+                f"nwb_file_name '{nwb_file_name}'. They do not exist in the "
+                f"Electrode table for this session."
+            )
+
+        master_key = {
             "nwb_file_name": nwb_file_name,
             "lfp_electrode_group_name": group_name,
         }
-        LFPElectrodeGroup().insert1(key, skip_duplicates=True)
 
-        # TODO: do this in a better way
-        all_electrodes = (Electrode() & {"nwb_file_name": nwb_file_name}).fetch(
-            as_dict=True
+        restriction_str = (
+            f"electrode_id = {electrode_list[0]}"
+            if len(electrode_list) == 1
+            else f"electrode_id in {tuple(electrode_list)}"
         )
-        primary_key = Electrode.primary_key
-        if isinstance(electrode_list, ndarray):
-            # convert to list if it is an numpy array
-            electrode_list = list(electrode_list.astype(int).reshape(-1))
-        for e in all_electrodes:
-            # create a dictionary so we can insert the electrodes
-            if e["electrode_id"] in electrode_list:
-                lfpelectdict = {k: v for k, v in e.items() if k in primary_key}
-                lfpelectdict["lfp_electrode_group_name"] = group_name
-                LFPElectrodeGroup().LFPElectrode.insert1(
-                    lfpelectdict, skip_duplicates=True
-                )
+
+        electrode_keys_to_insert = (electrode_table & restriction_str).fetch(
+            "KEY"
+        )
+        part_keys = [
+            {**master_key, **electrode_key}
+            for electrode_key in electrode_keys_to_insert
+        ]
+
+        # Insert within a transaction for atomicity
+        # (Ensures master and parts are inserted together or not at all)
+        with LFPElectrodeGroup.connection.transaction:
+            # Insert master table entry
+            LFPElectrodeGroup().insert1(master_key)
+            # Insert part table entries
+            LFPElectrodeGroup.LFPElectrode.insert(part_keys)
+
+        logger.info(
+            f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
+            f"with {len(electrode_list)} electrodes."
+        )
 
     def cautious_insert(
         self, session_key: dict, electrode_ids: List[int], group_name: str
