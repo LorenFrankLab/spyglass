@@ -1,5 +1,6 @@
 """Helper methods for comparing pynwb objects."""
 
+import atexit
 from json import loads as json_loads
 from pathlib import Path
 
@@ -21,16 +22,30 @@ class H5pyComparator:
     """
 
     def __init__(self, old, new, line_limit=80, run=True):
+        """Initialize the comparator with two objects."""
+        atexit.register(self.cleanup)
+
         self.inputs = (old.__repr__(), new.__repr__())
         self.old = self.obj_to_dict(old)
         self.new = self.obj_to_dict(new)
         self.line_limit = line_limit
+        self.open_files = []
+
         if run:
-            self.compare_dicts(self.old, self.new)
+            self.run()
+
+        self.cleanup()
+        atexit.unregister(self.cleanup)
 
     def __repr__(self):
         old, new = self.inputs
         return f"{self.__class__.__name__}({old}, {new})"
+
+    def cleanup(self):
+        """Close all open files."""
+        for file in self.open_files:
+            file.close()
+        self.open_files = []
 
     def run(self):
         """Rerun the comparison."""
@@ -78,7 +93,9 @@ class H5pyComparator:
 
     def open_file(self, path):
         if path.suffix == ".h5":
-            return h5py.File(path, "r")
+            file = h5py.File(path, "r")
+            self.open_files.append(file)
+            return file
         if path.suffix == ".nwb":
             return f"pointer to {path}"
         if path.suffix == ".json":
@@ -119,6 +136,9 @@ class H5pyComparator:
         """Compare two lists of dictionaries."""
         old_sorted = self.sort_list_of_dicts(old_list)
         new_sorted = self.sort_list_of_dicts(new_list)
+        if not len(old_sorted) == len(new_sorted):
+            print(f"{iteration} {level}: list length differ")
+            print(f"\t{len(old_sorted)} != {len(new_sorted)}")
         for o, n in zip(old_sorted, new_sorted):
             iteration += 1
             if isinstance(o, dict):

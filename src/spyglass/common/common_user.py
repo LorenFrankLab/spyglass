@@ -5,7 +5,7 @@ from json import dumps as json_dumps
 from os import environ as os_environ
 from pathlib import Path
 from subprocess import run as sub_run
-from typing import List
+from typing import List, Optional, Union
 
 import datajoint as dj
 import yaml
@@ -38,7 +38,7 @@ class UserEnvironment(dj.Manual):
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
     @cached_property
-    def env(self) -> str:
+    def env(self) -> Union[dict, str]:
         """Fetch the current Conda environment as a string."""
         result = sub_run(
             ["conda", "env", "export"],
@@ -56,9 +56,12 @@ class UserEnvironment(dj.Manual):
             if k not in ["name", "prefix"]
         }
 
-    def parse_env_dict(self, env):
+    def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
         dependencies = dict()
+        if env is None or not isinstance(env, dict):
+            logger.error(f"Invalid env type: expected dict, got {type(env)}")
+            return dependencies
         for dep in env.get("dependencies", []):
             if isinstance(dep, str):  # split conda by '='
                 pip_dep, val = dep.split("=", maxsplit=1)
@@ -76,13 +79,13 @@ class UserEnvironment(dj.Manual):
         return md5(env_json.encode()).hexdigest()
 
     @cached_property
-    def matching_env_id(self):
+    def matching_env_id(self) -> Optional[str]:
         """Return the env_id that matches the current environment's hash."""
         matches = self & f'env_hash="{self.env_hash}"'
         return matches.fetch1("env_id") if matches else None
 
     @cached_property
-    def this_env(self) -> dict:
+    def this_env(self) -> Optional[dict]:
         """Return the environment key. Cached to avoid rerunning insert."""
         if self.matching_env_id:
             return {"env_id": self.matching_env_id}
@@ -116,7 +119,7 @@ class UserEnvironment(dj.Manual):
 
         return f"{base_id}_{next_int:02d}"
 
-    def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
+    def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> Optional[dict]:
         """Insert the current environment into the table."""
 
         if not self.env:  # if conda dump fails
@@ -138,7 +141,9 @@ class UserEnvironment(dj.Manual):
         return {"env_id": env_id}
 
     def write_env_yaml(
-        self, env_id: str = DEFAULT_ENV_ID, dest_path: str = None
+        self,
+        env_id: Optional[str] = DEFAULT_ENV_ID,
+        dest_path: Optional[str] = None,
     ) -> None:
         """Write the environment to a YAML file."""
         query = self & f'env_id="{env_id}"'
@@ -155,10 +160,10 @@ class UserEnvironment(dj.Manual):
 
     def has_matching_env(
         self,
-        env_id: str = DEFAULT_ENV_ID,
-        relevant_deps: List[str] = None,
-        show_diffs=True,
-    ):
+        env_id: Optional[str] = DEFAULT_ENV_ID,
+        relevant_deps: Optional[List[str]] = None,
+        show_diffs: Optional[bool] = True,
+    ) -> bool:
         """Check if env_id matches the current env, list discrepancies.
 
         Note: Developers working on recompute pipelines may find that they only

@@ -19,15 +19,14 @@ from pathlib import Path
 from pprint import pprint  # TODO: Remove before merge
 from shutil import rmtree as shutil_rmtree
 from subprocess import run as sub_run
-from typing import Tuple
+from typing import Any, List, Optional, Tuple, Union
 
 import datajoint as dj
-from numpy import __version__ as np_version
 from packaging.version import parse as version_parse
 from probeinterface import __version__ as pi_version
 from spikeinterface import __version__ as si_version
 
-from spyglass.common.common_user import UserEnvironment
+from spyglass.common.common_user import UserEnvironment  # noqa F401
 from spyglass.settings import recording_dir, temp_dir
 from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v0.spikesorting_recording import (
@@ -53,7 +52,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 
     # --- Gatekeep recompute attempts ---
 
-    def _fetch_versions(self, package):
+    def _fetch_versions(self, package: str) -> list:
         if cached := self._version_cache.get(package):
             return cached
         run_kwargs = dict(capture_output=True, text=True)
@@ -71,8 +70,10 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             self & self._package_restr("spikeinterface", si_version)
         ) & self._package_restr("probeinterface", pi_version)
 
-    def _has_matching_env(self, key: dict, show_err=True) -> bool:
-        """Check current env for matching pynwb versions."""
+    def _has_matching_env(
+        self, key: dict, show_err: Optional[bool] = True
+    ) -> bool:
+        """Check current env for matching pynwb dependency versions."""
         key_pk = self.dict_to_pk(key)
         if not self & key:
             self.make(key)
@@ -90,7 +91,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 
         return ret
 
-    def _package_restr(self, package, version):
+    def _package_restr(self, package: str, version: str) -> str:
         """Return a restriction string for a package and version.
 
         Restricts to versions matching the most recent official release
@@ -117,7 +118,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 
     # --- Inventory versions ---
 
-    def _extract_version(self, obj):
+    def _extract_version(self, obj: Any) -> set:
         """Extract version numbers from a nested dictionary.
 
         Developed to be recursive to handle provenance.json files, which could
@@ -145,7 +146,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 
         return versions
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
         """Inventory the namespaces present in an analysis file."""
         query = SpikeSortingRecording() & key
         rec_path = Path(query.fetch1("recording_path"))
@@ -187,7 +188,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     logged_at_creation=0: bool
     """
 
-    def insert(self, rows, at_creation=False, **kwargs):
+    def insert(
+        self, rows: List[dict], at_creation: Optional[bool] = False, **kwargs
+    ) -> None:
         """Custom insert to ensure dependencies are added to each row."""
         if not rows:
             return
@@ -207,7 +210,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         super().insert(inserts, **kwargs)
 
     def attempt_all(
-        self, restr: dict = True, limit: int = None, **kwargs
+        self,
+        restr: Optional[dict] = True,
+        limit: Optional[int] = None,
+        **kwargs,
     ) -> None:
         """Insert all files into the recompute table.
 
@@ -268,7 +274,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         name : varchar(255)
         """
 
-        def get_objs(self, key, name: str = None):
+        def get_objs(
+            self, key: dict, name: Optional[str] = None
+        ) -> Tuple[str, str]:
             old, new = RecordingRecompute()._get_paths(key, as_str=True)
 
             old_hasher = RecordingRecompute()._hash_one(old)
@@ -280,7 +288,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
             return old_obj, new_obj
 
-        def compare(self, key=None):
+        def compare(
+            self, key: Optional[Union[dict, list, tuple]] = None
+        ) -> Optional[H5pyComparator]:
             """Compare embedded objects as available.
 
             If key is a list or tuple, compare all entries. If no key, compare
@@ -288,10 +298,8 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             use key to find paths to files and compare the objects.
             """
             if isinstance(key, (list, tuple)) or not key:
-                comps = []
-                for row in key or self:
-                    comps.append(self.compare(row))
-                return comps
+                rows = key or self
+                return [self.compare(row) for row in rows]
 
             if not key.get("name"):
                 self.compare(self & key)
@@ -306,7 +314,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             print("Comparing" + msg)
             return H5pyComparator(old / this_file, new / this_file)
 
-    def _parent_key(self, key):
+    def _parent_key(self, key: dict) -> dict:
         ret = (
             SpikeSortingRecording
             * RecordingRecomputeVersions
@@ -317,7 +325,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             raise ValueError(f"Query returned {len(ret)} entries: {ret}")
         return ret.fetch(as_dict=True)[0]
 
-    def _hash_one(self, path):
+    def _hash_one(self, path: Union[str, Path]) -> DirectoryHasher:
         str_path = str(path)
         if str_path in self._hasher_cache:
             return self._hasher_cache[str_path]
@@ -325,10 +333,12 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self._hasher_cache[str_path] = hasher
         return hasher
 
-    def _get_temp_dir(self, key):
+    def _get_temp_dir(self, key: dict) -> Path:
         return Path(temp_dir) / self.database / key["env_id"]
 
-    def _get_paths(self, key, as_str=False) -> Tuple[Path, Path]:
+    def _get_paths(
+        self, key: dict, as_str: Optional[bool] = False
+    ) -> Tuple[Path, Path]:
         """Return the old and new file paths."""
         rec_name = SpikeSortingRecording()._get_recording_name(key)
 
@@ -337,7 +347,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         return (str(old), str(new)) if as_str else (old, new)
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
         # Skip recompute for files logged at creation
         parent = self._parent_key(key)
         log_key = key.get("nwb_file_name", key)
@@ -390,7 +400,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
-    def delete_files(self, restriction=True, dry_run=True):
+    def delete_files(
+        self,
+        restriction: Optional[Union[str, dict]] = True,
+        dry_run: Optional[bool] = True,
+    ) -> None:
         """If successfully recomputed, delete files for a given restriction."""
         query = self & "matched=1" & restriction
         file_names = query.fetch("analysis_file_name")
@@ -411,7 +425,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
 
-    def delete(self, *args, **kwargs):
+    def delete(self, *args, **kwargs) -> None:
         """Delete recompute attempts when deleting rows."""
         attempt_dirs = []
         for key in self:
@@ -419,7 +433,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             attempt_dirs.append(new)
 
         msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_dirs)
-        if dj.utils.user_choice(msg).lower() == "yes":
+        if dj.utils.user_choice(msg).lower() in ["yes", "y"]:
             for dir in attempt_dirs:
                 shutil_rmtree(dir, ignore_errors=True)
 

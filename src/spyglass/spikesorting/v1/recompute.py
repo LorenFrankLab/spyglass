@@ -18,19 +18,16 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 import atexit
 from functools import cached_property
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Optional, Tuple, Union
 
 import datajoint as dj
 import pynwb
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
-from hdmf import __version__ as hdmf_version
 from hdmf.build import TypeMap
-from numpy import __version__ as np_version
-from spikeinterface import __version__ as si_version
 
 from spyglass.common import AnalysisNwbfile
-from spyglass.common.common_user import UserEnvironment
+from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
 from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
@@ -178,9 +175,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     def attempt_all(
         self,
-        restr: dict = True,
-        rounding: int = None,
-        limit: int = None,
+        restr: Optional[dict] = True,
+        rounding: Optional[int] = None,
+        limit: Optional[int] = None,
         **kwargs,
     ) -> None:
         """Insert recompute attempts for all existing files.

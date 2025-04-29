@@ -2,7 +2,7 @@ import os
 import random
 import string
 from pathlib import Path
-from typing import Union
+from typing import Dict, Optional, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -185,9 +185,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def create(
         self,
         nwb_file_name: str,
-        recompute_file_name: str = None,
-        alternate_dir: Union[str, Path] = None,
-        restrict_permission: bool = False,
+        recompute_file_name: Optional[str] = None,
+        alternate_dir: Optional[Union[str, Path]] = None,
+        restrict_permission: Optional[bool] = False,
     ) -> str:
         """Open the NWB file, create copy, write to disk and return new name.
 
@@ -363,7 +363,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
 
     @classmethod
     def get_abs_path(
-        cls, analysis_nwb_file_name: str, from_schema: bool = False
+        cls, analysis_nwb_file_name: str, from_schema: Optional[bool] = False
     ) -> str:
         """Return the absolute path for an analysis NWB file given the name.
 
@@ -425,7 +425,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self,
         analysis_file_name: str,
         nwb_object: pynwb.core.NWBDataInterface,
-        table_name: str = "pandas_table",
+        table_name: Optional[str] = "pandas_table",
     ):
         # TODO: change to add_object with checks for object type and a name
         # parameter, which should be specified if it is not an NWB container
@@ -465,9 +465,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def get_hash(
         self,
         analysis_file_name: str,
-        from_schema: bool = False,
-        precision_lookup: dict = None,
-        return_hasher: bool = False,
+        from_schema: Optional[bool] = False,
+        precision_lookup: Optional[Dict[str, int]] = None,
+        return_hasher: Optional[bool] = False,
     ) -> Union[str, NwbfileHasher]:
         """Return the hash of the file contents.
 
@@ -478,6 +478,10 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         from_schema : bool, Optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
+        precision_lookup : dict, Optional
+            A dictionary of object names and rounding precisions, dictating the
+            level of precision to which the data should be rounded before
+            hashing. Defaults to None, no rounding.
         return_hasher: bool, Optional
             If true, return the hasher object instead of the hash. Defaults to
             False.
@@ -541,9 +545,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         units: dict,
         units_valid_times: dict,
         units_sort_interval: dict,
-        metrics: dict = None,
-        units_waveforms: dict = None,
-        labels: dict = None,
+        metrics: Optional[dict] = None,
+        units_waveforms: Optional[dict] = None,
+        labels: Optional[dict] = None,
     ):
         """Add units to analysis NWB file
 
@@ -652,8 +656,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self,
         analysis_file_name: str,
         waveform_extractor: si.WaveformExtractor,
-        metrics: dict = None,
-        labels: dict = None,
+        metrics: Optional[dict] = None,
+        labels: Optional[dict] = None,
     ):
         """Add units to analysis NWB file along with the waveforms
 

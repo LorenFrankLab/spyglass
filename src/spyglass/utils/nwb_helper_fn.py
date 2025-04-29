@@ -66,7 +66,7 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         If the NWB file is not found locally or in kachery/Dandi, and cannot be
         recomputed.
     """
-    if not str(nwb_file_path).startswith("/"):
+    if not Path(nwb_file_path).is_absolute():
         from spyglass.common import Nwbfile
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)

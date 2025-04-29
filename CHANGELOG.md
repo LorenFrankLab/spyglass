@@ -15,7 +15,7 @@ Table update script
 import datajoint as dj
 from spyglass.spikesorting.v1 import recording as v1rec  # noqa
 from spyglass.spikesorting.v0 import spikesorting_recording as v0rec  # noqa
-from spyglass.linearization.v1.main import *  # noqa
+from spyglass.linearization.v1.main import TrackGraph  # noqa
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 dj.FreeTable(dj.conn(), "common_session.session_group").drop()

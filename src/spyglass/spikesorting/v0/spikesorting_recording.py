@@ -1,6 +1,6 @@
-import shutil
 from functools import reduce
 from pathlib import Path
+from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
 import numpy as np
@@ -375,7 +375,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             if has_entry:  # if table entry for existing file, use it
                 return {**ret, "hash": self._dir_hash(rec_path)}
             else:  # if no table entry, assume existing is outdated and delete
-                shutil.rmtree(rec_path)
+                shutil_rmtree(rec_path)
 
         recording = self._get_filtered_recording(key)
         recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
@@ -384,7 +384,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             new_hash = self._dir_hash(rec_path, return_hasher=False)
             old_hash = self.fetch("hash")[0]
             if new_hash != old_hash:
-                shutil.rmtree(rec_path)
+                shutil_rmtree(rec_path)
                 raise ValueError(
                     f"Hash mismatch for {rec_path}: {new_hash} != {old_hash}"
                 )
@@ -641,6 +641,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         for folder in tqdm(untracked, desc="Removing untracked folders"):
             try:
-                shutil.rmtree(folder)
+                shutil_rmtree(folder)
             except PermissionError:
                 logger.warning(f"Permission denied: {folder}")

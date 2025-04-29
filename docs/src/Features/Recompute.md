@@ -63,9 +63,9 @@ are modifying the existing table structure to include the new fields.
 
 ### Old files
 
-Retroactively demonstraing that files can be recomputed requires some additional
-work in testing various dependencies and recording the results. To ensure the
-replicability of old files prior to deletion, we'll need to...
+Retroactively demonstrating that files can be recomputed requires some
+additional work in testing various dependencies and recording the results. To
+ensure the replicability of old files prior to deletion, we'll need to...
 
 1. Update the tables for new fields, as shown above.
 2. Attempt file recompute, and record dependency info for successful attempts.
@@ -111,7 +111,7 @@ the environments used to attempt recompute. These attempts are run using the
 
 The respective `Versions` tables will record the dependencies of existing files
 (i.e., spikeinterface and probeinterface versions for v0 and pynwb dependencies
-for v0). By default, these insert methods will generate an entry in
+for v1). By default, these insert methods will generate an entry in
 `common.UserEnvironment`. This table stores all conda and pip dependencies for
 the environment used, and associates them with a unique `env_id` identifier
 (`{USER}_{CONDA_ENV_NAME}_{##}`) that increments if the environment is updated.
@@ -162,7 +162,8 @@ truncate output for large objects an may fail for objects that cannot be read as
 JSON.
 
 To expand the functionality of this feature, please either post a GitHub issue
-or make a pull request with edits to `spyglas.utils.h5_helper_fn.H5pyComarator`.
+or make a pull request with edits to
+`spyglas.utils.h5_helper_fn.H5pyComparator`.
 
 With this information, you can make changes to the environment to try another
 recompute attempt. For the best record keeping of attempts, we recommend cloning
@@ -177,8 +178,9 @@ conda create --name my_clone --clone my_default
 
 #### Deleting files
 
-Each recompute table has a `delete_files` method that will delete files that
-were successfully recomputed.
+Each recompute table has a `delete_files` method. Of files with a successful
+recompute attempt, this method will delete both the original and the recomputed
+files.
 
 === "v0"
     ```python
@@ -193,7 +195,7 @@ were successfully recomputed.
     ```python
     from spyglass.spikesorting.v1.recompute import RecordingRecompute
 
-    fails = v0_recompute.RecordingRecompute() & "matching=0"
+    fails = v1_recompute.RecordingRecompute() & "matching=0"
     subset = fails & my_restriction
     RecordingRecompute().delete_files(my_restriction, dry_run=False)
     ```
@@ -210,7 +212,7 @@ These methods have ...
 
 The implementation for tables that generate folders (e.g.,
 `v0.SpikeSortingRecording`) differs from those that generate NWB files (e.g.,
-`v1.SpikeSortingRecording`). NWB files are record some information about their
+`v1.SpikeSortingRecording`). NWB files record some information about their
 dependencies and the code that generated them. We can use this information to
 prevent recompute attempts that mismatch. See `RecomputeVersions` tables for
 more information.
@@ -230,7 +232,7 @@ from spyglass.common import UserEnvironment
 UserEnvironment().has_matching_env(
     env_id="previous_env_id",
     relevant_deps=["pynwb", "spikeinterface"],  # (1)!
-    show_diff=True,
+    show_diffs=True,
 )
 ```
 
@@ -244,7 +246,7 @@ file of the environment, `previous_env_id.yaml`, with ...
 ```python
 from spyglass.common import UserEnvironment
 
-UserEnvironment().write_env(
+UserEnvironment().write_env_yaml(
     env_id="previous_env_id",
     dest_path="/your/path/",  # Optional. Otherwise, user current directory
 )
