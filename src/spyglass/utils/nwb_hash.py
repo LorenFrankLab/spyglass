@@ -273,7 +273,7 @@ class NwbfileHasher:
 
         return this_hash.hexdigest()
 
-    def hash_shape_dtype(self, obj: [h5py.Dataset, np.ndarray]) -> str:
+    def hash_shape_dtype(self, obj: Union[h5py.Dataset, np.ndarray]) -> str:
         if not hasattr(obj, "shape") or not hasattr(obj, "dtype"):
             return "".encode()
         return str(obj.shape).encode() + str(obj.dtype).encode()

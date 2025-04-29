@@ -25,7 +25,7 @@ DEFAULT_ENV_ID = (
 @schema
 class UserEnvironment(dj.Manual):
     definition = """ # User conda env. Default ID is User_CondaEnv_00
-    env_id: varchar(32)  # Unique environment identifier
+    env_id: varchar(127)  # Unique environment identifier
     ---
     env_hash: char(32)  # MD5 hash of the environment
     env: blob  # Conda environment
