@@ -46,8 +46,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     nwb_deps=null:blob
     """
 
-    # expected nwb_deps: core, hdmf_common, hdmf_experimental,
-    #                    ndx_franklab_novela, ndx_optogenetics, spyglass
+    # expected nwb_deps: core, hdmf_common, hdmf_experimental, spyglass
+    #                    ndx_franklab_novela, ndx_optogenetics, ndx_pose
 
     @cached_property
     def nwb_deps(self):
@@ -64,7 +64,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if key_deps != self.nwb_deps:
+            if key_deps != self.nwb_deps:  # comment out to debug
                 continue
             restr.append(self.dict_to_pk(key))
         return self & restr
@@ -77,8 +77,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         ret = self.this_env & key
 
         if not ret and show_err:
-            need = sort_dict(self.key_env(key))
             have = sort_dict(self.nwb_deps)
+            need = sort_dict(self.key_env(key))
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
                 + f"\n\tHave: {have}"
@@ -154,6 +154,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     def insert(self, rows, limit=None, at_creation=False, **kwargs) -> None:
         """Custom insert to ensure dependencies are added to each row."""
+
+        if not self.env_dict.get("env_id"):  # likely not using conda
+            logger.warning("Cannot log for recompute without UserEnvironment.")
+            return
+
         if not rows:
             logger.info("No rows to insert.")
             return
@@ -170,6 +175,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             full_key = self.dict_to_full_key(row)
             full_key.update(dict(self.env_dict, logged_at_creation=at_creation))
             inserts.append(full_key)
+
+        if not len(inserts):
+            return
 
         super().insert(inserts, **kwargs)
 

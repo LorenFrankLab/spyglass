@@ -192,6 +192,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         self, rows: List[dict], at_creation: Optional[bool] = False, **kwargs
     ) -> None:
         """Custom insert to ensure dependencies are added to each row."""
+
+        if not self.this_env:  # likely not using conda
+            logger.warning("Cannot log for recompute without UserEnvironment.")
+            return
+
         if not rows:
             return
         if not isinstance(rows, (list, tuple)):

@@ -47,7 +47,10 @@ class UserEnvironment(dj.Manual):
             timeout=60,
         )
         if result.returncode != 0:
-            logger.error("Failed to retrieve the Conda environment.")
+            logger.error(
+                "Failed to retrieve the Conda environment. "
+                + "Recompute feature disabled."
+            )
             return ""
 
         return {
@@ -59,8 +62,9 @@ class UserEnvironment(dj.Manual):
     def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
         dependencies = dict()
-        if env is None or not isinstance(env, dict):
-            logger.error(f"Invalid env type: expected dict, got {type(env)}")
+        if not env or not isinstance(env, dict):
+            if env != "":  # only warn if it's not the no-conda empty string
+                logger.error(f"Invalid env {type(env)}: {env}")
             return dependencies
         for dep in env.get("dependencies", []):
             if isinstance(dep, str):  # split conda by '='
@@ -119,12 +123,11 @@ class UserEnvironment(dj.Manual):
 
         return f"{base_id}_{next_int:02d}"
 
-    def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> Optional[dict]:
+    def insert_current_env(self, env_id=DEFAULT_ENV_ID) -> dict:
         """Insert the current environment into the table."""
 
-        if not self.env:  # if conda dump fails
-            logger.error("Failed to retrieve the current environment.")
-            return
+        if not self.env:  # if conda dump fails, warned above
+            return {"env_id": None}
 
         if self.matching_env_id:  # if env is already stored
             return {"env_id": self.matching_env_id}

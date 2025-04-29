@@ -409,10 +409,20 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(f"Expected 1 entry, got {len(query)}: {query}")
 
         path = query.fetch1("recording_path")
+        path_obj = Path(path)
 
-        if not Path(path).exists():
+        # Protect against partial deletes, interrupted shutil.rmtree, etc.
+        # Error lets user decide if they want to backup before deleting
+        normal_file_count = 21
+        file_count = sum(1 for f in path_obj.rglob("*") if f.is_file())
+        if path_obj.exists() and file_count < normal_file_count:
+            raise RuntimeError(
+                f"Files missing! Please delete folder and rerun: {path}"
+            )
+
+        if not path_obj.exists():
             SpikeSortingRecording()._make_file(key)
-        if not Path(path).exists():
+        if not path_obj.exists():
             raise FileNotFoundError(
                 f"Recording could not be recomputed: {path}"
             )
