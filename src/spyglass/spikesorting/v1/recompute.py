@@ -212,6 +212,9 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             }
             for key in source.fetch("KEY", as_dict=True)
         ]
+        if not inserts:
+            logger.info(f"No rows to insert from:\n\t{source}")
+            return
         self.insert(inserts, at_creation=False, **kwargs)
 
     # --- Gatekeep recompute attempts ---
