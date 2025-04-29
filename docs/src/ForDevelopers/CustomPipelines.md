@@ -157,6 +157,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     -> MyAnalysisSelection
     ---
     -> AnalysisNwbfile
+    -> IntervalList
     """
 
     class MyAnalysisPart(SpyglassMixin, dj.Part):
@@ -175,10 +176,14 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         data = (MyAnalysisSelection & key).fetch_data()
         # 2. Run analysis
         ...
-        # 3. Insert results
+        interval = (IntervalList & key).fetch_interval().contains(params["time"])
         analysis_file_name = AnalysisNwbfile.create(key, data)
+        interval_pk = {"interval_list_name": my_name}
+        interval_key = {**interval_pk, "valid_times": interval}
+        # 3. Insert results
+        IntervalList.insert1(interval_key)
+        self.insert1({**key, "analysis_file_name": analysis_file_name, **interval_pk})
         self.MyAnalysisPart.insert1({**key, "result": 1})
-        self.insert1({**key, "analysis_file_name": analysis_file_name})
 ```
 
 In general, `make` methods have three steps:
@@ -190,6 +195,12 @@ In general, `make` methods have three steps:
 DataJoint has protections in place to ensure that `populate` calls are treated
 as a single transaction, but separating these steps supports debugging and
 testing.
+
+To facilitate operations on the time intervals, the `IntervalList` table has a
+`fetch_interval` method that returns the relevant `valid_times` as an `Interval`
+object, with associated methods for manipulating intervals (e.g., `union`,
+`intersect`, `contains`, etc.). For a full list op methods, see
+[api documentation](https://lorenfranklab.github.io/spyglass/latest/api/common/common_interval/#spyglass.common.common_interval.Interval).
 
 ## Primary and Foreign Key References
 

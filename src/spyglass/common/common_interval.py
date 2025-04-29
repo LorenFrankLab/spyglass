@@ -230,7 +230,7 @@ class Interval:
 
     NOTE: methods with _-prefix are for internal use comparing two interval
     lists to allow for inverting non-communicative methods (i.g., AxB!=BxA).
-    External use runs these methods on self vs other.
+    External equivalents (without _-prefix) runs these methods on self vs other.
     """
 
     # TODO: Class currently isn't aware of whether intervals are indices or
@@ -303,6 +303,8 @@ class Interval:
     @staticmethod
     def from_inds(list_frames):
         """Converts a list of indices to a list of intervals.
+
+        To use, initialize the Interval class with from_inds=True.
 
         e.g. [2,3,4,6,7,8,9,10] -> [[2,4],[6,10]]
 

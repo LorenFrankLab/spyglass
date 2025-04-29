@@ -228,10 +228,10 @@ Additionally, there are key tables such as `IntervalList` and `AnalysisNwbfile`,
 which are used to store entries created by downstream tables. These entries are
 not always deleted when the downstream entry is removed, creating 'orphans'.
 
-`IntevalList` relies on a string primary key uniqueness. This could cause issues
-if a user were to (a) run a `make` function on a computed table that generates a
-new `IntervalList` entry, then (b) delete the computed entry but not the
-`IntervalList` entry, then (c) run the `make` function again. If this `make`
+`IntervalList` relies on a string primary key uniqueness. This could cause
+issues if a user were to (a) run a `make` function on a computed table that
+generates a new `IntervalList` entry, then (b) delete the computed entry but not
+the `IntervalList` entry, then (c) run the `make` function again. If this `make`
 function were set up to skip duplicates, it may cause the new computed entry to
 attach to the old `IntervalList` entry. While all Spyglass `make`s are
 idempotent (using `replace` or throwing errors on duplicates), user custom
