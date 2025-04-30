@@ -1,6 +1,6 @@
 import itertools
 from functools import reduce
-from typing import List, Union
+from typing import List, Optional, Tuple, TypeVar, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -225,6 +225,10 @@ class IntervalList(SpyglassMixin, dj.Manual):
         orphans.super_delete(warn=False)
 
 
+T = TypeVar("T", bound="Interval")
+IntervalLike = Union[T, np.ndarray, List[int], dict]
+
+
 class Interval:
     """Class to handle interval lists
 
@@ -238,7 +242,7 @@ class Interval:
 
     def __init__(
         self, interval_list: Union[List[int], dict, np.ndarray], from_inds=False
-    ):
+    ) -> None:
         """Initialize the Intervals class with a list of intervals.
 
         Parameters
@@ -250,14 +254,14 @@ class Interval:
         self.key = None
         self.times = self._extract(interval_list, from_inds=from_inds)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         joined = "\n\t".join([np.array2string(i) for i in np.array(self.times)])
         return f"Interval({joined})"
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.times)
 
-    def __getitem__(self, item):
+    def __getitem__(self, item) -> T:
         """Get item from the interval list."""
         if isinstance(item, int):
             return Interval(self.times[item])
@@ -268,24 +272,26 @@ class Interval:
                 f"Unrecognized item type: {type(item)}. Must be int or slice."
             )
 
-    def __iter__(self):
+    def __iter__(self) -> iter:
         """Iterate over the intervals in the interval list."""
         for interval in self.times:
             yield Interval(interval)
 
-    def __eq__(self, other):
+    def __eq__(self, other: IntervalLike) -> bool:
         """Check if two interval lists are equal."""
         return np.array_equal(self.times, self._extract(other))
 
-    def __lt__(self, other):
+    def __lt__(self, other: IntervalLike) -> bool:
         """Check if this interval list is less than another."""
         return np.all(self.times < self._extract(other))
 
-    def __gt__(self, other):
+    def __gt__(self, other: IntervalLike) -> bool:
         """Check if this interval list is greater than another."""
         return np.all(self.times > self._extract(other))
 
-    def _extract(self, interval_list, from_inds=False):
+    def _extract(
+        self, interval_list: IntervalLike, from_inds: bool = False
+    ) -> np.ndarray:
         """Extract interval_list from a given object."""
         if from_inds:
             return self.from_inds(interval_list)
@@ -301,7 +307,7 @@ class Interval:
             )
 
     @staticmethod
-    def from_inds(list_frames):
+    def from_inds(list_frames) -> List[List[int]]:
         """Converts a list of indices to a list of intervals.
 
         To use, initialize the Interval class with from_inds=True.
@@ -322,14 +328,20 @@ class Interval:
         return np.asarray(interval_list)
 
     @staticmethod
-    def _by_length(x, min_length=0.0, max_length=1e10):
+    def _by_length(
+        x, min_length: Optional[float] = 0.0, max_length: Optional[float] = 1e10
+    ) -> List[float]:
         """Select intervals of certain lengths from an interval list."""
         min_length = 0 if min_length is None else min_length
         max_length = 1e10 if max_length is None else max_length
         lengths = np.ravel(np.diff(x))
         return x[np.logical_and(lengths > min_length, lengths < max_length)]
 
-    def by_length(self, min_length=0.0, max_length=1e10):
+    def by_length(
+        self,
+        min_length: Optional[float] = 0.0,
+        max_length: Optional[float] = 1e10,
+    ) -> T:
         """Select intervals of certain lengths from an interval list.
 
         Parameters
@@ -341,7 +353,12 @@ class Interval:
         """
         return Interval(self._by_length(self.times, min_length, max_length))
 
-    def contains(self, timestamps, as_indices=False, padding: int = None):
+    def contains(
+        self,
+        timestamps: np.ndarray,
+        as_indices: Optional[bool] = False,
+        padding: Optional[int] = None,
+    ) -> T:
         """Find timestamps that are contained in an interval list.
 
         Parameters
@@ -372,7 +389,9 @@ class Interval:
 
         return Interval(ret)
 
-    def excludes(self, timestamps, as_indices=False):
+    def excludes(
+        self, timestamps: np.ndarray, as_indices: Optional[bool] = False
+    ) -> T:
         """Find timestamps that are not contained in an interval list.
 
         Parameters
@@ -385,19 +404,19 @@ class Interval:
         return Interval(np.setdiff1d(timestamps, contained_times))
 
     @staticmethod
-    def _expand_1d(interval_list):
+    def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
         """Expand a 1D interval list to 2D."""
         if interval_list.ndim == 1:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
-    def _union_consolidate(self, interval_list):
+    def _union_consolidate(self, interval_list: IntervalLike) -> T:
         return Interval(reduce(self._union_concat, interval_list))
 
-    def union_consolidate(self):
+    def union_consolidate(self) -> T:
         return Interval(self._union_consolidate(self.times))
 
-    def _consolidate(self, interval_list):
+    def _consolidate(self, interval_list: IntervalLike) -> T:
         """Consolidate overlapping intervals in an interval list."""
         if interval_list.ndim == 1:
             return self._expand_1d(interval_list)
@@ -408,17 +427,24 @@ class Interval:
         # reduce may convert to 1D, so check and expand
         return self._expand_1d(interval_list)
 
-    def consolidate(self):
+    def consolidate(self) -> T:
         return Interval(self._consolidate(self.times))
 
     @staticmethod
-    def _set_intersect(interval1, interval2):
+    def _set_intersect(
+        interval1: IntervalLike, interval2: IntervalLike
+    ) -> Union[np.ndarray, None]:
         """Takes the (set-theoretic) intersection of two intervals"""
         start = max(interval1[0], interval2[0])
         end = min(interval1[1], interval2[1])
         return np.array([start, end]) if end > start else None
 
-    def _intersect(self, interval1, interval2, min_length=0):
+    def _intersect(
+        self,
+        interval1: IntervalLike,
+        interval2: IntervalLike,
+        min_length: Optional[float] = 0,
+    ) -> T:
         """Finds the intersection of two interval lists."""
 
         # Consolidate interval lists to disjoint by sorting & applying union
@@ -442,7 +468,9 @@ class Interval:
 
         return self._by_length(intersection, min_length=min_length)
 
-    def intersect(self, other, min_length=0):
+    def intersect(
+        self, other: IntervalLike, min_length: Optional[float] = 0
+    ) -> T:
         """Finds the intersections between this and another interval list.
 
         Each interval is (start time, stop time)
@@ -462,7 +490,9 @@ class Interval:
             self._intersect(self.times, self._extract(other), min_length)
         )
 
-    def _union_concat(self, interval1, interval2):
+    def _union_concat(
+        self, interval1: IntervalLike, interval2: IntervalLike
+    ) -> np.ndarray:
         """Compare last interval of interval list to given interval.
 
         If overlapping, take union. If not, concatenate interval to list.
@@ -482,7 +512,7 @@ class Interval:
 
         return np.concatenate((interval1[:-1], set_union), axis=0)
 
-    def union_adjacent_index(self, other):
+    def union_adjacent_index(self, other: IntervalLike) -> T:
         """Union index-adjacent intervals. If not adjacent, just concatenate.
 
         e.g. [a,b] and [b+1, c] is converted to [a,c]
@@ -511,7 +541,7 @@ class Interval:
         )
         return Interval(np.concatenate((interval1[:-1], x), axis=0))
 
-    def union_adjacent_consolidate(self):
+    def union_adjacent_consolidate(self) -> T:
         return Interval(
             self._expand_1d(reduce(self.union_adjacent_index, self.times))
         )
@@ -519,9 +549,9 @@ class Interval:
     def union(
         self,
         other: np.ndarray,
-        min_length: float = 0.0,
-        max_length: float = 1e10,
-    ) -> np.ndarray:
+        min_length: Optional[float] = 0.0,
+        max_length: Optional[float] = 1e10,
+    ) -> T:
         """Finds the union (all times in one or both) for two interval lists
 
         Parameters
@@ -573,7 +603,7 @@ class Interval:
 
         return Interval(np.asarray(union))
 
-    def censor(self, timestamps):
+    def censor(self, timestamps: Union[np.ndarray, List[int]]) -> T:
         """Returns new interval list that starts/ends at first/last timestamp
 
         Parameters
@@ -594,7 +624,13 @@ class Interval:
         timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
         return Interval(self._intersect(interval_list, timestamps_interval))
 
-    def subtract(self, other, reverse=False, min_length=None, max_length=None):
+    def subtract(
+        self,
+        other: IntervalLike,
+        reverse: Optional[bool] = False,
+        min_length: Optional[float] = None,
+        max_length: Optional[float] = None,
+    ) -> T:
         """Finds intervals in self that are not in other.
 
         Works on indices:
@@ -647,21 +683,9 @@ class Interval:
 
         return Interval(result)
 
-    def set_difference_inds(self, other, reverse=False, min_length=None):
-        return self.subtract(other, reverse=reverse, min_length=min_length)
-
-    def complement(self, other, reverse=False, min_length=0):
-        """
-        Finds intervals in intervals1 that are not in intervals2
-
-        Parameters
-        ----------
-        min_length : float, optional
-            Minimum interval length in seconds. Defaults to 0.0.
-        """
-        return self.subtract(other, reverse=reverse, min_length=min_length)
-
-    def add_removal_window(self, removal_window_ms, timestamps):
+    def add_removal_window(
+        self, removal_window_ms: int, timestamps: np.ndarray
+    ) -> T:
         """Add half of a removal window to start/end of each interval"""
         half_win = removal_window_ms / 1000 * 0.5
         new_interval = np.zeros((len(self.times), 2), dtype=np.float64)
@@ -680,7 +704,7 @@ class Interval:
             else Interval(new_interval)
         )
 
-    def to_indices(self, timestamps):
+    def to_indices(self, timestamps: np.ndarray) -> List[List[int]]:
         """Convert intervals to indices in the given timestamps.
 
         Parameters
@@ -701,7 +725,7 @@ class Interval:
         #     np.searchsorted(timestamps, interval) for interval in self.times
         # ]
 
-    def to_seconds(self, timestamps):
+    def to_seconds(self, timestamps: np.ndarray) -> List[Tuple[float]]:
         """Convert intervals to seconds in the given timestamps.
 
         Parameters
@@ -718,7 +742,9 @@ class Interval:
 
     # ---------------------------- Requiring Table ----------------------------
 
-    def _import_from_table(self, interval_key, return_table=False):
+    def _import_from_table(
+        self, interval_key: dict, return_table: Optional[bool] = False
+    ) -> Union[dj.expression.QueryExpression, np.ndarray]:
         from spyglass.common.common_interval import IntervalList
 
         query = IntervalList & interval_key
