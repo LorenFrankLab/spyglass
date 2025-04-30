@@ -12,6 +12,7 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
+from pynwb.core import ScratchData
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
@@ -416,6 +417,15 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             if isinstance(nwb_object, pd.DataFrame):
                 nwb_object = DynamicTable.from_dataframe(
                     name=table_name, df=nwb_object
+                )
+            elif isinstance(nwb_object, np.ndarray):
+                nwb_object = ScratchData(
+                    name=(
+                        "numpy_array"
+                        if table_name == "pandas_table"
+                        else table_name
+                    ),
+                    data=nwb_object,
                 )
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
