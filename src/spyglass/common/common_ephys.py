@@ -807,7 +807,6 @@ class LFPBand(SpyglassMixin, dj.Computed):
             }
         ).fetch_interval()
 
-        (LFPBandSelection & key).fetch1("min_interval_len")
         lfp_band_valid_times = valid_times.intersect(
             lfp_valid_times,
             min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
