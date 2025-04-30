@@ -709,13 +709,7 @@ class Interval:
         np.ndarray
             The indices of the intervals in the given timestamps.
         """
-        starts = np.searchsorted(timestamps, self.times[:, 0])
-        ends = np.searchsorted(timestamps, self.times[:, 1])
-        return np.column_stack((starts, ends))
-        # # Prev approach:
-        # return [
-        #     np.searchsorted(timestamps, interval) for interval in self.times
-        # ]
+        return np.searchsorted(timestamps, self.times.ravel()).reshape(-1, 2)
 
     def to_seconds(self, timestamps: np.ndarray) -> List[Tuple[float]]:
         """Convert intervals to seconds in the given timestamps.
