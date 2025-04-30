@@ -1,6 +1,7 @@
 import shutil
-import numpy as np
 from pathlib import Path
+
+import numpy as np
 
 
 def test_sort_group(pop_sort_group, mini_dict):

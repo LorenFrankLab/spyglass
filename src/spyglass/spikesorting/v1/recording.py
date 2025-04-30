@@ -286,8 +286,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             logger.info(f"Recomputing {recompute_file_name}.")
             query = cls & {"analysis_file_name": recompute_file_name}
             # Use deleted file's ids and hash for recompute
-            key, recompute_object_id, recompute_electrodes_id, hash = (
-                query.fetch1("KEY", "object_id", "electrodes_id", "hash")
+            key, recompute_object_id, recompute_electrodes_id = query.fetch1(
+                "KEY", "object_id", "electrodes_id"
             )
         elif save_to:  # recompute prior to deletion, save copy to temp_dir
             elect_id = cls._validate_file(file_path)

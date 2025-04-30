@@ -18,6 +18,26 @@ Spyglass 0.5.5 introduces the opportunity to delete and recompute both newly
 generated files after this release, and old files that were generated before
 this release.
 
+More practically, this feature allows...
+
+1. User A to run a computation, generate associated file(s), and interact with
+    them (e.g., `fetch_nwb`) using the IDs stored in the tables.
+2. User B to run the recompute pipeline and delete the file(s) to free up space
+    on disk.
+3. User A to attempt the same interactions as above. If the relevant file is not
+    found...
+    1. Spyglass will check for copies on Kachery and Dandi.
+    2. Spyglass will attempt to recompute the files(s) using the `_make_file`
+        method and check the contents match the expected hash.
+4. If the hash matches, the file(s) will be saved to the appropriate location
+    and the relevant tables updated. If the hash does not match, the file(s)
+    will be deleted and an error raised.
+
+To prevent unexpected hash mismatches, we store a record of the dependencies
+used to generate the file(s) in a new `UserEnvironment` table. Only files that
+have been successfully recomputed should be deleted via
+`TableRecompute.delete_files` (see below).
+
 ## How
 
 Common methods like `fetch_nwb` will now check for the existence of a relevant

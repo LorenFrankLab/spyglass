@@ -382,7 +382,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         if has_entry and base_dir == recording_dir:  # if recompute, check hash
             new_hash = self._dir_hash(rec_path, return_hasher=False)
-            old_hash = self.fetch("hash")[0]
+            old_hash = (self & key).fetch("hash")[0]
             if new_hash != old_hash:
                 shutil_rmtree(rec_path)
                 raise ValueError(

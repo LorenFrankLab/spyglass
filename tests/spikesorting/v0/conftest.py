@@ -52,6 +52,7 @@ def pop_rec_params(spike_v0):
 def pop_rec(
     spike_v0,
     pop_sort_group,
+    pop_sort_interval,
     pop_rec_params,
     mini_copy_name,
     add_interval,
@@ -66,6 +67,7 @@ def pop_rec(
         interval_list_name="01_s1",
         team_name=team_name,
     )
+    _ = pop_sort_interval
     spike_v0.SpikeSortingRecordingSelection.insert1(
         ssr_key, skip_duplicates=True
     )
