@@ -179,7 +179,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         interval = (IntervalList & key).fetch_interval().contains(params["time"])
         analysis_file_name = AnalysisNwbfile.create(key, data)
         interval_pk = {"interval_list_name": my_name}
-        interval_key = {**interval_pk, "valid_times": interval}
+        interval_key = {**interval_pk, "valid_times": interval.times}
         # 3. Insert results
         IntervalList.insert1(interval_key)
         self.insert1({**key, "analysis_file_name": analysis_file_name, **interval_pk})
