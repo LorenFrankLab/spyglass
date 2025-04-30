@@ -281,14 +281,6 @@ class Interval:
         """Check if two interval lists are equal."""
         return np.array_equal(self.times, self._extract(other))
 
-    def __lt__(self, other: IntervalLike) -> bool:
-        """Check if this interval list is less than another."""
-        return np.all(self.times < self._extract(other))
-
-    def __gt__(self, other: IntervalLike) -> bool:
-        """Check if this interval list is greater than another."""
-        return np.all(self.times > self._extract(other))
-
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
