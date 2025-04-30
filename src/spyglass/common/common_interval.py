@@ -324,6 +324,8 @@ class Interval:
     @staticmethod
     def _by_length(x, min_length=0.0, max_length=1e10):
         """Select intervals of certain lengths from an interval list."""
+        min_length = 0 if min_length is None else min_length
+        max_length = 1e10 if max_length is None else max_length
         lengths = np.ravel(np.diff(x))
         return x[np.logical_and(lengths > min_length, lengths < max_length)]
 
@@ -592,48 +594,63 @@ class Interval:
         timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
         return Interval(self._intersect(interval_list, timestamps_interval))
 
-    def set_difference_inds(self, other, reverse=False):
-        """Find the indices of self not in other
+    def subtract(self, other, reverse=False, min_length=None, max_length=None):
+        """Finds intervals in self that are not in other.
 
-        e.g.
-        intervals1 = [(0, 5), (8, 10)]
-        intervals2 = [(1, 2), (3, 4), (6, 9)]
-
-        result = [(0, 1), (4, 5), (9, 10)]
+        Works on indices:
+            intervals1 = [(0, 5), (8, 10)]
+            intervals2 = [(1, 2), (3, 4), (6, 9)]
+            result = [(0, 1), (4, 5), (9, 10)]
 
         Parameters
         ----------
-        other : Union[Intervals, np.ndarray]
+        other : Union[Interval, np.ndarray]
         reverse : bool, optional
             If True, reverse the order of the intervals. Defaults to False.
+        min_length : float, optional
+            Minimum interval length in seconds. If None, no filtering applied.
+        max_length : float, optional
+            Maximum interval length in seconds. If None, no filtering applied.
 
         Returns
         -------
-        List[Tuple[int, int]]
+        Interval
+            The resulting intervals after the difference operation.
+            If indices, List[Tuple[int, int]].
         """
         intervals1 = self.times if not reverse else self._extract(other)
         intervals2 = self._extract(other) if not reverse else self.times
 
         result = []
-        i = j = 0
-        while i < len(intervals1) and j < len(intervals2):
-            if intervals1[i][1] <= intervals2[j][0]:
-                result.append(intervals1[i])
-                i += 1
-            elif intervals2[j][1] <= intervals1[i][0]:
-                j += 1
-            else:
-                if intervals1[i][0] < intervals2[j][0]:
-                    result.append((intervals1[i][0], intervals2[j][0]))
-                if intervals1[i][1] > intervals2[j][1]:
-                    intervals1[i] = (intervals2[j][1], intervals1[i][1])
-                    j += 1
-                else:
-                    i += 1
-        result += intervals1[i:]
+        i, j = 0, 0
+        while i < len(intervals1):
+            start1, end1 = intervals1[i]
+            while j < len(intervals2) and intervals2[j][1] <= start1:
+                j += 1  # Skip intervals2 that end before start1
+            current_start = start1
+            while j < len(intervals2) and intervals2[j][0] < end1:
+                start2, end2 = intervals2[j]
+                # Add the non-overlap before the current interval in intervals2
+                if current_start < start2:
+                    result.append((current_start, min(start2, end1)))
+                # Update the current start to exclude the overlapping part
+                current_start = max(current_start, end2)
+                j += 1  # next interval in intervals2
+            if current_start < end1:  # if non-overlap btwn last part and end1
+                result.append((current_start, end1))
+            i += 1  # next interval in intervals1
+
+        if min_length is not None or max_length is not None:
+            result = self._by_length(
+                np.asarray(result), min_length=min_length, max_length=max_length
+            )
+
         return Interval(result)
 
-    def complement(self, other, min_length=0.0):
+    def set_difference_inds(self, other, reverse=False, min_length=None):
+        return self.subtract(other, reverse=reverse, min_length=min_length)
+
+    def complement(self, other, reverse=False, min_length=0):
         """
         Finds intervals in intervals1 that are not in intervals2
 
@@ -642,37 +659,7 @@ class Interval:
         min_length : float, optional
             Minimum interval length in seconds. Defaults to 0.0.
         """
-        intervals1 = self.times
-        intervals2 = self._extract(other)
-
-        result = []
-
-        for start1, end1 in intervals1:
-            subtracted = [(start1, end1)]
-
-            for start2, end2 in intervals2:
-                new_subtracted = []
-
-                for s, e in subtracted:
-                    if start2 <= s and e <= end2:
-                        continue
-                    if e <= start2 or end2 <= s:
-                        new_subtracted.append((s, e))
-                        continue
-                    if start2 > s:
-                        new_subtracted.append((s, start2))
-                    if end2 < e:
-                        new_subtracted.append((end2, e))
-
-                subtracted = new_subtracted
-
-            result.extend(subtracted)
-
-        return Interval(
-            self._by_length(
-                np.asarray(result), min_length=min_length, max_length=1e100
-            )
-        )
+        return self.subtract(other, reverse=reverse, min_length=min_length)
 
     def add_removal_window(self, removal_window_ms, timestamps):
         """Add half of a removal window to start/end of each interval"""
@@ -974,7 +961,7 @@ def interval_set_difference_inds(intervals1, intervals2):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log("interval_set_difference_inds")
-    return Interval(intervals1).set_difference_inds(intervals2).times
+    return Interval(intervals1).subtract(intervals2).times
 
 
 def interval_list_complement(intervals1, intervals2, min_length=0.0):
@@ -989,4 +976,6 @@ def interval_list_complement(intervals1, intervals2, min_length=0.0):
     from spyglass.common.common_usage import ActivityLog
 
     ActivityLog().deprecate_log("interval_list_complement")
-    return Interval(intervals1).complement(intervals2, min_length).times
+    return (
+        Interval(intervals1).subtract(intervals2, min_length=min_length).times
+    )

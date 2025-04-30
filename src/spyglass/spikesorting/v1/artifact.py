@@ -319,7 +319,7 @@ def _get_artifact_times(
     ).add_removal_window(removal_window_ms, valid_timestamps)
 
     # find non-artifact intervals in timestamps
-    artifact_removed_valid_times = sort_interval_valid_times.complement(
+    artifact_removed_valid_times = sort_interval_valid_times.subtract(
         artifact_intervals_s, min_length=1
     ).union_consolidate()
 

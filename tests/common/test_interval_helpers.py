@@ -131,7 +131,7 @@ def test_consolidate_intervals_1dim(interval_obj):
 
 
 @pytest.mark.parametrize(
-    "interval1, interval2, expected_result",
+    "one, two, expected_result",
     [
         (
             np.array([[0, 1]]),
@@ -150,17 +150,15 @@ def test_consolidate_intervals_1dim(interval_obj):
         ),
     ],
 )
-def test_union_adjacent_index(
-    interval_obj, interval1, interval2, expected_result
-):
-    ret = interval_obj(interval1).union_adjacent_index(interval2).times
+def test_union_adjacent_index(interval_obj, one, two, expected_result):
+    ret = interval_obj(one).union_adjacent_index(two).times
     assert np.array_equal(
         ret, expected_result
     ), "Problem with Interval.union_adjacent_index"
 
 
 @pytest.mark.parametrize(
-    "interval1, interval2, expected_result",
+    "one, two, expected_result",
     [
         (
             np.array([[0, 3]]),
@@ -179,10 +177,8 @@ def test_union_adjacent_index(
         ),
     ],
 )
-def test_interval_list_union(
-    interval_obj, interval1, interval2, expected_result
-):
-    ret = interval_obj(interval1).union(interval2).times
+def test_interval_list_union(interval_obj, one, two, expected_result):
+    ret = interval_obj(one).union(two).times
     assert np.array_equal(ret, expected_result), "Problem with Interval.union"
 
 
@@ -226,7 +222,7 @@ def test_interval_from_inds(interval_obj, interval_list, expected_result):
 
 
 @pytest.mark.parametrize(
-    "intervals1, intervals2, min_length, expected_result",
+    "one, two, min_length, expected_result",
     [
         (
             np.array([[0, 2], [4, 5]]),
@@ -249,9 +245,9 @@ def test_interval_from_inds(interval_obj, interval_list, expected_result):
     ],
 )
 def test_interval_list_complement(
-    interval_obj, intervals1, intervals2, min_length, expected_result
+    interval_obj, one, two, min_length, expected_result
 ):
-    ret = interval_obj(intervals1).complement(intervals2, min_length).times
+    ret = interval_obj(one).complement(two, min_length=min_length).times
     assert np.array_equal(
         ret, expected_result
-    ), "Problem with Interval.compliment"
+    ), "Problem with Interval.complement"

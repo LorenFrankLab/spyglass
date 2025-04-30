@@ -296,7 +296,7 @@ def _get_artifact_times(
         # convert to list of lists
         artifact_interv_idx = [artifact_interv_idx.times]
 
-    artifact_removed_valid_times = artifact_interv_idx.set_difference_inds(
+    artifact_removed_valid_times = artifact_interv_idx.subtract(
         [(0, len(valid_timestamps) - 1)], reverse=True
     ).to_seconds(valid_timestamps)
 
