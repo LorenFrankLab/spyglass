@@ -29,44 +29,69 @@ def test_list_intersect(interval_obj, one, two, result):
 
 
 @pytest.mark.parametrize(
-    "one, two, expected_result",
+    "one, two, min_length, expected_result",
     [
-        (  # No overlap
+        (  # Indices, No overlap
             [(0, 5), (8, 10)],
             [(5, 8)],
+            None,
             [(0, 5), (8, 10)],
         ),
-        (  # Overlap
+        (  # Indices, Overlap
             [(0, 5), (8, 10)],
             [(1, 2), (3, 4), (6, 9)],
+            None,
             [(0, 1), (2, 3), (4, 5), (9, 10)],
         ),
-        (  # One empty
+        (  # Indices, One empty
             [],
             [(1, 2), (3, 4), (6, 9)],
+            None,
             [],
         ),
-        (  # Two empty
+        (  # Indices, Two empty
             [(0, 5), (8, 10)],
             [],
+            None,
             [(0, 5), (8, 10)],
         ),
-        (  # Equal intervals
+        (  # Indices, Equal intervals
             [(0, 5), (8, 10)],
             [(0, 5), (8, 10)],
+            None,
             [],
         ),
-        (  # Multiple overlaps
+        (  # Indices, Multiple overlaps
             [(0, 10)],
             [(1, 3), (4, 6), (7, 9)],
+            None,
             [(0, 1), (3, 4), (6, 7), (9, 10)],
+        ),
+        (  # Arrays, Overlap
+            np.array([[0, 2], [4, 5]]),
+            np.array([[1, 3], [2, 4]]),
+            0,
+            np.array([[0, 1], [4, 5]]),
+        ),
+        (  # Arrays, Min length
+            np.array([[0, 2], [4, 5]]),
+            np.array([[1, 3], [2, 4]]),
+            1,
+            np.zeros((0, 2)),
+        ),
+        (  # Arrays, No overlap
+            np.array([[0, 2], [4, 6]]),
+            np.array([[5, 8], [2, 4]]),
+            1,
+            np.array([[0, 2]]),
         ),
     ],
 )
-def test_set_difference(interval_obj, one, two, expected_result):
-    assert (
-        interval_obj(one).set_difference_inds(two).times == expected_result
-    ), "Problem with Interval.set_difference"
+def test_subtract(interval_obj, one, two, min_length, expected_result):
+    ret = interval_obj(one).subtract(two, min_length=min_length)
+    assert np.array_equal(
+        ret.times, expected_result
+    ), "Problem with Interval.subtract"
 
 
 @pytest.mark.parametrize(
@@ -219,35 +244,3 @@ def test_interval_from_inds(interval_obj, interval_list, expected_result):
     assert np.array_equal(
         interval_obj(interval_list, from_inds=True).times, expected_result
     ), "Problem with Interval(x, from_inds=True)"
-
-
-@pytest.mark.parametrize(
-    "one, two, min_length, expected_result",
-    [
-        (
-            np.array([[0, 2], [4, 5]]),
-            np.array([[1, 3], [2, 4]]),
-            0,
-            np.array([[0, 1], [4, 5]]),
-        ),
-        (
-            np.array([[0, 2], [4, 5]]),
-            np.array([[1, 3], [2, 4]]),
-            1,
-            np.zeros((0, 2)),
-        ),
-        (
-            np.array([[0, 2], [4, 6]]),
-            np.array([[5, 8], [2, 4]]),
-            1,
-            np.array([[0, 2]]),
-        ),
-    ],
-)
-def test_interval_list_complement(
-    interval_obj, one, two, min_length, expected_result
-):
-    ret = interval_obj(one).complement(two, min_length=min_length).times
-    assert np.array_equal(
-        ret, expected_result
-    ), "Problem with Interval.complement"
