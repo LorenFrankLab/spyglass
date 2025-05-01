@@ -385,7 +385,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self,
         analysis_file_name: str,
         nwb_object: pynwb.core.NWBDataInterface,
-        table_name: str = "pandas_table",
+        table_name: str = None,
     ):
         # TODO: change to add_object with checks for object type and a name
         # parameter, which should be specified if it is not an NWB container
@@ -400,8 +400,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         nwb_object : pynwb.core.NWBDataInterface
             The NWB object created by PyNWB.
         table_name : str, optional
-            The name of the DynamicTable made from a dataframe. Defaults to
-            'pandas_table'.
+            The name of the pynwb object made from a passed passed dataframe or array.
+            Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
+            respectively.
 
         Returns
         -------
@@ -414,17 +415,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
+            # convert to pynwb object if it is a dataframe or array
             if isinstance(nwb_object, pd.DataFrame):
                 nwb_object = DynamicTable.from_dataframe(
-                    name=table_name, df=nwb_object
+                    name=table_name or "pandas_table", df=nwb_object
                 )
             elif isinstance(nwb_object, np.ndarray):
                 nwb_object = ScratchData(
-                    name=(
-                        "numpy_array"
-                        if table_name == "pandas_table"
-                        else table_name
-                    ),
+                    name=table_name or "numpy_array",
                     data=nwb_object,
                 )
             nwbf.add_scratch(nwb_object)
