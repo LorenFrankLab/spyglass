@@ -167,7 +167,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
 
         self.insert1(
             dict(
-                key,
+                self.dict_to_pk(key),
                 probeinterface=pi_version,
                 spikeinterface=next(iter(si_version)),
             ),
@@ -193,16 +193,19 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     ) -> None:
         """Custom insert to ensure dependencies are added to each row."""
 
-        if not self.this_env:  # likely not using conda
-            logger.warning("Cannot log for recompute without UserEnvironment.")
-            return
-
         if not rows:
             return
         if not isinstance(rows, (list, tuple)):
             rows = [rows]
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
+
+        for row in rows:
+            if not RecordingRecomputeVersions & row:
+                RecordingRecomputeVersions().make(row)
+        if not USER_TBL.this_env:  # likely not using conda
+            logger.warning("Cannot log for recompute without UserEnvironment.")
+            return
 
         inserts = []
         for row in rows:
