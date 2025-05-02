@@ -102,9 +102,7 @@ def test_artifact_detection(lfp, pop_art_detection):
     pass
 
 
-@pytest.mark.skip(
-    reason="Implemented in #1278, but no importable entry in test dataset"
-)
-def test_pop_imported_lfp(lfp):
-    with pytest.raises(NotImplementedError):
-        lfp.lfp_imported.ImportedLFP().populate()
+def test_pop_imported_lfp(lfp, common):
+    key = common.common_nwbfile.NWBFile().fetch("KEY")
+    lfp.lfp_imported.ImportedLFP().make(key)
+    assert len(lfp.lfp_imported.ImportedLFP()) == 1
