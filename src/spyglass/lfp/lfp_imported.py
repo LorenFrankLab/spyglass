@@ -40,7 +40,9 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
 
         # get the set of lfp objects in the file
         lfp_objects = [
-            obj for obj in nwbf.objects if isinstance(obj, pynwb.ecephys.LFP)
+            obj
+            for obj in nwbf.objects.values()
+            if isinstance(obj, pynwb.ecephys.LFP)
         ]
 
         if len(lfp_objects) == 0:
