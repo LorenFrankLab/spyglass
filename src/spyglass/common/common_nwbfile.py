@@ -500,6 +500,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     def _update_external(self, analysis_file_name: str, hash: str):
         """Update the external contents checksum for an analysis file.
 
+        Ensures that the file contents match the hash. If not, raise an error.
+
         Parameters
         ----------
         analysis_file_name : str
@@ -508,6 +510,12 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             The hash of the file contents as calculated by NwbfileHasher.
             If the hash does not match the file contents, the file and
             downstream entries are deleted.
+
+        Raises
+        ------
+        ValueError
+            If the hash does not match the file contents, the file is deleted
+            and a ValueError is raised.
         """
         file_path = self.get_abs_path(analysis_file_name, from_schema=True)
         new_hash = self.get_hash(analysis_file_name, from_schema=True)

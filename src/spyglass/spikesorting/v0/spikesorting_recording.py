@@ -382,15 +382,31 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
 
         if has_entry and base_dir == recording_dir:  # if recompute, check hash
-            new_hash = self._dir_hash(rec_path, return_hasher=False)
-            old_hash = (self & key).fetch("hash")[0]
-            if new_hash != old_hash:
-                shutil_rmtree(rec_path)
-                raise ValueError(
-                    f"Hash mismatch for {rec_path}: {new_hash} != {old_hash}"
-                )
+            _ = self._hash_check(key, rec_path)
 
         return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
+
+    def _hash_check(self, key, rec_path):
+        """Check if the hash of the directory matches the hash in the table."""
+        new_hash = self._dir_hash(rec_path, return_hasher=False)
+        old_hash = (self & key).fetch("hash")[0]
+
+        if new_hash == old_hash:
+            return True
+
+        from spyglass.spikesorting.v0 import spikesorting_recompute as rcp
+
+        msg = ""
+        if query := (rcp.RecordingRecomputeSelection & key):
+            env_id = query.fetch("env_id", as_dict=True)[0]
+            msg = "\nCheck UserEnvironment for possible dependency mismatch:"
+            msg += f"\n{rcp.UserEnvironment() & env_id}"
+
+        shutil_rmtree(rec_path)
+
+        raise ValueError(
+            f"Hash mismatch for {rec_path}: {new_hash} != {old_hash}{msg}"
+        )
 
     def _dir_hash(self, path, return_hasher=False):
         """Return the hash of the directory."""

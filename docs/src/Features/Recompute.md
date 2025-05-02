@@ -178,8 +178,8 @@ Recompute tables are set up to have `Name` and `Hash` part tables that track...
 
 The `compare` methods will print out the differences between the two objects or
 files, recursively checking for differences in nested objects. This will
-truncate output for large objects an may fail for objects that cannot be read as
-JSON.
+truncate output for large objects and may fail for objects that cannot be read
+as JSON.
 
 To expand the functionality of this feature, please either post a GitHub issue
 or make a pull request with edits to

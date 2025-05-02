@@ -528,8 +528,8 @@ def _resolve_external_table(
 ):
     """Function to resolve database vs. file property discrepancies.
 
-    WARNING: This should only be used when editing file metadata. Can violate data
-    integrity if impproperly used.
+    WARNING: This should only be used when editing file metadata. Can violate
+    data integrity if improperly used.
 
     Parameters
     ----------
@@ -538,7 +538,8 @@ def _resolve_external_table(
     file_name : str
         name of the file to edit
     location : str, optional
-        which external table the file is in, current options are ["analysis", "raw], by default "analysis"
+        which external table the file is in, current options are
+        ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
     from spyglass.common.common_nwbfile import schema as common_schema
@@ -546,17 +547,15 @@ def _resolve_external_table(
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
-    external_table = (
-        common_schema.external[location] & f"filepath LIKE '%{file_name}'"
-    )
-    external_key = external_table.fetch1()
+    external_table = common_schema.external[location]
+    external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
     external_key.update(
         {
             "size": Path(filepath).stat().st_size,
             "contents_hash": dj.hash.uuid_from_file(filepath),
         }
     )
-    common_schema.external[location].update1(external_key)
+    external_table.update1(external_key)
 
 
 def make_file_obj_id_unique(nwb_path: str):
