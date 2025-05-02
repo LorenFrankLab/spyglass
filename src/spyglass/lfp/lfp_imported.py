@@ -56,6 +56,11 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
             lfp_es_objects.extend(list(lfp_object.electrical_series.values()))
 
         for i, es_object in enumerate(lfp_es_objects):
+            if len(self & {"lfp_object_id": es_object.object_id}) > 0:
+                logger.warning(
+                    f"Skipping {es_object.object_id} because it already exists in ImportedLFP."
+                )
+                continue
             electrodes_df = es_object.electrodes.to_dataframe()
             electrode_ids = electrodes_df.index.values
 
