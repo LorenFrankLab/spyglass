@@ -400,7 +400,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         nwb_object : pynwb.core.NWBDataInterface
             The NWB object created by PyNWB.
         table_name : str, optional
-            The name of the pynwb object made from a passed passed dataframe or array.
+            The name of the pynwb object made from a passed dataframe or array.
             Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
             respectively.
 
