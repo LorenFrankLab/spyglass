@@ -425,6 +425,12 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     name=table_name or "numpy_array",
                     data=nwb_object,
                 )
+            if nwb_object.name in nwbf.scratch:
+                raise ValueError(
+                    f"Object with name '{nwb_object.name}' already exists in "
+                    + f"{analysis_file_name}. Please pass a different name argument "
+                    + "to AnalysisNwbfile.add_nwb_object()."
+                )
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
             return nwb_object.object_id
