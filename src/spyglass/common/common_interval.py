@@ -211,7 +211,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if update:
             for row in need_update:
                 self.update1(row)
-        else:
+        elif need_update:
             raise ValueError(
                 f"Found {len(need_update)} rows with existing names, but "
                 + f"different times:{need_update}"
@@ -233,7 +233,7 @@ class Interval:
     """Class to handle interval lists
 
     NOTE: methods with _-prefix are for internal use comparing two interval
-    lists to allow for inverting non-communicative methods (i.g., AxB!=BxA).
+    lists to allow for inverting non-communicative methods (i.e., AxB!=BxA).
     External equivalents (without _-prefix) runs these methods on self vs other.
     """
 
@@ -245,6 +245,9 @@ class Interval:
         interval_list: IntervalLike = None,
         name=None,
         from_inds=False,
+        no_overlap=False,
+        no_duplicates=True,
+        warn=True,
         **kwargs,
     ) -> None:
         """Initialize the Intervals class with a list of intervals.
@@ -260,34 +263,70 @@ class Interval:
         from_inds : bool, optional
             If True, treat the interval_list as a list of indices and
             convert to intervals. Defaults to False.
+        no_overlap : bool, optional
+            If True, consolidate overlapping intervals. Defaults to False.
+        no_duplicates : bool, optional
+            If True, remove duplicate intervals. Defaults to True.
         kwargs : dict, optional
             Additional keyword arguments to pass to the class, including
             "valid_times" and "interval_list_name" for times and name.
         """
+        self.kwargs = dict(  # Returned objects will set this behavior
+            kwargs,
+            no_overlap=no_overlap,
+            no_duplicates=no_duplicates,
+            warn=False,  # child instances do not warn
+        )
+
         self.key = dict()  # let _extract decide if this is a key
         self.name = name or kwargs.get("interval_list_name")
         self.pipeline = kwargs.get("pipeline")
         self.nwb_file_name = kwargs.get("nwb_file_name")
-        times = kwargs.get("valid_times") or interval_list
-        self.times = self._extract(times, from_inds=from_inds)
+        self.times = kwargs.get("valid_times") or interval_list
+        self.times = self._extract(self.times, from_inds=from_inds)
+
+        if warn or no_duplicates:
+            dupes_removed = np.unique(self.times, axis=0)
+        if no_duplicates:
+            self.times = dupes_removed
+        if warn and not np.array_equal(self.times, dupes_removed):
+            logger.warning(
+                "Found duplicate(s). Use no_duplicates flag to remove or not: "
+                f"{self.to_str(self.times)} vs {self.to_str(dupes_removed)}"
+            )
+
+        if warn or no_overlap:  # otherwise recursive _consolidate call
+            overlap_removed = self._consolidate(self.times)
+        if no_overlap:
+            self.times = overlap_removed
+        if warn and not np.array_equal(self.times, overlap_removed):
+            logger.warning(
+                "Found overlap(s). Use no_overlap flag to consolidate or not: "
+                f"{self.to_str(self.times)} vs {self.to_str(overlap_removed)}"
+            )
+
+    def to_str(self, array: np.ndarray, remove_breaks=True) -> str:
+        """Convert the interval list to a string."""
+        kwarg = dict(separator=", ") if remove_breaks else dict()
+        link = " " if remove_breaks else "\n\t"
+        if isinstance(array, Iterable):
+            return link.join(
+                [np.array2string(i, **kwarg) for i in np.array(array)]
+            )
+        return str(array)
 
     def __repr__(self) -> str:
-        joined = self.times
-        if isinstance(self.times, Iterable):
-            joined = "\n\t".join(
-                [np.array2string(i) for i in np.array(self.times)]
-            )
-        return f"Interval({joined})"
+        return f"Interval({self.to_str(self.times, remove_breaks=False)})"
 
     def __len__(self) -> int:
         return len(self.times)
 
     def __getitem__(self, item) -> T:
         """Get item from the interval list."""
-        if isinstance(item, int):
-            return Interval(self.times[item])
-        elif isinstance(item, slice):
-            return Interval(self.times[item])
+        if isinstance(item, (slice, int)):
+            return Interval(self.times[item], **self.kwargs)
+        # elif isinstance(item, slice):
+        #     return Interval(self.times[item], **self.kwargs)
         else:
             raise ValueError(
                 f"Unrecognized item type: {type(item)}. Must be int or slice."
@@ -315,7 +354,7 @@ class Interval:
         self.pipeline = kwargs.get("pipeline")
 
     @property
-    def __dict__(self) -> dict:
+    def as_dict(self) -> dict:
         """Convert the interval list to a dictionary."""
         ret = {
             "nwb_file_name": self.nwb_file_name,
@@ -325,10 +364,10 @@ class Interval:
         }
         return {k: v for k, v in ret.items() if v is not None}
 
-    @property
-    def as_dict(self) -> dict:
-        """Convert the interval list to a dictionary."""
-        return self.__dict__
+    # @property
+    # def as_dict(self) -> dict:
+    #     """Convert the interval list to a dictionary."""
+    #     return self.__dict__
 
     @property
     def primary_key(self):
@@ -350,12 +389,14 @@ class Interval:
             return interval_list.times
         elif isinstance(interval_list, dict):
             return self._import_from_table(interval_list)
-        elif isinstance(interval_list, (np.generic, np.ndarray, list, int)):
+        elif isinstance(
+            interval_list, (np.generic, np.ndarray, list, int, float, tuple)
+        ):
             return interval_list
         elif interval_list is None:
             return np.array([])
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
 
@@ -404,7 +445,9 @@ class Interval:
         max_length : float, optional
             Maximum interval length in seconds. Defaults to 1e10.
         """
-        return Interval(self._by_length(self.times, min_length, max_length))
+        return Interval(
+            self._by_length(self.times, min_length, max_length), **self.kwargs
+        )
 
     def contains(
         self,
@@ -440,7 +483,7 @@ class Interval:
             if ret[-1] != len(timestamps) - padding:
                 ret[-1] += padding
 
-        return Interval(ret)
+        return Interval(ret, **self.kwargs)
 
     def excludes(
         self, timestamps: np.ndarray, as_indices: Optional[bool] = False
@@ -454,7 +497,9 @@ class Interval:
         contained_times = self.contains(timestamps, as_indices=as_indices).times
         if as_indices:
             timestamps = np.arange(len(timestamps))
-        return Interval(np.setdiff1d(timestamps, contained_times))
+        return Interval(
+            np.setdiff1d(timestamps, contained_times), **self.kwargs
+        )
 
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
@@ -464,13 +509,16 @@ class Interval:
         return interval_list
 
     def _union_consolidate(self, interval_list: IntervalLike) -> T:
-        return Interval(reduce(self._union_concat, interval_list))
+        kwargs = dict(self.kwargs, no_overlap=False)
+        return Interval(reduce(self._union_concat, interval_list), **kwargs)
 
     def union_consolidate(self) -> T:
-        return Interval(self._union_consolidate(self.times))
+        return Interval(self._union_consolidate(self.times), **self.kwargs)
 
     def _consolidate(self, interval_list: IntervalLike) -> T:
         """Consolidate overlapping intervals in an interval list."""
+        if not isinstance(interval_list, np.ndarray):
+            interval_list = np.asarray(interval_list)
         if interval_list.ndim == 1:
             return self._expand_1d(interval_list)
 
@@ -481,7 +529,7 @@ class Interval:
         return self._expand_1d(interval_list)
 
     def consolidate(self) -> T:
-        return Interval(self._consolidate(self.times))
+        return Interval(self._consolidate(self.times), **self.kwargs)
 
     @staticmethod
     def _set_intersect(
@@ -540,7 +588,8 @@ class Interval:
         interval_list: np.array, (N,2)
         """
         return Interval(
-            self._intersect(self.times, self._extract(other), min_length)
+            self._intersect(self.times, self._extract(other), min_length),
+            **self.kwargs,
         )
 
     def _union_concat(
@@ -582,7 +631,9 @@ class Interval:
             interval1[-1][1] + 1 == interval2[0][0]
             or interval2[0][1] + 1 == interval1[-1][0]
         ):
-            return Interval(np.concatenate((interval1, interval2), axis=0))
+            return Interval(
+                np.concatenate((interval1, interval2), axis=0), **self.kwargs
+            )
 
         x = np.array(
             [
@@ -592,11 +643,15 @@ class Interval:
                 ]
             ]
         )
-        return Interval(np.concatenate((interval1[:-1], x), axis=0))
+        return Interval(
+            np.concatenate((interval1[:-1], x), axis=0), **self.kwargs
+        )
 
     def union_adjacent_consolidate(self) -> T:
+        times = [self.times] if len(self.times) > 1 else self.times
         return Interval(
-            self._expand_1d(reduce(self.union_adjacent_index, self.times))
+            self._expand_1d(reduce(self.union_adjacent_index, times)),
+            **self.kwargs,
         )
 
     def union(
@@ -654,7 +709,7 @@ class Interval:
             for start, stop in zip(union_starts, union_stops)
         ]
 
-        return Interval(np.asarray(union))
+        return Interval(np.asarray(union), **self.kwargs)
 
     def censor(self, timestamps: Union[np.ndarray, List[int]]) -> T:
         """Returns new interval list that starts/ends at first/last timestamp
@@ -675,7 +730,9 @@ class Interval:
             raise ValueError("Interval_list must contain all timestamps")
 
         timestamps_interval = np.asarray([[timestamps[0], timestamps[-1]]])
-        return Interval(self._intersect(interval_list, timestamps_interval))
+        return Interval(
+            self._intersect(interval_list, timestamps_interval), **self.kwargs
+        )
 
     def subtract(
         self,
@@ -734,9 +791,7 @@ class Interval:
                 np.asarray(result), min_length=min_length, max_length=max_length
             )
 
-        # __import__("pdb").set_trace()
-
-        return Interval(result)
+        return Interval(result, **self.kwargs)
 
     def add_removal_window(
         self, removal_window_ms: int, timestamps: np.ndarray
@@ -756,7 +811,7 @@ class Interval:
         return (
             self._union_consolidate(new_interval)
             if len(new_interval) > 1
-            else Interval(new_interval)
+            else Interval(new_interval, **self.kwargs)
         )
 
     def to_indices(self, timestamps: np.ndarray) -> List[List[int]]:
