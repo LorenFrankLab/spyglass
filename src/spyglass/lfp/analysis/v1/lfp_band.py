@@ -465,16 +465,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             }
         ).fetch("valid_times")
         lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
+        lfp_valid_times.set_key(**key, pipeline="lfp band")
         if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
             # add an interval list for the LFP valid times
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times.times,
-                    "pipeline": "lfp band",
-                }
-            )
+            IntervalList.insert1(lfp_valid_times.as_dict)
         else:
             # check that the valid times are the same
             assert np.isclose(
@@ -490,11 +484,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         """Fetches the filtered data as a dataframe"""
         filtered_nwb = self.fetch_nwb()
 
-        if len(filtered_nwb) == 0:
-            raise ValueError("No filtered data found for this LFPBandSelection")
-        if len(filtered_nwb) > 1:
+        if len(filtered_nwb) != 1:
             raise ValueError(
-                "Multiple filtered data found for this LFPBandSelection. Expected 1"
+                "Expected 1 filtered data, but got "
+                + f"{len(filtered_nwb)} for this LFPBandSelection"
             )
 
         filtered_nwb = filtered_nwb[0]

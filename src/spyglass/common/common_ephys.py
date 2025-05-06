@@ -552,17 +552,11 @@ class LFP(SpyglassMixin, dj.Imported):
 
         # finally, censor the valid times to account for the downsampling
         lfp_valid_times = valid_times.censor(timestamp_interval)
-        # add an interval list for the LFP valid times, skipping duplicates
-        key["interval_list_name"] = "lfp valid times"
-        IntervalList.insert1(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-                "valid_times": lfp_valid_times.times,
-                "pipeline": "lfp_v0",
-            },
-            replace=True,
+        lfp_valid_times.set_key(
+            nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
+        # add an interval list for the LFP valid times, skipping duplicates
+        IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 

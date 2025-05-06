@@ -176,15 +176,8 @@ class LFPV1(SpyglassMixin, dj.Computed):
             }
         ).fetch("valid_times")
         if len(tmp_valid_times) == 0:  # TODO: replace with cautious_insert
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_valid_times.times,
-                    "pipeline": "lfp_v1",
-                },
-                replace=True,
-            )
+            lfp_valid_times.set_key(**key, pipeline="lfp_v1")
+            IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
         elif not np.allclose(tmp_valid_times[0], lfp_valid_times.times):
             raise ValueError(
                 "previously saved lfp times do not match current times"

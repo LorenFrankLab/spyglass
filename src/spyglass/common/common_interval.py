@@ -1,6 +1,6 @@
 import itertools
 from functools import reduce
-from typing import List, Optional, Tuple, TypeVar, Union
+from typing import Iterable, List, Optional, Tuple, TypeVar, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -77,7 +77,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         """Fetch interval list object for a given key."""
         if not len(self) == 1:
             raise ValueError(f"Expected one row, got {len(self)}")
-        return Interval(self.fetch1("valid_times"))
+        return Interval(self.fetch1())
 
     def plot_intervals(self, figsize=(20, 5), return_fig=False):
         """Plot the intervals in the interval list."""
@@ -241,7 +241,11 @@ class Interval:
     # timestamps. This should be fixed in the future.
 
     def __init__(
-        self, interval_list: Union[List[int], dict, np.ndarray], from_inds=False
+        self,
+        interval_list: IntervalLike = None,
+        name=None,
+        from_inds=False,
+        **kwargs,
     ) -> None:
         """Initialize the Intervals class with a list of intervals.
 
@@ -250,12 +254,29 @@ class Interval:
         interval_list : dict or np.ndarray
             A key of IntervalList table, a numpy array of intervals, or a list
             of indices (integers).
+        name : str, optional
+            Name of the interval list. If not provided, can be taken from
+            kwargs["interval_list_name"].
+        from_inds : bool, optional
+            If True, treat the interval_list as a list of indices and
+            convert to intervals. Defaults to False.
+        kwargs : dict, optional
+            Additional keyword arguments to pass to the class, including
+            "valid_times" and "interval_list_name" for times and name.
         """
-        self.key = None
-        self.times = self._extract(interval_list, from_inds=from_inds)
+        self.key = dict()  # let _extract decide if this is a key
+        self.name = name or kwargs.get("interval_list_name")
+        self.pipeline = kwargs.get("pipeline")
+        self.nwb_file_name = kwargs.get("nwb_file_name")
+        times = kwargs.get("valid_times") or interval_list
+        self.times = self._extract(times, from_inds=from_inds)
 
     def __repr__(self) -> str:
-        joined = "\n\t".join([np.array2string(i) for i in np.array(self.times)])
+        joined = self.times
+        if isinstance(self.times, Iterable):
+            joined = "\n\t".join(
+                [np.array2string(i) for i in np.array(self.times)]
+            )
         return f"Interval({joined})"
 
     def __len__(self) -> int:
@@ -275,7 +296,45 @@ class Interval:
     def __iter__(self) -> iter:
         """Iterate over the intervals in the interval list."""
         for interval in self.times:
-            yield Interval(interval)
+            yield interval
+
+    def __hash__(self) -> int:  # required for dict dunder
+        """Hash the interval list for use in sets or dictionaries."""
+        times = self.times
+        if hasattr(times, "tolist"):
+            times = times.tolist()
+        if not isinstance(times, Iterable):
+            times = [times]
+        return hash(f"{self.name}{tuple(times)}")
+
+    def set_key(self, **kwargs: dict) -> None:
+        """Set the key for the interval list."""
+        self.key = kwargs
+        self.nwb_file_name = kwargs.get("nwb_file_name") or kwargs.get("nwb")
+        self.name = kwargs.get("interval_list_name") or kwargs.get("name")
+        self.pipeline = kwargs.get("pipeline")
+
+    @property
+    def __dict__(self) -> dict:
+        """Convert the interval list to a dictionary."""
+        ret = {
+            "nwb_file_name": self.nwb_file_name,
+            "interval_list_name": self.name,
+            "valid_times": self.times,
+            "pipeline": self.pipeline,
+        }
+        return {k: v for k, v in ret.items() if v is not None}
+
+    @property
+    def as_dict(self) -> dict:
+        """Convert the interval list to a dictionary."""
+        return self.__dict__
+
+    @property
+    def primary_key(self):
+        if not self.name:
+            raise ValueError("Interval list name is not set.")
+        return {"interval_list_name": self.name}
 
     def __eq__(self, other: IntervalLike) -> bool:
         """Check if two interval lists are equal."""
@@ -291,8 +350,10 @@ class Interval:
             return interval_list.times
         elif isinstance(interval_list, dict):
             return self._import_from_table(interval_list)
-        elif isinstance(interval_list, (list, np.ndarray)):
+        elif isinstance(interval_list, (np.generic, np.ndarray, list, int)):
             return interval_list
+        elif interval_list is None:
+            return np.array([])
         else:
             raise ValueError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
@@ -673,6 +734,8 @@ class Interval:
                 np.asarray(result), min_length=min_length, max_length=max_length
             )
 
+        # __import__("pdb").set_trace()
+
         return Interval(result)
 
     def add_removal_window(
@@ -731,28 +794,24 @@ class Interval:
     def _import_from_table(
         self, interval_key: dict, return_table: Optional[bool] = False
     ) -> Union[dj.expression.QueryExpression, np.ndarray]:
-        from spyglass.common.common_interval import IntervalList
+        self.key = interval_key
+        query = IntervalList & {
+            k: v
+            for k, v in interval_key.items()
+            if k in IntervalList.primary_key
+        }
 
-        query = IntervalList & interval_key
         if return_table:
             return query
-        times = query.fetch("valid_times")
-        if len(times) == 0:
-            raise ValueError(f"No valid times found for {interval_key}")
-        if len(times) == 1:
-            return times[0]
-
-        # Should be union?
-        raise ValueError(
-            f"Multiple valid times found for {interval_key}: {times}"
-        )
-
-    def _get_table(self):
-        if not self.key:
+        count = len(query)
+        if count != 1:  # Should be union of existing intervals?
             raise ValueError(
-                "Must initialize with a key run table-based operations"
+                f"Found {count} interval entries found for {interval_key}"
             )
-        return self._import_from_table(self.key, return_table=True)
+        self.name, self.pipeline, self.nwb_file_name, times = query.fetch1(
+            "interval_list_name", "pipeline", "nwb_file_name", "valid_times"
+        )
+        return times
 
 
 def intervals_by_length(interval_list, min_length=0.0, max_length=1e10):

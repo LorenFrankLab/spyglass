@@ -345,15 +345,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             folder=recording_path, chunk_duration="10000ms", n_jobs=8
         )
 
-        IntervalList.insert1(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": recording_name,
-                "valid_times": sort_interval_valid_times.times,
-                "pipeline": "spikesorting_recording_v0",
-            },
-            replace=True,
+        sort_interval_valid_times.set_key(
+            nwb_file_name=key["nwb_file_name"],
+            interval_list_name=recording_name,
+            pipeline="spikesorting_recording_v0",
         )
+        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
 
         self.insert1(
             {
