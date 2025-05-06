@@ -10,10 +10,7 @@ from ripple_detection import Karlsson_ripple_detector, Kay_ripple_detector
 from ripple_detection.core import gaussian_smooth, get_envelope
 from scipy.stats import zscore
 
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput
@@ -293,7 +290,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["target_interval_list_name"],
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
         position_info = (
             PositionOutput() & {"merge_id": key["pos_merge_id"]}
         ).fetch1_dataframe()
@@ -302,9 +299,9 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
         valid_times_interval = np.array(
             [position_info.index[0], position_info.index[-1]]
         )
-        position_valid_times = interval_list_intersect(
-            position_valid_times, valid_times_interval
-        )
+        position_valid_times = position_valid_times.intersect(
+            valid_times_interval
+        ).times
 
         position_info = pd.concat(
             [

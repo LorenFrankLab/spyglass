@@ -1,15 +1,10 @@
 import warnings
-from functools import reduce
 from typing import Union
 
 import numpy as np
 import scipy.signal
 
-from spyglass.common.common_interval import (
-    _union_concat,
-    interval_from_inds,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import Interval
 from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_valid_intervals
 
@@ -170,9 +165,6 @@ def difference_artifact_detector(
     artifact_frames = above_thresh.copy()
     logger.info("detected ", artifact_frames.shape[0], " artifacts")
 
-    # Convert to s to remove from either side of each detected artifact
-    half_removal_window_s = removal_window_ms / 1000 * 0.5
-
     if len(artifact_frames) == 0:
         recording_interval = np.asarray(
             [[valid_timestamps[0], valid_timestamps[-1]]]
@@ -181,37 +173,25 @@ def difference_artifact_detector(
         logger.info("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
-    artifact_intervals = interval_from_inds(artifact_frames)
-
-    artifact_intervals_s = np.zeros(
-        (len(artifact_intervals), 2), dtype=np.float64
+    # generate intervals for artifact frame indices
+    artifact_intervals_s = Interval(
+        artifact_frames, from_inds=True
+    ).add_removal_window(
+        removal_window_ms=removal_window_ms, timestamps=valid_timestamps
     )
-
-    for interval_idx, interval in enumerate(artifact_intervals):
-        artifact_intervals_s[interval_idx] = [
-            valid_timestamps[interval[0]] - half_removal_window_s,
-            valid_timestamps[interval[1]] + half_removal_window_s,
-        ]
-    artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
 
     valid_intervals = get_valid_intervals(
         valid_timestamps, sampling_frequency, 1.5, 0.000001
     )
 
     # these are artifact times - need to subtract these from valid timestamps
-    artifact_valid_times = interval_list_intersect(
-        valid_intervals, artifact_intervals_s
+    artifact_valid_times = Interval(valid_intervals).intersect(
+        artifact_intervals_s
     )
 
-    # note: this is a slow step
-    list_triggers = []
-    for interval in artifact_valid_times:
-        list_triggers.append(
-            np.arange(
-                np.searchsorted(valid_timestamps, interval[0]),
-                np.searchsorted(valid_timestamps, interval[1]),
-            )
-        )
+    starts = np.searchsorted(valid_timestamps, artifact_valid_times[:, 0])
+    ends = np.searchsorted(valid_timestamps, artifact_valid_times[:, 1])
+    list_triggers = [np.arange(start, end) for start, end in zip(starts, ends)]
 
     new_array = np.array(np.concatenate(list_triggers))
 
