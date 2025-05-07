@@ -884,8 +884,6 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
     delete calls from upstream tables to downstream tables.
     """
 
-    # TODO: See #1163
-
     def delete(self, *args, **kwargs):
         """Delete master and part entries."""
         restriction = self.restriction or True  # for (tbl & restr).delete()

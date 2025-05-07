@@ -393,7 +393,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         all_timestamps = recording.get_times()
 
-        # TODO: make sure the following works for recordings that don't have explicit timestamps
+        # TODO: check works for recordings w/o explicit timestamps
         valid_sort_times = self._get_sort_interval_valid_times(key)
         valid_sort_times_indices = _consolidate_intervals(
             valid_sort_times, all_timestamps

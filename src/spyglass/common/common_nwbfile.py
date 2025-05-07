@@ -155,11 +155,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         schema.external["raw"].delete(delete_external_files=delete_files)
 
 
-# TODO: add_to_kachery will not work because we can't update the entry after
-# it's been used in another table. We therefore need another way to keep track
-# of the file here
-
-
 @schema
 class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
@@ -387,8 +382,6 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         nwb_object: pynwb.core.NWBDataInterface,
         table_name: str = None,
     ):
-        # TODO: change to add_object with checks for object type and a name
-        # parameter, which should be specified if it is not an NWB container
         """Add an NWB object to the analysis file and return the NWB object ID
 
         Adds object to the scratch space of the NWB file.

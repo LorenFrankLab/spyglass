@@ -1,12 +1,14 @@
+from typing import Union
+
 import datajoint as dj
 import numpy as np
 from datajoint.utils import to_camel_case
 from ripple_detection import get_multiunit_population_firing_rate
 
 from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
-from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
+from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
-)
+)  # noqa: F401
 from spyglass.spikesorting.v1 import ArtifactDetectionSelection  # noqa: F401
 from spyglass.spikesorting.v1 import (
     CurationV1,
@@ -58,13 +60,61 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         -> CuratedSpikeSorting
         """
 
+    def _get_restricted_merge_ids_v1(
+        self,
+        key: dict,
+        restrict_by_artifact: bool = True,
+        as_dict: bool = False,
+    ) -> Union[None, list, dict]:
+        """Helper function to get merge ids for a given interpretable key
+
+        Parameters
+        ----------
+        key : dict
+            restriction for any stage of the spikesorting pipeline
+        restrict_by_artifact : bool, optional
+            whether to restrict by artifact rather than original interval name.
+            Relevant to v1 pipeline, by default True
+        as_dict : bool, optional
+            whether to return merge_ids as a list of dictionaries. Default False
+
+        Returns
+        -------
+        merge_ids : Union[None, list, dict]
+            list of merge ids from the restricted sources
+        """
+        table = SpikeSortingRecordingSelection() & key  # recording restriction
+
+        art_restrict = True
+        if restrict_by_artifact:  # Artifact restriction
+            art_restrict = [
+                {
+                    **{k: v for k, v in row.items() if k != "artifact_id"},
+                    "interval_list_name": str(row["artifact_id"]),
+                }
+                for row in ArtifactDetectionSelection * table & key
+            ]
+            key.pop("interval_list_name", None)  # intervals now in art restr
+
+        table = (SpikeSortingSelection() * table.proj()) & art_restrict & key
+        # Metric Curation is optional - only restrict if the headings present
+        metric_sel_fields = MetricCurationSelection.heading.names
+        headings = [name for name in metric_sel_fields if name != "curation_id"]
+        if any([heading in key for heading in headings]):
+            table = (MetricCurationSelection().proj(*headings) * table) & key
+
+        table = (CurationV1() * table) & key  # get curations
+        table = SpikeSortingOutput().CurationV1() & table
+
+        return table.fetch("merge_id", as_dict=as_dict)
+
     def get_restricted_merge_ids(
         self,
         key: dict,
         sources: list = ["v0", "v1"],
         restrict_by_artifact: bool = True,
         as_dict: bool = False,
-    ):
+    ) -> Union[None, list, dict]:
         """Helper function to get merge ids for a given interpretable key
 
         Parameters
@@ -74,71 +124,38 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
         sources : list, optional
             list of sources to restrict to
         restrict_by_artifact : bool, optional
-            whether to restrict by artifact rather than original interval name. Relevant to v1 pipeline, by default True
+            whether to restrict by artifact rather than original interval name.
+            Relevant to v1 pipeline, by default True
         as_dict : bool, optional
-            whether to return merge_ids as a list of dictionaries, by default False
+            whether to return merge_ids as a list of dictionaries. Default False
 
         Returns
         -------
         merge_ids : list
             list of merge ids from the restricted sources
         """
-        # TODO: replace with long-distance restrictions
+        if not isinstance(key, dict):
+            raise TypeError("key must be a dictionary")
 
         merge_ids = []
 
         if "v1" in sources:
-            key_v1 = key.copy()
-            # Recording restriction
-            table = SpikeSortingRecordingSelection() & key_v1
-            if restrict_by_artifact:
-                # Artifact restriction
-                table_artifact = ArtifactDetectionSelection * table & key_v1
-                artifact_restrict = table_artifact.proj(
-                    interval_list_name="artifact_id"
-                ).fetch(as_dict=True)
-                # convert interval_list_name from artifact uuid to string
-                for key_i in artifact_restrict:
-                    key_i["interval_list_name"] = str(
-                        key_i["interval_list_name"]
-                    )
-                if "interval_list_name" in key_v1:
-                    key_v1.pop(
-                        "interval_list_name"
-                    )  # pop the interval list since artifact intervals are now the restriction
-                # Spike sorting restriction
-                table = (
-                    (SpikeSortingSelection() * table.proj())
-                    & artifact_restrict
-                    & key_v1
+            merge_ids.extend(
+                self._get_restricted_merge_ids_v1(
+                    key.copy(),
+                    restrict_by_artifact=restrict_by_artifact,
+                    as_dict=as_dict,
                 )
-            else:
-                # use the supplied interval to restrict
-                table = (SpikeSortingSelection() * table.proj()) & key_v1
-            # Metric Curation restriction
-            headings = MetricCurationSelection.heading.names
-            headings.pop(
-                headings.index("curation_id")
-            )  # this is the parent curation id of the final entry. dont restrict by this name here
-            # metric curation is an optional process. only do this join if the headings are present in the key
-            if any([heading in key_v1 for heading in headings]):
-                table = (
-                    MetricCurationSelection().proj(*headings) * table
-                ) & key_v1
-            # get curations
-            table = (CurationV1() * table) & key_v1
-            table = SpikeSortingOutput().CurationV1() & table
-            merge_ids.extend(table.fetch("merge_id", as_dict=as_dict))
+            )
 
+        if "v0" in sources and restrict_by_artifact:
+            logger.warning(
+                "V0 requires artifact restrict. Ignoring restrict_by_artifact"
+            )
         if "v0" in sources:
-            if restrict_by_artifact:
-                logger.warning(
-                    'V0 requires artifact restrict. Ignoring "restrict_by_artifact" flag.'
-                )
             key_v0 = key.copy()
             if "sort_interval" not in key_v0 and "interval_list_name" in key_v0:
-                key_v0["sort_interval"] = key_v0["interval_list_name"]
-                _ = key_v0.pop("interval_list_name")
+                key_v0["sort_interval"] = key_v0.pop("interval_list_name")
             merge_ids.extend(
                 (SpikeSortingOutput.CuratedSpikeSorting() & key_v0).fetch(
                     "merge_id", as_dict=as_dict

@@ -83,16 +83,12 @@ def get_nwb_file(nwb_file_path):
                     raise FileNotFoundError(
                         f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
                     )
-                io, nwbfile = DandiPath().fetch_file_from_dandi(
-                    dandi_key
-                )  # TODO: consider case where file in multiple dandisets
+                io, nwbfile = DandiPath().fetch_file_from_dandi(dandi_key)
                 __open_nwb_files[nwb_file_path] = (io, nwbfile)
                 return nwbfile
 
-        # now open the file
-        io = pynwb.NWBHDF5IO(
-            path=nwb_file_path, mode="r", load_namespaces=True
-        )  # keep file open
+        # now open the file, and keep it open
+        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode="r", load_namespaces=True)
         nwbfile = io.read()
         __open_nwb_files[nwb_file_path] = (io, nwbfile)
 
@@ -122,7 +118,7 @@ def get_linked_nwbs(path: str) -> List[str]:
         return [x for x in io._HDF5IO__built if x != path]
 
 
-def get_config(nwb_file_path, calling_table=None):
+def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
 
@@ -130,33 +126,38 @@ def get_config(nwb_file_path, calling_table=None):
     ----------
     nwb_file_path : str
         Absolute path to the NWB file.
+    calling_table : str, optional
+        The name of the table that is calling this function. Used for
+        logging purposes.
 
     Returns
     -------
     dict
-        Dictionary of configuration settings loaded from the corresponding YAML file
+        Dictionary of configuration settings loaded from the YAML file
     """
     if nwb_file_path in __configs:  # load from cache if exists
         return __configs[nwb_file_path]
 
-    p = Path(nwb_file_path)
-    # NOTE use p.stem[:-1] to remove the underscore that was added to the file
-    config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+    obj_path = Path(nwb_file_path)
+    # NOTE use stem[:-1] to remove the underscore that was added to the file
+    config_path = obj_path.parent / (
+        obj_path.stem[:-1] + "_spyglass_config.yaml"
+    )
     if not os.path.exists(config_path):
         from spyglass.settings import base_dir  # noqa: F401
 
-        rel_path = p.relative_to(base_dir)
+        rel_path = obj_path.relative_to(base_dir)
         table = f"{calling_table}: " if calling_table else ""
         logger.info(f"{table}No config found at {rel_path}")
         ret = dict()
         __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
         return ret
     with open(config_path, "r") as stream:
-        d = yaml.safe_load(stream)
+        config_dict = yaml.safe_load(stream)
 
     # TODO write a JSON schema for the yaml file and validate the yaml file
-    __configs[nwb_file_path] = d  # store in cache
-    return d
+    __configs[nwb_file_path] = config_dict  # store in cache
+    return config_dict
 
 
 def close_nwb_files():

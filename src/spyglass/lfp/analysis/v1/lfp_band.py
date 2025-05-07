@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -436,10 +436,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            eseries_name = "filtered data"
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
+                name="filtered data",
                 data=filtered_data,
                 electrodes=electrode_table_region,
                 timestamps=new_timestamps,
