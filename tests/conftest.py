@@ -470,7 +470,7 @@ def trodes_params(trodes_params_table, teardown):
             "params": {
                 **params,
                 "is_upsampled": 1,
-                "upsampling_sampling_rate": 50,  # TODO - lower this to speed up
+                "upsampling_sampling_rate": 50,
             },
         },
     }

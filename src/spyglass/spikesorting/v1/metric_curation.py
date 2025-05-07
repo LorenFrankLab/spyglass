@@ -260,7 +260,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
-        joined = (
+        query = (
             (MetricCurationSelection & key)
             * SpikeSortingSelection
             * WaveformParameters
