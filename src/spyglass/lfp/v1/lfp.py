@@ -66,7 +66,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
         the AnalysisNwbfile table. The valid times for the filtered data are
         stored in the IntervalList table.
         """
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         # get the NWB object with the data
         nwbf_key = {"nwb_file_name": key["nwb_file_name"]}
         rawdata = (Raw & nwbf_key).fetch_nwb()[0]["raw"]
@@ -201,7 +201,6 @@ class LFPV1(SpyglassMixin, dj.Computed):
         orig_key["analysis_file_name"] = lfp_file_name
         orig_key["lfp_object_id"] = lfp_object_id
         LFPOutput.insert1(orig_key)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a single dataframe."""

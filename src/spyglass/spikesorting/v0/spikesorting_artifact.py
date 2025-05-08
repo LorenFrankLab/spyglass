@@ -106,55 +106,52 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             - Recording from SpikeSortingRecording (loads with spikeinterface)
         Uses module-level function _get_artifact_times to detect artifacts.
         """
-        if not (ArtifactDetectionSelection & key).fetch1(
-            "custom_artifact_detection"
-        ):
-            # get the dict of artifact params associated with this artifact_params_name
-            artifact_params = (ArtifactDetectionParameters & key).fetch1(
-                "artifact_params"
-            )
+        query = ArtifactDetectionParameters * ArtifactDetectionSelection & key
 
-            recording_path = (SpikeSortingRecording & key).fetch1(
-                "recording_path"
-            )
-            recording_name = SpikeSortingRecording._get_recording_name(key)
-            recording = si.load_extractor(recording_path)
+        if query.fetch1("custom_artifact_detection"):
+            return
 
-            job_kwargs = {
-                "chunk_duration": "10s",
-                "n_jobs": 4,
-                "progress_bar": "True",
+        # get the dict of artifact params associated with this artifact_params_name
+        artifact_params = query.fetch1("artifact_params")
+
+        recording_name = SpikeSortingRecording._get_recording_name(key)
+        recording = SpikeSortingRecording().load_recording(key)
+
+        job_kwargs = {
+            "chunk_duration": "10s",
+            "n_jobs": 4,
+            "progress_bar": "True",
+        }
+
+        artifact_removed_valid_times, artifact_times = _get_artifact_times(
+            recording, **artifact_params, **job_kwargs
+        )
+
+        key.update(
+            {
+                "artifact_times": artifact_times,
+                "artifact_removed_valid_times": artifact_removed_valid_times,
+                "artifact_removed_interval_list_name": (
+                    # set up a name for no-artifact times using recording id
+                    recording_name
+                    + "_"
+                    + key["artifact_params_name"]
+                    + "_artifact_removed_valid_times"
+                ),
             }
+        )
 
-            artifact_removed_valid_times, artifact_times = _get_artifact_times(
-                recording, **artifact_params, **job_kwargs
-            )
+        interval_key = {
+            "nwb_file_name": key["nwb_file_name"],
+            "interval_list_name": key["artifact_removed_interval_list_name"],
+            "valid_times": key["artifact_removed_valid_times"],
+            "pipeline": "spikesorting_artifact_v0",
+        }
 
-            key["artifact_times"] = artifact_times
-            key["artifact_removed_valid_times"] = artifact_removed_valid_times
-
-            # set up a name for no-artifact times using recording id
-            key["artifact_removed_interval_list_name"] = (
-                recording_name
-                + "_"
-                + key["artifact_params_name"]
-                + "_artifact_removed_valid_times"
-            )
-
-            ArtifactRemovedIntervalList.insert1(key, replace=True)
-
-            # also insert into IntervalList
-            tmp_key = {}
-            tmp_key["nwb_file_name"] = key["nwb_file_name"]
-            tmp_key["interval_list_name"] = key[
-                "artifact_removed_interval_list_name"
-            ]
-            tmp_key["valid_times"] = key["artifact_removed_valid_times"]
-            tmp_key["pipeline"] = "spikesorting_artifact_v0"
-            IntervalList.insert1(tmp_key, replace=True)
-
-            # insert into computed table
-            self.insert1(key)
+        ArtifactRemovedIntervalList.insert1(key, replace=True)
+        IntervalList.insert1(interval_key, replace=True)
+        # insert into computed table
+        self.insert1(key)
 
 
 @schema
