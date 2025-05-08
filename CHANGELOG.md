@@ -81,6 +81,7 @@ ImportedLFP().drop()
     - Allow ingestion of multi-row task epoch tables #1278
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
+    - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208

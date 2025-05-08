@@ -16,7 +16,6 @@ import json
 import re
 from functools import cached_property
 from pathlib import Path
-from pprint import pprint  # TODO: Remove before merge
 from shutil import rmtree as shutil_rmtree
 from subprocess import run as sub_run
 from typing import Any, List, Optional, Tuple, Union
@@ -36,7 +35,7 @@ from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
 
-schema = dj.schema("cbroz_recomp_v0")  # TODO: spikesorting_recompute_v0
+schema = dj.schema("spikesorting_recompute_v0")
 
 
 @schema

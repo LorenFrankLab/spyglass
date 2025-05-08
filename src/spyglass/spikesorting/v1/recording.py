@@ -315,8 +315,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             return_hasher=bool(save_to),
         )
 
-        # NOTE: Conditional to avoid impacting database. NO MERGE!
-        if recompute and test_mode:
+        if recompute:
             AnalysisNwbfile()._update_external(recompute_file_name, hash)
 
         return dict(

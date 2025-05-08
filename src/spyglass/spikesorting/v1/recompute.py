@@ -35,7 +35,7 @@ from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
-schema = dj.schema("cbroz_recomp_v1")  # TODO: spikesorting_v1_recompute
+schema = dj.schema("spikesorting_v1_recompute")
 
 
 @schema
