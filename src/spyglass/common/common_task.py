@@ -200,8 +200,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     IntervalList() & {"nwb_file_name": nwb_file_name}
                 ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
-                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
-                    # so epoch would be an int
                     key["epoch"] = epoch
                     target_interval = self.get_epoch_interval_name(
                         epoch, session_intervals
@@ -303,8 +301,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             loading data into the TaskEpoch table.
         """
 
-        # TODO this could be more strict and check data types, but really it
-        # should be schematized
         return (
             Task.is_nwb_task_table(task_table)
             and hasattr(task_table, "camera_id")

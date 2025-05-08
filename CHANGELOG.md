@@ -43,6 +43,7 @@ ImportedLFP().drop()
 - Fix column error in `check_threads` method #1256
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
+- Remove outdated code comments #1304
 
 ### Documentation
 
@@ -66,6 +67,7 @@ ImportedLFP().drop()
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
     - Sanitize new project names for unix file system #1247
+    - Add arg to return percent below threshold in `get_subthresh_inds` #1304
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -75,16 +77,18 @@ ImportedLFP().drop()
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
+    - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
-    - Adding a condition in the MAD detector to replace zero, NaN, or infinite
-        MAD values with 1.0. #1280
+    - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
+        values with 1.0. #1280
     - Refactoring the creation of LFPElectrodeGroup with added input validation
         and transactional insertion. #1280, #1302
     - Updating the LFPBandSelection logic with comprehensive validation and batch
         insertion for electrodes and references. #1280
     - Implement `ImportedLFP.make()`  for ingestion from nwb files #1278, #1302
+
 
 ## [0.5.4] (December 20, 2024)
 

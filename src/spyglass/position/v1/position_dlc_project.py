@@ -181,7 +181,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
             config_path = new_config_path
             add_to_config(config_path, **{"project_path": new_proj_dir})
 
-        # TODO still need to copy videos over to video dir
         key = {
             "project_name": project_name,
             "team_name": lab_team,

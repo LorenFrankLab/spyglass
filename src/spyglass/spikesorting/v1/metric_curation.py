@@ -1,5 +1,6 @@
 import os
 import uuid
+from pathlib import Path
 from time import time
 from typing import Any, Dict, List, Union
 
@@ -259,37 +260,40 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
-        nwb_file_name = (
-            SpikeSortingSelection * MetricCurationSelection & key
-        ).fetch1("nwb_file_name")
-
-        # TODO: reduce fetch calls on same tables
-        waveform_params = (
-            WaveformParameters * MetricCurationSelection & key
-        ).fetch1("waveform_params")
-        metric_params = (
-            MetricParameters * MetricCurationSelection & key
-        ).fetch1("metric_params")
-        label_params, merge_params = (
-            MetricCurationParameters * MetricCurationSelection & key
-        ).fetch1("label_params", "merge_params")
-        sorting_id, curation_id = (MetricCurationSelection & key).fetch1(
-            "sorting_id", "curation_id"
+        query = (
+            (MetricCurationSelection & key)
+            * SpikeSortingSelection
+            * WaveformParameters
+            * MetricParameters
+            * MetricCurationParameters
         )
-        # DO
+        (
+            nwb_file_name,
+            waveform_params,
+            metric_params,
+            label_params,
+            merge_params,
+            sorting_id,
+            curation_id,
+        ) = query.fetch1(
+            "nwb_file_name",
+            "waveform_params",
+            "metric_params",
+            "label_params",
+            "merge_params",
+            "sorting_id",
+            "curation_id",
+        )
+
         # load recording and sorting
-        recording = CurationV1.get_recording(
-            {"sorting_id": sorting_id, "curation_id": curation_id}
-        )
-        sorting = CurationV1.get_sorting(
-            {"sorting_id": sorting_id, "curation_id": curation_id}
-        )
+        rec_key = {"sorting_id": sorting_id, "curation_id": curation_id}
+        recording = CurationV1.get_recording(rec_key)
+        sorting = CurationV1.get_sorting(rec_key)
         # extract waveforms
-        if "whiten" in waveform_params:
-            if waveform_params.pop("whiten"):
-                recording = sp.whiten(recording, dtype=np.float64)
+        if waveform_params.pop("whiten", False):
+            recording = sp.whiten(recording, dtype=np.float64)
 
-        waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
+        waveforms_dir = Path(temp_dir) / str(key["metric_curation_id"])
         os.makedirs(waveforms_dir, exist_ok=True)
 
         logger.info("Extracting waveforms...")

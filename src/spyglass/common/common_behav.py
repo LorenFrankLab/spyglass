@@ -336,17 +336,16 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
             logger.info(associated_file_obj.description)
+            this_desc = associated_file_obj.description.upper
+
             if (
-                "statescript".upper() in associated_file_obj.description.upper()
-                or "state_script".upper()
-                in associated_file_obj.description.upper()
-                or "state script".upper()
-                in associated_file_obj.description.upper()
-            ):
+                "statescript".upper() in this_desc
+                or "state_script".upper() in this_desc
+                or "state script".upper() in this_desc
+            ) and str(key["epoch"]) in epoch_list:
                 # find the file associated with this epoch
-                if str(key["epoch"]) in epoch_list:
-                    key["file_object_id"] = associated_file_obj.object_id
-                    script_inserts.append(key.copy())
+                key["file_object_id"] = associated_file_obj.object_id
+                script_inserts.append(key.copy())
             else:
                 logger.info("not a statescript file")
 
