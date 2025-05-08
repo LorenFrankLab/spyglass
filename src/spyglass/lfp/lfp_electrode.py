@@ -163,14 +163,14 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
 
         # Unique group and set of electrodes, insert
         master_insert = dict(**session_key, lfp_electrode_group_name=group_name)
-        electrode_inserts = (
+        electrode_keys = (
             Electrode()
             & session_key
             & [{"electrode_id": e_id} for e_id in e_ids]
         ).fetch("KEY")
+        e_group_dict = dict(lfp_electrode_group_name=group_name)
         electrode_inserts = [
-            {**electrode_insert, "lfp_electrode_group_name": group_name}
-            for electrode_insert in electrode_inserts
+            dict(e_key, **e_group_dict) for e_key in electrode_keys
         ]
 
         self.insert1(master_insert)
