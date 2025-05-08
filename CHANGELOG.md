@@ -84,10 +84,11 @@ ImportedLFP().drop()
     - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
         values with 1.0. #1280
     - Refactoring the creation of LFPElectrodeGroup with added input validation
-        and transactional insertion. #1280
+        and transactional insertion. #1280, #1302
     - Updating the LFPBandSelection logic with comprehensive validation and batch
         insertion for electrodes and references. #1280
-    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278
+    - Implement `ImportedLFP.make()`  for ingestion from nwb files #1278, #1302
+
 
 ## [0.5.4] (December 20, 2024)
 
