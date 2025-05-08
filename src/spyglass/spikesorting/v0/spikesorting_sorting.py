@@ -323,7 +323,5 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         )
         return sorting_name
 
-    # TODO: write a function to import sorting done outside of dj
-
     def _import_sorting(self, key):
-        raise NotImplementedError
+        raise NotImplementedError("Not supported in V0. Use V1 instead.")

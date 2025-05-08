@@ -276,11 +276,14 @@ class CameraDevice(SpyglassMixin, dj.Manual):
         device_name_list = list()
         for device in nwbf.devices.values():
             if isinstance(device, ndx_franklab_novela.CameraDevice):
-                # TODO ideally the ID is not encoded in the name formatted in a
-                # particular way device.name must have the form "[any string
-                # without a space, usually camera] [int]"
+                id_int = [int(i) for i in device.name.split() if i.isnumeric()]
+                if not id_int:
+                    logger.warning(
+                        f"Camera {device.name} missing a valid integer ID."
+                    )
+                    continue
                 device_dict = {
-                    "camera_id": int(device.name.split()[1]),
+                    "camera_id": id_int[0],
                     "camera_name": device.camera_name,
                     "manufacturer": device.manufacturer,
                     "model": device.model,

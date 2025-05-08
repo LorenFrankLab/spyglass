@@ -221,10 +221,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 & {"probe_id": probe_id, "probe_electrode": probe_electrode}
             ).fetch("rel_x", "rel_y", "rel_z")
             # TODO: Fix this HACK when we can use probeinterface:
-            rel_x = float(rel_x)
-            rel_y = float(rel_y)
-            rel_z = float(rel_z)
-            tmp_geom[i, :] = [rel_x, rel_y, rel_z]
+            tmp_geom[i, :] = [float(rel_x), float(rel_y), float(rel_z)]
 
         # figure out which columns have coordinates
         n_found = 0

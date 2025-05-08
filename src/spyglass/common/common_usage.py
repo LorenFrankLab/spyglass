@@ -388,7 +388,7 @@ class Export(SpyglassMixin, dj.Computed):
                 + f" and including {links} instead"
             )
             unlinked_files.update(links)
-        file_paths = unlinked_files  # TODO: what if linked items have links?
+        file_paths = unlinked_files
 
         table_inserts = [
             {**key, **rd, "table_id": i}

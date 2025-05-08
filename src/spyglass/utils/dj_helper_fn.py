@@ -286,7 +286,6 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     )
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
-    # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)

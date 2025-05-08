@@ -130,9 +130,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
                 + f"bodyparts_params_dict {len(bp_params_dict)}"
             )
 
-        # TODO: change to DLCSmoothInterp.heading.names
-        table_column_names = list(table_entries[0].dtype.fields.keys())
-
+        table_column_names = DLCSmoothInterp.heading.names
         part_keys = [
             {
                 **{k: v for k, v in zip(table_column_names, table_entry[0])},
