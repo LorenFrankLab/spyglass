@@ -127,7 +127,7 @@ class SpikeSortingOutput(_Merge, SpyglassMixin):
             whether to restrict by artifact rather than original interval name.
             Relevant to v1 pipeline, by default True
         as_dict : bool, optional
-            whether to return merge_ids as a list of dictionaries, 
+            whether to return merge_ids as a list of dictionaries,
             by default False
 
         Returns
