@@ -92,6 +92,14 @@ class SpyglassMixin(ExportMixin):
 
     # -------------------------- Misc helper methods --------------------------
 
+    def dict_to_pk(self, key):
+        """Return primary key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.primary_key}
+
+    def dict_to_full_key(self, key):
+        """Return full key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.heading.names}
+
     @property
     def camel_name(self):
         """Return table name in camel case."""

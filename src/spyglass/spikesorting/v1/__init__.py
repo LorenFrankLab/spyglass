@@ -16,6 +16,11 @@ from spyglass.spikesorting.v1.metric_curation import (
     MetricParameters,
     WaveformParameters,
 )
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,
+)
 from spyglass.spikesorting.v1.recording import (
     SortGroup,
     SpikeSortingPreprocessingParameters,
@@ -27,3 +32,28 @@ from spyglass.spikesorting.v1.sorting import (
     SpikeSorting,
     SpikeSortingSelection,
 )
+
+__all__ = [
+    "ArtifactDetection",
+    "ArtifactDetectionParameters",
+    "ArtifactDetectionSelection",
+    "CurationV1",
+    "FigURLCuration",
+    "FigURLCurationSelection",
+    "ImportedSpikeSorting",
+    "MetricCuration",
+    "MetricCurationParameters",
+    "MetricCurationSelection",
+    "MetricParameters",
+    "RecordingRecompute",
+    "RecordingRecomputeSelection",
+    "RecordingRecomputeVersions",
+    "SortGroup",
+    "SpikeSorterParameters",
+    "SpikeSorting",
+    "SpikeSortingPreprocessingParameters",
+    "SpikeSortingRecording",
+    "SpikeSortingRecordingSelection",
+    "SpikeSortingSelection",
+    "WaveformParameters",
+]

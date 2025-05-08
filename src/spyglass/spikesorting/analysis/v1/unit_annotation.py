@@ -33,7 +33,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
             Parameters
             ----------
             return_unit_ids : bool, optional
-               whether to return unit ids with spike times, by default False
+                whether to return unit ids with spike times, by default False
 
             Returns
             -------
@@ -88,7 +88,7 @@ class UnitAnnotation(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         return_unit_ids : bool, optional
-           whether to return unit ids with spike times, by default False
+            whether to return unit ids with spike times, by default False
 
         Returns
         -------

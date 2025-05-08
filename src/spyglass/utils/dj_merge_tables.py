@@ -741,8 +741,6 @@ class Merge(ExportMixin, dj.Manual):
         source: Union[str, dict, dj.Table]
             Accepts a CamelCase name of the source, or key as a dict, or a part
             table.
-        init: bool, optional
-            Default False. If True, returns an instance of the class.
 
         Returns
         -------

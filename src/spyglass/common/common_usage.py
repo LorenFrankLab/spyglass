@@ -212,7 +212,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-
+        # only add items if found respective file types
         if raw_files := self._list_raw_files(key):
             raw_tbl = self._externals["raw"]
             raw_name = raw_tbl.full_table_name

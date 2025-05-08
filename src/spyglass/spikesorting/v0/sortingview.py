@@ -67,6 +67,10 @@ class SortingviewWorkspace(SpyglassMixin, dj.Computed):
             "lab_member_name"
         )
         google_user_ids = []
+
+        # ensure recording exists
+        _ = SpikeSortingRecording().load_recording(key)
+
         for team_member in team_members:
             google_user_id = (
                 LabMember.LabMemberInfo & {"lab_member_name": team_member}
