@@ -28,8 +28,35 @@ schema = dj.schema("position_v1_dlc_centroid")
 
 @schema
 class DLCCentroidParams(SpyglassMixin, dj.Manual):
-    """
-    Parameters for calculating the centroid
+    """Parameters for calculating the centroid
+
+    Parameters
+    ----------
+    dlc_centroid_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        centroid_method : str
+            Method for determining centroid. Options are:
+            'two_pt_centroid': Two-point centroid calculation
+            'four_led_centroid': Four-LED centroid calculation
+            'null': No centroid calculation
+        points : dict
+            Dictionary of bodyparts to use for centroid calculation
+        interpolate : bool
+            Whether to interpolate over NaNs in the data
+        interp_params : dict
+            Parameters for interpolation like max_cm_to_interp: float
+        smooth : bool
+            Whether to smooth the data
+        smoothing_params : dict
+            Parameters for smoothing the data
+            smoothing_duration : float
+            smooth_method : str (e.g. 'moving_avg')
+        max_LED_separation : float
+            Maximum separation between LEDs for centroid calculation
+        speed_smoothing_std_dev : float
+            Standard deviation for Gaussian smoothing of speed data
     """
 
     definition = """

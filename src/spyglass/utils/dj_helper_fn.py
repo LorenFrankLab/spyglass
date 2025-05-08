@@ -3,6 +3,7 @@
 import inspect
 import multiprocessing.pool
 import os
+import re
 from pathlib import Path
 from typing import Iterable, List, Type, Union
 from uuid import uuid4
@@ -32,6 +33,33 @@ PERIPHERAL_TABLES = [
     "`common_nwbfile`.`nwbfile_kachery`",
     "`common_nwbfile`.`nwbfile`",
 ]
+
+
+def sanitize_unix_name(name: str) -> str:
+    """Sanitize a string to be a valid unix name.
+
+    This function replaces any invalid characters with underscores and
+    removes leading and trailing whitespace. It warns the user if the name
+    has been changed.
+
+    Parameters
+    ----------
+    name : str
+        Name to sanitize.
+
+    Returns
+    -------
+    str
+        Sanitized name.
+    """
+    invalid_chars = r"[^a-zA-Z0-9_.-]+"
+    sanitized_name = re.sub(invalid_chars, "_", name.strip().replace(" ", "_"))
+    if sanitized_name != name:
+        logger.warning(
+            f"Name '{name}' contains invalid characters. "
+            + f"Sanitized to '{sanitized_name}'."
+        )
+    return sanitized_name
 
 
 def ensure_names(
@@ -77,9 +105,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -258,7 +286,6 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     )
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
-    # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)

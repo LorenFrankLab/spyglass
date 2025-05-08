@@ -22,8 +22,7 @@ class Task(SpyglassMixin, dj.Manual):
      task_subtype = NULL: varchar(2000)        # subtype of task
      """
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf: pynwb.NWBFile):
+    def insert_from_nwbfile(self, nwbf: pynwb.NWBFile):
         """Insert tasks from an NWB file.
 
         Parameters
@@ -36,14 +35,13 @@ class Task(SpyglassMixin, dj.Manual):
             logger.warning(f"No tasks processing module found in {nwbf}\n")
             return
         for task in tasks_mod.data_interfaces.values():
-            if cls.check_task_table(task):
-                cls.insert_from_task_table(task)
+            if self.is_nwb_task_table(task):
+                self.insert_from_task_table(task)
 
-    @classmethod
-    def insert_from_task_table(cls, task_table: pynwb.core.DynamicTable):
+    def insert_from_task_table(self, task_table: pynwb.core.DynamicTable):
         """Insert tasks from a pynwb DynamicTable containing task metadata.
 
-        Duplicate tasks will not be added.
+        Duplicate tasks will check for matching secondary keys and not be added.
 
         Parameters
         ----------
@@ -60,10 +58,31 @@ class Task(SpyglassMixin, dj.Manual):
             axis=1,
         ).tolist()
 
-        cls.insert(task_dicts, skip_duplicates=True)
+        # Check if the task is already in the table
+        # if so check that the secondary keys all match
+        def unequal_vals(key, a, b):
+            a, b = a.get(key) or "", b.get(key, "") or ""
+            return a != b  # prevent false positive on None != ""
+
+        inserts = []
+        for task_dict in task_dicts:
+            query = self & {"task_name": task_dict["task_name"]}
+            if not query:
+                inserts.append(task_dict)  # only append novel tasks
+                continue
+            existing = query.fetch1()
+            for key in set(task_dict).union(existing):
+                if unequal_vals(key, task_dict, existing):
+                    raise ValueError(
+                        f"Task {task_dict['task_name']} already exists "
+                        + f"with different values for {key}: "
+                        + f"{task_dict.get(key)} != {existing.get(key)}"
+                    )
+        # Insert the tasks into the table
+        self.insert(inserts)
 
     @classmethod
-    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+    def is_nwb_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
         """Check format of pynwb DynamicTable containing task metadata.
 
         The table should be an instance of pynwb.core.DynamicTable and contain
@@ -141,11 +160,13 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             )
             return
 
-        task_inserts = []
-        for task in tasks_mod.data_interfaces.values():
-            if self.check_task_table(task):
-                # check if the task is in the Task table and if not, add it
-                Task.insert_from_task_table(task)
+        task_inserts = []  # inserts for Task table
+        task_epoch_inserts = []  # inserts for TaskEpoch table
+        for task_table in tasks_mod.data_interfaces.values():
+            if not self.is_nwb_task_epoch(task_table):
+                continue
+            task_inserts.append(task_table)
+            for task in task_table:
                 key["task_name"] = task.task_name[0]
 
                 # get the CameraDevice used for this task (primary key is
@@ -179,8 +200,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     IntervalList() & {"nwb_file_name": nwb_file_name}
                 ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
-                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
-                    # so epoch would be an int
                     key["epoch"] = epoch
                     target_interval = self.get_epoch_interval_name(
                         epoch, session_intervals
@@ -189,7 +208,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         logger.warning("Skipping epoch.")
                         continue
                     key["interval_list_name"] = target_interval
-                    task_inserts.append(key.copy())
+                    task_epoch_inserts.append(key.copy())
 
         # Add tasks from config
         for task in config_tasks:
@@ -222,9 +241,14 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     logger.warning("Skipping epoch.")
                     continue
                 new_key["interval_list_name"] = target_interval
-                task_inserts.append(key.copy())
+                task_epoch_inserts.append(key.copy())
 
-        self.insert(task_inserts, allow_direct_insert=True)
+        # check if the task entries are in the Task table and if not, add it
+        [
+            Task().insert_from_task_table(task_table)
+            for task_table in task_inserts
+        ]
+        self.insert(task_epoch_inserts, allow_direct_insert=True)
 
     @classmethod
     def get_epoch_interval_name(cls, epoch, session_intervals):
@@ -258,7 +282,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             cls.update1(row=row)
 
     @classmethod
-    def check_task_table(cls, task_table: pynwb.core.DynamicTable) -> bool:
+    def is_nwb_task_epoch(cls, task_table: pynwb.core.DynamicTable) -> bool:
         """Check format of pynwb DynamicTable containing task metadata.
 
         The table should be an instance of pynwb.core.DynamicTable and contain
@@ -277,10 +301,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             loading data into the TaskEpoch table.
         """
 
-        # TODO this could be more strict and check data types, but really it
-        # should be schematized
         return (
-            Task.check_task_table(task_table)
+            Task.is_nwb_task_table(task_table)
             and hasattr(task_table, "camera_id")
             and hasattr(task_table, "task_epochs")
         )

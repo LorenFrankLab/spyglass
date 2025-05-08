@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Tuple, Union
 
 import datajoint as dj
 import numpy as np
@@ -27,22 +28,26 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
-    Attributes
+    Parameters
     ----------
-    interpolate : bool, default True
-        whether to interpolate over NaN spans
-    smooth : bool, default True
-        whether to smooth the dataset
-    smoothing_params : dict
-        smoothing_duration : float, default 0.05
-            number of frames to smooth over:
-            sampling_rate*smoothing_duration = num_frames
-    interp_params : dict
-        max_cm_to_interp : int, default 20
-            maximum distance between high likelihood points on either side of a
-            NaN span to interpolate over
-    likelihood_thresh : float, default 0.95
-        likelihood below which to NaN and interpolate over
+    dlc_si_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        interpolate : bool, default True
+            whether to interpolate over NaN spans
+        smooth : bool, default True
+            whether to smooth the dataset
+        smoothing_params : dict
+            smoothing_duration : float, default 0.05
+                number of frames to smooth over:
+                sampling_rate*smoothing_duration = num_frames
+        interp_params : dict
+            max_cm_to_interp : int, default 20
+                maximum distance between high likelihood points on either side
+                of a NaN span to interpolate over
+        likelihood_thresh : float, default 0.95
+            likelihood below which to NaN and interpolate over
     """
 
     definition = """
@@ -487,8 +492,27 @@ def span_length(x):
     return x[-1] - x[0]
 
 
-def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
-    """Return indices of subthresh points."""
+def get_subthresh_inds(
+    dlc_df: pd.DataFrame, likelihood_thresh: float, ret_sub_thresh: bool = False
+) -> Union[np.ndarray, Tuple[np.ndarray, float]]:
+    """Return indices of subthresh points.
+
+    Parameters
+    ----------
+    dlc_df : pd.DataFrame
+        Dataframe containing the DLC data
+    likelihood_thresh : float
+        Likelihood threshold for subthresh points
+    ret_sub_thresh : bool, default False
+        Whether to return the percentage of subthresh points
+
+    Returns
+    -------
+    all_nan_inds : np.ndarray
+        Indices of subthresh points
+    sub_thresh_percent: float, optional
+        Percentage of subthresh points
+    """
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(
         ~np.isnan(dlc_df["likelihood"].where(df_filter))
@@ -496,6 +520,5 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
-    # TODO: add option to return sub_thresh_percent
-    # sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
-    return all_nan_inds
+    sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
+    return all_nan_inds, sub_thresh_percent if ret_sub_thresh else all_nan_inds

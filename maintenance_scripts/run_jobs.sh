@@ -14,12 +14,14 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/.env" # load environment variables from this directory
 
-if [[ -z "${SPYGLASS_CONDA_PATH}" \
+if [[ -z "${SPYGLASS_BASE_PATH}"
+  || -z "${SPYGLASS_CONDA_PATH}" \
   || -z "${SPYGLASS_CONDA_ENV}" \
   || -z "${SPYGLASS_REPO_PATH}" \
   || -z "${SPYGLASS_LOG}" ]]; then
-  echo "Error: SPYGLASS_CONDA_PATH, SPYGLASS_CONDA_ENV, SPYGLASS_REPO_PATH,
-        and SPYGLASS_LOG must be set in .env"
+  echo "Error: the followimg must be set in an .env:
+        SPYGLASS_BASE_PATH, SPYGLASS_CONDA_PATH, SPYGLASS_CONDA_ENV,
+        SPYGLASS_REPO_PATH, and SPYGLASS_LOG"
   exit 1
 fi
 
@@ -79,6 +81,11 @@ conda_run() { conda run --name $SPYGLASS_CONDA_ENV "$@"; }
 CONN_TEST="import datajoint as dj; dj.logger.setLevel('ERROR'); dj.conn()"
 conda_run python -c "$CONN_TEST" > /dev/null || \
   { on_fail "Could not connect to the database"; exit 1; }
+
+# Chmod new files
+if $SPYGLASS_CHMOD_FILES; then
+  find $SPYGLASS_BASE_PATH -type f -mtime -1 -exec chmod 644 {} \; || true
+fi
 
 # Run cleanup script
 conda_run python maintenance_scripts/cleanup.py

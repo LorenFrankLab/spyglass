@@ -12,6 +12,7 @@ import pandas as pd
 import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
+from pynwb.core import ScratchData
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
@@ -152,11 +153,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         specified. Run this after deleting the Nwbfile() entries themselves.
         """
         schema.external["raw"].delete(delete_external_files=delete_files)
-
-
-# TODO: add_to_kachery will not work because we can't update the entry after
-# it's been used in another table. We therefore need another way to keep track
-# of the file here
 
 
 @schema
@@ -384,10 +380,8 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         self,
         analysis_file_name: str,
         nwb_object: pynwb.core.NWBDataInterface,
-        table_name: str = "pandas_table",
+        table_name: str = None,
     ):
-        # TODO: change to add_object with checks for object type and a name
-        # parameter, which should be specified if it is not an NWB container
         """Add an NWB object to the analysis file and return the NWB object ID
 
         Adds object to the scratch space of the NWB file.
@@ -399,8 +393,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
         nwb_object : pynwb.core.NWBDataInterface
             The NWB object created by PyNWB.
         table_name : str, optional
-            The name of the DynamicTable made from a dataframe. Defaults to
-            'pandas_table'.
+            The name of the pynwb object made from a passed dataframe or array.
+            Defaults to "pandas_table" or "numpy_array" for dataframes and arrays
+            respectively.
 
         Returns
         -------
@@ -413,9 +408,21 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
             load_namespaces=True,
         ) as io:
             nwbf = io.read()
+            # convert to pynwb object if it is a dataframe or array
             if isinstance(nwb_object, pd.DataFrame):
                 nwb_object = DynamicTable.from_dataframe(
-                    name=table_name, df=nwb_object
+                    name=table_name or "pandas_table", df=nwb_object
+                )
+            elif isinstance(nwb_object, np.ndarray):
+                nwb_object = ScratchData(
+                    name=table_name or "numpy_array",
+                    data=nwb_object,
+                )
+            if nwb_object.name in nwbf.scratch:
+                raise ValueError(
+                    f"Object with name '{nwb_object.name}' already exists in "
+                    + f"{analysis_file_name}. Please pass a different name argument "
+                    + "to AnalysisNwbfile.add_nwb_object()."
                 )
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)

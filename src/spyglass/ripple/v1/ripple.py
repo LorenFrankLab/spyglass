@@ -111,6 +111,33 @@ class RippleLFPSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class RippleParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for ripple detection
+
+    Parameters
+    ----------
+    ripple_param_name : str
+        Name of the parameter set
+    ripple_param_dict : dict
+        Dictionary of parameters for ripple detection, including...
+        speed_name : str
+            Name of the speed column in the PositionOutput table
+        ripple_detection_algorithm : str
+            Name of the ripple detection algorithm to use
+        ripple_detection_params : dict
+            Dictionary of parameters for the ripple detection algorithm, which
+            may include...
+            speed_threshold : float
+                Speed threshold for ripple detection (cm/s)
+            minimum_duration : float
+                Minimum duration for ripple detection (sec)
+            zscore_threshold : float
+                Z-score threshold for ripple detection (std)
+            smoothing_sigma : float
+                Smoothing sigma for ripple detection (sec)
+            close_ripple_threshold : float
+                Close ripple threshold for ripple detection (sec)
+    """
+
     definition = """
     ripple_param_name : varchar(80) # a name for this set of parameters
     ----

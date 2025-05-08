@@ -40,7 +40,7 @@ dependencies = [
     "black[jupyter]",
     "bottleneck",
     "dask",
-    "datajoint>=0.14.2",
+    "datajoint>=0.14.4",
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
@@ -50,9 +50,9 @@ dependencies = [
     "non_local_detector",
     "numpy",
     "opencv-python",
-    "panel>=1.4.0",                  # panel #6325 resolved
+    "panel>=1.4.0",
     "position_tools>=0.1.0",
-    "pubnub<6.4.0",                  # TODO: remove this when sortingview is updated
+    "pubnub<6.4.0",  # TODO: remove this when sortingview is updated
     "pydotplus",
     "pynwb>=2.2.0,<3",
     "ripple_detection",
@@ -102,6 +102,7 @@ docs = [
     "mkdocs-literate-nav",   # Dynamic page list for API docs
     "mkdocs-material",       # Docs theme
     "mkdocstrings[python]",  # Docs API docstrings
+    "mkdocs-mermaid2-plugin",# Docs mermaid diagrams
 ]
 
 [project.urls]
