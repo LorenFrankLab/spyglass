@@ -348,7 +348,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         used_pairs = validate_pairs(query, to_investigate_pairs)
         fig = self._get_fig_by_sg_id(key)
         ccgs_e, bins = self._compute_correlograms(key)
-        ret = plot_burst_xcorrel(fig, ccgs_e, bins, used_pairs)
+        ret = plot_burst_xcorrel(fig, used_pairs, ccgs_e, bins)
         if return_fig:
             return ret
 

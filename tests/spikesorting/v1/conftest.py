@@ -8,8 +8,10 @@ def burst_params_key(spike_v1):
 
 @pytest.fixture(scope="session")
 def pop_burst(spike_v1, pop_metric, burst_params_key):
+    metric_ids = spike_v1.MetricCuration().fetch("metric_curation_id")
+    for metric_id in metric_ids:
+        spike_v1.BurstPairSelection().insert_by_curation_id(metric_id)
     burst_key = {**pop_metric, **burst_params_key}
-    spike_v1.BurstPairSelection.insert1(burst_key, skip_duplicates=True)
     spike_v1.BurstPair.populate(burst_key)
     yield spike_v1.BurstPair() & burst_key
 

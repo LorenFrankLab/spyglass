@@ -86,7 +86,7 @@ def plot_burst_pair_peaks(pairs, peak_amps, peak_timestamps):
         peak2 = peak_amps[u2]
 
         axes[ind, 0].set_ylabel("percent")
-        for i in range(4):
+        for i in range(min(peak1.shape[1], peak2.shape[1])):
             data1, data2 = peak1[:, i], peak2[:, i]
             axes[ind, i].hist(data1, **get_kwargs(u1, data1))
             axes[ind, i].hist(data2, **get_kwargs(u2, data2))
