@@ -13,16 +13,22 @@ def _get_peak_amplitude(
 
     Parameters
     ----------
-    waveform : array-like, shape (n_spikes, n_time, n_channels)
-    peak_sign : ('pos', 'neg', 'both'), optional
-        Direction of the peak in the waveform
+    waveform_extractor : si.WaveformExtractor
+        An object that provides access to waveforms for specific units.
+    unit_id : int
+        The ID of the unit for which to extract waveforms.
+    peak_sign : {'pos', 'neg', 'both'}, optional
+        Direction of the peak in the waveform. Defaults to 'neg'.
     estimate_peak_time : bool, optional
-        Find the peak times for each spike because some spikesorters do not
-        align the spike time (at index n_time // 2) to the peak
+        If True, estimates the peak times for each spike because some 
+        spikesorters do not align the spike time (at index n_time // 2) 
+        to the peak. Defaults to False.
 
     Returns
     -------
-    peak_amplitudes : array-like, shape (n_spikes, n_channels)
+    peak_amplitudes : np.ndarray, shape (n_spikes, n_channels)
+        The amplitudes of all channels at the time of the peak amplitude 
+        across channels.
 
     """
     waveforms = waveform_extractor.get_waveforms(unit_id)
