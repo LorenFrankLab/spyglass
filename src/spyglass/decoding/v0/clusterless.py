@@ -55,7 +55,6 @@ from spyglass.common.common_behav import (
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo
-from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.decoding.v0.core import (
     convert_valid_times_to_slice,
     get_valid_ephys_position_times_by_epoch,
@@ -78,6 +77,7 @@ from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSortingSelection,
 )
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.waveforms import _get_peak_amplitude
 
 schema = dj.schema("decoding_clusterless")
 

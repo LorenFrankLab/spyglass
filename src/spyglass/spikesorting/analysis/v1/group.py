@@ -7,6 +7,7 @@ import numpy as np
 from spyglass.common import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
+from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
@@ -152,10 +153,12 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         key : dict
             dictionary containing the group key
         time_slice : list of float or slice, optional
-            if provided, filter for spikes occurring in the interval [start, stop], by default None
+            if provided, filter for spikes occurring in the interval
+            [start, stop], by default None
         return_unit_ids : bool, optional
-            if True, return the unit_ids along with the spike times, by default False
-            Unit ids defined as a list of dictionaries with keys 'spikesorting_merge_id' and 'unit_number'
+            if True, return the unit_ids along with the spike times, by default
+            False. Unit ids defined as a list of dictionaries with keys
+            'spikesorting_merge_id' and 'unit_number'
 
         Returns
         -------
@@ -189,30 +192,33 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
         )
         for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
             nwb_field_name = _get_spike_obj_name(nwb_file, allow_empty=True)
+
             if nwb_field_name is None:
+                logger.warning(f"No spike object found for {merge_id}")
                 # case where no units found or curation removed all units
                 continue
-            sorting_spike_times = nwb_file[nwb_field_name][
-                "spike_times"
-            ].to_list()
+
+            file_df = nwb_file[nwb_field_name]
+            sorting_spike_times = file_df["spike_times"].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
                 for unit_id in range(len(sorting_spike_times))
             ]
 
             # filter the spike times based on the labels if present
-            for col in ("label", "curation_label"):  # v0, v1 names
-                if col in nwb_file[nwb_field_name].columns:
-                    group_labels = nwb_file[nwb_field_name][col]
-                    break
-            else:
-                group_labels = None
-            if group_labels is not None:
+            # v0: "label", v1: "curation_label"
+            group_col = (c for c in file_df.columns if c.endswith("label"))
+            group_labels = file_df.get(next(group_col, None), None)
+            # for col in ("label", "curation_label"):  # v0, v1 names
+            #     if col in file_field.columns:
+            #         group_labels = file_field[col]
+            #         break
+
+            if group_labels is not None and not test_mode:
                 group_label_list = group_labels.to_list()
                 include_unit = SortedSpikesGroup.filter_units(
                     group_label_list, include_labels, exclude_labels
                 )
-
                 sorting_spike_times = list(
                     compress(sorting_spike_times, include_unit)
                 )
@@ -237,6 +243,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
 
         if return_unit_ids:
             return spike_times, unit_ids
+
         return spike_times
 
     @classmethod
