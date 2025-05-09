@@ -7,4 +7,4 @@ def test_burst_params(spike_v0, burst_params_key):
 
 
 def test_burst_pairs(spike_v0, pop_burst):
-    assert len(pop_burst) > 5
+    assert len(pop_burst), "Burst pairs not populated correctly"

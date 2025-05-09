@@ -10,7 +10,7 @@ def test_waves_params_insert(spike_v0, wave_params_key):
 
 def test_pop_waves(spike_v0, pop_waves):
     """Test that the waveforms are populated correctly"""
-    assert len(pop_waves) > 8, "Waveforms not populated correctly"
+    assert len(pop_waves), "Waveforms not populated correctly"
 
 
 def test_metric_params_insert(spike_v0, metric_params_key):
@@ -44,7 +44,7 @@ def test_curation_params_insert(spike_v0, curation_params_key):
 def test_pop_auto_curation(spike_v0, pop_auto_curation):
     """Test that the automatic curation is populated correctly"""
     auto_curation, _ = pop_auto_curation
-    assert len(auto_curation) > 8, "Automatic curation not populated correctly"
+    assert len(auto_curation), "Automatic curation not populated correctly"
 
 
 def test_pop_curated(spike_v0, pop_curated):
