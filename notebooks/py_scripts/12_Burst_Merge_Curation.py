@@ -20,7 +20,7 @@
 # +
 import datajoint as dj
 
-dj.config.load("/home/cbroz/wrk/alt/creds/dj_local_conf.json_prod")
+dj.config.load("your_config_file.json")
 dj.conn()
 
 # +

@@ -2,6 +2,19 @@ import pytest
 
 
 @pytest.fixture(scope="session")
+def burst_params_key(spike_v1):
+    yield dict(burst_params_name="default")
+
+
+@pytest.fixture(scope="session")
+def pop_burst(spike_v1, pop_metric, burst_params_key):
+    burst_key = {**pop_metric, **burst_params_key}
+    spike_v1.BurstPairSelection.insert1(burst_key, skip_duplicates=True)
+    spike_v1.BurstPair.populate(burst_key)
+    yield spike_v1.BurstPair() & burst_key
+
+
+@pytest.fixture(scope="session")
 def pop_figurl(spike_v1, pop_sort, metric_objs):
     # WON'T WORK UNTIL CI/CD KACHERY_CLOUD INIT
     sort_dict = {"sorting_id": pop_sort["sorting_id"], "curation_id": 1}

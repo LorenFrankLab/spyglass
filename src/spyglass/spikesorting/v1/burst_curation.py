@@ -9,7 +9,6 @@ from spikeinterface.postprocessing.correlograms import (
     compute_correlograms,
 )
 
-from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.spikesorting.utils_burst import (
     calculate_ca,
     calculate_isi_violation,
@@ -26,8 +25,9 @@ from spyglass.spikesorting.v1.metric_curation import (
     MetricCurationSelection,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.waveforms import _get_peak_amplitude
 
-schema = dj.schema("burst_v1")  # TODO: rename to spikesorting_burst_v1
+schema = dj.schema("spikesorting_burst_v1")
 
 METRIC_TBL = MetricCuration()  # initialize to preserve waveform cache
 
@@ -323,35 +323,51 @@ class BurstPair(SpyglassMixin, dj.Computed):
         return fig
 
     def plot_by_sort_group_ids(
-        self, key: dict, sort_group_ids: List[int] = None
+        self,
+        key: dict,
+        sort_group_ids: List[int] = None,
+        return_fig: bool = False,
     ):
         fig = self._get_fig_by_sort_id(key, sort_group_ids)
-        plot_burst_by_sort_group(fig)
+        ret = plot_burst_by_sort_group(fig)
+        if return_fig:
+            return ret
 
     def investigate_pair_xcorrel(
-        self, key: dict, to_investigate_pairs: List[Tuple[int, int]]
+        self,
+        key: dict,
+        to_investigate_pairs: List[Tuple[int, int]],
+        return_fig: bool = False,
     ):
         """Plot cross-correlograms for a given key and pairs of units"""
         query = self.BurstPairUnit & key
         used_pairs = validate_pairs(query, to_investigate_pairs)
         fig = self._get_fig_by_sort_id(key)
         ccgs_e, bins = self._compute_correlograms(key)
-        plot_burst_xcorrel(fig, ccgs_e, bins, used_pairs)
+        ret = plot_burst_xcorrel(fig, ccgs_e, bins, used_pairs)
+        if return_fig:
+            return ret
 
     def investigate_pair_peaks(
-        self, key: dict, to_investigate_pairs: List[Tuple[int, int]]
+        self,
+        key: dict,
+        to_investigate_pairs: List[Tuple[int, int]],
+        return_fig: bool = False,
     ):
         """Plot peak amplitudes for a given key and pairs of units"""
         query = self.BurstPairUnit & key
         used_pairs = validate_pairs(query, to_investigate_pairs)
         peak_amps, peak_timestamps = self.get_peak_amps(key)
-        plot_burst_pair_peaks(used_pairs, peak_amps, peak_timestamps)
+        ret = plot_burst_pair_peaks(used_pairs, peak_amps, peak_timestamps)
+        if return_fig:
+            return ret
 
     def plot_peak_over_time(
         self,
         key: dict,
         to_investigate_pairs: List[Tuple[int, int]],
         overlap: bool = True,
+        return_fig: bool = False,
     ):
         """Plot peak amplitudes over time for a given key.
 
@@ -368,4 +384,8 @@ class BurstPair(SpyglassMixin, dj.Computed):
         peak_v, peak_t = self.get_peak_amps(key)
         query = self.BurstPairUnit & key
         used_pairs = validate_pairs(query, to_investigate_pairs)
-        plot_burst_peak_over_time(peak_v, peak_t, used_pairs, overlap=overlap)
+        ret = plot_burst_peak_over_time(
+            peak_v, peak_t, used_pairs, overlap=overlap
+        )
+        if return_fig:
+            return ret

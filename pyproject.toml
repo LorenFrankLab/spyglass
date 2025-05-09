@@ -130,7 +130,7 @@ line-length = 80
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
 ignore-words-list = 'nevers'
-# Nevers - name in Citation
+# Never - name in Citation
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -166,28 +166,29 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["*/src/spyglass/*"]
-omit = [ # which submodules have no tests
-    "*/__init__.py",
-    "*/_version.py",
-    # "*/common/*",
-    "*/data_import/*",
-    "*/decoding/v0/*",
-    # "*/decoding/*",
-    "*/figurl_views/*",
-    # "*/lfp/*",
-    # "*/linearization/*",
-    "*/lock/*",
-    "*/mua/*",
-    # "*/position/*",
-    "*/ripple/*",
-    "*/sharing/*",
-    "*/spikesorting/v0/*",
-    # "*/spikesorting/*",
-    # "*/utils/*",
-    "settings.py",
-    "*/moseq/*",
-]
+source = ["*/src/spyglass/spikesorting/*burst*"]
+# include = [ "*/src/spyglass/spikesorting/*burst*" ]
+# omit = [ # which submodules have no tests
+#     "*/__init__.py",
+#     "*/_version.py",
+#     # "*/common/*",
+#     "*/data_import/*",
+#     "*/decoding/v0/*",
+#     # "*/decoding/*",
+#     "*/figurl_views/*",
+#     # "*/lfp/*",
+#     # "*/linearization/*",
+#     "*/lock/*",
+#     "*/mua/*",
+#     # "*/position/*",
+#     "*/ripple/*",
+#     "*/sharing/*",
+#     "*/spikesorting/v0/*",
+#     # "*/spikesorting/*",
+#     # "*/utils/*",
+#     "settings.py",
+#     "*/moseq/*",
+# ]
 
 [tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
 line-length = 80

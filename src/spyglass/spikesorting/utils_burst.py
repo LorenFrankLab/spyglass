@@ -66,6 +66,8 @@ def plot_burst_xcorrel(fig, pairs, ccgs_e, bins):
 
     plt.tight_layout()
 
+    return fig
+
 
 def plot_burst_pair_peaks(pairs, peak_amps, peak_timestamps):
     """Plot peak amplitudes and timestamps for a list of unit pairs."""
@@ -93,6 +95,8 @@ def plot_burst_pair_peaks(pairs, peak_amps, peak_timestamps):
             axes[ind, i].legend()
 
     plt.tight_layout()
+
+    return fig
 
 
 def plot_burst_peak_over_time(
@@ -175,6 +179,8 @@ def plot_burst_peak_over_time(
 
         axes[0, 0].set_title(f"pair:{pair}")
 
+    return fig
+
 
 def plot_burst_by_sort_group(fig):
     for sg_id, f in fig.items():
@@ -185,6 +191,7 @@ def plot_burst_by_sort_group(fig):
         canvas_manager.canvas.figure = f
         managed_fig.set_canvas(canvas_manager.canvas)
         plt.suptitle(f"sort group {sg_id}", fontsize=20)
+    return fig
 
 
 def plot_burst_metrics(
