@@ -269,7 +269,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
         peak_amps, peak_timestamps = self.get_peak_amps(key)
         units = peak_amps.keys()
-        if len(units) < 0:
+        if len(units) == 0:
             self._null_insert(key)
             return
 
