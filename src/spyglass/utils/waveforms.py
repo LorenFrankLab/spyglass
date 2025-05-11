@@ -20,14 +20,14 @@ def _get_peak_amplitude(
     peak_sign : {'pos', 'neg', 'both'}, optional
         Direction of the peak in the waveform. Defaults to 'neg'.
     estimate_peak_time : bool, optional
-        If True, estimates the peak times for each spike because some 
-        spikesorters do not align the spike time (at index n_time // 2) 
+        If True, estimates the peak times for each spike because some
+        spikesorters do not align the spike time (at index n_time // 2)
         to the peak. Defaults to False.
 
     Returns
     -------
     peak_amplitudes : np.ndarray, shape (n_spikes, n_channels)
-        The amplitudes of all channels at the time of the peak amplitude 
+        The amplitudes of all channels at the time of the peak amplitude
         across channels.
 
     """
