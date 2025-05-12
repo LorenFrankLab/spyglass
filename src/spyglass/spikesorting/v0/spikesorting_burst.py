@@ -1,7 +1,8 @@
 from itertools import permutations
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import datajoint as dj
+import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
 from spikeinterface.postprocessing.correlograms import (
@@ -76,9 +77,9 @@ class BurstPairSelection(SpyglassMixin, dj.Manual):
         self,
         nwb_file_name: str,
         session_name: str,
+        curation_id: int,
         sort_group_ids: List[int] = None,
         sorter: str = "mountainsort4",
-        curation_id: int = 1,
         burst_params_name: str = "default",
         **kwargs,
     ) -> None:
@@ -92,10 +93,10 @@ class BurstPairSelection(SpyglassMixin, dj.Manual):
             name of the session, used as CuratedSpikeSorting.sort_interval_name
         sort_group_ids : list of int, optional
             list of sort_group_ids to restrict the selection to. If none, all
-        sorter : str, optional
-            name of the spike sorter, default "mountainsort4"
         curation_id : int, optional
             curation_id, default 1
+        sorter : str, optional
+            name of the spike sorter, default "mountainsort4"
         burst_params_name : str, optional
             name of the BurstPairParams entry, default "default"
         """
@@ -240,10 +241,14 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        ccgs : np.ndarray
-            cross-correlograms
-        bins : np.ndarray
-            bin edges for the correlograms
+        ccgs : np.array
+            Correlograms with shape (num_units, num_units, num_bins)
+            The diagonal of ccgs is the auto correlogram.
+            ccgs[A, B, :] is the symetrie of ccgs[B, A, :]
+            ccgs[A, B, :] have to be read as the histogram of
+                spiketimesA - spiketimesB
+        bins :  np.array
+            The bin edges in ms
         """
         key_hash = dj.hash.key_hash(key)
         if cached := self._xcorrel_cache.get(key_hash):
@@ -308,7 +313,9 @@ class BurstPair(SpyglassMixin, dj.Computed):
         self.insert1(key)
         self.BurstPairUnit.insert(unit_pairs)
 
-    def _get_fig_by_sg_id(self, key, sort_group_ids=None):
+    def _get_fig_by_sg_id(
+        self, key, sort_group_ids=None
+    ) -> Dict[int, plt.Figure]:
         query = self.BurstPairUnit & key
 
         if isinstance(sort_group_ids, int):
@@ -332,7 +339,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         key: dict,
         sort_group_ids: List[int] = None,
         return_fig: bool = False,
-    ):
+    ) -> Union[None, plt.Figure]:
         fig = self._get_fig_by_sg_id(key, sort_group_ids)
         ret = plot_burst_by_sort_group(fig)
         if return_fig:
@@ -343,12 +350,11 @@ class BurstPair(SpyglassMixin, dj.Computed):
         key: dict,
         to_investigate_pairs: List[Tuple[int, int]],
         return_fig: bool = False,
-    ):
+    ) -> Union[None, plt.Figure]:
         query = self.BurstPairUnit & key
         used_pairs = validate_pairs(query, to_investigate_pairs)
-        fig = self._get_fig_by_sg_id(key)
         ccgs_e, bins = self._compute_correlograms(key)
-        ret = plot_burst_xcorrel(fig, used_pairs, ccgs_e, bins)
+        ret = plot_burst_xcorrel(used_pairs, ccgs_e, bins)
         if return_fig:
             return ret
 
@@ -357,11 +363,11 @@ class BurstPair(SpyglassMixin, dj.Computed):
         key: dict,
         to_investigate_pairs: List[Tuple[int, int]],
         return_fig: bool = False,
-    ):
+    ) -> Union[None, plt.Figure]:
         query = self.BurstPairUnit & key
         used_pairs = validate_pairs(query, to_investigate_pairs)
         peak_amps, peak_timestamps = self.get_peak_amps(key)
-        ret = plot_burst_pair_peaks(used_pairs, peak_amps, peak_timestamps)
+        ret = plot_burst_pair_peaks(used_pairs, peak_amps)
         if return_fig:
             return ret
 
@@ -371,7 +377,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         to_investigate_pairs: List[Tuple[int, int]],
         overlap: bool = True,
         return_fig: bool = False,
-    ):
+    ) -> Union[None, plt.Figure]:
         """Plot peak amplitudes over time for a given key.
 
         Parameters

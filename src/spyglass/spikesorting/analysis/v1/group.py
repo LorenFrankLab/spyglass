@@ -198,21 +198,23 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
                 # case where no units found or curation removed all units
                 continue
 
-            file_df = nwb_file[nwb_field_name]
-            sorting_spike_times = file_df["spike_times"].to_list()
+            sorting_spike_times = nwb_file[nwb_field_name][
+                "spike_times"
+            ].to_list()
             file_unit_ids = [
                 {"spikesorting_merge_id": merge_id, "unit_id": unit_id}
                 for unit_id in range(len(sorting_spike_times))
             ]
 
             # filter the spike times based on the labels if present
-            # v0: "label", v1: "curation_label"
-            group_col = (c for c in file_df.columns if c.endswith("label"))
-            group_labels = file_df.get(next(group_col, None), None)
-            # for col in ("label", "curation_label"):  # v0, v1 names
-            #     if col in file_field.columns:
-            #         group_labels = file_field[col]
-            #         break
+            group_col = (  # v0: "label", v1: "curation_label"
+                c
+                for c in nwb_file[nwb_field_name].columns
+                if c in ("label", "curation_label")
+            )
+            group_labels = nwb_file[nwb_field_name].get(
+                next(group_col, None), None
+            )
 
             if group_labels is not None and not test_mode:
                 group_label_list = group_labels.to_list()

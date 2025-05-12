@@ -17,26 +17,25 @@ def validate_pairs(
     columns unit1, unit2.
     """
 
-    def validate_pair(
-        query: QueryExpression, unit1: int, unit2: int
-    ) -> Tuple[int, int]:
+    if isinstance(pairs, tuple) and len(pairs) == 2:
+        pairs = [pairs]
+
+    query_pairs = set(query.fetch("unit1", "unit2"))
+
+    def validate_pair(unit1: int, unit2: int) -> Tuple[int, int]:
         """Ensure that unit1, unit2 is a valid pair in the table."""
-        template = "unit1={unit1} AND unit2={unit2}"
-        if query & template.format(unit1=unit1, unit2=unit2):
+        if (unit1, unit2) in query_pairs:
             return unit1, unit2
-        elif query & template.format(unit1=unit2, unit2=unit1):
+        elif (unit2, unit1) in query_pairs:
             logger.warning(f"Using reverse pair {unit1}, {unit2}")
             return unit2, unit1
         else:
             logger.warning(f"No entry found for pair {unit1}, {unit2}")
             return None
 
-    if isinstance(pairs, tuple) and len(pairs) == 2:
-        pairs = [pairs]
-
     valid_pairs = []
     for p in pairs:
-        if valid_pair := validate_pair(query, *p):
+        if valid_pair := validate_pair(*p):
             valid_pairs.append(valid_pair)
 
     if not valid_pairs:
@@ -44,15 +43,32 @@ def validate_pairs(
     return valid_pairs
 
 
-def plot_burst_xcorrel(fig, pairs, ccgs_e, bins):
-    """Plot cross-correlograms for a list of unit pairs."""
+def plot_burst_xcorrel(
+    pairs: List[Tuple[int, int]],
+    ccgs_e: np.ndarray,
+    bins: np.ndarray,
+) -> plt.Figure:
+    """Plot cross-correlograms for a list of unit pairs.
+
+    Parameters
+    ----------
+    pairs : list of tuples of int
+        pairs of units to investigate
+    ccgs : np.array
+        Correlograms with shape (num_units, num_units, num_bins)
+        The diagonal of ccgs is the auto correlogram.
+        ccgs[A, B, :] is the symetrie of ccgs[B, A, :]
+        ccgs[A, B, :] have to be read as the histogram of
+            spiketimesA - spiketimesB
+    bins :  np.array
+        The bin edges in ms
+
+    Returns
+    -------
+    plt.Figure
+    """
     col_num = int(np.ceil(len(pairs) / 2))
-    fig, axes = plt.subplots(
-        2,
-        int(np.ceil(len(pairs) / 2)),
-        figsize=(col_num * 3, 4),
-        squeeze=True,
-    )
+    fig, axes = plt.subplots(2, col_num, figsize=(col_num * 3, 4), squeeze=True)
 
     for ind, p in enumerate(pairs):
         (u1, u2) = p
@@ -69,7 +85,9 @@ def plot_burst_xcorrel(fig, pairs, ccgs_e, bins):
     return fig
 
 
-def plot_burst_pair_peaks(pairs, peak_amps, peak_timestamps):
+def plot_burst_pair_peaks(
+    pairs: List[Tuple[int, int]], peak_amps: Dict[int, np.ndarray]
+):
     """Plot peak amplitudes and timestamps for a list of unit pairs."""
     fig, axes = plt.subplots(len(pairs), 4, figsize=(12, 2 * len(pairs)))
 
@@ -109,10 +127,12 @@ def plot_burst_peak_over_time(
 
     Parameters
     ----------
-    key : dict
-        key of BurstPair
-    to_investigate_pairs : list of tuples of int
-        pairs of units to investigate
+    peak_v : dict of int to np.ndarray
+        peak amplitudes for each unit
+    peak_t : dict of int to np.ndarray
+        peak timestamps for each unit
+    pairs : list of tuples of int
+        pairs of units to plot
     overlap : bool, optional
         if True, plot units in pair on the same plot
     """
@@ -130,7 +150,7 @@ def plot_burst_peak_over_time(
         axes: plt.Axes = None,
         row_duration: int = 600,
         show_plot: bool = False,
-    ):
+    ) -> Tuple[plt.Figure, plt.Axes]:
 
         max_channel = np.argmax(-np.mean(voltages, 0))
         time_since = timestamps - timestamps[0]
@@ -182,7 +202,9 @@ def plot_burst_peak_over_time(
     return fig
 
 
-def plot_burst_by_sort_group(fig):
+def plot_burst_by_sort_group(
+    fig: Dict[int, plt.Figure],
+) -> Dict[int, plt.Figure]:
     for sg_id, f in fig.items():
         managed_fig, _ = plt.subplots(
             1, 4, figsize=(24, 4), sharex=False, sharey=False

@@ -191,6 +191,7 @@ def pop_burst(spike_v0, pop_curated, burst_params_key):
         spike_v0.BurstPairSelection().insert_by_sort_group_ids(
             nwb_file_name=key["nwb_file_name"],
             session_name=key["sort_interval_name"],
+            curation_id=1,
         )
     spike_v0.BurstPairSelection.insert(burst_keys, skip_duplicates=True)
     spike_v0.BurstPair().populate(burst_keys)
