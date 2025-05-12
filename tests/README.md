@@ -1,8 +1,6 @@
 # PyTests
 
-[![codecov](https://codecov.io/gh/CBroz1/spyglass/graph/badge.svg?token=KOFSLJ2V9M)](https://codecov.io/gh/CBroz1/spyglass)
-
-[Coverage Diagram](https://codecov.io/gh/CBroz1/spyglass/graphs/sunburst.svg?token=KOFSLJ2V9M)
+[![codecov](https://codecov.io/gh/LorenFrankLab/spyglass/graph/badge.svg?token=QEJIIFN2S8)](https://codecov.io/gh/LorenFrankLab/spyglass)
 
 ## Environment
 
