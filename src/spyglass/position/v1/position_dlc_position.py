@@ -345,7 +345,7 @@ def nan_inds(
     # last good point
 
     subthresh_inds = get_subthresh_inds(
-        dlc_df, likelihood_thresh=likelihood_thresh, ret_sub_thresh=False
+        dlc_df, likelihood_thresh=likelihood_thresh
     )
     df_subthresh_indices = dlc_df.index[subthresh_inds]
     dlc_df.loc[idx[df_subthresh_indices], idx[("x", "y")]] = np.nan
