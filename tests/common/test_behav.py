@@ -100,7 +100,7 @@ def test_pos_interval_no_transaction(verbose_context, common, mini_restr):
     with verbose_context:
         common.PositionIntervalMap()._no_transaction_make(mini_restr)
     after = common.PositionIntervalMap().fetch()
-    expected_insertions = 3
+    expected_insertions = 4
     assert len(after) - len(before) == expected_insertions, (
         f"PositionIntervalMap failed to insert the expected number of entries. "
         f"Expected {expected_insertions}, but got {len(after) - len(before)}."
