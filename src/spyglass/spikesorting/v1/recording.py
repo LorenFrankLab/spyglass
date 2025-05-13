@@ -217,7 +217,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - entry into SpikeSortingRecording
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         sort_interval_valid_times.set_key(
-            nwb_file_name=key["nwb_file_name"],
+            nwb_file_name=nwb_file_name,
             interval_list_name=key["recording_id"],
             pipeline="spikesorting_recording_v1",
         )
