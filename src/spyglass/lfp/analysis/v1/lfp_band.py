@@ -299,9 +299,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def make(self, key: dict) -> None:
         """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         # get the NWB object with the lfp data;
         # FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
@@ -427,10 +425,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            eseries_name = "filtered data"
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
+                name="filtered data",
                 data=filtered_data,
                 electrodes=electrode_table_region,
                 timestamps=new_timestamps,
@@ -477,7 +474,6 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:

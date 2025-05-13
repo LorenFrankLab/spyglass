@@ -19,8 +19,6 @@ class SQLDumpHelper:
 
     Parameters
     ----------
-    free_tables : List[FreeTable]
-        List of FreeTables to export
     paper_id : str
         Paper ID to use for export file names
     docker_id : str, optional

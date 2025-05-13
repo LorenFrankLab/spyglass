@@ -227,7 +227,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-
+        # only add items if found respective file types
         if raw_files := self._list_raw_files(key):
             raw_tbl = self._externals["raw"]
             raw_name = raw_tbl.full_table_name
@@ -403,7 +403,7 @@ class Export(SpyglassMixin, dj.Computed):
                 + f" and including {links} instead"
             )
             unlinked_files.update(links)
-        file_paths = unlinked_files  # TODO: what if linked items have links?
+        file_paths = unlinked_files
 
         table_inserts = [
             {**key, **rd, "table_id": i}

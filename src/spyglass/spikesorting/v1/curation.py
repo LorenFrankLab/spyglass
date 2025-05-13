@@ -1,4 +1,3 @@
-from time import time
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -79,8 +78,6 @@ class CurationV1(SpyglassMixin, dj.Manual):
         -------
         curation_key : dict
         """
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
-
         sort_query = cls & {"sorting_id": sorting_id}
         parent_curation_id = max(parent_curation_id, -1)
 
@@ -123,7 +120,6 @@ class CurationV1(SpyglassMixin, dj.Manual):
             "description": description,
         }
         cls.insert1(key, skip_duplicates=True)
-        AnalysisNwbfile().log(analysis_file_name, table=cls.full_table_name)
 
         return key
 

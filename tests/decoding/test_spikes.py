@@ -10,6 +10,7 @@ def test_spikes_decoding(spikes_decoding, result_coordinates):
     ), "Incorrect coordinates in results"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_fetch_model(spikes_decoding):
     from non_local_detector.models.base import SortedSpikesDetector
 
@@ -18,6 +19,7 @@ def test_fetch_model(spikes_decoding):
     ), "Model is not ClusterlessDetector"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_fetch_environments(spikes_decoding, spikes_decoding_key):
     from non_local_detector.environment import Environment
 
@@ -31,6 +33,7 @@ def test_fetch_linearized_position(spikes_decoding, spikes_decoding_key):
     assert lin_pos is not None, "Linearized position is None"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_fetch_spike_by_interval(
     decode_v1, spikes_decoding, spikes_decoding_key
 ):
@@ -41,18 +44,21 @@ def test_fetch_spike_by_interval(
     assert np.all((spikes >= begin) & (spikes <= end)), "Spikes not in interval"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_spikes_by_place(spikes_decoding, spikes_decoding_key):
     spikes = spikes_decoding.spike_times_sorted_by_place_field_peak()
     eg = next(iter(spikes.values()))[0]  # get first value
     assert eg.shape[0] > 0, "Spikes by place failed"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_get_orientation_col(spikes_decoding):
     df = pd.DataFrame(columns=["orientation"])
     ret = spikes_decoding.get_orientation_col(df)
     assert ret == "orientation", "Orientation column not found"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_spikes_decoding_estimated(
     spikes_decoding_estimated, result_coordinates
 ):

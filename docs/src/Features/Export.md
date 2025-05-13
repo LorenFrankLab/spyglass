@@ -36,8 +36,6 @@ tables. When these functions are called, the mixin grabs the table name and the
 restriction applied to the table and stores them in the `ExportSelection` part
 tables.
 
-<!-- TODO: Mention intercepting of restrict and join. -->
-
 - `fetch_nwb` is specific to Spyglass and logs all analysis nwb files that are
     fetched.
 - `fetch` is a DataJoint method that retrieves data from a table.

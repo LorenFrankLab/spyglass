@@ -22,81 +22,104 @@ global invalid_electrode_index
 invalid_electrode_index = 99999999
 
 
-def get_nwb_file(nwb_file_path):
+def _open_nwb_file(nwb_file_path, source="local"):
+    """Open an NWB file, add to cache, return contents. Does not close file."""
+    if source == "local":
+        io = pynwb.NWBHDF5IO(path=nwb_file_path, mode="r", load_namespaces=True)
+        nwbfile = io.read()
+    elif source == "dandi":
+        from ..common.common_dandi import DandiPath
+
+        io, nwbfile = DandiPath().fetch_file_from_dandi(
+            nwb_file_path=nwb_file_path
+        )
+    else:
+        raise ValueError(f"Invalid open_nwb source: {source}")
+    __open_nwb_files[nwb_file_path] = (io, nwbfile)
+    return nwbfile
+
+
+def get_nwb_file(nwb_file_path, query_expression=None):
     """Return an NWBFile object with the given file path in read mode.
 
     If the file is not found locally, this will check if it has been shared
-    with kachery and if so, download it and open it.
-
+    with kachery/dandi and if so, download it and open it. If not, and the
+    query_expression has a `_make_file` method, it will call that method to
+    recompute the file.
 
     Parameters
     ----------
     nwb_file_path : str
         Path to the NWB file or NWB file name. If it does not start with a "/",
         get path with Nwbfile.get_abs_path
+    query_expression : dj.QueryExpression, optional
+        The restricted table associated with the NWB file, used for recompute.
 
     Returns
     -------
     nwbfile : pynwb.NWBFile
         NWB file object for the given path opened in read mode.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the NWB file is not found locally or in kachery/Dandi, and cannot be
+        recomputed.
     """
-    if not nwb_file_path.startswith("/"):
-        from ..common import Nwbfile
+    if not Path(nwb_file_path).is_absolute():
+        from spyglass.common import Nwbfile
 
         nwb_file_path = Nwbfile.get_abs_path(nwb_file_path)
 
     _, nwbfile = __open_nwb_files.get(nwb_file_path, (None, None))
 
-    if nwbfile is None:
-        # check to see if the file exists
-        if not os.path.exists(nwb_file_path):
-            logger.info(
-                "NWB file not found locally; checking kachery for "
-                + f"{nwb_file_path}"
-            )
-            # first try the analysis files
-            from ..sharing.sharing_kachery import AnalysisNwbfileKachery
+    if nwbfile is not None:
+        return nwbfile
 
-            # the download functions assume just the filename, so we need to
-            # get that from the path
-            if not AnalysisNwbfileKachery.download_file(
-                os.path.basename(nwb_file_path), permit_fail=True
-            ):
-                logger.info(
-                    "NWB file not found in kachery; checking Dandi for "
-                    + f"{nwb_file_path}"
-                )
-                # Dandi fallback SB 2024-04-03
-                from ..common.common_dandi import DandiPath
+    if os.path.exists(nwb_file_path):
+        return _open_nwb_file(nwb_file_path)
 
-                dandi_key = {"filename": os.path.basename(nwb_file_path)}
-                if not DandiPath() & dandi_key:
-                    # Check if non-copied raw file is in Dandi
-                    dandi_key = {
-                        "filename": Path(nwb_file_path).name.replace(
-                            "_.nwb", ".nwb"
-                        )
-                    }
+    logger.info(
+        f"NWB file not found locally; checking kachery for {nwb_file_path}"
+    )
 
-                if not DandiPath & dandi_key:
-                    # If not in Dandi, then we can't find the file
-                    raise FileNotFoundError(
-                        f"NWB file not found in kachery or Dandi: {os.path.basename(nwb_file_path)}."
-                    )
-                io, nwbfile = DandiPath().fetch_file_from_dandi(
-                    dandi_key
-                )  # TODO: consider case where file in multiple dandisets
-                __open_nwb_files[nwb_file_path] = (io, nwbfile)
-                return nwbfile
+    from ..sharing.sharing_kachery import AnalysisNwbfileKachery
 
-        # now open the file
-        io = pynwb.NWBHDF5IO(
-            path=nwb_file_path, mode="r", load_namespaces=True
-        )  # keep file open
-        nwbfile = io.read()
-        __open_nwb_files[nwb_file_path] = (io, nwbfile)
+    kachery_success = AnalysisNwbfileKachery.download_file(
+        os.path.basename(nwb_file_path), permit_fail=True
+    )
+    if kachery_success:
+        return _open_nwb_file(nwb_file_path)
 
-    return nwbfile
+    logger.info(
+        "NWB file not found in kachery; checking Dandi for "
+        + f"{nwb_file_path}"
+    )
+
+    # Dandi fallback SB 2024-04-03
+    from ..common.common_dandi import DandiPath
+
+    if DandiPath().has_file_path(file_path=nwb_file_path):
+        return _open_nwb_file(nwb_file_path, source="dandi")
+
+    if DandiPath().has_raw_path(file_path=nwb_file_path):
+        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
+        return _open_nwb_file(raw, source="dandi")
+
+    if hasattr(query_expression, "_make_file"):
+        # if the query_expression has a _make_file method, call it to
+        # recompute the file
+        basename = os.path.basename(nwb_file_path)
+        logger.info(f"Recomputing {basename}")
+
+        nwbfile = query_expression._make_file(recompute_file_name=basename)
+        if nwbfile is not None:
+            return nwbfile
+
+    raise FileNotFoundError(
+        "NWB file not found in kachery or Dandi: "
+        + f"{os.path.basename(nwb_file_path)}."
+    )
 
 
 def file_from_dandi(filepath):
@@ -122,7 +145,7 @@ def get_linked_nwbs(path: str) -> List[str]:
         return [x for x in io._HDF5IO__built if x != path]
 
 
-def get_config(nwb_file_path, calling_table=None):
+def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
     """Return a dictionary of config settings for the given NWB file.
     If the file does not exist, return an empty dict.
 
@@ -130,33 +153,38 @@ def get_config(nwb_file_path, calling_table=None):
     ----------
     nwb_file_path : str
         Absolute path to the NWB file.
+    calling_table : str, optional
+        The name of the table that is calling this function. Used for
+        logging purposes.
 
     Returns
     -------
     dict
-        Dictionary of configuration settings loaded from the corresponding YAML file
+        Dictionary of configuration settings loaded from the YAML file
     """
     if nwb_file_path in __configs:  # load from cache if exists
         return __configs[nwb_file_path]
 
-    p = Path(nwb_file_path)
-    # NOTE use p.stem[:-1] to remove the underscore that was added to the file
-    config_path = p.parent / (p.stem[:-1] + "_spyglass_config.yaml")
+    obj_path = Path(nwb_file_path)
+    # NOTE use stem[:-1] to remove the underscore that was added to the file
+    config_path = obj_path.parent / (
+        obj_path.stem[:-1] + "_spyglass_config.yaml"
+    )
     if not os.path.exists(config_path):
         from spyglass.settings import base_dir  # noqa: F401
 
-        rel_path = p.relative_to(base_dir)
+        rel_path = obj_path.relative_to(base_dir)
         table = f"{calling_table}: " if calling_table else ""
         logger.info(f"{table}No config found at {rel_path}")
         ret = dict()
         __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
         return ret
     with open(config_path, "r") as stream:
-        d = yaml.safe_load(stream)
+        config_dict = yaml.safe_load(stream)
 
     # TODO write a JSON schema for the yaml file and validate the yaml file
-    __configs[nwb_file_path] = d  # store in cache
-    return d
+    __configs[nwb_file_path] = config_dict  # store in cache
+    return config_dict
 
 
 def close_nwb_files():
