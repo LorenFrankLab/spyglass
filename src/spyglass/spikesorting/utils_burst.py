@@ -20,7 +20,8 @@ def validate_pairs(
     if isinstance(pairs, tuple) and len(pairs) == 2:
         pairs = [pairs]
 
-    query_pairs = set(query.fetch("unit1", "unit2"))
+    # set[tuple[int, int]]
+    query_pairs = set(zip(*query.fetch("unit1", "unit2")))
 
     def validate_pair(unit1: int, unit2: int) -> Tuple[int, int]:
         """Ensure that unit1, unit2 is a valid pair in the table."""

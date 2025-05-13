@@ -146,7 +146,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         """Get peak value for a unit at a given timestamp index"""
         wave = _get_peak_amplitude(
             waveform_extractor=waves,
-            unit_id=unit,
+            unit_idx=unit,
             peak_sign="neg",
             estimate_peak_time=True,
         )
@@ -193,23 +193,23 @@ class BurstPair(SpyglassMixin, dj.Computed):
 
         curation_key = self._curation_key(key)
         sorting = CurationV1.get_sorting(curation_key, as_dataframe=True)
-        unit_ids = getattr(sorting, "index", None)
+        unit_indices = getattr(sorting, "index", None)
 
-        if unit_ids is None or len(unit_ids) == 0:
+        if unit_indices is None or len(unit_indices) == 0:
             self._peak_amp_cache[key_hash] = {}, {}
             return {}, {}
 
         peak_amps, peak_timestamps = {}, {}
-        for unit_id in unit_ids:
-            timestamp = np.asarray(sorting["spike_times"][unit_id])
+        for unit_idx in unit_indices:
+            timestamp = np.asarray(sorting["spike_times"][unit_idx])
             timestamp_ind = np.argsort(timestamp)
-            upeak = self._get_peak_amps1(waves, unit_id, timestamp_ind)
+            upeak = self._get_peak_amps1(waves, unit_idx, timestamp_ind)
             utime = timestamp[timestamp_ind]
             upeak, utime = self._truncate_to_shortest(
-                f"unit {unit_id}", upeak, utime
+                f"unit {unit_idx}", upeak, utime
             )
-            peak_amps[unit_id] = upeak
-            peak_timestamps[unit_id] = utime
+            peak_amps[unit_idx] = upeak
+            peak_timestamps[unit_idx] = utime
 
         self._peak_amp_cache[key_hash] = peak_amps, peak_timestamps
 

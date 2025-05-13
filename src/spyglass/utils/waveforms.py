@@ -4,7 +4,7 @@ import spikeinterface as si
 
 def _get_peak_amplitude(
     waveform_extractor: si.WaveformExtractor,
-    unit_id: int,
+    unit_idx: int,
     peak_sign: str = "neg",
     estimate_peak_time: bool = False,
 ) -> np.ndarray:
@@ -31,7 +31,7 @@ def _get_peak_amplitude(
         across channels.
 
     """
-    waveforms = waveform_extractor.get_waveforms(unit_id)
+    waveforms = waveform_extractor.get_waveforms(unit_idx)
     if estimate_peak_time:
         if peak_sign == "neg":
             peak_inds = np.argmin(np.min(waveforms, axis=2), axis=1)

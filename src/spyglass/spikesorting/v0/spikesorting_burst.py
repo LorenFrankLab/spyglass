@@ -177,7 +177,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
         """Get peak value for a unit at a given timestamp index"""
         wave = _get_peak_amplitude(
             waveform_extractor=waves,
-            unit_id=unit,
+            unit_idx=unit,
             peak_sign="neg",
             estimate_peak_time=True,
         )
@@ -215,13 +215,13 @@ class BurstPair(SpyglassMixin, dj.Computed):
             return {}, {}
 
         peak_amps, peak_timestamps = {}, {}
-        for unit_id in nwb_units.index:
-            timestamp = np.asarray(nwb_units["spike_times"][unit_id])
+        for unit_idx in nwb_units.index:
+            timestamp = np.asarray(nwb_units["spike_times"][unit_idx])
             timestamp_ind = np.argsort(timestamp)
-            peak_amps[unit_id] = self._get_peak_amps1(
-                waves, unit_id, timestamp_ind
+            peak_amps[unit_idx] = self._get_peak_amps1(
+                waves, unit_idx, timestamp_ind
             )
-            peak_timestamps[unit_id] = timestamp[timestamp_ind]
+            peak_timestamps[unit_idx] = timestamp[timestamp_ind]
 
         self._peak_amp_cache[key_hash] = peak_amps, peak_timestamps
 
