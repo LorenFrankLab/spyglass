@@ -66,6 +66,7 @@ ImportedLFP().drop()
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
+- Add code coverage badge #1305
 
 ### Documentation
 
@@ -89,7 +90,8 @@ ImportedLFP().drop()
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
     - Sanitize new project names for unix file system #1247
-    - Add arg to return percent below threshold in `get_subthresh_inds` #1304
+    - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
+        #1305
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
