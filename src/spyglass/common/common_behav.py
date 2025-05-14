@@ -418,7 +418,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 # overlapping with the task epoch times
 
                 timestamps = video_obj.timestamps
-                these_times = valid_times.contains(timestamps).times
+                these_times = valid_times.contains(timestamps)
                 if not len(these_times > 0.9 * len(timestamps)):
                     continue
 

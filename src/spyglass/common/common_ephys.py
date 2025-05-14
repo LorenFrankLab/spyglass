@@ -819,7 +819,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
         # are within the valid times
         included_indices = lfp_band_valid_times.contains(
             timestamps, as_indices=True, padding=1
-        ).times
+        )
 
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 

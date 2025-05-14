@@ -112,7 +112,7 @@ def test_interval_setter(interval_obj):
 
 
 def test_interval_pk(interval_obj):
-    obj = interval_obj(np.array([[0, 2]]), name="TEST")
+    obj = interval_obj(np.array([[0, 2]]), name="TEST", nwb_file_name="OTHER")
     assert (
         obj.primary_key["interval_list_name"] == "TEST"
     ), "Problem Interval.primary_key"
@@ -271,7 +271,7 @@ def test_interval_list_contains_ind(interval_obj, example_interval):
     interval, timestamps = example_interval
     idxs = interval_obj(interval).contains(timestamps, as_indices=True)
     assert np.array_equal(
-        idxs.times, np.array([1, 3, 4])
+        idxs, np.array([1, 3, 4])
     ), "Problem with Interval.contains"
 
 
@@ -279,13 +279,13 @@ def test_interval_list_contains(interval_obj, example_interval):
     interval, timestamps = example_interval
     idxs = interval_obj(interval).contains(timestamps)
     assert np.array_equal(
-        idxs.times, np.array([1, 7, 8])
+        idxs, np.array([1, 7, 8])
     ), "Problem with Interval.contains"
 
 
 def test_interval_list_contains_padding(interval_obj, example_interval):
     interval, timestamps = example_interval
-    idxs = interval_obj(interval).contains(timestamps, padding=1).times
+    idxs = interval_obj(interval).contains(timestamps, padding=1)
     assert np.array_equal(
         idxs, np.array([0, 7, 9])
     ), "Problem with Interval.contains padding"
@@ -295,7 +295,7 @@ def test_interval_list_excludes_ind(interval_obj, example_interval):
     interval, timestamps = example_interval
     idxs = interval_obj(interval).excludes(timestamps, as_indices=True)
     assert np.array_equal(
-        idxs.times, np.array([0, 2, 5])
+        idxs, np.array([0, 2, 5])
     ), "Problem with Interval.excludes"
 
 
@@ -303,7 +303,7 @@ def test_interval_list_excludes(interval_obj, example_interval):
     interval, timestamps = example_interval
     idxs = interval_obj(interval).excludes(timestamps)
     assert np.array_equal(
-        idxs.times, np.array([0, 5, 9])
+        idxs, np.array([0, 5, 9])
     ), "Problem with Interval.excludes"
 
 

@@ -481,7 +481,7 @@ class Interval:
             if ret[-1] != len(timestamps) - padding:
                 ret[-1] += padding
 
-        return Interval(ret, **self.kwargs)
+        return ret
 
     def excludes(
         self, timestamps: np.ndarray, as_indices: Optional[bool] = False
@@ -492,12 +492,10 @@ class Interval:
         ----------
         timestamps : array_like
         """
-        contained_times = self.contains(timestamps, as_indices=as_indices).times
+        contained_times = self.contains(timestamps, as_indices=as_indices)
         if as_indices:
             timestamps = np.arange(len(timestamps))
-        return Interval(
-            np.setdiff1d(timestamps, contained_times), **self.kwargs
-        )
+        return np.setdiff1d(timestamps, contained_times)
 
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
@@ -901,7 +899,7 @@ def interval_list_contains_ind(interval_list, timestamps):
         "interval_list_contains_ind", alt="Interval.contains"
     )
 
-    return Interval(interval_list).contains(timestamps, as_indices=True).times
+    return Interval(interval_list).contains(timestamps, as_indices=True)
 
 
 def interval_list_contains(interval_list, timestamps):
@@ -918,7 +916,7 @@ def interval_list_contains(interval_list, timestamps):
     ActivityLog().deprecate_log(
         "interval_list_contains", alt="Interval.contains"
     )
-    return Interval(interval_list).contains(timestamps).times
+    return Interval(interval_list).contains(timestamps)
 
 
 def interval_list_excludes_ind(interval_list, timestamps):
@@ -936,7 +934,7 @@ def interval_list_excludes_ind(interval_list, timestamps):
         "interval_list_excludes_ind",
         alt="Interval.excludes(timestamps, as_indices=True)",
     )
-    return Interval(interval_list).excludes(timestamps, as_indices=True).times
+    return Interval(interval_list).excludes(timestamps, as_indices=True)
 
 
 def interval_list_excludes(interval_list, timestamps):
@@ -953,7 +951,7 @@ def interval_list_excludes(interval_list, timestamps):
     ActivityLog().deprecate_log(
         "interval_list_excludes", alt="Interval.excludes"
     )
-    return Interval(interval_list).excludes(timestamps).times
+    return Interval(interval_list).excludes(timestamps)
 
 
 def consolidate_intervals(interval_list):
