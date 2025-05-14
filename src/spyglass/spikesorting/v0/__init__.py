@@ -12,6 +12,11 @@ from spyglass.spikesorting.v0.spikesorting_artifact import (  # noqa: F401
     ArtifactDetectionSelection,
     ArtifactRemovedIntervalList,
 )
+from spyglass.spikesorting.v0.spikesorting_burst import (  # noqa: F401
+    BurstPair,
+    BurstPairParams,
+    BurstPairSelection,
+)
 from spyglass.spikesorting.v0.spikesorting_curation import (  # noqa: F401
     AutomaticCuration,
     AutomaticCurationParameters,
@@ -55,6 +60,9 @@ __all__ = [
     "AutomaticCuration",
     "AutomaticCurationParameters",
     "AutomaticCurationSelection",
+    "BurstPair",
+    "BurstPairParams",
+    "BurstPairSelection",
     "CuratedSpikeSorting",
     "CuratedSpikeSortingSelection",
     "Curation",
