@@ -84,6 +84,7 @@ ImportedLFP().drop()
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -105,6 +106,7 @@ ImportedLFP().drop()
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
+    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278
     - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
         values with 1.0. #1280
     - Refactoring the creation of LFPElectrodeGroup with added input validation

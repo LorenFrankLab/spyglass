@@ -945,7 +945,8 @@ def delete_downstream_merge(
     from spyglass.utils.dj_mixin import SpyglassMixin
 
     ActivityLog().deprecate_log(
-        "delete_downstream_merge. Use Table.delete_downstream_merge"
+        name="delete_downstream_merge",
+        alternate="Table.delete_downstream_merge",
     )
 
     if not isinstance(table, SpyglassMixin):

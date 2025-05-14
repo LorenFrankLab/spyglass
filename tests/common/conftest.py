@@ -2,6 +2,11 @@ import pytest
 
 
 @pytest.fixture(scope="session")
+def interval_list(common):
+    yield common.IntervalList()
+
+
+@pytest.fixture(scope="session")
 def mini_devices(mini_content):
     yield mini_content.devices
 
