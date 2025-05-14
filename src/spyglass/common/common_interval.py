@@ -364,16 +364,14 @@ class Interval:
         }
         return {k: v for k, v in ret.items() if v is not None}
 
-    # @property
-    # def as_dict(self) -> dict:
-    #     """Convert the interval list to a dictionary."""
-    #     return self.__dict__
-
     @property
     def primary_key(self):
-        if not self.name:
-            raise ValueError("Interval list name is not set.")
-        return {"interval_list_name": self.name}
+        if not (self.name and self.nwb_file_name):
+            raise ValueError("Both name and file name required for primary key")
+        return {
+            "interval_list_name": self.name,
+            "nwb_file_name": self.nwb_file_name,
+        }
 
     def __eq__(self, other: IntervalLike) -> bool:
         """Check if two interval lists are equal."""
