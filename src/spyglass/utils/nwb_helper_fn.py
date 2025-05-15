@@ -363,6 +363,7 @@ def get_valid_intervals(
     timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
 ):
     """Finds the set of all valid intervals in a list of timestamps.
+
     Valid interval: (start time, stop time) during which there are
     no gaps (i.e. missing samples).
 
@@ -400,9 +401,10 @@ def get_valid_intervals(
     # find gaps
     gap = np.diff(timestamps) > 1.0 / sampling_rate * gap_proportion
 
-    # all true entries of gap represent gaps. Get the times bounding these intervals.
+    # all true entries of gap represent gaps.
+    # Get the times bounding these intervals.
     gapind = np.asarray(np.where(gap))
-    # The end of each valid interval are the indices of the gaps and the final value
+    # The end of each valid interval are the indices of gaps and the final value
     valid_end = np.append(gapind, np.asarray(len(timestamps) - 1))
 
     # the beginning of the gaps are the first element and gapind+1
@@ -599,7 +601,10 @@ def change_group_permissions(
     subject_ids, set_group_name, analysis_dir="/stelmo/nwb/analysis"
 ):
     """Change group permissions for specified subject ids in analysis dir."""
-    logger.warning("DEPRECATED: This function will be removed in `0.6`.")
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log("change_group_permissions")
+
     # Change to directory with analysis nwb files
     os.chdir(analysis_dir)
     # Get nwb file directories with specified subject ids
