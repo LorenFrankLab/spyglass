@@ -85,6 +85,7 @@ ImportedLFP().drop()
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
     - `IntervalList.fetch_interval` now returns `Interval` object #1293
+    - Correct name parsing in Session.Experimenter insertion #1306
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
