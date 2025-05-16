@@ -105,6 +105,7 @@ ImportedLFP().drop()
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
+    - Add `LinearAssemby` tables for sorted spikes #1307
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
