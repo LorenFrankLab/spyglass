@@ -19,10 +19,11 @@ class LinearAssemblyParams(SpyglassMixin, dj.Lookup):
     linear_assembly_params_name: varchar(32)
     ---
     bin_size_ms: float
+    activation_metric: varchar(32)  # 'squared'
     """
 
     contents = [
-        ("default", 100),
+        ("default", 100, "squared"),
     ]
 
 
@@ -36,6 +37,25 @@ class LinearAssemblySelection(SpyglassMixin, dj.Manual):
     """
 
 
+def squared_assembly_activity(ic_vectors, Z):
+    """
+    Compute assembly activity from IC vectors and spike vector
+
+    Parameters
+    ----------
+    ic_vectors : np.ndarray
+        IC vectors (num_assemblies x num_neurons)
+    Z : np.ndarray
+        Spike vector (num_bins x num_neurons)
+
+    Returns
+    -------
+    np.ndarray
+        Assembly activity (num_bins x num_assemblies)
+    """
+    return np.square(ic_vectors @ Z.T)
+
+
 @schema
 class LinearAssembly(SpyglassMixin, dj.Computed):
     definition = """
@@ -47,6 +67,10 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
     pc_vectors_object_id: varchar(255)  # ID of the PCA vectors object
     eigenvalues_object_id: varchar(255)  # ID of the eigenvalues object
     """
+
+    activation_metric_dictionary = {
+        "squared": squared_assembly_activity,
+    }
 
     def make(self, key):
         """
@@ -90,12 +114,6 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
         ic_vectors = np.dot(
             ica.components_, V
         )  # project ICs back to original unit space
-        # sort IC vectors by decreasing variance
-        ic_assembly_activities = np.square(ic_vectors @ Z.T)
-        row_variances = np.var(ic_assembly_activities, axis=1)
-        ic_vectors = ic_vectors[
-            np.argsort(row_variances)[::-1]
-        ]  # sort in descending order
         # normalize weights by norm
         for k in range(len(ic_vectors)):
             ic_vectors[k] = ic_vectors[k] / np.linalg.norm(ic_vectors[k])
@@ -108,6 +126,19 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
             pc_vectors[k] = pc_vectors[k] * np.sign(
                 pc_vectors[k][np.argmax(np.abs(pc_vectors[k]))]
             )
+
+        # compute assembly activity
+        activation_metric = (LinearAssemblyParams & key).fetch1(
+            "activation_metric"
+        )
+        ic_assembly_activities = self.activation_metric_dictionary[
+            activation_metric
+        ](ic_vectors, Z)
+        # sort IC vectors by decreasing variance
+        row_variances = np.var(ic_assembly_activities, axis=1)
+        row_order = np.argsort(row_variances)[::-1]
+        ic_vectors = ic_vectors[row_order]  # sort in descending order
+        ic_assembly_activities = ic_assembly_activities[:, row_order]
 
         # Save results to NWB file
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
