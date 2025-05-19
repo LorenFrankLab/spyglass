@@ -656,7 +656,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         nwb_file_name: str, channel_ids: List[int]
     ):
         """Spikinterface uses channel_names instead of index number if present in
-        nwb electrodes tablle. This function ensures match in channel_id values
+        nwb electrodes table. This function ensures match in channel_id values
         for indexing.
 
         Parameters
