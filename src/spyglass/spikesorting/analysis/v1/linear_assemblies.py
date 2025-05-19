@@ -201,7 +201,7 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
             Each assembly vector is plotted in a separate subplot.
         """
         if not len(self) == 1:
-            raise ValueError("plot_assemblies() only works for single keys")
+            raise ValueError("plot_assembly_vectors() only works for single keys")
         nwb = self.fetch_nwb()[0]
         ic = nwb["ic_vectors"].data[:].T
         x = np.arange(ic.shape[0])
