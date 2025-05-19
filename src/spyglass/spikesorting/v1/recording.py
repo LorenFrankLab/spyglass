@@ -539,8 +539,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
 
         # slice in channels; include ref channel in first slice, then exclude it in second slice
+        all_spikeinterface_channel_ids = self._get_spikeinterface_channel_ids(
+            nwb_file_name, all_channel_ids
+        )
         if ref_channel_id >= 0:
-            recording = recording.channel_slice(channel_ids=all_channel_ids)
+            recording = recording.channel_slice(
+                channel_ids=all_spikeinterface_channel_ids,
+                renamed_channel_ids=all_channel_ids,
+            )
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="single",
@@ -552,7 +558,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         elif ref_channel_id == -2:
             recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
+                channel_ids=all_spikeinterface_channel_ids,
+                renamed_channel_ids=all_channel_ids,
             )
             recording = si.preprocessing.common_reference(
                 recording,
@@ -562,7 +569,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             )
         elif ref_channel_id == -1:
             recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
+                channel_ids=all_spikeinterface_channel_ids,
+                renamed_channel_ids=all_channel_ids,
             )
         else:
             raise ValueError(
@@ -629,6 +637,35 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             primary key of SpikeSortingRecording table
         """
         raise NotImplementedError("Recompute not implemented.")
+
+    @staticmethod
+    def _get_spikeinterface_channel_ids(
+        nwb_file_name: str, channel_ids: List[int]
+    ):
+        """Spikinterface uses channel_names instead of index number if present in
+        nwb electrodes tablle. This function ensures match in channel_id values
+        for indexing.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            file name of the NWB file
+        channel_ids : List[int]
+            list of channel indexes (electrode_id) to be converted
+
+        Returns
+        -------
+        List[str]
+            list of channel_id values used by spikeinterface
+        """
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
+            nwbfile = io.read()
+            electrodes_table = nwbfile.electrodes
+            if "channel_name" not in electrodes_table.colnames:
+                return channel_ids
+            channel_names = electrodes_table["channel_name"]
+            return [channel_names[ch] for ch in channel_ids]
 
 
 def _consolidate_intervals(intervals, timestamps):
