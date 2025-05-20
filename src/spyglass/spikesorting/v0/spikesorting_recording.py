@@ -445,7 +445,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """Update file hashes for all entries in the table.
 
         Only used for transitioning to recompute NWB files, see #1093."""
-        for key in tqdm(self & 'hash=""', desc="Updating hashes"):
+        for key in tqdm(self & "hash is NULL", desc="Updating hashes"):
             key["hash"] = self._dir_hash(key["recording_path"])
             self.update1(key)
 
