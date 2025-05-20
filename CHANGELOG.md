@@ -80,7 +80,7 @@ ImportedLFP().drop()
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
-    #1XXX
+    #1311
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
