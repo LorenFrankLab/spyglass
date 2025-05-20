@@ -24,6 +24,7 @@ class LinearAssemblyParams(SpyglassMixin, dj.Lookup):
 
     contents = [
         ("default", 100, "squared"),
+        ("default_diagonal_corrected", 100, "diagonal_corrected"),
     ]
 
 
@@ -53,7 +54,44 @@ def squared_assembly_activity(ic_vectors, Z):
     np.ndarray
         Assembly activity (num_bins x num_assemblies)
     """
-    return np.square(ic_vectors @ Z.T)
+    return np.square(ic_vectors @ Z.T).T
+
+
+def diagonal_corrected_assembly_activity(ic_vectors, Z):
+    """
+    Compute assembly activity from IC vectors and spike vector
+
+    Parameters
+    ----------
+    ic_vectors : np.ndarray
+        IC vectors (num_assemblies x num_neurons)
+    Z : np.ndarray
+        Spike vector (num_bins x num_neurons)
+
+    Returns
+    -------
+    np.ndarray
+        Assembly activity (num_bins x num_assemblies)
+    """
+    assembly_activities = np.zeros(
+        (Z.shape[0], ic_vectors.shape[0])
+    )  # [n_time_bins x n_assemblies]
+    for i, vec in enumerate(ic_vectors):  # vec: [n_units]
+        # Normalize vec if not already
+        vec = vec / np.linalg.norm(vec)
+        # Signed linear projection: [n_time_bins]
+        signed_proj = Z @ vec
+        # Outer product with diagonal removed
+        W = np.outer(vec, vec)
+        np.fill_diagonal(W, 0)
+        # Quadratic form: [n_time_bins]
+        quadratic_form = np.einsum("ti,ij,tj->t", Z, W, Z)
+        # Signed magnitude: sign * sqrt(abs)
+        signed_magnitude = np.sign(signed_proj) * np.sqrt(
+            np.abs(quadratic_form)
+        )
+        assembly_activities[:, i] = signed_magnitude
+    return assembly_activities
 
 
 @schema
@@ -70,6 +108,7 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
 
     activation_metric_dictionary = {
         "squared": squared_assembly_activity,
+        "diagonal_corrected": diagonal_corrected_assembly_activity,
     }
 
     def make(self, key):
@@ -135,7 +174,7 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
             activation_metric
         ](ic_vectors, Z)
         # sort IC vectors by decreasing variance
-        row_variances = np.var(ic_assembly_activities, axis=1)
+        row_variances = np.var(ic_assembly_activities, axis=0)
         row_order = np.argsort(row_variances)[::-1]
         ic_vectors = ic_vectors[row_order]  # sort in descending order
         ic_assembly_activities = ic_assembly_activities[:, row_order]
@@ -160,7 +199,7 @@ class LinearAssembly(SpyglassMixin, dj.Computed):
         )
         assembly_activity_obj = pynwb.TimeSeries(
             name="assembly_activity",
-            data=ic_assembly_activities.T,
+            data=ic_assembly_activities,
             unit="a.u.",
             timestamps=t_spikes,
             description="Assembly activity",
