@@ -653,9 +653,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def _get_spikeinterface_channel_ids(
-        nwb_file_name: str, channel_ids: List[int]
+        nwb_file_name: str, channel_ids: List[Union[int, str]]
     ):
-        """Spikinterface uses channel_names instead of index number if present in
+        """SpikInterface uses channel_names instead of index number if present in
         nwb electrodes table. This function ensures match in channel_id values
         for indexing.
 
@@ -668,7 +668,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        List[str]
+        List[Union[int, str]]
             list of channel_id values used by spikeinterface
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
