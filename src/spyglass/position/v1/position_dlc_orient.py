@@ -1,5 +1,3 @@
-from time import time
-
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -32,7 +30,25 @@ _key_to_func_dict = {
 @schema
 class DLCOrientationParams(SpyglassMixin, dj.Manual):
     """
-    Parameters for determining and smoothing the orientation of a set of BodyParts
+    Params for determining and smoothing the orientation of a set of BodyParts
+
+    Parameters
+    ----------
+    dlc_orientation_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        orient_method : str
+            Method for determining orientation. Options are:
+            'none': No orientation calculation
+            'red_green_orientation': Two-point head orientation calculation
+            'red_led_bisector': Red LED bisector orientation calculation
+        bodypart1 : str
+            First bodypart to use for orientation calculation
+        bodypart2 : str
+            Second bodypart to use for orientation calculation
+        orientation_smoothing_std_dev : float
+            Standard deviation for Gaussian smoothing of the orientation data
     """
 
     definition = """
@@ -127,7 +143,6 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         4. Insert the key into the DLCOrientation table.
         """
         # Get labels to smooth from Parameters table
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         pos_df = self._get_pos_df(key)
 
         params = (DLCOrientationParams() & key).fetch1("params")
@@ -166,7 +181,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         final_df = pd.DataFrame(
             orientation, columns=["orientation"], index=pos_df.index
         )
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+        key["analysis_file_name"] = AnalysisNwbfile().create(
             key["nwb_file_name"]
         )
         # if spatial series exists, get metadata from there
@@ -196,7 +211,6 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         )
 
         self.insert1(key)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe"""

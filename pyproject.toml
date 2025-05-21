@@ -40,7 +40,7 @@ dependencies = [
     "black[jupyter]",
     "bottleneck",
     "dask",
-    "datajoint>=0.14.2",
+    "datajoint>=0.14.4",
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
@@ -50,9 +50,9 @@ dependencies = [
     "non_local_detector",
     "numpy",
     "opencv-python",
-    "panel>=1.4.0",                  # panel #6325 resolved
+    "panel>=1.4.0",
     "position_tools>=0.1.0",
-    "pubnub<6.4.0",                  # TODO: remove this when sortingview is updated
+    "pubnub<6.4.0",  # TODO: remove this when sortingview is updated
     "pydotplus",
     "pynwb>=2.2.0,<3",
     "ripple_detection",
@@ -79,6 +79,7 @@ moseq-cpu = [
 ]
 
 test = [
+    "codecov",                # for code coverage badge
     "docker",                 # for tests in a container
     "ghostipy",
     "kachery",                # database access
@@ -102,6 +103,7 @@ docs = [
     "mkdocs-literate-nav",   # Dynamic page list for API docs
     "mkdocs-material",       # Docs theme
     "mkdocstrings[python]",  # Docs API docstrings
+    "mkdocs-mermaid2-plugin",# Docs mermaid diagrams
 ]
 
 [project.urls]
@@ -140,7 +142,7 @@ addopts = [
     # "--pdb", # drop into debugger on failure
     "-p no:warnings",
     # "--no-teardown", # don't teardown the database after tests
-    "--quiet-spy",   # don't show logging from spyglass
+    # "--quiet-spy",   # don't show logging from spyglass
     # "--no-dlc",      # don't run DLC tests
     "--show-capture=no",
     "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
@@ -181,7 +183,6 @@ omit = [ # which submodules have no tests
     # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
-    "*/spikesorting/v0/*",
     # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",

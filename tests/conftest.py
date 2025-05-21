@@ -29,6 +29,18 @@ from .data_downloader import DataDownloader
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.simplefilter("ignore", category=ResourceWarning)
+warnings.simplefilter("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", module="tensorflow")
+
+warnings.filterwarnings(
+    "ignore", category=MissingRequiredBuildWarning, module="hdmf"
+)
+warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
+warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
+warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -107,19 +119,6 @@ def pytest_configure(config):
         verbose=VERBOSE,
         download_dlc=not NO_DLC,
     )
-
-    warnings.filterwarnings("ignore", module="tensorflow")
-    warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
-    warnings.filterwarnings(
-        "ignore", category=MissingRequiredBuildWarning, module="hdmf"
-    )
-    warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
-    warnings.filterwarnings(
-        "ignore", category=PerformanceWarning, module="pandas"
-    )
-    warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-    warnings.simplefilter("ignore", category=ResourceWarning)
-    warnings.simplefilter("ignore", category=DeprecationWarning)
 
 
 def pytest_unconfigure(config):
@@ -470,7 +469,7 @@ def trodes_params(trodes_params_table, teardown):
             "params": {
                 **params,
                 "is_upsampled": 1,
-                "upsampling_sampling_rate": 500,  # TODO - lower this to speed up
+                "upsampling_sampling_rate": 50,
             },
         },
     }
@@ -1111,21 +1110,19 @@ def populate_pose_estimation(sgp, pose_estimation_key):
 def si_params_name(sgp, populate_pose_estimation):
     params_name = "low_bar"
     params_tbl = sgp.v1.DLCSmoothInterpParams
-    # if len(params_tbl & {"dlc_si_params_name": params_name}) < 1:
-    if True:  # TODO: remove before merge
-        nan_params = params_tbl.get_nan_params()
-        nan_params["dlc_si_params_name"] = params_name
-        nan_params["params"].update(
-            {
-                "likelihood_thresh": 0.4,
-                "max_cm_between_pts": 100,
-                "num_inds_to_span": 50,
-                # Smoothing and Interpolation added later - must check
-                "smoothing_params": {"smoothing_duration": 0.05},
-                "interp_params": {"max_cm_to_interp": 100},
-            }
-        )
-        params_tbl.insert1(nan_params, skip_duplicates=True)
+    nan_params = params_tbl.get_nan_params()
+    nan_params["dlc_si_params_name"] = params_name
+    nan_params["params"].update(
+        {
+            "likelihood_thresh": 0.4,
+            "max_cm_between_pts": 100,
+            "num_inds_to_span": 50,
+            # Smoothing and Interpolation added later - must check
+            "smoothing_params": {"smoothing_duration": 0.05},
+            "interp_params": {"max_cm_to_interp": 100},
+        }
+    )
+    params_tbl.insert1(nan_params, skip_duplicates=True)
 
     yield params_name
 

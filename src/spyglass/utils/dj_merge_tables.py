@@ -1,7 +1,7 @@
+import re
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
-from re import sub as re_sub
 from time import time
 from typing import List, Union
 
@@ -27,10 +27,10 @@ MERGE_DEFINITION = (
 def is_merge_table(table):
     """Return True if table fields exactly match Merge table."""
 
-    def trim_def(definition):
-        return re_sub(
-            r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        ).replace(" ", "")
+    def trim_def(definition):  # ignore full-line comments
+        no_comment = re.sub(r"^\s*#.*\n", "\n", definition, flags=re.MULTILINE)
+        no_blanks = re.sub(r"\n\s*\n", "\n", no_comment.strip())
+        return no_blanks.replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
@@ -741,8 +741,6 @@ class Merge(ExportMixin, dj.Manual):
         source: Union[str, dict, dj.Table]
             Accepts a CamelCase name of the source, or key as a dict, or a part
             table.
-        init: bool, optional
-            Default False. If True, returns an instance of the class.
 
         Returns
         -------
@@ -947,7 +945,8 @@ def delete_downstream_merge(
     from spyglass.utils.dj_mixin import SpyglassMixin
 
     ActivityLog().deprecate_log(
-        "delete_downstream_merge. Use Table.delete_downstream_merge"
+        name="delete_downstream_merge",
+        alternate="Table.delete_downstream_merge",
     )
 
     if not isinstance(table, SpyglassMixin):

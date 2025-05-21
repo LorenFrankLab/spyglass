@@ -56,13 +56,14 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
         .to_dict()
     )
     exp = {
-        "position_x": 230389.335,
-        "position_y": 295368.260,
-        "orientation": 0.0,
-        "velocity_x": 1726.304,
-        "velocity_y": -1675.276,
-        "speed": 6257.273,
+        "position_x": 23116.620,
+        "position_y": 29631.434,
+        "orientation": 0,
+        "velocity_x": 173.990,
+        "velocity_y": -170.379,
+        "speed": 628.899,
     }
+
     for k in exp:
         assert (
             pytest.approx(df[k], rel=1e-3) == exp[k]

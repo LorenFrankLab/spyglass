@@ -55,6 +55,7 @@ nav:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
           - Spike Sorting Analysis: notebooks/11_Spike_Sorting_Analysis.ipynb
+          - Spike Burst Merge: notebooks/12_Spike_Burst.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
@@ -75,6 +76,7 @@ nav:
     - Merge Tables: Features/Merge.md
     - Export: Features/Export.md
     - Centralized Code: Features/Mixin.md
+    - Recompute: Features/Recompute.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md
@@ -82,6 +84,7 @@ nav:
     - Code Reuse: ForDevelopers/Reuse.md
     - Table Types: ForDevelopers/TableTypes.md
     - Understanding a Schema: ForDevelopers/Schema.md
+    - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - Change Log: CHANGELOG.md
@@ -92,6 +95,7 @@ extra_css:
 
 plugins:
   - search
+  - mermaid2 # for graphs
   - exclude:
       glob:
         - "temp*"
@@ -137,6 +141,8 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
 
 extra:
   generator: false # Disable watermark

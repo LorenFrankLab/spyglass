@@ -2,6 +2,56 @@
 
 ## [0.5.5] (Unreleased)
 
+### Release Notes
+
+<!-- Running draft to be removed immediately prior to release. -->
+
+<!-- When altering tables, import all foreign key references. -->
+
+Table update script
+
+```python
+# -- For recompute --
+import datajoint as dj
+from spyglass.spikesorting.v1 import recording as v1rec  # noqa
+from spyglass.spikesorting.v0 import spikesorting_recording as v0rec  # noqa
+from spyglass.linearization.v1.main import TrackGraph  # noqa
+
+dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
+dj.FreeTable(dj.conn(), "common_session.session_group").drop()
+TrackGraph.alter()  # Add edge map parameter
+v0rec.SpikeSortingRecording().alter()
+v0rec.SpikeSortingRecording().update_ids()
+v1rec.SpikeSortingRecording().alter()
+v1rec.SpikeSortingRecording().update_ids()
+
+# -- For LFP pipeline --
+from spyglass.lfp.lfp_imported import ImportedLFP
+from spyglass.lfp.lfp_merge import LFPOutput
+
+if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
+    raise ValueError(
+        "Existing entries found and would be dropped in update. Please delete "
+        + "entries or start a GitHub discussion for migration assistance."
+        + f"\nImportedLFP: {len(ImportedLFP())}"
+        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
+    )
+
+table = LFPOutput().ImportedLFP()
+table_name = table.full_table_name
+
+if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
+    drop_list = [x for x in drop_list if x != table_name]
+    raise ValueError(
+        "Downstream tables exist and would be dropped in update."
+        + "Please drop the following tables first: \n"
+        + "\n ".join([str(t) for t in drop_list])
+    )
+
+LFPOutput().ImportedLFP().drop_quick()
+ImportedLFP().drop()
+```
+
 ### Infrastructure
 
 - Ensure merge tables are declared during file insertion #1205
@@ -14,6 +64,16 @@
 - Fix column error in `check_threads` method #1256
 - Export python env and store in newly created analysis files #1270
 - Enforce single table entry in `fetch1_dataframe` calls #1270
+- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093
+- Track Spyglass version in dedicated table for enforcing updates #1281
+- Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
+- Remove outdated code comments #1304
+- Add code coverage badge #1305
+
+### Documentation
+
+- Add documentation for custom pipeline #1281
+- Add developer note on initializing `hatch` #1281
 
 ### Pipelines
 
@@ -22,6 +82,13 @@
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
     - Calculate mode of timestep size in log scale when estimating sampling rate #1270
+    - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
+    - Allow ingestion of multi-row task epoch tables #1278
+    - Add `SensorData` to `populate_all_common` #1281
+    - Add `fetch1_dataframe` to `SensorData` #1291
+    - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293
+    - Correct name parsing in Session.Experimenter insertion #1306
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -29,16 +96,32 @@
         #1247
     - Change key value `position_source` to "imported" during ingestion #1270
     - Define orientation as `nan` for single-led data #1270
+    - Sanitize new project names for unix file system #1247
+    - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
+        #1305
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
     - Speedup `get_sorting` on `CurationV1` #1246
     - Add cleanup for `v0.SpikeSortingRecording` #1263
+    - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
     - Update transaction and parallel make settings for `v0` and `v1` `SpikeSorting` tables #1270
+    - Disable make transactionsfor `CuratedSpikeSorting` #1288
+    - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
+    - Add burst merge curation #1209
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
+- LFP
+    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278
+    - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
+        values with 1.0. #1280
+    - Refactoring the creation of LFPElectrodeGroup with added input validation
+        and transactional insertion. #1280, #1302
+    - Updating the LFPBandSelection logic with comprehensive validation and batch
+        insertion for electrodes and references. #1280
+    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278, #1302
 
 ## [0.5.4] (December 20, 2024)
 
@@ -48,6 +131,7 @@
     #1108, #1172, #1187
 - Add docstrings to all public methods #1076
 - Update DataJoint to 0.14.2 #1081
+- Remove `AnalysisNwbfileLog` #1093
 - Allow restriction based on parent keys in `Merge.fetch_nwb()` #1086, #1126
 - Import `datajoint.dependencies.unite_master_parts` -> `topo_sort` #1116,
     #1137, #1162
@@ -59,6 +143,7 @@
 - Update DataJoint install and password instructions #1131
 - Fix dandi upload process for nwb's with video or linked objects #1095, #1151
 - Minor docs fixes #1145
+- Add Nwb hashing tool #1093
 - Test fixes
     - Remove stored hashes from pytests #1152
     - Remove mambaforge from tests #1153
@@ -118,6 +203,7 @@
     - Fix bug in `get_group_by_shank` #1096
     - Fix bug in `_compute_metric` #1099
     - Fix bug in `insert_curation` returned key #1114
+    - Add fields to `SpikeSortingRecording` to allow recompute #1093
     - Fix handling of waveform extraction sparse parameter #1132
     - Limit Artifact detection intervals to valid times #1196
 

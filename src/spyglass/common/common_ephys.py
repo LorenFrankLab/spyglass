@@ -9,11 +9,7 @@ import pynwb
 from spyglass.common.common_device import Probe  # noqa: F401
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import interval_list_censor  # noqa: F401
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_contains_ind,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
@@ -343,7 +339,7 @@ class Raw(SpyglassMixin, dj.Imported):
                 min_valid_len=0,
             )
 
-        IntervalList().cautious_insert(interval_dict)
+        IntervalList().cautious_insert(interval_dict, update=True)
 
         # now insert each of the electrodes as an individual row, but with the
         # same nwb_object_id
@@ -481,7 +477,7 @@ class LFP(SpyglassMixin, dj.Imported):
         """
         # get the NWB object with the data; FIX: change to fetch with
         # additional infrastructure
-        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])  # logged
+        lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
@@ -495,17 +491,13 @@ class LFP(SpyglassMixin, dj.Imported):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
         # keep only the intervals > 1 second long
-        min_interval_length = 1.0
-        valid = []
-        for count, interval in enumerate(valid_times):
-            if interval[1] - interval[0] > min_interval_length:
-                valid.append(count)
-        valid_times = valid_times[valid]
+        orig_len = len(valid_times)
+        valid_times = valid_times.by_length(min_length=1.0)
         logger.info(
-            f"LFP: found {len(valid)} of {count+1} intervals > "
-            + f"{min_interval_length} sec long."
+            f"LFP: found {len(valid_times)} of {orig_len} intervals > "
+            + "1.0 sec long."
         )
 
         # target 1 KHz sampling rate
@@ -544,7 +536,7 @@ class LFP(SpyglassMixin, dj.Imported):
             lfp_file_abspath,
             rawdata,
             filter_coeff,
-            valid_times,
+            valid_times.times,
             electrode_id_list,
             decimation,
         )
@@ -559,18 +551,12 @@ class LFP(SpyglassMixin, dj.Imported):
         key["lfp_sampling_rate"] = sampling_rate // decimation
 
         # finally, censor the valid times to account for the downsampling
-        lfp_valid_times = interval_list_censor(valid_times, timestamp_interval)
-        # add an interval list for the LFP valid times, skipping duplicates
-        key["interval_list_name"] = "lfp valid times"
-        IntervalList.insert1(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["interval_list_name"],
-                "valid_times": lfp_valid_times,
-                "pipeline": "lfp_v0",
-            },
-            replace=True,
+        lfp_valid_times = valid_times.censor(timestamp_interval)
+        lfp_valid_times.set_key(
+            nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
+        # add an interval list for the LFP valid times, skipping duplicates
+        IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
         AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
@@ -770,9 +756,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
         6. Adds resulting interval list to IntervalList table.
         """
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         # get the NWB object with the lfp data;
         # FIX: change to fetch with additional infrastructure
@@ -817,10 +801,11 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": lfp_interval_list,
             }
-        ).fetch1("valid_times")
-        min_length = (LFPBandSelection & key).fetch1("min_interval_len")
-        lfp_band_valid_times = interval_list_intersect(
-            valid_times, lfp_valid_times, min_length=min_length
+        ).fetch_interval()
+
+        lfp_band_valid_times = valid_times.intersect(
+            lfp_valid_times,
+            min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
         )
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
@@ -836,14 +821,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
-        included_indices = interval_list_contains_ind(
-            lfp_band_valid_times, timestamps
+        included_indices = lfp_band_valid_times.contains(
+            timestamps, as_indices=True, padding=1
         )
-        # pad the indices by 1 on each side to avoid message in filter_data
-        if included_indices[0] > 0:
-            included_indices[0] -= 1
-        if included_indices[-1] != len(timestamps) - 1:
-            included_indices[-1] += 1
 
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 
@@ -914,10 +894,9 @@ class LFPBand(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            eseries_name = "filtered data"
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
+                name="filtered data",
                 data=filtered_data,
                 electrodes=electrode_table_region,
                 timestamps=new_timestamps,
@@ -940,23 +919,27 @@ class LFPBand(SpyglassMixin, dj.Computed):
             + str(lfp_band_sampling_rate)
             + "Hz"
         )
+
+        # TODO: why does this check against existing one set of times, but
+        # then insert censored times? Shouldn't it check against the censored
+        # times? Doesn't match `lfp_band.py`
+        # If it should be censored, can replace block for `cautious_insert`
+
         tmp_valid_times = (
             IntervalList
             & {
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": key["interval_list_name"],
             }
-        ).fetch("valid_times")
+        ).fetch_interval()
         if len(tmp_valid_times) == 0:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
+            lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
             # add an interval list for the LFP valid times
             IntervalList.insert1(
                 {
                     "nwb_file_name": key["nwb_file_name"],
                     "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times,
+                    "valid_times": lfp_band_valid_times.times,
                     "pipeline": "lfp_band",
                 }
             )
@@ -968,7 +951,6 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 "previously saved lfp band times do not match current times"
             )
 
-        AnalysisNwbfile().log(lfp_band_file_name, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:

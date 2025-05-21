@@ -354,7 +354,6 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 analysis_file_name=key["analysis_file_name"],
             )
             self.BodyPart.insert1(key)
-            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a concatenated dataframe of all bodyparts."""

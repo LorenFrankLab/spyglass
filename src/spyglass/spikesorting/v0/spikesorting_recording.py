@@ -1,22 +1,17 @@
-import os
-import shutil
-from functools import reduce
 from pathlib import Path
+from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
 import numpy as np
 import probeinterface as pi
 import spikeinterface as si
 import spikeinterface.extractors as se
+from spikeinterface import preprocessing as si_preprocessing
+from tqdm import tqdm
 
 from spyglass.common.common_device import Probe, ProbeType  # noqa: F401
 from spyglass.common.common_ephys import Electrode, ElectrodeGroup
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-    intervals_by_length,
-    union_adjacent_index,
-)
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_lab import LabTeam  # noqa: F401
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
@@ -25,8 +20,9 @@ from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
-from spyglass.utils import SpyglassMixin
+from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import dj_replace
+from spyglass.utils.nwb_hash import DirectoryHasher
 
 schema = dj.schema("spikesorting_recording")
 
@@ -77,8 +73,12 @@ class SortGroup(SpyglassMixin, dj.Manual):
         omit_unitrode : bool
             Optional. If True, no sort groups are defined for unitrodes.
         """
-        # delete any current groups
-        (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
+        existing_entries = SortGroup & {"nwb_file_name": nwb_file_name}
+
+        if existing_entries and self._test_mode:
+            return
+        elif existing_entries:  # delete any current groups
+            existing_entries.delete()
 
         sg_keys, sge_keys = get_group_by_shank(
             nwb_file_name=nwb_file_name,
@@ -215,10 +215,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 & {"probe_id": probe_id, "probe_electrode": probe_electrode}
             ).fetch("rel_x", "rel_y", "rel_z")
             # TODO: Fix this HACK when we can use probeinterface:
-            rel_x = float(rel_x)
-            rel_y = float(rel_y)
-            rel_z = float(rel_z)
-            tmp_geom[i, :] = [rel_x, rel_y, rel_z]
+            tmp_geom[i, :] = [float(rel_x), float(rel_y), float(rel_z)]
 
         # figure out which columns have coordinates
         n_found = 0
@@ -244,11 +241,35 @@ class SortInterval(SpyglassMixin, dj.Manual):
     sort_interval: longblob # 1D numpy array with start and end time for a single interval to be used for spike sorting
     """
 
+    def fetch_interval(self):
+        """Fetch interval list object for a given key."""
+        if not len(self) == 1:
+            raise ValueError(f"Expected one row, got {len(self)}")
+        return Interval(self.fetch1("sort_interval"))
+
     # NOTE: See #630, #664. Excessive key length.
 
 
 @schema
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
+    """Preprocessing parameters for spike sorting.
+
+    Parameters
+    ----------
+    preproc_params_name : str
+        Name of the preprocessing parameters.
+    preproc_params : dict
+        Dictionary of preprocessing parameters.
+        frequency_min : float
+            High pass filter value in Hz.
+        frequency_max : float
+            Low pass filter value in Hz.
+        margin_ms : float
+            Margin in ms on border to avoid border effect.
+        seed : int
+            Random seed for whitening.
+    """
+
     definition = """
     preproc_params_name: varchar(32)
     ---
@@ -291,16 +312,17 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
-    use_transaction, _allow_insert = False, True
 
     definition = """
     -> SpikeSortingRecordingSelection
     ---
     recording_path: varchar(1000)
     -> IntervalList.proj(sort_interval_list_name='interval_list_name')
+    hash=null: char(32)  # hash of the directory
     """
 
     _parallel_make = True
+    _use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populates the SpikeSortingRecording table with the recording data.
@@ -313,37 +335,119 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         2. Saves the recording data to the recording directory
         3. Inserts the path to the recording data into SpikeSortingRecording
         """
+        rec_info = self._make_file(key)
+
         sort_interval_valid_times = self._get_sort_interval_valid_times(key)
+        sort_interval_valid_times.set_key(
+            nwb_file_name=key["nwb_file_name"],
+            interval_list_name=rec_info["name"],
+            pipeline="spikesorting_recording_v0",
+        )
+        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
+
+        self_insert = dict(
+            key,
+            sort_interval_list_name=rec_info["name"],
+            recording_path=rec_info["path"],
+        )
+        self.insert1(self_insert)
+        self._record_environment(self_insert)
+
+    def _record_environment(self, key):
+        """Record environment details for this recording."""
+        from spyglass.spikesorting.v0 import spikesorting_recompute as rcp
+
+        rcp.RecordingRecomputeVersions().make(key)
+        rcp.RecordingRecomputeSelection().insert(key, at_creation=True)
+
+    def _make_file(self, key, base_dir=None, return_hasher=False):
+        """Run only operations required to save the recording data to disk."""
+        has_entry = bool(self & key)  # table entry exists, so recompute files
+        base_dir = Path(base_dir or recording_dir)
+        rec_path = base_dir / Path(self._get_recording_name(key))
+        ret = {"name": self._get_recording_name(key), "path": str(rec_path)}
+
+        if rec_path.exists():
+            if has_entry:  # if table entry for existing file, use it
+                return {**ret, "hash": self._dir_hash(rec_path)}
+            else:  # if no table entry, assume existing is outdated and delete
+                shutil_rmtree(rec_path)
+
         recording = self._get_filtered_recording(key)
-        recording_name = self._get_recording_name(key)
+        recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
 
-        # Path to files that will hold the recording extractors
-        recording_path = str(recording_dir / Path(recording_name))
-        if os.path.exists(recording_path):
-            shutil.rmtree(recording_path)
+        if has_entry and base_dir == recording_dir:  # if recompute, check hash
+            _ = self._hash_check(key, rec_path)
 
-        recording.save(
-            folder=recording_path, chunk_duration="10000ms", n_jobs=8
+        return {**ret, "hash": self._dir_hash(rec_path, return_hasher)}
+
+    def _hash_check(self, key, rec_path):
+        """Check if the hash of the directory matches the hash in the table."""
+        new_hash = self._dir_hash(rec_path, return_hasher=False)
+        old_hash = (self & key).fetch("hash")[0]
+
+        if new_hash == old_hash:
+            return True
+
+        from spyglass.spikesorting.v0 import spikesorting_recompute as rcp
+
+        msg = ""
+        if query := (rcp.RecordingRecomputeSelection & key):
+            env_id = query.fetch("env_id", as_dict=True)[0]
+            msg = "\nCheck UserEnvironment for possible dependency mismatch:"
+            msg += f"\n{rcp.UserEnvironment() & env_id}"
+
+        shutil_rmtree(rec_path)
+
+        raise ValueError(
+            f"Hash mismatch for {rec_path}: {new_hash} != {old_hash}{msg}"
         )
 
-        IntervalList.insert1(
-            {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": recording_name,
-                "valid_times": sort_interval_valid_times,
-                "pipeline": "spikesorting_recording_v0",
-            },
-            replace=True,
+    def _dir_hash(self, path, return_hasher=False):
+        """Return the hash of the directory."""
+        hasher = DirectoryHasher(  # only cache per file if returning hasher obj
+            directory_path=path, keep_obj_hash=return_hasher
         )
+        return hasher if return_hasher else hasher.hash
 
-        self.insert1(
-            {
-                **key,
-                # store the list of valid times for the sort
-                "sort_interval_list_name": recording_name,
-                "recording_path": recording_path,
+    def load_recording(self, key):
+        """Load the recording data from the file."""
+        query = self & key
+        if not len(query) == 1:
+            query = self & {
+                k: v for k, v in key.items() if k in self.primary_key
             }
-        )
+        if not len(query) == 1:
+            raise ValueError(f"Expected 1 entry, got {len(query)}: {query}")
+
+        path = query.fetch1("recording_path")
+        path_obj = Path(path)
+
+        # Protect against partial deletes, interrupted shutil.rmtree, etc.
+        # Error lets user decide if they want to backup before deleting
+        normal_file_count = 21
+        file_count = sum(1 for f in path_obj.rglob("*") if f.is_file())
+        if path_obj.exists() and file_count < normal_file_count:
+            raise RuntimeError(
+                f"Files missing! Please delete folder and rerun: {path}"
+            )
+
+        if not path_obj.exists():
+            SpikeSortingRecording()._make_file(key)
+        if not path_obj.exists():
+            raise FileNotFoundError(
+                f"Recording could not be recomputed: {path}"
+            )
+
+        return si.load_extractor(path)
+
+    def update_ids(self):
+        """Update file hashes for all entries in the table.
+
+        Only used for transitioning to recompute NWB files, see #1093."""
+        for key in tqdm(self & 'hash=""', desc="Updating hashes"):
+            key["hash"] = self._dir_hash(key["recording_path"])
+            self.update1(key)
 
     @staticmethod
     def _get_recording_name(key):
@@ -353,6 +457,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 key["sort_interval_name"],
                 str(key["sort_group_id"]),
                 key["preproc_params_name"],
+                # key["team_name"], # TODO: add team name, reflect PK structure
             ]
         )
 
@@ -391,7 +496,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "sort_interval_name": sort_interval_name,
             }
-        ).fetch1("sort_interval")
+        ).fetch_interval()
 
         valid_interval_times = (
             IntervalList
@@ -399,16 +504,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
-        valid_sort_times = interval_list_intersect(
-            sort_interval, valid_interval_times
-        )
+        valid_sort_times = sort_interval.intersect(valid_interval_times)
+
         # Exclude intervals shorter than specified length
-        if "min_segment_length" in params:
-            valid_sort_times = intervals_by_length(
-                valid_sort_times, min_length=params["min_segment_length"]
-            )
+        if min_length := params.get("min_segment_length"):
+            valid_sort_times = valid_sort_times.by_length(min_length=min_length)
+
         return valid_sort_times
 
     def _get_filtered_recording(self, key: dict):
@@ -433,7 +536,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             nwb_file_abs_path, load_time_vector=True
         )
 
-        valid_sort_times = self._get_sort_interval_valid_times(key)
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
         # shape is (N, 2)
         valid_sort_times_indices = np.array(
             [
@@ -442,13 +545,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
         )
         # join intervals of indices that are adjacent
-        valid_sort_times_indices = reduce(
-            union_adjacent_index, valid_sort_times_indices
+        valid_sort_times_indices = (
+            Interval(valid_sort_times_indices)
+            .union_adjacent_consolidate()
+            .times
         )
-        if valid_sort_times_indices.ndim == 1:
-            valid_sort_times_indices = np.expand_dims(
-                valid_sort_times_indices, 0
-            )
 
         # create an AppendRecording if there is more than one disjoint sort interval
         if len(valid_sort_times_indices) > 1:
@@ -487,13 +588,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             channel_ids_ref = np.append(channel_ids, ref_channel_id)
             recording = recording.channel_slice(channel_ids=channel_ids_ref)
 
-            recording = si.preprocessing.common_reference(
+            recording = si_preprocessing.common_reference(
                 recording, reference="single", ref_channel_ids=ref_channel_id
             )
             recording = recording.channel_slice(channel_ids=channel_ids)
         elif ref_channel_id == -2:
             recording = recording.channel_slice(channel_ids=channel_ids)
-            recording = si.preprocessing.common_reference(
+            recording = si_preprocessing.common_reference(
                 recording, reference="global", operator="median"
             )
         else:
@@ -501,7 +602,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         filter_params = (SpikeSortingPreprocessingParameters & key).fetch1(
             "preproc_params"
         )
-        recording = si.preprocessing.bandpass_filter(
+        recording = si_preprocessing.bandpass_filter(
             recording,
             freq_min=filter_params["frequency_min"],
             freq_max=filter_params["frequency_max"],
@@ -556,5 +657,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in untracked:
-            shutil.rmtree(folder)
+        for folder in tqdm(untracked, desc="Removing untracked folders"):
+            try:
+                shutil_rmtree(folder)
+            except PermissionError:
+                logger.warning(f"Permission denied: {folder}")

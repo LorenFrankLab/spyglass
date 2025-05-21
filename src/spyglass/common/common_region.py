@@ -15,10 +15,6 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
     subsubregion_name=NULL: varchar(200)  # subregion within subregion
     """
 
-    # TODO consider making (region_name, subregion_name, subsubregion_name) a
-    # primary key subregion_name='' and subsubregion_name='' will be necessary
-    # but that seems OK
-
     @classmethod
     def fetch_add(
         cls,

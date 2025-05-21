@@ -1,6 +1,5 @@
 import uuid
-from functools import reduce
-from typing import List, Union
+from typing import Union
 
 import datajoint as dj
 import numpy as np
@@ -8,12 +7,7 @@ import spikeinterface as si
 import spikeinterface.extractors as se
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
-from spyglass.common.common_interval import (
-    IntervalList,
-    _union_concat,
-    interval_from_inds,
-    interval_list_complement,
-)
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.utils import (
     _check_artifact_thresholds,
@@ -31,6 +25,33 @@ schema = dj.schema("spikesorting_v1_artifact")
 
 @schema
 class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
+    """Parameters for detecting artifacts (non-neural high amplitude events).
+
+    Parameters
+    ----------
+    artifact_param_name : str
+        Name of the artifact detection parameters.
+    artifact_params : dict
+        Dictionary of parameters for artifact detection, which may include:
+        zscore_thresh: float, optional
+            Stdev threshold for exclusion, should be >=0, defaults to None
+        amplitude_thresh_uV: float, optional
+            Amplitude threshold for exclusion, should be >=0, defaults to None
+        proportion_above_thresh: float, optional, should be>0 and <=1
+            Proportion of electrodes that need to have threshold crossings,
+            defaults to 1
+        removal_window_ms: float, optional
+            Width of the window in milliseconds to mask out per artifact
+            (window/2 removed on each side of threshold crossing),
+            defaults to 1 ms
+        chunk_duration: str, optional
+            Duration of chunks to process in seconds, defaults to "10s"
+        n_jobs: int, optional
+            Number of parallel jobs to use, defaults to 4
+        progress_bar: bool, optional
+            Whether to show a progress bar, defaults to True
+    """
+
     definition = """
     # Parameters for detecting artifacts (non-neural high amplitude events).
     artifact_param_name : varchar(200)
@@ -146,7 +167,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
                     & key
                 ).fetch1("interval_list_name"),
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         # DO:
         # - load recording
@@ -184,7 +205,7 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 
 def _get_artifact_times(
     recording: si.BaseRecording,
-    sort_interval_valid_times: List[List],
+    sort_interval_valid_times: Interval,
     zscore_thresh: Union[float, None] = None,
     amplitude_thresh_uV: Union[float, None] = None,
     proportion_above_thresh: float = 1.0,
@@ -203,7 +224,7 @@ def _get_artifact_times(
     Parameters
     ----------
     recording : si.BaseRecording
-    sort_interval_valid_times : List[List]
+    sort_interval_valid_times : Interval
         The sort interval for the recording, unit: seconds
     zscore_thresh : float, optional
         Stdev threshold for exclusion, should be >=0, defaults to None
@@ -283,7 +304,6 @@ def _get_artifact_times(
 
     # turn ms to remove total into s to remove from either side of each
     # detected artifact
-    half_removal_window_s = removal_window_ms / 2 / 1000
 
     if len(artifact_frames) == 0:
         recording_interval = np.asarray(
@@ -294,44 +314,16 @@ def _get_artifact_times(
         return recording_interval, artifact_times_empty
 
     # convert indices to intervals
-    artifact_intervals = interval_from_inds(artifact_frames)
-
-    # convert to seconds and pad with window
-    artifact_intervals_s = np.zeros(
-        (len(artifact_intervals), 2), dtype=np.float64
-    )
-    for interval_idx, interval in enumerate(artifact_intervals):
-        interv_ind = [
-            np.searchsorted(
-                valid_timestamps,
-                valid_timestamps[interval[0]] - half_removal_window_s,
-            ),
-            np.searchsorted(
-                valid_timestamps,
-                np.minimum(
-                    valid_timestamps[interval[1]] + half_removal_window_s,
-                    valid_timestamps[-1],
-                ),
-            ),
-        ]
-        artifact_intervals_s[interval_idx] = [
-            valid_timestamps[interv_ind[0]],
-            valid_timestamps[interv_ind[1]],
-        ]
-
-    # make the artifact intervals disjoint
-    if len(artifact_intervals_s) > 1:
-        artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
+    artifact_intervals_s = Interval(
+        artifact_frames, from_inds=True
+    ).add_removal_window(removal_window_ms, valid_timestamps)
 
     # find non-artifact intervals in timestamps
-    artifact_removed_valid_times = interval_list_complement(
-        sort_interval_valid_times, artifact_intervals_s, min_length=1
-    )
-    artifact_removed_valid_times = reduce(
-        _union_concat, artifact_removed_valid_times
-    )
+    artifact_removed_valid_times = sort_interval_valid_times.subtract(
+        artifact_intervals_s, min_length=1
+    ).union_consolidate()
 
-    return artifact_removed_valid_times, artifact_intervals_s
+    return artifact_removed_valid_times.times, artifact_intervals_s
 
 
 def merge_intervals(intervals):
