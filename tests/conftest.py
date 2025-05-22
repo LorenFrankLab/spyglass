@@ -1077,11 +1077,12 @@ def model_key(sgp, model_source_key):
 @pytest.fixture(scope="session")
 def populate_model(sgp, model_key):
     model_tbl = sgp.v1.DLCModel
-    if model_tbl & model_key:
-        yield
+    restricted = model_tbl & model_key
+    if restricted:
+        yield restricted
     else:
-        sgp.v1.DLCModel.populate(model_key)
-        yield
+        model_tbl.populate(model_key)
+        yield model_tbl & model_key
 
 
 @pytest.fixture(scope="session")
@@ -1095,6 +1096,7 @@ def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
         },
         task_mode="trigger",  # trigger or load
         params={"gputouse": None, "videotype": "mp4", "TFGPUinference": False},
+        check_crop=True,
     )
 
 
@@ -1267,7 +1269,7 @@ def orient_key(sgp, orient_selection):
 @pytest.fixture(scope="session")
 def populate_orient(sgp, orient_selection):
     sgp.v1.DLCOrientation().populate(orient_selection)
-    yield
+    yield sgp.v1.DLCOrientation() & orient_selection
 
 
 @pytest.fixture(scope="session")

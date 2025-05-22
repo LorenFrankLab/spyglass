@@ -1,5 +1,7 @@
+from pathlib import Path
+
+import datajoint as dj
 import pytest
-from datajoint.hash import key_hash
 
 
 @pytest.fixture(scope="session")
@@ -11,6 +13,7 @@ def test_add_params(params_table, trodes_params):
     tbl = params_table
     assert tbl & tbl.default_params, "Failed to add default params"
     assert tbl & trodes_params, "Failed to add custom params"
+    assert tbl.get_default() == tbl.default_params, "Default params mismatch"
 
 
 def test_param_keys(params_table):
@@ -68,6 +71,16 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
         assert (
             pytest.approx(df[k], rel=1e-3) == exp[k]
         ), f"Value differs from expected: {k}"
+
+
+def test_trodes_pose_df_error(trodes_pos_v1):
+    with pytest.raises(NotImplementedError):
+        trodes_pos_v1.fetch_pose_dataframe()
+
+
+def test_trodes_fetch_video_path(trodes_pos_v1):
+    video_path = (trodes_pos_v1 & dj.Top(limit=1)).fetch_video_path()
+    assert Path(video_path).exists(), "Failed to fetch video path"
 
 
 def test_trodes_video(sgp, trodes_pos_v1):

@@ -1,18 +1,3 @@
-"""
-The following lines are not used in the course of regular pose processing and
-can be removed so long as other functionality is not impacted.
-
-position_merge.py: 106-107, 110-123, 139-262
-dlc_decorators.py: 11, 16-18, 22
-dlc_reader.py    :
-    24, 38, 44-45, 51, 57-58, 61, 70, 74, 80-81, 135-137, 146, 149-162, 214,
-    218
-dlc_utils.py     :
-    58, 61, 69, 72, 97-100, 104, 149-161, 232-235, 239-241, 246, 259, 280,
-    293-305, 310-316, 328-341, 356-373, 395, 404, 480, 487-488, 530, 548-561,
-    594-601, 611-612, 641-657, 682-736, 762-772, 787, 809-1286
-"""
-
 from itertools import product as iter_product
 
 import numpy as np
@@ -30,6 +15,7 @@ def dlc_video_params(sgp):
             "params": {
                 "percent_frames": 0.05,
                 "incl_likelihood": True,
+                "limit": 2,
             },
         },
         skip_duplicates=True,
@@ -46,14 +32,14 @@ def dlc_video_selection(sgp, dlc_key, dlc_video_params, populate_dlc):
 
 @pytest.fixture(scope="session")
 def populate_dlc_video(sgp, dlc_video_selection):
-    sgp.v1.DLCPosVideo.populate(dlc_video_selection)
-    yield sgp.v1.DLCPosVideo()
+    video_maker = sgp.v1.DLCPosVideo.make(dlc_video_selection)
+    yield video_maker
 
 
 @pytest.fixture(scope="session")
 def populate_evaluation(sgp, populate_model):
     sgp.v1.DLCEvaluation.populate()
-    yield
+    yield sgp.v1.DLCEvaluation()
 
 
 def generate_led_df(leds, inc_vals=False):

@@ -206,6 +206,19 @@ class SpyglassMixin(ExportMixin):
 
         return key
 
+    def cautious_fetch1(self, *args, **kwargs):
+        """Fetch one entry from the table."
+
+        Raises
+        ------
+        KeyError
+            If the table is empty or if the key is not unique.
+        """
+        count = len(self)
+        if count != 1:
+            raise KeyError(f"Method expects a single entry, but found {count}")
+        return self.fetch1(*args, **kwargs)
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property

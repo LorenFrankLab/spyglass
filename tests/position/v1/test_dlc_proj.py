@@ -1,4 +1,9 @@
+import os
+
+import datajoint as dj
 import pytest
+
+from tests.conftest import VERBOSE
 
 
 def test_bp_insert(sgp):
@@ -57,6 +62,13 @@ def test_failed_name_insert(
     ), "Project re-insert did not return expected key"
 
 
+def test_dlc_project_insert_type_error(dlc_project_tbl):
+    with pytest.raises(TypeError):
+        dlc_project_tbl.insert1(dict(project_name=True))
+    with pytest.raises(TypeError):
+        dlc_project_tbl.insert1(dict(project_name="a", frames_per_video="a"))
+
+
 @pytest.mark.usefixtures("skipif_no_dlc")
 def test_failed_group_insert(no_dlc, dlc_project_tbl, new_project_key):
     if no_dlc:  # Decorator wasn't working here, so duplicate skipif
@@ -69,3 +81,48 @@ def test_extract_frames(extract_frames, labeled_vid_dir):
     extracted_files = list(labeled_vid_dir.glob("*.png"))
     stems = set([f.stem for f in extracted_files]) - {"img000", "img001"}
     assert len(stems) == 2, "Incorrect number of frames extracted"
+
+
+def test_process_video_error(dlc_project_tbl, teardown):
+    kwarg = dict(output_path="fake_output")
+    with pytest.raises(FileNotFoundError):
+        dlc_project_tbl._process_videos(video_list=["fake_video.mp4"], **kwarg)
+    with open("temp_file.txt", "w") as f:
+        f.write("This is a temporary file.")
+    with pytest.raises(ValueError):
+        dlc_project_tbl._process_videos(video_list=["temp_file.txt"], **kwarg)
+
+    os.remove("temp_file.txt")
+
+
+def test_add_video_error(dlc_project_tbl):
+    kwarg = dict(video_list=["fake_video.mp4"])
+    with pytest.raises(ValueError):
+        dlc_project_tbl.add_video_files(**kwarg, add_new=True)
+    with pytest.raises(ValueError):
+        dlc_project_tbl.add_video_files(**kwarg, config_path=".")
+
+
+def test_add_video(dlc_project_tbl):
+    with open("temp_file.mp4", "w") as f:
+        f.write("This is a temporary file.")
+    dlc_project_tbl.add_video_files(video_list=["temp_file.mp4"], add_new=True)
+
+
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
+def test_label_frame_warn(caplog, dlc_project_tbl):
+    (dlc_project_tbl & dj.Top(limit=1)).run_label_frames()
+    txt = caplog.text
+    assert "light mode" in txt, "Warning not caught."
+
+
+def test_check_labels(dlc_project_tbl):
+    dlc_project_tbl.check_labels()
+    assert True, "Check labels did not run successfully"
+
+
+def test_label_frame_error(dlc_project_tbl):
+    with pytest.raises(FileNotFoundError):
+        (dlc_project_tbl & dj.Top(limit=1)).import_labeled_frames(
+            key=True, new_proj_path="/fake_path"  # fails on fake path
+        )

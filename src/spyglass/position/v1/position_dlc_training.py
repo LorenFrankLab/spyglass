@@ -1,9 +1,9 @@
-import inspect
 import os
 from pathlib import Path
 
 import datajoint as dj
 
+from spyglass.position.utils import get_param_names
 from spyglass.position.v1.dlc_utils import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
@@ -139,7 +139,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
-        except (ImportError, ModuleNotFoundError):
+        except (ImportError, ModuleNotFoundError):  # pragma: no cover
             from deeplabcut.utils.auxiliaryfunctions import (
                 GetModelFolder as get_model_folder,
             )
@@ -175,13 +175,10 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         # Write dlc config file to base project folder
         dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
         # ---- create training dataset ----
-        training_dataset_input_args = list(
-            inspect.signature(create_training_dataset).parameters
-        )
         training_dataset_kwargs = {
             k: v
             for k, v in dlc_config.items()
-            if k in training_dataset_input_args
+            if k in get_param_names(create_training_dataset)
         }
         logger.info("creating training dataset")
         create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
@@ -199,7 +196,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         try:
             train_network(dlc_cfg_filepath, **train_network_kwargs)
-        except KeyboardInterrupt:
+        except KeyboardInterrupt:  # pragma: no cover
             logger.info("DLC training stopped via Keyboard Interrupt")
 
         snapshots = (
@@ -242,8 +239,3 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             key=key,
             skip_duplicates=True,
         )
-
-
-def get_param_names(func):
-    """Get parameter names for a function signature."""
-    return list(inspect.signature(func).parameters)

@@ -1,15 +1,15 @@
-import os
 from pathlib import Path
 
 import datajoint as dj
 import ruamel.yaml as yaml
 
+from spyglass.position.utils import get_most_recent_file
+from spyglass.position.utils_dlc import get_dlc_model_eval
+from spyglass.position.v1 import dlc_reader
+from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
+from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import str_to_bool
-
-from . import dlc_reader
-from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
-from .position_dlc_training import DLCModelTraining  # noqa: F401
 
 schema = dj.schema("position_v1_dlc_model")
 
@@ -21,7 +21,7 @@ class DLCModelInput(SpyglassMixin, dj.Manual):
     """
 
     definition = """
-    dlc_model_name : varchar(64)  # Different than dlc_model_name in DLCModelSource... not great
+    dlc_model_name : varchar(64)  # Different than DLCModelSource.dlc_model_name
     -> DLCProject
     ---
     project_path         : varchar(255) # Path to project directory
@@ -101,7 +101,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         n_found = len(table_query)
         if n_found != 1:
             logger.warning(
-                f"Found {len(table_query)} entries found for project "
+                f"Found {len(table_query)} entries for project "
                 + f"{project_name}:\n{table_query}"
             )
 
@@ -309,11 +309,7 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """.populate() method will launch evaluation for each unique entry in Model."""
-        import csv
-
-        from deeplabcut import evaluate_network
-        from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
+        """Evaluate trained model"""
 
         dlc_config, project_path, model_prefix, shuffle, trainingsetindex = (
             DLCModel & key
@@ -325,35 +321,15 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
             "trainingsetindex",
         )
 
-        yml_path, _ = dlc_reader.read_yaml(project_path)
-
-        evaluate_network(
-            yml_path,
-            Shuffles=[shuffle],  # this needs to be a list
-            trainingsetindex=trainingsetindex,
-            comparisonbodyparts="all",
-        )
-
-        eval_folder = get_evaluation_folder(
-            trainFraction=dlc_config["TrainingFraction"][trainingsetindex],
+        results = get_dlc_model_eval(
+            yml_path=dlc_reader.read_yaml(project_path)[0],
+            project_path=project_path,
+            model_prefix=model_prefix,
             shuffle=shuffle,
-            cfg=dlc_config,
-            modelprefix=model_prefix,
+            train_fraction=dlc_config["TrainingFraction"][trainingsetindex],
+            dlc_config=dlc_config,
         )
-        eval_path = project_path / eval_folder
-        assert (
-            eval_path.exists()
-        ), f"Couldn't find evaluation folder:\n{eval_path}"
 
-        eval_csvs = list(eval_path.glob("*csv"))
-        max_modified_time = 0
-        for eval_csv in eval_csvs:
-            modified_time = os.path.getmtime(eval_csv)
-            if modified_time > max_modified_time:
-                eval_csv_latest = eval_csv
-        with open(eval_csv_latest, newline="") as f:
-            results = list(csv.DictReader(f, delimiter=","))[0]
-        # in testing, test_error_p returned empty string
         self.insert1(
             dict(
                 key,

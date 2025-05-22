@@ -113,9 +113,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         table_entries = []
         bp_params_dict = cohort_selection.pop("bodyparts_params_dict")
         if len(bp_params_dict) == 0:
-            logger.logger.warn(
-                "No bodyparts specified in bodyparts_params_dict"
-            )
+            logger.warn("No bodyparts specified in bodyparts_params_dict")
             self.insert1(key)
             return
         temp_key = cohort_selection.copy()
