@@ -38,6 +38,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             # master table key for epoch
             epoch_key = dict(
                 nwb_file_name=nwb_key["nwb_file_name"],
+                epoch=row["epoch_number"],
                 description=row["convenience_code"],
                 pulse_length=row["pulse_length_in_ms"],
                 pulses_per_train=row["number_pulses_per_pulse_train"],
