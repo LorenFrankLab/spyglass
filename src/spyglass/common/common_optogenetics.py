@@ -1,6 +1,6 @@
 import datajoint as dj
 
-from spyglass.common import Session, TaskEpoch
+from spyglass.common import Nwbfile, Session, TaskEpoch
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_optogenetics")
@@ -18,8 +18,74 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
     intratrain_interval: float  # period in ms
     intertrain_interval: float  # intertrain interval in ms
     stimulus_power: float  # stimulus power in mW
-    dio_object_id: varchar(32)  # object id of the dio corresponding to the optogenetic stimulation
+    stimulus_object_id: varchar(32)  # object id of the dio corresponding to the optogenetic stimulation
     """
+
+    _nwb_table = Nwbfile
+
+    def make(self, key):
+        nwb_key = {
+            "nwb_file_name": key["nwb_file_name"],
+        }
+        nwb = (Nwbfile() & nwb_key).fetch_nwb()[0]
+        opto_epoch_df = nwb.intervals["optogenetic_epochs"].to_dataframe()
+
+        epoch_inserts = []
+        ripple_inserts = []
+        theta_inserts = []
+        speed_inserts = []
+        for _, row in opto_epoch_df.iterrows():
+            # master table key for epoch
+            epoch_key = dict(
+                nwb_file_name=nwb_key["nwb_file_name"],
+                description=row["convenience_code"],
+                pulse_length=row["pulse_length_in_ms"],
+                pulses_per_train=row["number_pulses_per_pulse_train"],
+                intratrain_interval=row["period_in_ms"],
+                intertrain_interval=row["intertrain_interval_in_ms"],
+                stimulus_power=row["power_in_mW"],
+                stimulus_object_id=row["stimulus_signal"].object_id,
+            )
+            epoch_inserts.append(epoch_key)
+            # Ripple trigger part if present
+            if row.get("ripple_filter_on", None):
+                ripple_key = dict(
+                    epoch_key,
+                    threshold_sd=row["ripple_filter_threshold_sd "],
+                    n_above_threshold=row["ripple_filter_num_above_threshold"],
+                    lockout_period=row[
+                        "ripple_filter_lockout_period_in_samples"
+                    ],
+                )
+                ripple_inserts.append(ripple_key)
+            # Theta trigger part if present
+            if row.get("theta_filter_on", None):
+                theta_key = dict(
+                    epoch_key,
+                    filter_phase=row["theta_filter_target_phase"],
+                    reference_ntrode=row["theta_filter_reference_ntrode"],
+                    lockout_period=row[
+                        "theta_filter_lockout_period_in_samples"
+                    ],
+                )
+                theta_inserts.append(theta_key)
+            # Speed conditional part if present
+            if row.get("speed_filter_on", None):
+                speed_key = dict(
+                    epoch_key,
+                    speed_threshold=row["speed_filter_threshold"],
+                    active_above_threshold=row[
+                        "speed_filter_on_above_threshold"
+                    ],
+                )
+                speed_inserts.append(speed_key)
+            # Spatial conditional part if present
+            # TODO
+        # insert keys
+        self.insert(epoch_inserts)
+        self.RippleTrigger.insert(ripple_inserts)
+        self.ThetaTrigger.insert(theta_inserts)
+        self.SpeedConditional.insert(speed_inserts)
 
     class RippleTrigger(SpyglassMixin, dj.Part):
         definition = """
@@ -37,6 +103,8 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         -> master
         ---
         filter_phase: float # target phase of the trigger
+        reference_ntrode: int # reference ntrode for the trigger
+        lockout_period: float # lockout period in sample steps
         """
 
     class SpeedConditional(SpyglassMixin, dj.Part):
@@ -55,6 +123,13 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ---
         nodes: longblob # list of nodes defining polygonal area for optogenetic stimulation
         """
+
+    def get_stimulus_timeseries(self):
+        if not len(self) == 1:
+            raise ValueError(
+                "get_stimulus_timeseries() only works for single entries"
+            )
+        return self.fetch_nwb()[0]["stimulus"]
 
 
 @schema
