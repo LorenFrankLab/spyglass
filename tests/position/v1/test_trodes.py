@@ -11,9 +11,11 @@ def params_table(trodes_params_table):
 
 def test_add_params(params_table, trodes_params):
     tbl = params_table
-    assert tbl & tbl.default_params, "Failed to add default params"
+    tbl_params = tbl.default_params
+    tbl_get_params = tbl.get_default()["params"]
+    assert tbl & dict(trodes_pos_params_name="default"), "Failed to add default"
     assert tbl & trodes_params, "Failed to add custom params"
-    assert tbl.get_default() == tbl.default_params, "Default params mismatch"
+    assert tbl_params == tbl_get_params, "Default params mismatch"
 
 
 def test_param_keys(params_table):

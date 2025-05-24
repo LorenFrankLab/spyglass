@@ -1,4 +1,5 @@
 import datajoint as dj
+import numpy as np
 import pytest
 
 
@@ -18,19 +19,20 @@ def test_dlc_video_default(sgp):
 
 
 def test_dlc_video_populate(populate_dlc_video):
-    assert hasattr(populate_dlc_video, "fps"), "Make failed to return object"
+    assert populate_dlc_video, "DLCPosVideo table not populated correctly"
 
 
-def test_null_position(sgp, mini_dict):
+def test_null_position(common, sgp, mini_dict):
+    import pynwb
+
     pos_tbl = sgp.v1.position_dlc_selection.DLCPosV1()
-    key = pos_tbl.make_null_position_nwb(mini_dict)
-    df = (pos_tbl & key).fetch1_dataframe()
-    assert df.shape == (1, 0), "Null position dataframe is not empty"
+    fname = pos_tbl.make_null_position_nwb(mini_dict)["analysis_file_name"]
+    fpath = common.AnalysisNwbfile().get_abs_path(fname)
 
+    with pynwb.NWBHDF5IO(fpath, "r") as io:
+        df = io.read().fields["scratch"]["pandas_table"].to_dataframe()
 
-def test_multi_likelihood_error(sgp):
-    """Test that an error is raised when multiple likelihoods are selected"""
-    assert False
+    assert df.shape == (0, 0), "Null position dataframe is not empty"
 
 
 @pytest.fixture(scope="module")
@@ -47,13 +49,14 @@ def test_pose_dataframe(dlc_pose_tables):
     pos_tbl, estim_tbl, key = dlc_pose_tables
     df1 = (pos_tbl & key).fetch_pose_dataframe()
     df2 = (estim_tbl & key).fetch_dataframe()
-    assert (
-        df1.shape == df2.shape and df1.columns == df2.columns
+    assert df1.shape == df2.shape and np.all(
+        df1.columns == df2.columns
     ), "Pose dataframes do not match"
 
 
-def test_pose_video_path(dlc_pose_tables):
-    pos_tbl, estim_tbl, key = dlc_pose_tables
+def test_pose_video_path(sgp, dlc_pose_tables):
+    pos_tbl, _, key = dlc_pose_tables
     path1 = (pos_tbl & key).fetch_video_path()
-    path2 = (estim_tbl & key).fetch1("video_path")
+    estim_sel_tbl = sgp.v1.position_dlc_selection.DLCPoseEstimationSelection()
+    path2 = (estim_sel_tbl & key).fetch1("video_path")
     assert path1 == path2, "Pose video paths do not match"

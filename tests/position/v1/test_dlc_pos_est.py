@@ -14,15 +14,15 @@ def vid_crop_tools(sgp, video_keys, pos_est_sel):
     vid_path, vid_name, _, _ = sgp.v1.dlc_utils.get_video_info(video_keys[0])
     get_video_crop = pos_est_sel.get_video_crop
 
-    yield vid_path, vid_name, get_video_crop
+    yield Path(vid_path) / vid_name, get_video_crop
 
 
 @pytest.mark.usefixtures("skipif_no_dlc")
 def test_rename_non_default_columns(vid_crop_tools):
-    vid_path, vid_name, get_video_crop = vid_crop_tools
+    vid_path, get_video_crop = vid_crop_tools
 
     input = "0, 10, 0, 1000"
-    output = get_video_crop(vid_path, vid_name, input)
+    output = get_video_crop(vid_path, input)
     expected = [0, 10, 0, 1000]
 
     assert output == expected, "get_video_crop did not parse string"
@@ -30,8 +30,8 @@ def test_rename_non_default_columns(vid_crop_tools):
 
 @pytest.mark.usefixtures("skipif_no_dlc")
 def test_vid_crop_none(vid_crop_tools):
-    vid_path, vid_name, get_video_crop = vid_crop_tools
-    output = get_video_crop(vid_path, vid_name, crop_ints="none")
+    vid_path, get_video_crop = vid_crop_tools
+    output = get_video_crop(vid_path, "none")
     assert output is None, "get_video_crop did not detect 'none'"
 
 

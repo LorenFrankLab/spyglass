@@ -61,6 +61,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         """
         import cv2
 
+        video_path = str(video_path)
         cap = cv2.VideoCapture(video_path)
         _, frame = cap.read()
         fig, ax = plt.subplots(figsize=(20, 10))

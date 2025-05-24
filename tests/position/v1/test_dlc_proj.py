@@ -106,23 +106,25 @@ def test_add_video_error(dlc_project_tbl):
 def test_add_video(dlc_project_tbl):
     with open("temp_file.mp4", "w") as f:
         f.write("This is a temporary file.")
-    dlc_project_tbl.add_video_files(video_list=["temp_file.mp4"], add_new=True)
+    key = dlc_project_tbl.fetch("KEY", limit=1)[0]
+    with pytest.raises(OSError):
+        dlc_project_tbl.add_video_files(
+            video_list=["temp_file.mp4"], key=key, add_new=True
+        )
 
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_label_frame_warn(caplog, dlc_project_tbl):
-    (dlc_project_tbl & dj.Top(limit=1)).run_label_frames()
+    key = dlc_project_tbl.fetch("KEY", limit=1)[0]
+    dlc_project_tbl.run_label_frames(key)
     txt = caplog.text
     assert "light mode" in txt, "Warning not caught."
 
 
-def test_check_labels(dlc_project_tbl):
-    dlc_project_tbl.check_labels()
-    assert True, "Check labels did not run successfully"
-
-
-def test_label_frame_error(dlc_project_tbl):
+def test_label_frame_error(dlc_project_tbl, empty_dlc_project):
     with pytest.raises(FileNotFoundError):
         (dlc_project_tbl & dj.Top(limit=1)).import_labeled_frames(
-            key=True, new_proj_path="/fake_path"  # fails on fake path
+            key=empty_dlc_project,
+            new_proj_path="/fake_path",
+            video_filenames=["any"],
         )

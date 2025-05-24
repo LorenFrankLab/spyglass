@@ -1,34 +1,63 @@
+import builtins
+import contextlib
 import csv
 from pathlib import Path
 
+from deeplabcut import __name__ as dlc_name
 from deeplabcut import evaluate_network
 from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
 
 from spyglass.position.utils import get_most_recent_file
 
 
+@contextlib.contextmanager
+def suppress_print_from_package(package: str = dlc_name):
+    original_print = builtins.print
+
+    def dummy_print(*args, **kwargs):
+        stack = [
+            frame.f_globals.get("__name__")
+            for frame in inspect.stack()
+            if hasattr(frame, "f_globals")
+        ]
+        if any(name and name.startswith(package) for name in stack):
+            return  # Suppress if the call comes from the target package
+        return original_print(*args, **kwargs)
+
+    import inspect
+
+    builtins.print = dummy_print
+    try:
+        yield
+    finally:
+        builtins.print = original_print
+
+
 def get_dlc_model_eval(
     yml_path: str,
-    project_path: Path,
     model_prefix: str,
     shuffle: int,
-    train_fraction: float,
+    trainingsetindex: int,
     dlc_config: str,
 ):
-    evaluate_network(
-        yml_path,
-        Shuffles=[shuffle],  # this needs to be a list
-        trainingsetindex=train_fraction,
-        comparisonbodyparts="all",
-    )
+    project_path = Path(yml_path).parent
+    trainFraction = dlc_config["TrainingFraction"][trainingsetindex]
+
+    with suppress_print_from_package(dlc_name):
+        evaluate_network(
+            yml_path,
+            Shuffles=[shuffle],  # this needs to be a list
+            trainingsetindex=trainingsetindex,
+            comparisonbodyparts="all",
+        )
 
     eval_folder = get_evaluation_folder(
-        trainFraction=train_fraction,
+        trainFraction=trainFraction,
         shuffle=shuffle,
         cfg=dlc_config,
         modelprefix=model_prefix,
     )
-    eval_path = Path(project_path) / eval_folder
+    eval_path = project_path / eval_folder
     if not eval_path.exists():
         raise FileNotFoundError(f"Couldn't find eval folder: {eval_path}")
 

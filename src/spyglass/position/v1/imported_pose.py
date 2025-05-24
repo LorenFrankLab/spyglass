@@ -70,34 +70,34 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     sampling_rate=sampling_rate,
                     min_valid_len=sampling_rate,
                 )
-                interval_key = {
+                interval_pk = {
                     "nwb_file_name": nwb_file_name,
                     "interval_list_name": f"pose_{name}_valid_intervals",
-                    "valid_times": valid_intervals,
-                    "pipeline": "ImportedPose",
                 }
-                interval_keys.append(interval_key)
-
-                # master key
-                master_key = {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_key["interval_list_name"],
-                    "pose_object_id": obj.object_id,
-                    "skeleton_object_id": obj.skeleton.object_id,
-                }
-                master_keys.append(master_key)
-
-                # part keys
-                for part, part_obj in obj.pose_estimation_series.items():
-                    part_key = {
-                        "nwb_file_name": nwb_file_name,
-                        "interval_list_name": interval_key[
-                            "interval_list_name"
-                        ],
-                        "part_name": part,
-                        "part_object_id": part_obj.object_id,
+                interval_keys.append(
+                    {
+                        **interval_pk,
+                        "valid_times": valid_intervals,
+                        "pipeline": "ImportedPose",
                     }
-                    part_keys.append(part_key)
+                )
+                master_keys.append(
+                    {
+                        **interval_pk,
+                        "pose_object_id": obj.object_id,
+                        "skeleton_object_id": obj.skeleton.object_id,
+                    }
+                )
+                part_keys.extend(
+                    [
+                        {
+                            **interval_pk,
+                            "part_name": part,
+                            "part_object_id": part_obj.object_id,
+                        }
+                        for part, part_obj in obj.pose_estimation_series.items()
+                    ]
+                )
 
         IntervalList().insert(interval_keys, skip_duplicates=True)
         self.insert(master_keys)
@@ -147,12 +147,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
 
     def fetch_skeleton(self, key=None):
         key = key or dict()
-        query = self & key
-        if not len(query) == 1:
-            raise ValueError(
-                "fetch_skeleton can only be called on a single entry"
-            )
-        skeleton = query.fetch_nwb()[0]["skeleton"]
+        skeleton = self.cautious_fetch1().fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]

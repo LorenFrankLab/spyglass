@@ -4,6 +4,7 @@ from pathlib import Path
 import datajoint as dj
 
 from spyglass.position.utils import get_param_names
+from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v1.dlc_utils import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
@@ -195,7 +196,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             train_network_kwargs["maxiters"] = 2
 
         try:
-            train_network(dlc_cfg_filepath, **train_network_kwargs)
+            with suppress_print_from_package():
+                train_network(dlc_cfg_filepath, **train_network_kwargs)
         except KeyboardInterrupt:  # pragma: no cover
             logger.info("DLC training stopped via Keyboard Interrupt")
 

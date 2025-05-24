@@ -7,7 +7,8 @@ def test_cohort_pop(sgp, cohort_key):
 
 
 @pytest.fixture(scope="session")
-def cohort_tbls(sgp):
+def cohort_tbls(sgp, cohort_key):
+    _ = cohort_key
     select_tbl = sgp.v1.DLCSmoothInterpCohortSelection()
     cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
 
@@ -20,7 +21,7 @@ def test_cohort_null_params(cohort_tbls):
     select_key = select_tbl.fetch(limit=1, as_dict=True)[0]
     select_key.update(
         dict(
-            dlc_si_cohort_selection_name="test null cohort",
+            dlc_si_cohort_selection_name="test no bodyparts",
             bodyparts_params_dict=dict(),
         )
     )
@@ -31,16 +32,16 @@ def test_cohort_null_params(cohort_tbls):
     assert len(part_tbl) == 0, "Cohort table populated w/empty bodyparts params"
 
 
-def test_cohort_error(sgp):
-    select_tbl = sgp.v1.DLCSmoothInterpCohortSelection()
-    cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
+def test_cohort_error(cohort_tbls):
+    select_tbl, cohort_tbl = cohort_tbls
     select_key = select_tbl.fetch(limit=1, as_dict=True)[0]
+    select_pk = dict(dlc_si_cohort_selection_name="test bad bodyparts")
     select_key.update(
-        dict(
-            dlc_si_cohort_selection_name="test null cohort",
-            bodyparts_params_dict=dict(bad_bp="bad_bp"),
-        )
+        dict(select_pk, bodyparts_params_dict=dict(bad_bp="bad_bp"))
     )
+    if select_tbl & select_pk:
+        select_tbl.delete(safemode=False)
     select_tbl.insert1(select_key, skip_duplicates=True)
+
     with pytest.raises(ValueError):
         cohort_tbl.populate(select_key)

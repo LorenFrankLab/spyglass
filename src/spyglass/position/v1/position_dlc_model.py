@@ -109,7 +109,9 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
         if n_found > 1 and not cls._test_mode:
             choice = dj.utils.user_choice("Use first entry?")[0]
         if n_found == 0 or choice != "y":
-            return
+            return  # shouldn't his delete the parent? Why master w/o part?
+
+        key = key or dict()  # handle case where key is None
 
         part_table.insert1(
             {
@@ -205,8 +207,13 @@ class DLCModel(SpyglassMixin, dj.Computed):
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
 
-        SourceTable = getattr(DLCModelSource, table_source)
         params = (DLCModelParams & key).fetch1("params")
+
+        SourceTable = getattr(DLCModelSource, table_source)
+        query = SourceTable & key
+        if not query:
+            logger.error(f"Key not in {SourceTable.__name__} table: {key}")
+            return
         project_path = Path((SourceTable & key).fetch1("project_path"))
 
         available_config = list(project_path.glob("*config.y*ml"))
@@ -323,10 +330,9 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
 
         results = get_dlc_model_eval(
             yml_path=dlc_reader.read_yaml(project_path)[0],
-            project_path=project_path,
             model_prefix=model_prefix,
             shuffle=shuffle,
-            train_fraction=dlc_config["TrainingFraction"][trainingsetindex],
+            trainingsetindex=trainingsetindex,
             dlc_config=dlc_config,
         )
 

@@ -118,9 +118,10 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
             return
         temp_key = cohort_selection.copy()
         for bodypart, params in bp_params_dict.items():
-            temp_key["bodypart"] = bodypart
-            temp_key["dlc_si_params_name"] = params
-            table_entries.append((DLCSmoothInterp & temp_key).fetch())
+            temp_key.update(dict(bodypart=bodypart, dlc_si_params_name=params))
+            query = DLCSmoothInterp & temp_key
+            if len(query):  # added to prevent appending empty array
+                table_entries.append((DLCSmoothInterp & temp_key).fetch())
 
         if not len(table_entries) == len(bp_params_dict):
             raise ValueError(

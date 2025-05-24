@@ -124,9 +124,12 @@ def test_centroid_null(centroid_tbls, centroid_selection_key):
 def test_centoid_point_err(centroid_tbls, params_tbl, centroid_selection_key):
     DLCCentroidParams, DLCCentroidSelection, DLCCentroid = centroid_tbls
 
-    params_pk = dict(dlc_centroid_params_name="null")
+    params_pk = dict(dlc_centroid_params_name="point_err")
     upstream = dict(**params_pk, **centroid_selection_key)
 
+    query = DLCCentroidParams & params_pk
+    if query:
+        query.delete(safemode=False)
     DLCCentroidParams.insert1(
         dict(
             params_pk,

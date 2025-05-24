@@ -89,9 +89,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         """Override insert1 to check types of key values."""
         if not isinstance(key["project_name"], str):
-            raise ValueError("project_name must be a string")
+            raise TypeError("project_name must be a string")
         if not isinstance(key["frames_per_video"], int):
-            raise ValueError("frames_per_video must be of type `int`")
+            raise TypeError("frames_per_video must be of type `int`")
         key["project_name"] = sanitize_unix_name(key["project_name"])
         super().insert1(key, **kwargs)
 
@@ -114,8 +114,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         add_to_files: bool = True,
         **kwargs,
     ):
-        """
-        insert an existing project into DLCProject table.
+        """Insert an existing project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
@@ -135,6 +135,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
 
         cfg = read_config(config_path)
         all_bodyparts = cfg["bodyparts"]
+        bodyparts_to_add = []  # handle no bodyparts passed
         if bodyparts:
             bodyparts_to_add = [
                 bodypart
@@ -142,6 +143,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 if bodypart not in cfg["bodyparts"]
             ]
             all_bodyparts += bodyparts_to_add
+        elif bodyparts is None:  # avoid insert error with empty list
+            bodyparts = all_bodyparts
 
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
@@ -160,6 +163,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 add_to_config(
                     config_path, **{"numframes2pick": frames_per_video}
                 )
+        else:  # Handle none passed
+            frames_per_video = cfg["numframes2pick"]
 
         config_path = Path(config_path)
         project_path = config_path.parent

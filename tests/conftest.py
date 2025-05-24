@@ -1036,13 +1036,15 @@ def model_train_key(sgp, project_key, training_params_key):
         **project_key,
         **training_params_key,
     }
-    sgp.v1.DLCModelTrainingSelection().insert1(
-        {
-            **model_train_key,
-            "model_prefix": "",
-        },
-        skip_duplicates=True,
-    )
+    train_tbl = sgp.v1.DLCModelTrainingSelection()
+    if not train_tbl & model_train_key:
+        sgp.v1.DLCModelTrainingSelection().insert1(
+            {
+                **model_train_key,
+                "model_prefix": "",
+            },
+            skip_duplicates=True,
+        )
     yield model_train_key
 
 
@@ -1063,7 +1065,7 @@ def model_source_key(sgp, model_train_key, populate_training):
 
     _ = populate_training
 
-    yield (sgp.v1.DLCModelSource & model_train_key).fetch("KEY")[0]
+    yield (sgp.v1.DLCModelSource & 'dlc_model_name like "pyt%"').fetch("KEY")[0]
 
 
 @pytest.fixture(scope="session")
@@ -1087,17 +1089,26 @@ def populate_model(sgp, model_key):
 
 @pytest.fixture(scope="session")
 def pose_estimation_key(sgp, mini_copy_name, populate_model, model_key):
-    yield sgp.v1.DLCPoseEstimationSelection().insert_estimation_task(
-        {
-            "nwb_file_name": mini_copy_name,
-            "epoch": 1,
-            "video_file_num": 0,
-            **model_key,
-        },
-        task_mode="trigger",  # trigger or load
-        params={"gputouse": None, "videotype": "mp4", "TFGPUinference": False},
-        check_crop=True,
-    )
+    key = {
+        "nwb_file_name": mini_copy_name,
+        "epoch": 1,
+        "video_file_num": 0,
+        **model_key,
+    }
+
+    sel_tbl = sgp.v1.DLCPoseEstimationSelection()
+    if not sel_tbl & key:
+        sel_tbl.insert_estimation_task(
+            key=key,
+            task_mode="trigger",  # trigger or load
+            params={
+                "gputouse": None,
+                "videotype": "mp4",
+                "TFGPUinference": False,
+            },
+            check_crop=True,
+        )
+    yield dict(key, task_mode="trigger")
 
 
 @pytest.fixture(scope="session")
@@ -1157,21 +1168,23 @@ def populate_si(sgp, si_key, populate_pose_estimation):
 
 
 @pytest.fixture(scope="session")
-def cohort_selection(sgp, si_key, si_params_name):
+def cohort_selection(sgp, si_key, populate_si, si_params_name):
+    _ = populate_si
+    sel_tbl = sgp.v1.DLCSmoothInterpCohortSelection()
+    sel_pk = dict(dlc_si_cohort_selection_name="whiteLED")
     cohort_key = {
         k: v
         for k, v in {
             **si_key,
-            "dlc_si_cohort_selection_name": "whiteLED",
-            "bodyparts_params_dict": {
-                "whiteLED": si_params_name,
-            },
+            **sel_pk,
+            "bodyparts_params_dict": {"whiteLED": si_params_name},
         }.items()
         if k not in ["bodypart", "dlc_si_params_name"]
     }
-    sgp.v1.DLCSmoothInterpCohortSelection().insert1(
-        cohort_key, skip_duplicates=True
-    )
+    sel_tbl.insert1(cohort_key, skip_duplicates=True)
+    if not sel_tbl & sel_pk:
+        raise ValueError("Cohort not inserted.")
+
     yield cohort_key
 
 
@@ -1179,7 +1192,10 @@ def cohort_selection(sgp, si_key, si_params_name):
 def cohort_key(sgp, cohort_selection, populate_si):
     cohort_tbl = sgp.v1.DLCSmoothInterpCohort()
     cohort_tbl.populate(cohort_selection)
-    yield cohort_tbl.fetch("KEY", as_dict=True)[0]
+    query = cohort_tbl & cohort_selection
+    if not query:
+        raise ValueError("Cohort not populated.")
+    yield query.fetch("KEY", as_dict=True)[0]
 
 
 @pytest.fixture(scope="session")
@@ -1250,14 +1266,21 @@ def orient_params(sgp):
 
 
 @pytest.fixture(scope="session")
-def orient_selection(sgp, cohort_key, orient_params):
+def orient_selection(sgp, cohort_key, orient_params, cohort_selection):
+    _ = cohort_selection
+    # No idea why this isn't running above, but fails half the time
+    sgp.v1.DLCSmoothInterpCohortSelection().insert1(
+        cohort_selection, skip_duplicates=True
+    )
+    sgp.v1.DLCSmoothInterpCohort().populate(cohort_key)
+    sel_tbl = sgp.v1.DLCOrientationSelection()
     orient_key = {
         key: val
         for key, val in cohort_key.items()
-        if key in sgp.v1.DLCOrientationSelection.primary_key
+        if key in sel_tbl.primary_key
     }
     orient_key.update(orient_params)
-    sgp.v1.DLCOrientationSelection().insert1(orient_key, skip_duplicates=True)
+    sel_tbl.insert1(orient_key, skip_duplicates=True)
     yield orient_key
 
 
