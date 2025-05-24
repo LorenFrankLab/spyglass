@@ -146,6 +146,7 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
     -------
     None
     """
+    # pragma: no cover
     ActivityLog().deprecate_log("dlc_utils: _set_permissions")
 
     directory = Path(directory)
@@ -183,7 +184,7 @@ def file_log(logger, console=False):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             if not (log_path := getattr(self, "log_path", None)):
-                self.log_path = f"temp_{self.__class__.__name__}.log"
+                log_path = f"temp_{self.__class__.__name__}.log"
             file_handler = logging.FileHandler(log_path, mode="a")
             file_fmt = logging.Formatter(
                 "[%(asctime)s][%(levelname)s] Spyglass "
@@ -207,7 +208,7 @@ def file_log(logger, console=False):
     return decorator
 
 
-def get_dlc_root_data_dir():
+def get_dlc_root_data_dir():  # pragma: no cover
     """Returns list of potential root directories for DLC data"""
     ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
@@ -225,7 +226,7 @@ def get_dlc_root_data_dir():
         return dlc_root_dirs
 
 
-def get_dlc_processed_data_dir() -> str:
+def get_dlc_processed_data_dir() -> str:  # pragma: no cover
     """Returns session_dir relative to custom 'dlc_output_dir' root"""
     ActivityLog().deprecate_log("dlc_utils: get_dlc_processed_data_dir")
     if "custom" in dj.config:
@@ -237,7 +238,7 @@ def get_dlc_processed_data_dir() -> str:
         return Path("/nimbus/deeplabcut/output/")
 
 
-def find_full_path(root_directories, relative_path):
+def find_full_path(root_directories, relative_path):  # pragma: no cover
     """
     from Datajoint Elements - unused
     Given a relative path, search and return the full-path
@@ -266,7 +267,7 @@ def find_full_path(root_directories, relative_path):
     )
 
 
-def find_root_directory(root_directories, full_path):
+def find_root_directory(root_directories, full_path):  # pragma: no cover
     """
     From datajoint elements - unused
     Given multiple potential root directories and a full-path,
@@ -417,12 +418,12 @@ def find_mp4(
     video_files = (
         [Path(video_path) / video_filename]
         if video_filename
-        else Path(video_path).glob(f"*.{video_filetype}")
+        else [p for p in Path(video_path).glob(f"*.{video_filetype}")]
     )
 
     if len(video_files) != 1:
         raise FileNotFoundError(
-            f"Found {len(video_files)} video files in {video_path}"
+            f"Found {len(video_files)} video files: {video_files}"
         )
     video_filepath = video_files[0]
 
@@ -542,7 +543,7 @@ def _check_packets(file, count_frames=False):
     raise ValueError(f"Check packets error: {out}")
 
 
-def get_gpu_memory():
+def get_gpu_memory():  # pragma: no cover
     """Queries the gpu cluster and returns the memory use for each core.
     This is used to evaluate which GPU cores are available to run jobs on
     (i.e. pose estimation, DLC model training)
@@ -805,7 +806,7 @@ class Centroid:
         logical_or : bool, optional
             Whether to use logical_and or logical_or to combine mask tuple.
         """
-        if isinstance(mask, list):
+        if isinstance(mask, list):  # pragma: no cover
             mask = [reduce(np.logical_and, m) for m in mask]
 
         # Check that combinations of points close enough
@@ -816,7 +817,7 @@ class Centroid:
         func = np.logical_or if logical_or else np.logical_and
         mask = reduce(func, mask)
 
-        if not np.any(mask):
+        if not np.any(mask):  # pragma: no cover
             return
         if replace:
             self.centroid[mask] = np.nan

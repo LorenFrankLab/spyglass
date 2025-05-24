@@ -152,7 +152,7 @@ class VideoMaker:
             stderr=subprocess.PIPE,
             text=True,
         )
-        if ret.returncode != 0:
+        if ret.returncode != 0:  # pragma: no cover
             raise ValueError(f"Error getting video dimensions: {ret.stderr}")
 
         stats = ret.stdout.strip().split("x")

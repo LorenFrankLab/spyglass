@@ -274,9 +274,9 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         """Not applicable for TrodesPosV1 pipeline."""
         raise NotImplementedError("No pose data for TrodesPosV1")
 
-    def fetch_video_path(self, key=dict()):
+    def fetch_video_path(self, key=True):
         """Fetch the video path for the position data."""
-        key = (self & key).fetch1("KEY")
+        key = (self & key).cautious_fetch1("KEY")
         nwb_file_name, interval_list_name = self.fetch1(
             "nwb_file_name", "interval_list_name"
         )
@@ -336,7 +336,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         )
 
         # Check if video exists
-        if not video_path:
+        if not video_path:  # pragma: no cover
             self.insert1(dict(**key, has_video=False))
             return
 
@@ -375,7 +375,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         limit = params.get("limit", None)
 
-        if limit and not test_mode:
+        if limit and not test_mode:  # pragma: no cover
             params["debug"] = True
             output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
         elif test_mode:
@@ -436,7 +436,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             **params,
         )
 
-        if limit and not test_mode:
+        if limit and not test_mode:  # pragma: no cover
             return vid_maker
 
         self.insert1(dict(**key, has_video=True))

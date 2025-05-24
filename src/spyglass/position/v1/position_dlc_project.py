@@ -9,6 +9,7 @@ import pandas as pd
 from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
+from spyglass.position.utils import sanitize_filename
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
@@ -88,9 +89,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         """Override insert1 to check types of key values."""
         if not isinstance(key["project_name"], str):
-            raise ValueError("project_name must be a string")
+            raise TypeError("project_name must be a string")
         if not isinstance(key["frames_per_video"], int):
-            raise ValueError("frames_per_video must be of type `int`")
+            raise TypeError("frames_per_video must be of type `int`")
         key["project_name"] = sanitize_unix_name(key["project_name"])
         super().insert1(key, **kwargs)
 
@@ -113,8 +114,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         add_to_files: bool = True,
         **kwargs,
     ):
-        """
-        insert an existing project into DLCProject table.
+        """Insert an existing project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
@@ -134,6 +135,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
 
         cfg = read_config(config_path)
         all_bodyparts = cfg["bodyparts"]
+        bodyparts_to_add = []  # handle no bodyparts passed
         if bodyparts:
             bodyparts_to_add = [
                 bodypart
@@ -141,6 +143,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 if bodypart not in cfg["bodyparts"]
             ]
             all_bodyparts += bodyparts_to_add
+        elif bodyparts is None:  # avoid insert error with empty list
+            bodyparts = all_bodyparts
 
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
@@ -159,6 +163,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 add_to_config(
                     config_path, **{"numframes2pick": frames_per_video}
                 )
+        else:  # Handle none passed
+            frames_per_video = cfg["numframes2pick"]
 
         config_path = Path(config_path)
         project_path = config_path.parent
@@ -268,7 +274,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         )
         for bodypart in bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(
+                raise ValueError(  # pragma: no cover
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
         kwargs_copy = copy.deepcopy(kwargs)
@@ -297,7 +303,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             cls().add_training_files(key, **kwargs)
 
         if isinstance(config_path, PosixPath):
-            config_path = config_path.as_posix()
+            config_path = config_path.as_posix()  # pragma: no cover
         return {"project_name": project_name, "config_path": config_path}
 
     def _process_videos(self, video_list, output_path):
@@ -492,7 +498,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             if isinstance(video_filenames, List)
             else [video_filenames]
         )
-        for video_file in videos:
+        for video_file in videos:  # pragma: no cover
             h5_file = next((new_data_path / video_file).glob("*h5"))
             dlc_df = pd.read_hdf(h5_file)
             dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
@@ -550,15 +556,3 @@ def add_to_config(
 
     with open(config, "w") as fw:
         yaml.dump(data, fw)
-
-
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to remove special characters"""
-    char_map = {
-        " ": "_",
-        ".": "_",
-        ",": "-",
-        "&": "and",
-        "'": "",
-    }
-    return "".join([char_map.get(c, c) for c in filename])

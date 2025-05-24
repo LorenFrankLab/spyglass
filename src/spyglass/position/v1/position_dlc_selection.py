@@ -240,7 +240,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         if not (DLCSmoothInterpCohort.BodyPart & centroid_key) and not (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ):
-            return {}
+            return {}  # pragma: no cover
 
         centroid_bodyparts, centroid_si_params = (
             DLCSmoothInterpCohort.BodyPart & centroid_key
@@ -306,7 +306,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         pd.DataFrame
             pose data
         """
-        key = self.fetch1("KEY")
+        key = self.cautious_fetch1("KEY")
         return (DLCPoseEstimation & key).fetch_dataframe()
 
     def fetch_video_path(self, key: dict = dict()) -> str:
@@ -449,7 +449,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             axis=1,
         )
         if not len(pos_est_df) == len(pos_info_df):
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 "Dataframes are not the same length\n"
                 + f"\tPose estim   :  {len(pos_est_df)}\n"
                 + f"\tPosition info: {len(pos_info_df)}"
@@ -509,8 +509,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             **params.get("video_params", {}),
         )
 
-        if limit:  # don't insert if we're just debugging
-            return video_maker
-
         if output_video_filename.exists():
             self.insert1(key)
+
+        if limit:
+            return video_maker

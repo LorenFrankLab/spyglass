@@ -209,10 +209,11 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
         logger.info("Identifying indices to NaN")
+        likelihood_thresh = params.pop("likelihood_thresh")
         df_w_nans, bad_inds = nan_inds(
             dlc_df.copy(),
             max_dist_between=params["max_cm_between_pts"],
-            likelihood_thresh=params.pop("likelihood_thresh"),
+            likelihood_thresh=likelihood_thresh,
             inds_to_span=params["num_inds_to_span"],
         )
 
@@ -230,13 +231,15 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             smooth_method = smooth_params.get("smooth_method")
             smooth_func = _key_to_smooth_func_dict[smooth_method]
 
+            # Handle duplicate smoothing_duration key
+            smooth_dur = smooth_params.get("smoothing_duration") or params[
+                "smoothing_params"
+            ].pop("smoothing_duration", None)
+
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             logger.info(f"Smoothing using method: {smooth_method}")
             smooth_df = smooth_func(
-                interp_df,
-                smoothing_duration=smooth_params.get("smoothing_duration"),
-                sampling_rate=1 / dt,
-                **params["smoothing_params"],
+                interp_df, smoothing_duration=smooth_dur, sampling_rate=1 / dt
             )
         else:
             smooth_df = interp_df.copy()
@@ -367,6 +370,7 @@ def nan_inds(
         raise ValueError("No good spans found in the data")
 
     for span in good_spans[::-1]:
+        # __import__("pdb").set_trace()  # need test for this 'if'
         if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:
             nan_mask = np.isnan(dlc_df.iloc[span[0] : span[-1]].x)
             good_start = np.arange(span[0], span[1])[~nan_mask]
@@ -375,6 +379,7 @@ def nan_inds(
             start_point = span[0] + int(span_length(span) // 2)
 
         for ind in range(start_point, span[0], -1):
+            # __import__("pdb").set_trace()  # need test for this 'if'
             if subthresh_inds_mask[ind]:
                 continue
             previous_good_inds = np.where(

@@ -25,6 +25,15 @@ def test_existing_params(
     assert len(params_query) == 1, "Existing params duplicated"
 
 
+def test_insert_params_error(dlc_training_params):
+    params_tbl, _ = dlc_training_params
+    with pytest.raises(ValueError):
+        params_tbl.insert_new_params(
+            paramset_name="test",
+            params={"shuffle": 1},
+        )
+
+
 @pytest.mark.usefixtures("skipif_no_dlc")
 def test_get_params(no_dlc, verbose_context, dlc_training_params):
     if no_dlc:  # Decorator wasn't working here, so duplicate skipif

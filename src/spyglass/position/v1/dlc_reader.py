@@ -8,107 +8,61 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
-from spyglass.common.common_usage import ActivityLog
 from spyglass.settings import test_mode
 
 
-class PoseEstimation:
-    def __init__(
-        self,
-        dlc_dir=None,
-        pkl_path=None,
-        h5_path=None,
-        yml_path=None,
-        filename_prefix="",
-    ):
-        ActivityLog.deprecate_log("dlc_reader: PoseEstimation")
-        if dlc_dir is None:
-            assert pkl_path and h5_path and yml_path, (
-                'If "dlc_dir" is not provided, then pkl_path, h5_path, and yml_path '
-                + "must be provided"
-            )
-        else:
-            self.dlc_dir = Path(dlc_dir)
-            assert self.dlc_dir.exists(), f"Unable to find {dlc_dir}"
+class PoseEstimation:  # Note: simplifying to require only project path
+    def __init__(self, dlc_dir, filename_prefix=""):
+        self.dlc_dir = Path(dlc_dir)
+        if not self.dlc_dir.exists():
+            raise FileNotFoundError(f"Unable to find dlc_dir {dlc_dir}.")
 
-        # meta file: pkl - info about this  DLC run (input video, configuration, etc.)
-        if pkl_path is None:
-            pkl_paths = list(
-                self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle")
-            )
-            if not test_mode:
-                assert len(pkl_paths) == 1, (
-                    "Unable to find one unique .pickle file in: "
-                    + f"{dlc_dir} - Found: {len(pkl_paths)}"
-                )
-            self.pkl_path = pkl_paths[0]
-        else:
-            self.pkl_path = Path(pkl_path)
-            assert self.pkl_path.exists()
-
+        # meta file: info about this  DLC run (input video, configuration, etc.)
+        pkl_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle"))
         # data file: h5 - body part outputs from the DLC post estimation step
-        if h5_path is None:
-            h5_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*.h5"))
-            if not test_mode:
-                assert len(h5_paths) == 1, (
-                    "Unable to find one unique .h5 file in: "
-                    + f"{dlc_dir} - Found: {len(h5_paths)}"
-                )
-            self.h5_path = h5_paths[0]
-        else:
-            self.h5_path = Path(h5_path)
-            assert self.h5_path.exists()
+        h5_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*.h5"))
+        # config file: configuration for invoking the DLC post estimation step
+        yml_paths = list(self.dlc_dir.glob(f"{filename_prefix}*.y*ml"))
 
-        if not test_mode:
-            assert (
-                self.pkl_path.stem == self.h5_path.stem + "_meta"
-            ), f"Mismatching h5 ({self.h5_path.stem}) and pickle {self.pkl_path.stem}"
+        if len(yml_paths) > 1:  # If multiple, defer to the one we save.
+            yml_paths = [p for p in yml_paths if p.stem == "dj_dlc_config"]
 
-        # config file: yaml - configuration for invoking the DLC post estimation step
-        if yml_path is None:
-            yml_paths = list(self.dlc_dir.glob(f"{filename_prefix}*.y*ml"))
-            # If multiple, defer to the one we save.
-            if len(yml_paths) > 1:
-                yml_paths = [
-                    val for val in yml_paths if val.stem == "dj_dlc_config"
-                ]
-            if not test_mode:
-                assert len(yml_paths) == 1, (
-                    "Unable to find one unique .yaml file in: "
-                    + f"{dlc_dir} - Found: {len(yml_paths)}"
-                )
-            self.yml_path = yml_paths[0]
-        else:
-            self.yml_path = Path(yml_path)
-            assert self.yml_path.exists()
+        if (
+            not test_mode
+            and not len(pkl_paths) == len(h5_paths) == len(yml_paths) == 1
+        ):
+            raise ValueError(
+                "Unable to find one unique .pickle, .h5, and .yaml file in: "
+                + f"{dlc_dir}\n"
+                + f"Found: {len(pkl_paths)}, {len(h5_paths)}, {len(yml_paths)}"
+            )
+
+        self.pkl_path = pkl_paths[0]
+        self.h5_path = h5_paths[0]
+        self.yml_path = yml_paths[0]
 
         self._pkl = None
         self._rawdata = None
         self._yml = None
         self._data = None
 
-        train_idx = np.where(
-            (np.array(self.yml["TrainingFraction"]) * 100).astype(int)
-            == int(self.pkl["training set fraction"] * 100)
-        )[0][0]
-        train_iter = int(self.pkl["Scorer"].split("_")[-1])
+        yml_frac = (np.array(self.yml["TrainingFraction"]) * 100).astype(int)
+        pkl_frac = int(self.pkl["training set fraction"] * 100)
+        shuffle = re.search(r"shuffle(\d+)", self.pkl["Scorer"]).groups()[0]
 
         self.model = {
             "Scorer": self.pkl["Scorer"],
             "Task": self.yml["Task"],
             "date": self.yml["date"],
             "iteration": self.pkl["iteration (active-learning)"],
-            "shuffle": int(
-                re.search(r"shuffle(\d+)", self.pkl["Scorer"]).groups()[0]
-            ),
+            "shuffle": int(shuffle),
             "snapshotindex": self.yml["snapshotindex"],
-            "trainingsetindex": train_idx,
-            "training_iteration": train_iter,
+            "trainingsetindex": np.where(yml_frac == pkl_frac)[0][0],
+            "training_iteration": int(self.pkl["Scorer"].split("_")[-1]),
         }
 
         self.fps = self.pkl["fps"]
         self.nframes = self.pkl["nframes"]
-
         self.creation_time = self.h5_path.stat().st_mtime
 
     @property
@@ -119,7 +73,7 @@ class PoseEstimation:
                 self._pkl = pickle.load(f)
         return self._pkl["data"]
 
-    @property  # DLC aux_func has a read_config option, but it rewrites the proj path
+    @property  # DLC aux_func.read_config exists, but it rewrites proj path
     def yml(self) -> dict:
         """Dictionary of the yaml file DLC metadata."""
         if self._yml is None:
@@ -155,11 +109,11 @@ class PoseEstimation:
 
     def reformat_rawdata(self) -> dict:
         """Reformat the rawdata from the h5 file to a more useful dictionary."""
-        error_message = (
-            f"Total frames from .h5 file ({len(self.rawdata)}) differs "
-            + f'from .pickle ({self.pkl["nframes"]})'
-        )
-        assert len(self.rawdata) == self.pkl["nframes"], error_message
+        if not len(self.rawdata) == self.pkl["nframes"]:
+            raise ValueError(
+                f"Total frames from .h5 file ({len(self.rawdata)}) differs "
+                + f'from .pickle ({self.pkl["nframes"]})'
+            )
 
         body_parts_position = {}
         for body_part in self.body_parts:
@@ -172,7 +126,7 @@ class PoseEstimation:
 
 
 def read_yaml(fullpath, filename="*"):
-    """Return contents of yml in fullpath. If available, defer to DJ-saved version
+    """Return contents of yml in fullpath. If available, defer to our version
 
     Parameters
     ----------
@@ -193,15 +147,18 @@ def read_yaml(fullpath, filename="*"):
         list(Path(fullpath).glob(f"{filename}.y*ml"))
     )
 
-    assert (  # If more than 1 and not DJ-saved,
-        len(yml_paths) == 1
-    ), f"Found more yaml files than expected: {len(yml_paths)}\n{fullpath}"
+    if len(yml_paths) != 1:
+        raise FileNotFoundError(
+            f"Expected one yaml file, found {len(yml_paths)}:\n{fullpath}"
+        )
 
     return yml_paths[0], read_config(yml_paths[0])
 
 
 def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
-    """Save config_dict to output_path as filename.yaml. By default, preserves original.
+    """Save config_dict to output_path as filename.yaml.
+
+    By default, preserves original.
 
     Parameters
     ----------
