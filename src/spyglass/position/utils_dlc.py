@@ -3,15 +3,17 @@ import contextlib
 import csv
 from pathlib import Path
 
-from deeplabcut import __name__ as dlc_name
-from deeplabcut import evaluate_network
-from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
+try:
+    from deeplabcut import evaluate_network
+    from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
+except ImportError:
+    evaluate_network, get_evaluation_folder = None, None
 
 from spyglass.position.utils import get_most_recent_file
 
 
 @contextlib.contextmanager
-def suppress_print_from_package(package: str = dlc_name):
+def suppress_print_from_package(package: str = "deeplabcut"):
     original_print = builtins.print
 
     def dummy_print(*args, **kwargs):
@@ -43,7 +45,7 @@ def get_dlc_model_eval(
     project_path = Path(yml_path).parent
     trainFraction = dlc_config["TrainingFraction"][trainingsetindex]
 
-    with suppress_print_from_package(dlc_name):
+    with suppress_print_from_package():
         evaluate_network(
             yml_path,
             Shuffles=[shuffle],  # this needs to be a list
