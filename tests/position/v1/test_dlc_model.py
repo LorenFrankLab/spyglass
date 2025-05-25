@@ -1,7 +1,7 @@
 import datajoint as dj
 import pytest
 
-from tests.conftest import VERBOSE
+from tests.conftest import VERBOSE, skip_if_no_dlc
 
 
 def test_model_params_default(sgp):
@@ -31,7 +31,10 @@ def test_model_imported(import_dlc_model):
     assert import_dlc_model & 'source="FromImport"', "Failed import model"
 
 
-def test_model_source_not_exist(sgp):
+@skip_if_no_dlc
+def test_model_source_not_exist(sgp, no_dlc):
+    if no_dlc:  # Decorator wasn't working here, so duplicate skipif
+        pytest.skip(reason="Skipping DLC-dependent tests.")
     with pytest.raises(dj.errors.IntegrityError):
         sgp.v1.DLCModelSource().insert_entry(
             dlc_model_name="fake_model",
@@ -41,11 +44,13 @@ def test_model_source_not_exist(sgp):
         )
 
 
+@skip_if_no_dlc
 def test_model_source_exist(common, sgp, team_name, null_dlc_project):
     project_dict = null_dlc_project
     assert sgp.v1.DLCModelSource & project_dict, "Model source should exist"
 
 
+@skip_if_no_dlc
 def test_model_pop_error(sgp, model_key, empty_dlc_project):
     _ = model_key, empty_dlc_project
     params = sgp.v1.DLCModelParams().fetch("KEY", limit=1)[0]

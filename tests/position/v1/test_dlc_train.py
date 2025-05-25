@@ -1,5 +1,7 @@
 import pytest
 
+from tests.conftest import skip_if_no_dlc
+
 
 def test_existing_params(
     verbose_context, dlc_training_params, training_params_key
@@ -34,11 +36,8 @@ def test_insert_params_error(dlc_training_params):
         )
 
 
-@pytest.mark.usefixtures("skipif_no_dlc")
+@skip_if_no_dlc
 def test_get_params(no_dlc, verbose_context, dlc_training_params):
-    if no_dlc:  # Decorator wasn't working here, so duplicate skipif
-        pytest.skip(reason="Skipping DLC-dependent tests.")
-
     params_tbl, _ = dlc_training_params
     with verbose_context:
         accepted_params = params_tbl.get_accepted_params()

@@ -3,7 +3,7 @@ import os
 import datajoint as dj
 import pytest
 
-from tests.conftest import VERBOSE
+from tests.conftest import VERBOSE, skip_if_no_dlc
 
 
 def test_bp_insert(sgp):
@@ -69,10 +69,8 @@ def test_dlc_project_insert_type_error(dlc_project_tbl):
         dlc_project_tbl.insert1(dict(project_name="a", frames_per_video="a"))
 
 
-@pytest.mark.usefixtures("skipif_no_dlc")
+@skip_if_no_dlc
 def test_failed_group_insert(no_dlc, dlc_project_tbl, new_project_key):
-    if no_dlc:  # Decorator wasn't working here, so duplicate skipif
-        pytest.skip(reason="Skipping DLC-dependent tests.")
     with pytest.raises(ValueError):
         dlc_project_tbl.insert_new_project(**new_project_key)
 
@@ -103,6 +101,7 @@ def test_add_video_error(dlc_project_tbl):
         dlc_project_tbl.add_video_files(**kwarg, config_path=".")
 
 
+@skip_if_no_dlc
 def test_add_video(dlc_project_tbl):
     with open("temp_file.mp4", "w") as f:
         f.write("This is a temporary file.")
@@ -113,6 +112,7 @@ def test_add_video(dlc_project_tbl):
         )
 
 
+@skip_if_no_dlc
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_label_frame_warn(caplog, dlc_project_tbl):
     key = dlc_project_tbl.fetch("KEY", limit=1)[0]

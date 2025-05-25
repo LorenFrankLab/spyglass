@@ -3,6 +3,8 @@ from pathlib import Path
 import datajoint as dj
 import pytest
 
+from tests.conftest import skip_if_no_dlc
+
 
 @pytest.fixture(scope="session")
 def pos_est_sel(sgp):
@@ -17,7 +19,7 @@ def vid_crop_tools(sgp, video_keys, pos_est_sel):
     yield Path(vid_path) / vid_name, get_video_crop
 
 
-@pytest.mark.usefixtures("skipif_no_dlc")
+@skip_if_no_dlc
 def test_rename_non_default_columns(vid_crop_tools):
     vid_path, get_video_crop = vid_crop_tools
 
@@ -28,7 +30,7 @@ def test_rename_non_default_columns(vid_crop_tools):
     assert output == expected, "get_video_crop did not parse string"
 
 
-@pytest.mark.usefixtures("skipif_no_dlc")
+@skip_if_no_dlc
 def test_vid_crop_none(vid_crop_tools):
     vid_path, get_video_crop = vid_crop_tools
     output = get_video_crop(vid_path, "none")
@@ -52,6 +54,7 @@ def test_pose_est_dataframe(populate_pose_estimation):
             assert col in pose_cols, f"PoseEstimation df missing column {col}."
 
 
+@skip_if_no_dlc
 def test_fetch_video_path(sgp):
     pose_tbl = sgp.v1.position_dlc_pose_estimation.DLCPoseEstimation()
 

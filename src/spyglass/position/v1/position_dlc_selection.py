@@ -91,16 +91,15 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def make_null_position_nwb(key):
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            nwb_file_name=key["nwb_file_name"]
+        a_fname = AnalysisNwbfile().create(nwb_file_name=key["nwb_file_name"])
+        obj_id = AnalysisNwbfile().add_nwb_object(a_fname, pd.DataFrame())
+        return dict(  # modified to avoid editing the original key
+            key,
+            analysis_file_name=a_fname,
+            position_object_id=obj_id,
+            orientation_object_id=obj_id,
+            velocity_object_id=obj_id,
         )
-        obj_id = AnalysisNwbfile().add_nwb_object(
-            key["analysis_file_name"], pd.DataFrame()
-        )
-        key["position_object_id"] = obj_id
-        key["orientation_object_id"] = obj_id
-        key["velocity_object_id"] = obj_id
-        return key
 
     @staticmethod
     def make_dlc_pos_nwb(key, pos_nwb, ori_nwb):

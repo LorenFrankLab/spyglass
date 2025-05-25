@@ -101,6 +101,7 @@ def pytest_configure(config):
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
     NO_DLC = config.option.no_dlc
+    pytest.NO_DLC = NO_DLC
 
     BASE_DIR = Path(config.option.base_dir).absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -130,6 +131,8 @@ def pytest_unconfigure(config):
         analysis_dir = BASE_DIR / "analysis"
         for file in analysis_dir.glob("*.nwb"):
             file.unlink()
+        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
+            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
@@ -234,12 +237,10 @@ def no_dlc(request):
     yield NO_DLC
 
 
-@pytest.fixture(scope="session")
-def skipif_no_dlc(request):
-    if NO_DLC:
-        yield pytest.mark.skip(reason="Skipping DLC-dependent tests.")
-    else:
-        yield
+skip_if_no_dlc = pytest.mark.skipif(
+    condition=lambda: getattr(pytest, "NO_DLC", False),
+    reason="Skipping DLC-dependent tests.",
+)
 
 
 @pytest.fixture(scope="session")

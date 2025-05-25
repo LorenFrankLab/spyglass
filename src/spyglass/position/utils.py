@@ -5,6 +5,8 @@ from pathlib import Path
 
 def get_param_names(func):
     """Get parameter names for a function signature."""
+    if not callable(func):
+        return []  # If called when func is not imported
     return list(inspect.signature(func).parameters)
 
 

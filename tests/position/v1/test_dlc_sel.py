@@ -2,6 +2,8 @@ import datajoint as dj
 import numpy as np
 import pytest
 
+from tests.conftest import skip_if_no_dlc
+
 
 def test_dlc_video_default(sgp):
     expected_default = {
@@ -45,6 +47,7 @@ def dlc_pose_tables(sgp):
     return pos_tbl, estim_tbl, key
 
 
+@skip_if_no_dlc
 def test_pose_dataframe(dlc_pose_tables):
     pos_tbl, estim_tbl, key = dlc_pose_tables
     df1 = (pos_tbl & key).fetch_pose_dataframe()
@@ -54,6 +57,7 @@ def test_pose_dataframe(dlc_pose_tables):
     ), "Pose dataframes do not match"
 
 
+@skip_if_no_dlc
 def test_pose_video_path(sgp, dlc_pose_tables):
     pos_tbl, _, key = dlc_pose_tables
     path1 = (pos_tbl & key).fetch_video_path()
