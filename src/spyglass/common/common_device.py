@@ -386,11 +386,11 @@ class Probe(SpyglassMixin, dj.Manual):
             List of probe device types found in the NWB file.
         """
         config = config or dict()
-        all_probes_descriptions, ndx_probes, config_probes = (
-            cls.get_all_probe_names(nwbf, config)
+        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
+            nwbf, config
         )
 
-        for probe_id in all_probes_descriptions:
+        for probe_id in all_probes_types:
             new_probe_type_dict = dict()
             new_probe_dict = dict()
             shank_dict = dict()
@@ -468,12 +468,12 @@ class Probe(SpyglassMixin, dj.Manual):
             for electrode in elect_dict.values():
                 cls.Electrode.insert1(electrode, skip_duplicates=True)
 
-        if all_probes_descriptions:
-            logger.info(f"Inserted probes {all_probes_descriptions}")
+        if all_probes_types:
+            logger.info(f"Inserted probes {all_probes_types}")
         else:
             logger.warning("No conforming probe metadata found.")
 
-        return all_probes_descriptions
+        return all_probes_types
 
     @classmethod
     def get_all_probe_names(cls, nwbf, config):
@@ -504,7 +504,7 @@ class Probe(SpyglassMixin, dj.Manual):
         # NWB file that are of type ndx_franklab_novela.Probe and thus have the
         # required metadata
         ndx_probes = {
-            device_obj.probe_description: device_obj
+            device_obj.probe_type: device_obj
             for device_obj in nwbf.devices.values()
             if isinstance(device_obj, ndx_franklab_novela.Probe)
         }
@@ -512,17 +512,15 @@ class Probe(SpyglassMixin, dj.Manual):
         # make a dict mapping probe type to dict of device metadata from the
         # config YAML if exists
         config_probes = (
-            [probe_dict["probe_description"] for probe_dict in config["Probe"]]
+            [probe_dict["probe_type"] for probe_dict in config["Probe"]]
             if "Probe" in config
             else list()
         )
 
         # get all the probe types from the NWB file plus the config YAML
-        all_probes_descriptions = set(ndx_probes.keys()).union(
-            set(config_probes)
-        )
+        all_probes_types = set(ndx_probes.keys()).union(set(config_probes))
 
-        return all_probes_descriptions, ndx_probes, config_probes
+        return all_probes_types, ndx_probes, config_probes
 
     @classmethod
     def __read_ndx_probe_data(
@@ -547,7 +545,7 @@ class Probe(SpyglassMixin, dj.Manual):
 
         new_probe_dict.update(
             {
-                "probe_id": nwb_probe_obj.probe_description,
+                "probe_id": nwb_probe_obj.probe_type,
                 "probe_type": nwb_probe_obj.probe_type,
                 "contact_side_numbering": (
                     "True" if nwb_probe_obj.contact_side_numbering else "False"
