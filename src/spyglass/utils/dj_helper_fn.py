@@ -105,9 +105,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
         SpikeSortingOutput,
-    )  # noqa: F401
+    )
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -638,3 +638,15 @@ def str_to_bool(value) -> bool:
     if not value:
         return False
     return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
+
+
+def accept_divergence(key, new_value, existing_value):
+    """generate prompt to accept divergence in values between existing and new entries"""
+    response = dj.utils.user_choice(
+        f"Existing entry differers in '{key}' column.\n"
+        + "Accept the existing value of: \n"
+        + f"'{existing_value}' \n"
+        + "in place of the new value: \n"
+        + f"'{new_value}' ?\n"
+    )
+    return str_to_bool(response)
