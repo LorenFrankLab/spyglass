@@ -7,6 +7,7 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
 schema = dj.schema("common_task")
@@ -73,11 +74,16 @@ class Task(SpyglassMixin, dj.Manual):
             existing = query.fetch1()
             for key in set(task_dict).union(existing):
                 if unequal_vals(key, task_dict, existing):
-                    raise ValueError(
-                        f"Task {task_dict['task_name']} already exists "
-                        + f"with different values for {key}: "
-                        + f"{task_dict.get(key)} != {existing.get(key)}"
-                    )
+                    if not accept_divergence(
+                        key, task_dict.get(key), existing.get(key)
+                    ):
+                        # If the user does not accept the divergence,
+                        # raise an error to prevent data inconsistency
+                        raise ValueError(
+                            f"Task {task_dict['task_name']} already exists "
+                            + f"with different values for {key}: "
+                            + f"{task_dict.get(key)} != {existing.get(key)}"
+                        )
         # Insert the tasks into the table
         self.insert(inserts)
 
