@@ -86,7 +86,7 @@ ImportedLFP().drop()
     - `IntervalList.fetch_interval` now returns `Interval` object #1293
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
-    - Prompt user to verify compatability between new insert and existing
+    - Prompt user to verify compatibility between new insert and existing
       table entries # 1318
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
