@@ -539,17 +539,18 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
 
         # slice in channels; include ref channel in first slice, then exclude it in second slice
+        spyglass_ids = (
+            all_channel_ids if ref_channel_id >= 0 else recording_channel_ids
+        )
+        spikeinterface_ids = self._get_spikeinterface_channel_ids(
+            nwb_file_name, spyglass_ids
+        )
+        recording = recording.channel_slice(
+            channel_ids=spikeinterface_ids,
+            renamed_channel_ids=spyglass_ids,
+        )
 
         if ref_channel_id >= 0:
-            all_spikeinterface_channel_ids = (
-                self._get_spikeinterface_channel_ids(
-                    nwb_file_name, all_channel_ids
-                )
-            )
-            recording = recording.channel_slice(
-                channel_ids=all_spikeinterface_channel_ids,
-                renamed_channel_ids=all_channel_ids,
-            )
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="single",
@@ -560,32 +561,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 channel_ids=recording_channel_ids
             )
         elif ref_channel_id == -2:
-            recording_spikeinterface_channel_ids = (
-                self._get_spikeinterface_channel_ids(
-                    nwb_file_name, recording_channel_ids
-                )
-            )
-            recording = recording.channel_slice(
-                channel_ids=recording_spikeinterface_channel_ids,
-                renamed_channel_ids=recording_channel_ids,
-            )
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="global",
                 operator="median",
                 dtype=np.float64,
             )
-        elif ref_channel_id == -1:
-            recording_spikeinterface_channel_ids = (
-                self._get_spikeinterface_channel_ids(
-                    nwb_file_name, recording_channel_ids
-                )
-            )
-            recording = recording.channel_slice(
-                channel_ids=recording_spikeinterface_channel_ids,
-                renamed_channel_ids=recording_channel_ids,
-            )
-        else:
+        elif ref_channel_id != -1:
             raise ValueError(
                 "Invalid reference channel ID. Use -1 to skip referencing. Use "
                 + "-2 to reference via global median. Use positive integer to "
@@ -655,7 +637,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     def _get_spikeinterface_channel_ids(
         nwb_file_name: str, channel_ids: List[Union[int, str]]
     ):
-        """SpikInterface uses channel_names instead of index number if present in
+        """SpikeInterface uses channel_names instead of index number if present in
         nwb electrodes table. This function ensures match in channel_id values
         for indexing.
 
