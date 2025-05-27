@@ -4,6 +4,7 @@ import ndx_franklab_novela
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_device")
@@ -166,12 +167,16 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         db_dict = (
             DataAcquisitionDevice & {"data_acquisition_device_name": name}
         ).fetch1()
-        if db_dict != new_device_dict:
-            raise PopulateException(
-                "Data acquisition device properties of PyNWB Device object "
-                + f"with name '{name}': {new_device_dict} do not match "
-                f"properties of the corresponding database entry: {db_dict}."
-            )
+        for k in new_device_dict:
+            if not new_device_dict[k] == db_dict[k]:
+                # if the values do not match, check whether the user wants to
+                # accept the entry in the database, or raise an exception
+                if not accept_divergence(k, new_device_dict[k], db_dict[k]):
+                    raise PopulateException(
+                        "Data acquisition device properties of PyNWB Device object "
+                        + f"with name '{name}': {new_device_dict} do not match "
+                        f"properties of the corresponding database entry: {db_dict}."
+                    )
 
     @classmethod
     def _add_system(cls, system):
