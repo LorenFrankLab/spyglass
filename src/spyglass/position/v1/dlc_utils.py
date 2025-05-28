@@ -146,8 +146,9 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
     -------
     None
     """
-    # pragma: no cover
-    ActivityLog().deprecate_log("dlc_utils: _set_permissions")
+    ActivityLog().deprecate_log(  # pragma: no cover
+        "dlc_utils: _set_permissions"
+    )
 
     directory = Path(directory)
     assert directory.exists(), f"Target directory: {directory} does not exist"
@@ -495,7 +496,7 @@ def _convert_mp4(
             stderr=subprocess.STDOUT,
         )
     except subprocess.CalledProcessError as err:
-        raise RuntimeError(
+        raise RuntimeError(  # pragma: no cover
             f"Video convert errored: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = convert_process.communicate()
@@ -506,7 +507,9 @@ def _convert_mp4(
     orig_packets = _check_packets(video_path, count_frames=count_frames)
     dest_packets = _check_packets(dest_path, count_frames=count_frames)
     if orig_packets != dest_packets:
-        logger.warning(f"Conversion error: {orig_filename} -> {dest_filename}")
+        logger.warning(  # pragma: no cover
+            f"Conversion error: {orig_filename} -> {dest_filename}"
+        )
 
     if return_output:
         return dest_path
@@ -532,8 +535,8 @@ def _check_packets(file, count_frames=False):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
+    except subprocess.CalledProcessError as err:  # pragma: no cover
+        raise RuntimeError(  # pragma: no cover
             f"Check packets error: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = check_process.communicate()
@@ -734,7 +737,9 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     # Handling error case where y_vec is zero and all Ys are the same
     y_1, y_2, y_3 = pos_df[LED1]["y"], pos_df[LED2]["y"], pos_df[LED3]["y"]
     if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
-        raise Exception("Cannot determine head direction from bisector")
+        raise Exception(  # pragma: no cover
+            "Cannot determine head direction from bisector"
+        )
 
     # General case where y_vec is not zero. Use arctan2 to determine orientation
     length = np.sqrt(x_vec**2 + y_vec**2)

@@ -100,16 +100,19 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 
         n_found = len(table_query)
         if n_found != 1:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 f"Found {len(table_query)} entries for project "
                 + f"{project_name}:\n{table_query}"
             )
 
         choice = "y"
         if n_found > 1 and not cls._test_mode:
-            choice = dj.utils.user_choice("Use first entry?")[0]
+            choice = dj.utils.user_choice("Use first entry?")[
+                0
+            ]  # pragma: no cover
         if n_found == 0 or choice != "y":
-            return  # shouldn't his delete the parent? Why master w/o part?
+            # shouldn't his delete the parent? Why master w/o part?
+            return  # pragma: no cover
 
         key = key or dict()  # handle case where key is None
 

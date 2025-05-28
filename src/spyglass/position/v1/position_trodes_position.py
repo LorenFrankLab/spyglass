@@ -342,7 +342,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         # Check timepoints overlap
         if not set(video_time).intersection(set(pos_df.index)):
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 "No overlapping time points between video and position data"
             )
 

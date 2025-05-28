@@ -559,7 +559,7 @@ class VideoMaker:
             *self.ffmpeg_log_args,
         ]
         try:
-            ret = subprocess.run(
+            _ = subprocess.run(
                 ffmpeg_cmd,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -568,7 +568,6 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"Error stitching partial video: {e.stderr}")
-            logger.debug(f"stderr: {ret.stderr}")
 
 
 def make_video(**kwargs):

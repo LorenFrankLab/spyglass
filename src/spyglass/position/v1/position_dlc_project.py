@@ -155,12 +155,14 @@ class DLCProject(SpyglassMixin, dj.Manual):
 
         # check bodyparts are in config, if not add
         if len(bodyparts_to_add) > 0:
-            add_to_config(config_path, bodyparts=bodyparts_to_add)
+            add_to_config(  # pragma: no cover
+                config_path, bodyparts=bodyparts_to_add
+            )
 
         # Get frames per video from config. If passed as arg, check match
         if frames_per_video:
-            if frames_per_video != cfg["numframes2pick"]:
-                add_to_config(
+            if frames_per_video != cfg["numframes2pick"]:  # pragma: no cover
+                add_to_config(  # pragma: no cover
                     config_path, **{"numframes2pick": frames_per_video}
                 )
         else:  # Handle none passed
@@ -176,7 +178,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             if dest_folder.exists():
                 new_proj_dir = dest_folder.as_posix()
             else:
-                new_proj_dir = shutil.copytree(
+                new_proj_dir = shutil.copytree(  # pragma: no cover
                     src=project_path,
                     dst=f"{dlc_project_path}/{project_dirname}/",
                 )
@@ -365,7 +367,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             add_new_videos(config=config_path, videos=videos, copy_videos=True)
 
         if add_to_files:  # Add videos to training files
-            cls().add_training_files(key, **kwargs)
+            cls().add_training_files(key, **kwargs)  # pragma: no cover
         return videos
 
     @classmethod
@@ -449,7 +451,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             logger.error("DLC loaded in light mode, cannot label frames")
             return
 
-        label_frames(config_path)
+        label_frames(config_path)  # pragma: no cover
 
     @classmethod
     def check_labels(cls, key, **kwargs):

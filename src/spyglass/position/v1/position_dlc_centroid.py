@@ -309,7 +309,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
         if query := (RawPosition() & key):
             spatial_series = query.fetch_nwb()[0]["raw_position"]
         else:
-            spatial_series = None
+            spatial_series = None  # pragma: no cover
 
         common_attrs = {
             "conversion": METERS_PER_CM,

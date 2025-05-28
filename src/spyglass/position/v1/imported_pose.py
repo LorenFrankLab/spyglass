@@ -44,7 +44,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
     def make(self, key):
         self.insert_from_nwbfile(key["nwb_file_name"])
 
-    def insert_from_nwbfile(self, nwb_file_name):
+    def insert_from_nwbfile(self, nwb_file_name, **kwargs):
         file_path = Nwbfile().get_abs_path(nwb_file_name)
         interval_keys = []
         master_keys = []
@@ -99,9 +99,9 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     ]
                 )
 
-        IntervalList().insert(interval_keys, skip_duplicates=True)
-        self.insert(master_keys)
-        self.BodyPart().insert(part_keys)
+        IntervalList().insert(interval_keys, **kwargs)
+        self.insert(master_keys, **kwargs)
+        self.BodyPart().insert(part_keys, **kwargs)
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
@@ -146,8 +146,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         return pd.concat(pose_df, axis=1)
 
     def fetch_skeleton(self, key=None):
-        key = key or dict()
-        skeleton = self.cautious_fetch1().fetch_nwb()[0]["skeleton"]
+        key = key or self.cautious_fetch1("KEY")
+        skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]

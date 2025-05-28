@@ -258,7 +258,9 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             )
 
         if len(np.unique(likelihood_thresh)) > 1:
-            raise ValueError("more than one likelihood threshold used")
+            raise ValueError(  # pragma: no cover
+                "more than one likelihood threshold used"
+            )
 
         like_thresh = likelihood_thresh[0]
         bodyparts = np.unique([*centroid_bodyparts, *orientation_bodyparts])

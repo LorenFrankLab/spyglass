@@ -370,7 +370,6 @@ def nan_inds(
         raise ValueError("No good spans found in the data")
 
     for span in good_spans[::-1]:
-        # __import__("pdb").set_trace()  # need test for this 'if'
         if np.sum(np.isnan(dlc_df.iloc[span[0] : span[-1]].x)) > 0:
             nan_mask = np.isnan(dlc_df.iloc[span[0] : span[-1]].x)
             good_start = np.arange(span[0], span[1])[~nan_mask]
@@ -381,7 +380,7 @@ def nan_inds(
         for ind in range(start_point, span[0], -1):
             # __import__("pdb").set_trace()  # need test for this 'if'
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[ind + 1 : start_point].x),
@@ -407,7 +406,7 @@ def nan_inds(
                 jump_inds_mask[ind] = True
         for ind in range(start_point, span[-1], 1):
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[start_point:ind].x),

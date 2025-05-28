@@ -795,6 +795,7 @@ def add_electrode_group(
         nwb_file_name=mini_copy_name,
         group_name=group_name,
         electrode_list=np.array(lfp_constants.get("lfp_electrode_ids")),
+        skip_duplicates=True,
     )
     assert len(
         electrodegroup_table & {"lfp_electrode_group_name": group_name}

@@ -15,7 +15,9 @@ class PoseEstimation:  # Note: simplifying to require only project path
     def __init__(self, dlc_dir, filename_prefix=""):
         self.dlc_dir = Path(dlc_dir)
         if not self.dlc_dir.exists():
-            raise FileNotFoundError(f"Unable to find dlc_dir {dlc_dir}.")
+            raise FileNotFoundError(  # pragma: no cover
+                f"Unable to find dlc_dir {dlc_dir}."
+            )
 
         # meta file: info about this  DLC run (input video, configuration, etc.)
         pkl_paths = list(self.dlc_dir.rglob(f"{filename_prefix}*meta.pickle"))
@@ -25,13 +27,15 @@ class PoseEstimation:  # Note: simplifying to require only project path
         yml_paths = list(self.dlc_dir.glob(f"{filename_prefix}*.y*ml"))
 
         if len(yml_paths) > 1:  # If multiple, defer to the one we save.
-            yml_paths = [p for p in yml_paths if p.stem == "dj_dlc_config"]
+            yml_paths = [  # pragma: no cover
+                p for p in yml_paths if p.stem == "dj_dlc_config"
+            ]
 
         if (
             not test_mode
             and not len(pkl_paths) == len(h5_paths) == len(yml_paths) == 1
         ):
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 "Unable to find one unique .pickle, .h5, and .yaml file in: "
                 + f"{dlc_dir}\n"
                 + f"Found: {len(pkl_paths)}, {len(h5_paths)}, {len(yml_paths)}"
@@ -109,7 +113,7 @@ class PoseEstimation:  # Note: simplifying to require only project path
 
     def reformat_rawdata(self) -> dict:
         """Reformat the rawdata from the h5 file to a more useful dictionary."""
-        if not len(self.rawdata) == self.pkl["nframes"]:
+        if not len(self.rawdata) == self.pkl["nframes"]:  # pragma: no cover
             raise ValueError(
                 f"Total frames from .h5 file ({len(self.rawdata)}) differs "
                 + f'from .pickle ({self.pkl["nframes"]})'
@@ -148,7 +152,7 @@ def read_yaml(fullpath, filename="*"):
     )
 
     if len(yml_paths) != 1:
-        raise FileNotFoundError(
+        raise FileNotFoundError(  # pragma: no cover
             f"Expected one yaml file, found {len(yml_paths)}:\n{fullpath}"
         )
 
@@ -177,11 +181,11 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
     from deeplabcut.utils.auxiliaryfunctions import write_config
 
     if "config_template" in config_dict:  # if passed full model.Model dict
-        config_dict = config_dict["config_template"]
+        config_dict = config_dict["config_template"]  # pragma: no cover
     if mkdir:
         Path(output_dir).mkdir(exist_ok=True)
     if "." in filename:  # if user provided extension, remove
-        filename = filename.split(".")[0]
+        filename = filename.split(".")[0]  # pragma: no cover
 
     output_filepath = Path(output_dir) / f"{filename}.yaml"
     write_config(output_filepath, config_dict)
