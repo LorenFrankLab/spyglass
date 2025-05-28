@@ -42,7 +42,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         """
 
     def make(self, key):
-        self.insert_from_nwbfile(key["nwb_file_name"])
+        self.insert_from_nwbfile(key["nwb_file_name"])  # pragma: no cover
 
     def insert_from_nwbfile(self, nwb_file_name, **kwargs):
         file_path = Nwbfile().get_abs_path(nwb_file_name)
@@ -116,7 +116,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pd.DataFrame
             DataFrame containing pose data
         """
-        key = key or dict()
+        key = key or self.cautious_fetch1("KEY")
         query = self & key
         if len(query) != 1:
             raise ValueError(f"Key selected {len(query)} entries: {query}")

@@ -16,8 +16,9 @@ def imported_pose_tbl():
     return ImportedPose()
 
 
-@pytest.fixture
-def import_pose_nwb(common, verbose_context, imported_pose_tbl, monkeypatch):
+@pytest.fixture(scope="module")
+def import_pose_nwb(verbose_context, imported_pose_tbl):
+    from spyglass.common import Nwbfile, Session
     from spyglass.settings import raw_dir
 
     # --- Create fake data
@@ -76,25 +77,30 @@ def import_pose_nwb(common, verbose_context, imported_pose_tbl, monkeypatch):
     behavior_mod = nwbfile.create_processing_module(
         "behavior", "Behavior module"
     )
-    behavior_mod.add(pose)
     behavior_mod.add(skeletons)
+    behavior_mod.add(pose)
 
     # --- Write to file
     pose_file = Path(raw_dir) / "test_imported_pose.nwb"
+    nwb_dict = dict(nwb_file_name=pose_file.name)
+    if (Nwbfile() & nwb_dict) or pose_file.exists():
+        Nwbfile().delete(safemode=False)
+        pose_file.unlink(missing_ok=True)
+
     with NWBHDF5IO(pose_file, mode="w") as io:
         io.write(nwbfile)
+
     # --- Insert pose data into ImportedPose
-    nwb_dict = dict(nwb_file_name=pose_file.name)
-    if not (common.Session & nwb_dict):
-        common.Nwbfile().insert_from_relative_file_name(pose_file.name)
-        common.Session().populate(dict(nwb_file_name=pose_file.name))
+    Nwbfile().insert_from_relative_file_name(pose_file.name)
+    Session().populate(dict(nwb_file_name=pose_file.name))
+
     imported_pose_tbl.insert_from_nwbfile(pose_file.name, skip_duplicates=True)
 
     yield pose_file
 
     with verbose_context:
         pose_file.unlink(missing_ok=True)  # Clean up after test
-        (common.Nwbfile() & nwb_dict).delete(safemode=False)  # Clean tables
+        (Nwbfile() & nwb_dict).delete(safemode=False)  # Clean tables
 
 
 def test_insert_from_nwbfile(imported_pose_tbl, import_pose_nwb):
@@ -108,9 +114,15 @@ def test_fetch_pose_dataframe(imported_pose_tbl, import_pose_nwb):
     _ = import_pose_nwb  # Ensure fixture is executed
 
     df = imported_pose_tbl.fetch_pose_dataframe()
+
     assert isinstance(df, pd.DataFrame)
     assert "x" in df["nose"]
     assert "likelihood" in df["tail"]
+
+    with pytest.raises(KeyError):
+        (imported_pose_tbl & False).fetch_pose_dataframe()
+    with pytest.raises(ValueError):
+        imported_pose_tbl.fetch_pose_dataframe(key=dict(nwb_file_name="f"))
 
 
 def test_fetch_skeleton(imported_pose_tbl, import_pose_nwb):
