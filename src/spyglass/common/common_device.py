@@ -167,11 +167,11 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         db_dict = (
             DataAcquisitionDevice & {"data_acquisition_device_name": name}
         ).fetch1()
-        for k in new_device_dict:
-            if not new_device_dict[k] == db_dict[k]:
+        for k, existing_val in db_dict.items():
+            if not (new_val := new_device_dict.get(k, None)) == existing_val:
                 # if the values do not match, check whether the user wants to
                 # accept the entry in the database, or raise an exception
-                if not accept_divergence(k, new_device_dict[k], db_dict[k]):
+                if not accept_divergence(k, new_val, existing_val):
                     raise PopulateException(
                         "Data acquisition device properties of PyNWB Device object "
                         + f"with name '{name}': {new_device_dict} do not match "
