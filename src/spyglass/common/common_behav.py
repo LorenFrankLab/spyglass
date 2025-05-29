@@ -336,7 +336,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
             logger.info(associated_file_obj.description)
-            this_desc = associated_file_obj.description.upper
+            this_desc = associated_file_obj.description.upper()
 
             if (
                 "statescript".upper() in this_desc
