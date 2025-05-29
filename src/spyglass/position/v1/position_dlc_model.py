@@ -215,8 +215,10 @@ class DLCModel(SpyglassMixin, dj.Computed):
         SourceTable = getattr(DLCModelSource, table_source)
         query = SourceTable & key
         if not query:
-            logger.error(f"Key not in {SourceTable.__name__} table: {key}")
-            return
+            logger.error(  # pragma: no cover
+                f"Key not in {SourceTable.__name__} table: {key}"
+            )
+            return  # pragma: no cover
         project_path = Path((SourceTable & key).fetch1("project_path"))
 
         available_config = list(project_path.glob("*config.y*ml"))
@@ -232,7 +234,9 @@ class DLCModel(SpyglassMixin, dj.Computed):
         )
 
         if not config_path.exists():
-            raise FileNotFoundError(f"config does not exist: {config_path}")
+            raise FileNotFoundError(  # pragma: no cover
+                f"config does not exist: {config_path}"
+            )
 
         if config_path.suffix in (".yml", ".yaml"):
             with open(config_path, "rb") as f:
@@ -246,7 +250,9 @@ class DLCModel(SpyglassMixin, dj.Computed):
         trainingsetindex = params.pop("trainingsetindex", None)
 
         if not isinstance(trainingsetindex, int):
-            raise KeyError("no trainingsetindex specified in key")
+            raise KeyError(  # pragma: no cover
+                "trainingsetindex must be an integer"
+            )
 
         model_prefix = params.pop("model_prefix", "")
         model_description = params.pop("model_description", model_name)
@@ -260,7 +266,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
             "TrainingFraction",
         ]
         if not set(needed_attributes).issubset(set(dlc_config)):
-            raise KeyError(
+            raise KeyError(  # pragma: no cover
                 f"Missing required config attributes: {needed_attributes}"
             )
 

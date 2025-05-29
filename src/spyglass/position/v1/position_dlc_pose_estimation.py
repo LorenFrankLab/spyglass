@@ -83,7 +83,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         if crop_input is None or crop_input.lower() == "none":
             return None
         crop_ints = [int(val) for val in crop_input.split(",")]
-        assert all(isinstance(val, int) for val in crop_ints)  # TODO: raise
+        if not all(isinstance(val, int) and val >= 0 for val in crop_ints):
+            raise ValueError("Crop parameters must be non-negative integers.")
         return crop_ints
 
     def insert_estimation_task(

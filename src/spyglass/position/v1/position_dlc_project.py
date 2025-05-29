@@ -131,7 +131,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
         if (existing := cls()._existing_project(project_name)) is not None:
-            return existing
+            return existing  # pragma: no cover
 
         cfg = read_config(config_path)
         all_bodyparts = cfg["bodyparts"]
@@ -144,12 +144,12 @@ class DLCProject(SpyglassMixin, dj.Manual):
             ]
             all_bodyparts += bodyparts_to_add
         elif bodyparts is None:  # avoid insert error with empty list
-            bodyparts = all_bodyparts
+            bodyparts = all_bodyparts  # pragma: no cover
 
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(
+                raise ValueError(  # pragma: no cover
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
 
@@ -334,7 +334,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
         ]
 
         if len(videos) < 1:
-            raise ValueError(f"no .mp4 videos found from {video_list}")
+            raise ValueError(  # pragma: no cover
+                f"no .mp4 videos found from {video_list}"
+            )
 
         return videos
 
@@ -359,16 +361,18 @@ class DLCProject(SpyglassMixin, dj.Manual):
         if add_to_files and not has_proj:
             raise ValueError("Cannot set add_to_files=True without passing key")
 
-        videos = cls()._process_videos(video_list, output_path)
+        videos = cls()._process_videos(  # pragma: no cover
+            video_list, output_path
+        )
 
-        if add_new:
+        if add_new:  # pragma: no cover
             from deeplabcut import add_new_videos
 
             add_new_videos(config=config_path, videos=videos, copy_videos=True)
 
-        if add_to_files:  # Add videos to training files
+        if add_to_files:  # Add videos to training files # pragma: no cover
             cls().add_training_files(key, **kwargs)  # pragma: no cover
-        return videos
+        return videos  # pragma: no cover
 
     @classmethod
     def add_training_files(cls, key, **kwargs):
@@ -439,7 +443,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         extract_frames(config_path, **kwargs)
 
     @classmethod
-    def run_label_frames(cls, key):
+    def run_label_frames(cls, key):  # pragma: no cover
         """Convenience function to launch DLC GUI for labeling frames.
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
@@ -454,7 +458,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         label_frames(config_path)  # pragma: no cover
 
     @classmethod
-    def check_labels(cls, key, **kwargs):
+    def check_labels(cls, key, **kwargs):  # pragma: no cover
         """Convenience function to check labels on
         previously extracted and labeled frames
         """

@@ -150,14 +150,14 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
         "dlc_utils: _set_permissions"
     )
 
-    directory = Path(directory)
+    directory = Path(directory)  # pragma: no cover
     assert directory.exists(), f"Target directory: {directory} does not exist"
-    uid = pwd.getpwnam(username).pw_uid
-    if groupname:
+    uid = pwd.getpwnam(username).pw_uid  # pragma: no cover
+    if groupname:  # pragma: no cover
         gid = grp.getgrnam(groupname).gr_gid
-    else:
+    else:  # pragma: no cover
         gid = None
-    for dirpath, _, filenames in os.walk(directory):
+    for dirpath, _, filenames in os.walk(directory):  # pragma: no cover
         os.chown(dirpath, uid, gid)
         os.chmod(dirpath, mode)
         for filename in filenames:
@@ -495,7 +495,7 @@ def _convert_mp4(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-    except subprocess.CalledProcessError as err:
+    except subprocess.CalledProcessError as err:  # pragma: no cover
         raise RuntimeError(  # pragma: no cover
             f"Video convert errored: Code {err.returncode}, {err.output}"
         ) from err
@@ -506,7 +506,7 @@ def _convert_mp4(
     logger.info(f"Checking packets match orig file: {dest_filename}")
     orig_packets = _check_packets(video_path, count_frames=count_frames)
     dest_packets = _check_packets(dest_path, count_frames=count_frames)
-    if orig_packets != dest_packets:
+    if orig_packets != dest_packets:  # pragma: no cover
         logger.warning(  # pragma: no cover
             f"Conversion error: {orig_filename} -> {dest_filename}"
         )

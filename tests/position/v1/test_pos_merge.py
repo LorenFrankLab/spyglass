@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 
@@ -22,3 +24,18 @@ def test_merge_dlc_fetch1_dataframe(merge_df):
     assert all(
         e in df_cols for e in exp_cols
     ), f"Unexpected cols in position merge dataframe: {df_cols}"
+
+
+def test_merge_fetch_pose_dataframe(pos_merge, dlc_key, populate_dlc):
+    _ = populate_dlc
+    merge_key = (pos_merge.DLCPosV1 & dlc_key).fetch1("KEY")
+    df = (pos_merge & merge_key).fetch_pose_dataframe()
+    assert not df.empty, "Pose dataframe is empty"
+    assert False
+
+
+def test_merge_fetch_video_path(pos_merge, dlc_key, populate_dlc):
+    _ = populate_dlc
+    merge_key = (pos_merge.DLCPosV1 & dlc_key).fetch1("KEY")
+    path = (pos_merge & merge_key).fetch_video_path()
+    assert Path(path).exists(), f"Video path does not exist: {path}"

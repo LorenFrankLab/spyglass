@@ -378,7 +378,6 @@ def nan_inds(
             start_point = span[0] + int(span_length(span) // 2)
 
         for ind in range(start_point, span[0], -1):
-            # __import__("pdb").set_trace()  # need test for this 'if'
             if subthresh_inds_mask[ind]:
                 continue  # pragma: no cover
             previous_good_inds = np.where(

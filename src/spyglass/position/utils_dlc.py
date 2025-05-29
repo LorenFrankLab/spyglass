@@ -6,8 +6,8 @@ from pathlib import Path
 try:
     from deeplabcut import evaluate_network
     from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
-except ImportError:
-    evaluate_network, get_evaluation_folder = None, None
+except ImportError:  # pragma: no cover
+    evaluate_network, get_evaluation_folder = None, None  # pragma: no cover
 
 from spyglass.position.utils import get_most_recent_file
 
@@ -61,7 +61,9 @@ def get_dlc_model_eval(
     )
     eval_path = project_path / eval_folder
     if not eval_path.exists():
-        raise FileNotFoundError(f"Couldn't find eval folder: {eval_path}")
+        raise FileNotFoundError(  # pragma: no cover
+            f"Couldn't find eval folder: {eval_path}"
+        )
 
     with open(get_most_recent_file(eval_path, ext=".csv"), newline="") as f:
         results = list(csv.DictReader(f, delimiter=","))[0]

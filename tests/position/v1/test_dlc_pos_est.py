@@ -37,6 +37,13 @@ def test_vid_crop_none(vid_crop_tools):
     assert output is None, "get_video_crop did not detect 'none'"
 
 
+@skip_if_no_dlc
+def test_vid_crop_error(vid_crop_tools):
+    vid_path, get_video_crop = vid_crop_tools
+    with pytest.raises(ValueError):
+        _ = get_video_crop(vid_path, "0, 10, 0, -10")
+
+
 def test_invalid_video(pos_est_sel, pose_estimation_key):
     _ = pose_estimation_key  # Ensure populated
     example_key = pos_est_sel.fetch("KEY", as_dict=True)[0]

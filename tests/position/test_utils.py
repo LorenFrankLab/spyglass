@@ -6,6 +6,25 @@ import pandas as pd
 import pytest
 
 
+def test_get_params_fallback(sgp):
+    get_params = sgp.v1.dlc_utils.get_params
+
+    not_callable = "not_a_function"
+    assert get_params(not_callable) == [], "Expected empty list"
+
+    def no_params():
+        pass
+
+    assert get_params(no_params) == [], "Expected empty list"
+
+
+def test_get_files_error(sgp):
+    get_files = sgp.v1.dlc_utils.get_most_recent_file
+
+    with pytest.raises(FileNotFoundError):
+        get_files(path=".", ext="not_an_extension")
+
+
 def test_valid_option_error(sgp):
     validate = sgp.v1.dlc_utils.validate_option
 
@@ -110,6 +129,8 @@ def spans_to_interp():
         ("valid_interpolation", [(1, 2)], float("inf"), False),
         ("no_interpolation_due_to_change", [(1, 2)], 50, False),
         ("missing_start_end", [(1, 2)], float("inf"), True),
+        ("late_end", [(2, 999)], float("inf"), True),
+        ("early_start", [(0, 1)], float("inf"), True),
     ],
 )
 def test_interp_pos(
@@ -133,6 +154,8 @@ def test_interp_pos(
         ("valid_interpolation", [(1, 2)], float("inf"), False),
         ("no_interpolation_due_to_change", [(1, 2)], 50, False),
         ("missing_start_end", [(1, 2)], float("inf"), True),
+        ("late_end", [(2, 999)], float("inf"), True),
+        ("early_start", [(0, 1)], float("inf"), True),
     ],
 )
 def test_interp_orientation(
@@ -182,3 +205,46 @@ def test_recent_files(sgp):
         f.write("test2")
     recent = sgp.utils.get_most_recent_file(".", "txt")
     assert str(recent) == "temp2.txt", f"Expected temp2.txt, got {recent}"
+
+
+def test_suppress_print(sgp, monkeypatch, capsys):
+    import inspect
+
+    suppress_print_from_package = sgp.v1.dlc_utils.suppress_print_from_package
+
+    # Fake a module whose __name__ starts with "deeplabcut"
+    fake_module_globals = {"__name__": "my_module.some_module"}
+
+    def fake_deeplabcut_function():
+        print("This should be suppressed")
+
+    # Patch inspect.stack to return a fake frame from the target package
+    class FakeFrame:
+        def __init__(self):
+            self.f_globals = fake_module_globals
+
+    monkeypatch.setattr(inspect, "stack", lambda: [FakeFrame()])
+
+    with suppress_print_from_package("my_module"):
+        fake_deeplabcut_function()
+
+    out = capsys.readouterr()
+    assert out.out == ""  # Assert nothing was printed
+
+
+@pytest.fixture(scope="module")
+def estim_class(sgp, centroid_key):
+    estim_class = sgp.v1.dlc_reader.PoseEstimation
+    infer_dir = sgp.v1.dlc_utils.infer_output_dir
+
+    yield estim_class(infer_dir(centroid_key))
+
+
+def test_estim_class(estim_class):
+    assert estim_class is not None, "PoseEstimation class should be initialized"
+
+    data = estim_class.data
+    bp = estim_class.body_parts
+    assert isinstance(data, pd.DataFrame), "Data should be a DataFrame"
+    assert isinstance(bp, list), "Body parts should be a list"
+    assert False

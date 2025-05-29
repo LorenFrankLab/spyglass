@@ -41,11 +41,9 @@ def new_project_key():
     }
 
 
-def test_failed_name_insert(
-    dlc_project_tbl, dlc_project_name, config_path, new_project_key
-):
-    new_project_key.update({"project_name": dlc_project_name})
-    existing_key = dlc_project_tbl.insert_new_project(
+@pytest.fixture(scope="session")
+def insert_dlc_proj_kwargs(dlc_project_name):
+    yield dict(
         project_name=dlc_project_name,
         bodyparts=["bp1"],
         lab_team="any",
@@ -53,6 +51,18 @@ def test_failed_name_insert(
         video_list=["any"],
         groupname="any",
     )
+
+
+@skip_if_no_dlc
+def test_failed_name_insert(
+    dlc_project_tbl,
+    dlc_project_name,
+    config_path,
+    new_project_key,
+    insert_dlc_proj_kwargs,
+):
+    new_project_key.update({"project_name": dlc_project_name})
+    existing_key = dlc_project_tbl.insert_new_project(**insert_dlc_proj_kwargs)
     expected_key = {
         "project_name": dlc_project_name,
         "config_path": config_path,
@@ -60,6 +70,13 @@ def test_failed_name_insert(
     assert (
         existing_key == expected_key
     ), "Project re-insert did not return expected key"
+
+
+@skip_if_no_dlc
+def test_failed_team_insert(dlc_project_tbl, insert_dlc_proj_kwargs):
+    insert_dlc_proj_kwargs["lab_team"] = "non_existent_team"
+    with pytest.raises(ValueError):
+        dlc_project_tbl.insert_new_project(**insert_dlc_proj_kwargs)
 
 
 def test_dlc_project_insert_type_error(dlc_project_tbl):
