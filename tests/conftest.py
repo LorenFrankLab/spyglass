@@ -100,6 +100,7 @@ def pytest_configure(config):
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
+
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 

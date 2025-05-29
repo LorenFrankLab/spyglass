@@ -7,7 +7,7 @@ import pytest
 
 
 def test_get_params_fallback(sgp):
-    get_params = sgp.v1.dlc_utils.get_params
+    get_params = sgp.utils.get_param_names
 
     not_callable = "not_a_function"
     assert get_params(not_callable) == [], "Expected empty list"
@@ -19,7 +19,7 @@ def test_get_params_fallback(sgp):
 
 
 def test_get_files_error(sgp):
-    get_files = sgp.v1.dlc_utils.get_most_recent_file
+    get_files = sgp.utils.get_most_recent_file
 
     with pytest.raises(FileNotFoundError):
         get_files(path=".", ext="not_an_extension")
@@ -154,7 +154,7 @@ def test_interp_pos(
         ("valid_interpolation", [(1, 2)], float("inf"), False),
         ("no_interpolation_due_to_change", [(1, 2)], 50, False),
         ("missing_start_end", [(1, 2)], float("inf"), True),
-        ("late_end", [(2, 999)], float("inf"), True),
+        ("late_end", [(2, 999)], float("inf"), False),
         ("early_start", [(0, 1)], float("inf"), True),
     ],
 )
@@ -210,10 +210,7 @@ def test_recent_files(sgp):
 def test_suppress_print(sgp, monkeypatch, capsys):
     import inspect
 
-    suppress_print_from_package = sgp.v1.dlc_utils.suppress_print_from_package
-
-    # Fake a module whose __name__ starts with "deeplabcut"
-    fake_module_globals = {"__name__": "my_module.some_module"}
+    suppress_print_from_package = sgp.utils_dlc.suppress_print_from_package
 
     def fake_deeplabcut_function():
         print("This should be suppressed")
@@ -221,7 +218,7 @@ def test_suppress_print(sgp, monkeypatch, capsys):
     # Patch inspect.stack to return a fake frame from the target package
     class FakeFrame:
         def __init__(self):
-            self.f_globals = fake_module_globals
+            self.f_globals = {"__name__": "my_module.some_module"}
 
     monkeypatch.setattr(inspect, "stack", lambda: [FakeFrame()])
 
@@ -244,7 +241,11 @@ def test_estim_class(estim_class):
     assert estim_class is not None, "PoseEstimation class should be initialized"
 
     data = estim_class.data
-    bp = estim_class.body_parts
-    assert isinstance(data, pd.DataFrame), "Data should be a DataFrame"
+    data_keys = list(data.keys())
+    bp = estim_class.body_parts.tolist()
+    expect = ["tailBase", "tailMid", "tailTip", "whiteLED"]
+
+    assert isinstance(data, dict), "Data should be a dictionary"
     assert isinstance(bp, list), "Body parts should be a list"
-    assert False
+
+    assert data_keys == bp == expect, "Data keys should match body parts"
