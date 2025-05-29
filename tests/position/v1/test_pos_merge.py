@@ -35,7 +35,7 @@ def test_merge_fetch_pose_dataframe(pos_merge, dlc_key, populate_dlc):
     level0 = df.columns.get_level_values(0).unique().tolist()
     level1 = df.columns.get_level_values(1).unique().tolist()
     expected_level0 = ["tailBase", "tailMid", "tailTip", "whiteLED"]
-    expected_level1 = ["video_frame_ind", "x", "y", "orientation"]
+    expected_level1 = ["video_frame_ind", "x", "y", "likelihood"]
     assert level0 == expected_level0, f"Unexpected level 0 columns: {level0}"
     assert level1 == expected_level1, f"Unexpected level 1 columns: {level1}"
 
