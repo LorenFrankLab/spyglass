@@ -166,16 +166,17 @@ filterwarnings = [
   "ignore::MissingRequiredBuildWarning:.*",
 ]
 
-[tool.coverage.run]
+[tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
 source = ["*/src/spyglass/*"]
 omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
+    # "*/behavior/*",
+    "*/cli/*",
     # "*/common/*",
     "*/data_import/*",
     "*/decoding/v0/*",
     # "*/decoding/*",
-    "*/figurl_views/*",
     # "*/lfp/*",
     # "*/linearization/*",
     "*/lock/*",
