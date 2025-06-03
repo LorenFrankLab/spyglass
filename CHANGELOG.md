@@ -11,19 +11,36 @@
 Table update script
 
 ```python
-# -- For recompute --
-import datajoint as dj
-from spyglass.spikesorting.v1 import recording as v1rec  # noqa
-from spyglass.spikesorting.v0 import spikesorting_recording as v0rec  # noqa
+# -- For TrackGraph --
 from spyglass.linearization.v1.main import TrackGraph  # noqa
+
+TrackGraph.alter()  # Add edge map parameter
+
+# -- For dropping deprecated tables --
+import datajoint as dj
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-TrackGraph.alter()  # Add edge map parameter
-v0rec.SpikeSortingRecording().alter()
-v0rec.SpikeSortingRecording().update_ids()
-v1rec.SpikeSortingRecording().alter()
-v1rec.SpikeSortingRecording().update_ids()
+
+# -- For v0 recompute --
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+    IntervalList,
+)
+
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
+
+# -- For v1 recompute --
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+    AnalysisNwbfile,
+)
+
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
 
 # -- For LFP pipeline --
 from spyglass.lfp.lfp_imported import ImportedLFP
@@ -62,7 +79,8 @@ ImportedLFP().drop()
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
-- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093
+- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
+    #1311
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
