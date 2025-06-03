@@ -14,6 +14,7 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 
+from spyglass.settings import sg_config
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -642,6 +643,12 @@ def str_to_bool(value) -> bool:
 
 def accept_divergence(key, new_value, existing_value):
     """generate prompt to accept divergence in values between existing and new entries"""
+    if sg_config._test_mode:
+        # If get here in test mode, is because want to test failure
+        logger.warning(
+            "accept_divergence called in test mode, returning False without prompt"
+        )
+        return False
     response = dj.utils.user_choice(
         f"Existing entry differers in '{key}' column.\n"
         + "Accept the existing value of: \n"
