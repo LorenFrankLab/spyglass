@@ -94,7 +94,6 @@ ImportedLFP().drop()
 ### Pipelines
 
 - Common
-    - Set `probe_id` as `probe_description` when inserting from nwb file #1220
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
     - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
@@ -104,6 +103,9 @@ ImportedLFP().drop()
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
     - `IntervalList.fetch_interval` now returns `Interval` object #1293
     - Correct name parsing in Session.Experimenter insertion #1306
+    - Allow insert with dio events but no e-series data #1318
+    - Prompt user to verify compatibility between new insert and existing
+      table entries # 1318
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208

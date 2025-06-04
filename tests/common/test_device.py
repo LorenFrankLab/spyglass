@@ -4,7 +4,7 @@ from numpy import array_equal
 
 def test_invalid_device(common, populate_exception, mini_insert):
     device_dict = common.DataAcquisitionDevice.fetch(as_dict=True)[0]
-    device_dict["other"] = "invalid"
+    device_dict["data_acquisition_device_system"] = "invalid"
     with pytest.raises(populate_exception):
         common.DataAcquisitionDevice._add_device(device_dict)
 
