@@ -292,6 +292,37 @@ def get_raw_eseries(nwbfile):
     return ret
 
 
+def get_object_timestamps(nwb_object):
+    """Return timestamps of a given NWB object.
+
+    Parameters
+    ----------
+    nwb_object : pynwb.NWBDataInterface or pynwb.DynamicTable
+        The NWB object to get timestamps from.
+
+    Returns
+    -------
+    timestamps : numpy.ndarray
+        1D numpy array of timestamps.
+    """
+    timestamps = nwb_object.timestamps
+    if timestamps is None:
+        # if timestamps are not set, generate from starting_time and rate
+        if hasattr(nwb_object, "starting_time") and hasattr(nwb_object, "rate"):
+            timestamps = np.arange(
+                nwb_object.starting_time,
+                nwb_object.starting_time
+                + len(nwb_object.data) / nwb_object.rate,
+                1 / nwb_object.rate,
+            )
+        else:
+            raise ValueError(
+                f"Object {nwb_object.object_id} does not have timestamps or "
+                + "starting_time and rate attributes."
+            )
+    return timestamps
+
+
 def estimate_sampling_rate(
     timestamps, multiplier=1.75, verbose=False, filename="file"
 ):

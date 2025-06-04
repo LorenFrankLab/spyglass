@@ -8,6 +8,7 @@ from spyglass.common import IntervalList, Nwbfile
 from spyglass.utils.dj_mixin import SpyglassMixin
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
+    get_object_timestamps,
     get_valid_intervals,
 )
 
@@ -59,9 +60,9 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     continue
 
                 # use the timestamps from the first body part to define valid times
-                timestamps = list(obj.pose_estimation_series.values())[
-                    0
-                ].timestamps[:]
+                timestamps = get_object_timestamps(
+                    list(obj.pose_estimation_series.values())[0]
+                )
                 sampling_rate = estimate_sampling_rate(
                     timestamps, filename=nwb_file_name
                 )
@@ -129,7 +130,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pose_df = {}
         body_parts = list(pose_estimations.keys())
         index = pd.Index(
-            pose_estimations[body_parts[0]].timestamps[:], name="time"
+            get_object_timestamps(pose_estimations[body_parts[0]]),
+            name="time",
         )
         for body_part in body_parts:
             bp_data = pose_estimations[body_part].data
