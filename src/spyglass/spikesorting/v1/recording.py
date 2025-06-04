@@ -606,7 +606,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         Only used for transitioning to recompute NWB files, see #1093.
         """
         elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-        needs_update = self & ["electrodes_id=''", "hash=''"]
+        needs_update = self & "electrodes_id is NULL or hash is NULL"
 
         for key in tqdm(needs_update):
             analysis_file_path = AnalysisNwbfile.get_abs_path(
