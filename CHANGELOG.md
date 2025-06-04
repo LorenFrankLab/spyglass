@@ -112,6 +112,7 @@ ImportedLFP().drop()
     - Sanitize new project names for unix file system #1247
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
+    - Accept imported timestamps defined by `rate` and `start_time` #1322
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
