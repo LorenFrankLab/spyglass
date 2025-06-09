@@ -71,8 +71,8 @@ def pop_common_electrode_group(common_ephys):
     yield common_ephys.ElectrodeGroup()
 
 
-@pytest.fixture(scope="session")
-def dio_only_nwb(raw_dir):
+@pytest.fixture(scope="function")
+def dio_only_nwb(raw_dir, common):
     nwbfile = mock_NWBFile(
         identifier="my_identifier", session_description="my_session_description"
     )
@@ -95,3 +95,8 @@ def dio_only_nwb(raw_dir):
         io.write(nwbfile)
 
     yield file_name
+
+    # Cleanup
+    (common.Nwbfile & {"nwb_file_name": "mock_behavior_.nwb"}).delete(
+        safemode=False
+    )
