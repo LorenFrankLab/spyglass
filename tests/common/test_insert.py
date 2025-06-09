@@ -218,3 +218,18 @@ def test_insert_probe(mini_insert, mini_devices, common):
     assert probe_data["num_shanks"] == len(
         probe_raw.shanks
     ), "Number of shanks in ProbeType number not raw data"
+
+
+def test_dio_only_insert(dio_only_nwb, common, data_import):
+    """Test that DIOEvents can be inserted from a NWB file with only DIO data."""
+    data_import.insert_sessions(dio_only_nwb)
+
+    from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
+
+    key = {"nwb_file_name": get_nwb_copy_filename(dio_only_nwb)}
+    interval = (common.IntervalList() & key).fetch1()
+    assert interval["interval_list_name"] == "dio data valid times"
+    assert (
+        interval["valid_times"][0][0] == 0.0
+        and interval["valid_times"][0][1] == 19.0
+    ), "Interval does not match dio"
