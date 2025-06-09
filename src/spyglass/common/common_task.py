@@ -75,7 +75,10 @@ class Task(SpyglassMixin, dj.Manual):
             for key in set(task_dict).union(existing):
                 if unequal_vals(key, task_dict, existing):
                     if not accept_divergence(
-                        key, task_dict.get(key), existing.get(key)
+                        key,
+                        task_dict.get(key),
+                        existing.get(key),
+                        self._test_mode,
                     ):
                         # If the user does not accept the divergence,
                         # raise an error to prevent data inconsistency

@@ -136,7 +136,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
         return all_device_names, ndx_devices, config_devices
 
     @classmethod
-    def _add_device(cls, new_device_dict):
+    def _add_device(cls, new_device_dict, test_mode=None):
         """Ensure match between NWB file info & database entry.
 
         If no DataAcquisitionDevice with the given name exists in the database,
@@ -171,7 +171,7 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
             if not (new_val := new_device_dict.get(k, None)) == existing_val:
                 # if the values do not match, check whether the user wants to
                 # accept the entry in the database, or raise an exception
-                if not accept_divergence(k, new_val, existing_val):
+                if not accept_divergence(k, new_val, existing_val, test_mode):
                     raise PopulateException(
                         "Data acquisition device properties of PyNWB Device object "
                         + f"with name '{name}': {new_device_dict} do not match "

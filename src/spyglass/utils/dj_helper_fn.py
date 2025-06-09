@@ -640,11 +640,9 @@ def str_to_bool(value) -> bool:
     return str(value).lower() in ("y", "yes", "t", "true", "on", "1")
 
 
-def accept_divergence(key, new_value, existing_value):
+def accept_divergence(key, new_value, existing_value, test_mode=False):
     """prompt to accept divergence in values between existing and new entries"""
-    from spyglass.settings import sg_config
-
-    if sg_config._test_mode:
+    if test_mode:
         # If get here in test mode, is because want to test failure
         logger.warning(
             "accept_divergence called in test mode, returning False without prompt"
