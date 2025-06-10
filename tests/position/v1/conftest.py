@@ -1,19 +1,5 @@
-"""
-The following lines are not used in the course of regular pose processing and
-can be removed so long as other functionality is not impacted.
-
-position_merge.py: 106-107, 110-123, 139-262
-dlc_decorators.py: 11, 16-18, 22
-dlc_reader.py    :
-    24, 38, 44-45, 51, 57-58, 61, 70, 74, 80-81, 135-137, 146, 149-162, 214,
-    218
-dlc_utils.py     :
-    58, 61, 69, 72, 97-100, 104, 149-161, 232-235, 239-241, 246, 259, 280,
-    293-305, 310-316, 328-341, 356-373, 395, 404, 480, 487-488, 530, 548-561,
-    594-601, 611-612, 641-657, 682-736, 762-772, 787, 809-1286
-"""
-
 from itertools import product as iter_product
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -30,6 +16,7 @@ def dlc_video_params(sgp):
             "params": {
                 "percent_frames": 0.05,
                 "incl_likelihood": True,
+                "limit": 2,
             },
         },
         skip_duplicates=True,
@@ -46,14 +33,15 @@ def dlc_video_selection(sgp, dlc_key, dlc_video_params, populate_dlc):
 
 @pytest.fixture(scope="session")
 def populate_dlc_video(sgp, dlc_video_selection):
-    sgp.v1.DLCPosVideo.populate(dlc_video_selection)
-    yield sgp.v1.DLCPosVideo()
+    vid_tbl = sgp.v1.DLCPosVideo()
+    vid_tbl.populate(dlc_video_selection)
+    yield vid_tbl
 
 
 @pytest.fixture(scope="session")
 def populate_evaluation(sgp, populate_model):
-    sgp.v1.DLCEvaluation.populate()
-    yield
+    sgp.v1.DLCModelEvaluation.populate()
+    yield sgp.v1.DLCModelEvaluation()
 
 
 def generate_led_df(leds, inc_vals=False):
@@ -90,3 +78,57 @@ def generate_led_df(leds, inc_vals=False):
         return increment_count() if x == 1 else x
 
     return df.applymap(process_value)
+
+
+@pytest.fixture(scope="session")
+def import_dlc_model(sgp, insert_project):
+    from spyglass.settings import temp_dir
+
+    sgp.v1.DLCModelInput().insert1(
+        dict(
+            config_path=Path(temp_dir) / "test_config.yaml",
+            dlc_model_name="test_model",
+            project_name=insert_project[0]["project_name"],
+        ),
+        skip_duplicates=True,
+    )
+    yield sgp.v1.DLCModelSource()
+
+
+@pytest.fixture(scope="module")
+def empty_dlc_project(sgp, common, team_name, video_keys, import_dlc_model):
+    from deeplabcut.create_project.new import create_new_project
+
+    from spyglass.settings import temp_dir
+
+    _ = import_dlc_model
+    project_name = "empty_project"
+    project_dict = dict(project_name=project_name)
+    cfg = create_new_project(
+        project=project_name,
+        experimenter="test_experimenter",
+        videos=[common.VideoFile().get_abs_path(video_keys[0])],
+        copy_videos=False,
+        working_directory=temp_dir,
+    )
+    sgp.v1.DLCProject().insert_existing_project(
+        **project_dict,
+        lab_team=team_name,
+        config_path=cfg,
+        bodyparts=["WhiteLED"],
+    )
+    yield project_dict
+
+
+@pytest.fixture(scope="module")
+def null_dlc_project(sgp, empty_dlc_project):
+    _ = empty_dlc_project
+    project_dict = sgp.v1.DLCModelInput().fetch(
+        "dlc_model_name", "project_name", as_dict=True, limit=1
+    )[0]
+    sgp.v1.DLCModelSource().insert_entry(
+        **project_dict,
+        source="FromImport",
+        skip_duplicates=True,
+    )
+    yield project_dict
