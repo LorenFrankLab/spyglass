@@ -6,7 +6,7 @@ def test_invalid_device(common, populate_exception, mini_insert):
     device_dict = common.DataAcquisitionDevice.fetch(as_dict=True)[0]
     device_dict["data_acquisition_device_system"] = "invalid"
     with pytest.raises(populate_exception):
-        common.DataAcquisitionDevice._add_device(device_dict)
+        common.DataAcquisitionDevice._add_device(device_dict, test_mode=True)
 
 
 def test_get_device(common, mini_content):
