@@ -27,7 +27,7 @@ def test_merge_dlc_fetch1_dataframe(merge_df):
 def test_merge_id_order(pos_merge):
     merge_keys = pos_merge.TrodesPosV1().fetch("KEY")
     assert len(merge_keys) > 1
-    nwb_file_list, merge_ids = (pos_merge.TrodesPosV1() & merge_keys).fetch_nwb(
+    nwb_file_list, merge_ids = (pos_merge & merge_keys).fetch_nwb(
         return_merge_ids=True
     )
     for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
