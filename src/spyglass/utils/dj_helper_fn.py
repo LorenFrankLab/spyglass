@@ -649,7 +649,7 @@ def accept_divergence(key, new_value, existing_value, test_mode=False):
         )
         return False
     response = dj.utils.user_choice(
-        f"Existing entry differers in '{key}' column.\n"
+        f"Existing entry differs in '{key}' column.\n"
         + "Accept the existing value of: \n"
         + f"'{existing_value}' \n"
         + "in place of the new value: \n"
