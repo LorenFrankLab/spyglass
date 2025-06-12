@@ -1,4 +1,11 @@
+from pathlib import Path
+
+import numpy as np
 import pytest
+from pynwb import NWBHDF5IO
+from pynwb.behavior import BehavioralEvents
+from pynwb.testing.mock.behavior import mock_TimeSeries
+from pynwb.testing.mock.file import mock_NWBFile
 
 
 @pytest.fixture(scope="session")
@@ -62,3 +69,34 @@ def common_ephys(common):
 def pop_common_electrode_group(common_ephys):
     common_ephys.ElectrodeGroup.populate()
     yield common_ephys.ElectrodeGroup()
+
+
+@pytest.fixture(scope="function")
+def dio_only_nwb(raw_dir, common):
+    nwbfile = mock_NWBFile(
+        identifier="my_identifier", session_description="my_session_description"
+    )
+    time_series = mock_TimeSeries(
+        name="my_time_series", timestamps=np.arange(20), data=np.ones((20, 1))
+    )
+    behavioral_events = BehavioralEvents(
+        name="behavioral_events", time_series=time_series
+    )
+    behavior_module = nwbfile.create_processing_module(
+        name="behavior", description="behavior module"
+    )
+    behavior_module.add(behavioral_events)
+
+    from spyglass.settings import raw_dir
+
+    file_name = "mock_behavior.nwb"
+    nwbfile_path = Path(raw_dir) / file_name
+    with NWBHDF5IO(nwbfile_path, "w") as io:
+        io.write(nwbfile)
+
+    yield file_name
+
+    # Cleanup
+    (common.Nwbfile & {"nwb_file_name": "mock_behavior_.nwb"}).delete(
+        safemode=False
+    )
