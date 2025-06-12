@@ -74,7 +74,7 @@ ImportedLFP().drop()
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
 - Add common method `get_position_interval_epoch` #1056
-- Improve cron job documentation and script #1226, #1241, #1257
+- Improve cron job documentation and script #1226, #1241, #1257, #1328
 - Update export process to include `~external` tables #1239
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
