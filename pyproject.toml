@@ -79,6 +79,7 @@ moseq-cpu = [
 ]
 
 test = [
+    "codecov",                # for code coverage badge
     "docker",                 # for tests in a container
     "ghostipy",
     "kachery",                # database access
@@ -182,7 +183,6 @@ omit = [ # which submodules have no tests
     # "*/position/*",
     "*/ripple/*",
     "*/sharing/*",
-    "*/spikesorting/v0/*",
     # "*/spikesorting/*",
     # "*/utils/*",
     "settings.py",

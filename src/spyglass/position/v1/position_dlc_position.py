@@ -520,4 +520,7 @@ def get_subthresh_inds(
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
     sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
-    return all_nan_inds, sub_thresh_percent if ret_sub_thresh else all_nan_inds
+
+    if ret_sub_thresh:
+        return all_nan_inds, sub_thresh_percent
+    return all_nan_inds

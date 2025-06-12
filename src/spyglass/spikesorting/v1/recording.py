@@ -16,10 +16,7 @@ from tqdm import tqdm
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_device import Probe
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.settings import analysis_dir, test_mode
@@ -218,14 +215,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - valid times into IntervalList
         # - analysis NWB file holding processed recording into AnalysisNwbfile
         # - entry into SpikeSortingRecording
+        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
+        sort_interval_valid_times.set_key(
+            nwb_file_name=nwb_file_name,
+            interval_list_name=key["recording_id"],
+            pipeline="spikesorting_recording_v1",
+        )
         IntervalList.insert1(
-            {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": key["recording_id"],
-                "valid_times": self._get_sort_interval_valid_times(key),
-                "pipeline": "spikesorting_recording_v1",
-            },
-            skip_duplicates=True,  # for recompute
+            sort_interval_valid_times.as_dict, skip_duplicates=True
         )
         AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
 
@@ -416,7 +413,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": sort_interval_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         valid_interval_times = (
             IntervalList
@@ -424,13 +421,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": "raw data valid times",
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         # DO: - take intersection between sort interval and valid times
-        return interval_list_intersect(
-            sort_interval,
-            valid_interval_times,
-            min_length=params["min_segment_length"],
+        return sort_interval.intersect(
+            valid_interval_times, min_length=params["min_segment_length"]
         )
 
     def _get_preprocessed_recording(self, key: dict):
@@ -514,8 +509,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         all_timestamps = recording.get_times()
 
-        # TODO: check works for recordings w/o explicit timestamps
-        valid_sort_times = self._get_sort_interval_valid_times(key)
+        # Note: _consolidate_intervals is only used in spike sorting.v1
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
         valid_sort_times_indices = _consolidate_intervals(
             valid_sort_times, all_timestamps
         )
@@ -544,8 +539,18 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
 
         # slice in channels; include ref channel in first slice, then exclude it in second slice
+        spyglass_ids = (
+            all_channel_ids if ref_channel_id >= 0 else recording_channel_ids
+        )
+        spikeinterface_ids = self._get_spikeinterface_channel_ids(
+            nwb_file_name, spyglass_ids
+        )
+        recording = recording.channel_slice(
+            channel_ids=spikeinterface_ids,
+            renamed_channel_ids=spyglass_ids,
+        )
+
         if ref_channel_id >= 0:
-            recording = recording.channel_slice(channel_ids=all_channel_ids)
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="single",
@@ -556,20 +561,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 channel_ids=recording_channel_ids
             )
         elif ref_channel_id == -2:
-            recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
-            )
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="global",
                 operator="median",
                 dtype=np.float64,
             )
-        elif ref_channel_id == -1:
-            recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
-            )
-        else:
+        elif ref_channel_id != -1:
             raise ValueError(
                 "Invalid reference channel ID. Use -1 to skip referencing. Use "
                 + "-2 to reference via global median. Use positive integer to "
@@ -608,7 +606,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         Only used for transitioning to recompute NWB files, see #1093.
         """
         elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
-        needs_update = self & ["electrodes_id=''", "hash=''"]
+        needs_update = self & "electrodes_id is NULL or hash is NULL"
 
         for key in tqdm(needs_update):
             analysis_file_path = AnalysisNwbfile.get_abs_path(
@@ -635,11 +633,42 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """
         raise NotImplementedError("Recompute not implemented.")
 
+    @staticmethod
+    def _get_spikeinterface_channel_ids(
+        nwb_file_name: str, channel_ids: List[Union[int, str]]
+    ):
+        """Given a file name and channel ids, return channel names.
+
+        SpikeInterface uses channel_names instead of index number if present in
+        nwb electrodes table. This function ensures match in channel_id values
+        for indexing.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            file name of the NWB file
+        channel_ids : List[int]
+            list of channel indexes (electrode_id) to be converted
+
+        Returns
+        -------
+        List[Union[int, str]]
+            list of channel_id values used by spikeinterface
+        """
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
+            nwbfile = io.read()
+            electrodes_table = nwbfile.electrodes
+            channel_names = electrodes_table.get("colnames")
+            if channel_names is None:
+                return channel_ids
+            return [channel_names[ch] for ch in channel_ids]
+
 
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
-    to a list of intervals (start_index, stop_index) by comparing to a list of timestamps;
-    then consolidates overlapping or adjacent intervals
+    to a list of intervals (start_index, stop_index) by comparing to a list of
+    timestamps; then consolidates overlapping or adjacent intervals
 
     Parameters
     ----------
@@ -652,9 +681,8 @@ def _consolidate_intervals(intervals, timestamps):
     if intervals.ndim == 1:
         intervals = intervals.reshape(-1, 2)
     if intervals.shape[1] != 2:
-        raise ValueError(
-            "Input array must have shape (N, 2) where N is the number of intervals."
-        )
+        raise ValueError("Input array must have shape (N_Intervals, 2).")
+
     # Check if intervals are sorted. If not, sort them.
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = np.sort(intervals, axis=0)
@@ -673,11 +701,11 @@ def _consolidate_intervals(intervals, timestamps):
 
     # Loop through the rest of the intervals to join them if needed
     for next_start, next_stop in zip(start_indices, stop_indices):
-        # If the stop time of the current interval is equal to or greater than the next start time minus 1
+        # If the stop time of the current interval is equal to or greater than
+        # the next start time minus 1
         if stop >= next_start - 1:
-            stop = max(
-                stop, next_stop
-            )  # Extend the current interval to include the next one
+            # Extend the current interval to include the next one
+            stop = max(stop, next_stop)
         else:
             # Add the current interval to the consolidated list
             consolidated.append((start, stop))

@@ -1,4 +1,3 @@
-from functools import reduce
 from typing import Union
 
 import datajoint as dj
@@ -6,12 +5,7 @@ import numpy as np
 import spikeinterface as si
 from spikeinterface.core.job_tools import ChunkRecordingExecutor, ensure_n_jobs
 
-from spyglass.common.common_interval import (
-    IntervalList,
-    _union_concat,
-    interval_from_inds,
-    interval_set_difference_inds,
-)
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.spikesorting.utils import (
     _check_artifact_thresholds,
     _compute_artifact_chunk,
@@ -272,10 +266,6 @@ def _get_artifact_times(
     artifact_frames = executor.run()
     artifact_frames = np.concatenate(artifact_frames)
 
-    # turn ms to remove total into s to remove from either side of each
-    # detected artifact
-    half_removal_window_s = removal_window_ms / 2 / 1000
-
     if len(artifact_frames) == 0:
         recording_interval = np.asarray(
             [[valid_timestamps[0], valid_timestamps[-1]]]
@@ -284,49 +274,27 @@ def _get_artifact_times(
         logger.warning("No artifacts detected.")
         return recording_interval, artifact_times_empty
 
-    # convert indices to intervals
-    artifact_intervals = interval_from_inds(artifact_frames)
-
-    # convert to seconds and pad with window
-    artifact_intervals_s = np.zeros(
-        (len(artifact_intervals), 2), dtype=np.float64
-    )
-    for interval_idx, interval in enumerate(artifact_intervals):
-        artifact_intervals_s[interval_idx] = [
-            valid_timestamps[interval[0]] - half_removal_window_s,
-            np.minimum(
-                valid_timestamps[interval[1]] + half_removal_window_s,
-                valid_timestamps[-1],
-            ),
-        ]
-    # make the artifact intervals disjoint
-    if len(artifact_intervals_s) > 1:
-        artifact_intervals_s = reduce(_union_concat, artifact_intervals_s)
-
-    # convert seconds back to indices
-    artifact_intervals_new = []
-    for artifact_interval_s in artifact_intervals_s:
-        artifact_intervals_new.append(
-            np.searchsorted(valid_timestamps, artifact_interval_s)
-        )
+    # turn ms to remove total into s to remove from either side of each
+    # detected artifact
+    # generate intervals for artifact frame indices
+    artifact_intervals_s = Interval(
+        artifact_frames, from_inds=True
+    ).add_removal_window(removal_window_ms, valid_timestamps)
+    artifact_interv_idx = artifact_intervals_s.to_indices(valid_timestamps)
 
     # compute set difference between intervals (of indices)
     try:
-        # if artifact_intervals_new is a list of lists then len(artifact_intervals_new[0]) is the number of intervals
-        # otherwise artifact_intervals_new is a list of ints and len(artifact_intervals_new[0]) is not defined
-        len(artifact_intervals_new[0])
+        # if artifact_intervals_new is a list of lists then
+        # len(artifact_intervals_new[0]) is the number of intervals otherwise
+        # artifact_intervals_new is a list of ints and
+        # len(artifact_intervals_new[0]) is not defined
+        len(artifact_interv_idx[0])
     except TypeError:
         # convert to list of lists
-        artifact_intervals_new = [artifact_intervals_new]
-    artifact_removed_valid_times_ind = interval_set_difference_inds(
-        [(0, len(valid_timestamps) - 1)], artifact_intervals_new
-    )
+        artifact_interv_idx = [artifact_interv_idx.times]
 
-    # convert back to seconds
-    artifact_removed_valid_times = []
-    for i in artifact_removed_valid_times_ind:
-        artifact_removed_valid_times.append(
-            (valid_timestamps[i[0]], valid_timestamps[i[1]])
-        )
+    artifact_removed_valid_times = artifact_interv_idx.subtract(
+        [(0, len(valid_timestamps) - 1)], reverse=True
+    ).to_seconds(valid_timestamps)
 
-    return np.asarray(artifact_removed_valid_times), artifact_intervals_s
+    return np.asarray(artifact_removed_valid_times.times), artifact_intervals_s

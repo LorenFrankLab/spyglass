@@ -1,5 +1,7 @@
 # PyTests
 
+[![codecov](https://codecov.io/gh/LorenFrankLab/spyglass/graph/badge.svg?token=QEJIIFN2S8)](https://codecov.io/gh/LorenFrankLab/spyglass)
+
 ## Environment
 
 To facilitate headless testing of various Qt-based tools as well as Tensorflow,

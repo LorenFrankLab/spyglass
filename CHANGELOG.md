@@ -11,19 +11,36 @@
 Table update script
 
 ```python
-# -- For recompute --
-import datajoint as dj
-from spyglass.spikesorting.v1 import recording as v1rec  # noqa
-from spyglass.spikesorting.v0 import spikesorting_recording as v0rec  # noqa
+# -- For TrackGraph --
 from spyglass.linearization.v1.main import TrackGraph  # noqa
+
+TrackGraph.alter()  # Add edge map parameter
+
+# -- For dropping deprecated tables --
+import datajoint as dj
 
 dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
 dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-TrackGraph.alter()  # Add edge map parameter
-v0rec.SpikeSortingRecording().alter()
-v0rec.SpikeSortingRecording().update_ids()
-v1rec.SpikeSortingRecording().alter()
-v1rec.SpikeSortingRecording().update_ids()
+
+# -- For v0 recompute --
+from spyglass.spikesorting.v0.spikesorting_recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+    IntervalList,
+)
+
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
+
+# -- For v1 recompute --
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+    AnalysisNwbfile,
+)
+
+SpikeSortingRecording().alter()
+SpikeSortingRecording().update_ids()
 
 # -- For LFP pipeline --
 from spyglass.lfp.lfp_imported import ImportedLFP
@@ -62,10 +79,12 @@ ImportedLFP().drop()
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
-- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093
+- Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
+    #1311
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
+- Add code coverage badge #1305
 
 ### Documentation
 
@@ -83,13 +102,17 @@ ImportedLFP().drop()
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293
+    - Correct name parsing in Session.Experimenter insertion #1306
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
     - Sanitize new project names for unix file system #1247
-    - Add arg to return percent below threshold in `get_subthresh_inds` #1304
+    - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
+        #1305
+    - Accept imported timestamps defined by `rate` and `start_time` #1322
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -100,9 +123,15 @@ ImportedLFP().drop()
         `SortedSpikesGroup.fetch_spike_data` #1261
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
+    - Add burst merge curation #1209
+    - Reconcile spikeinterface value for `channel_id` when `channel_name` column
+      present in nwb file electrodes table #1310
+    - Ensure matching order of returned merge_ids and nwb files in
+      `SortedSpikesGroup.fetch_spike_data` #1320
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
+    - Implement `ImportedLFP.make()` for ingestion from nwb files #1278
     - Adding a condition in the MAD detector to replace zero, NaN, or infinite MAD
         values with 1.0. #1280
     - Refactoring the creation of LFPElectrodeGroup with added input validation

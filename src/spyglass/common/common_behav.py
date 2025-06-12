@@ -10,7 +10,7 @@ import pynwb
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
-from spyglass.common.common_interval import IntervalList, interval_list_contains
+from spyglass.common.common_interval import Interval, IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
@@ -112,7 +112,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
                 )
 
         with cls._safe_context():
-            IntervalList().cautious_insert(intervals)
+            IntervalList().cautious_insert(intervals, update=True)
             cls.insert(sources, skip_duplicates=skip_duplicates)
             cls.SpatialSeries.insert(
                 spat_series, skip_duplicates=skip_duplicates
@@ -336,7 +336,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             epoch_list = associated_file_obj.task_epochs.split(",")
             # only insert if this is the statescript file
             logger.info(associated_file_obj.description)
-            this_desc = associated_file_obj.description.upper
+            this_desc = associated_file_obj.description.upper()
 
             if (
                 "statescript".upper() in this_desc
@@ -406,7 +406,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         cam_device_str = r"camera_device (\d+)"
         is_found = False
@@ -417,10 +417,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 # check to see if the times for this video_object are largely
                 # overlapping with the task epoch times
 
-                if not len(
-                    interval_list_contains(valid_times, video_obj.timestamps)
-                    > 0.9 * len(video_obj.timestamps)
-                ):
+                timestamps = video_obj.timestamps
+                these_times = valid_times.contains(timestamps)
+                if not len(these_times > 0.9 * len(timestamps)):
                     continue
 
                 nwb_cam_device = video_obj.device.name

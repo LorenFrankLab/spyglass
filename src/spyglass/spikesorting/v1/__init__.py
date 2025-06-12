@@ -4,6 +4,11 @@ from spyglass.spikesorting.v1.artifact import (
     ArtifactDetectionParameters,
     ArtifactDetectionSelection,
 )
+from spyglass.spikesorting.v1.burst_curation import (
+    BurstPair,
+    BurstPairParams,
+    BurstPairSelection,
+)
 from spyglass.spikesorting.v1.curation import CurationV1
 from spyglass.spikesorting.v1.figurl_curation import (
     FigURLCuration,
@@ -37,6 +42,9 @@ __all__ = [
     "ArtifactDetection",
     "ArtifactDetectionParameters",
     "ArtifactDetectionSelection",
+    "BurstPair",
+    "BurstPairParams",
+    "BurstPairSelection",
     "CurationV1",
     "FigURLCuration",
     "FigURLCurationSelection",
