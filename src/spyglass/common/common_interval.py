@@ -4,6 +4,7 @@ from typing import Iterable, List, Optional, Tuple, TypeVar, Union
 
 import datajoint as dj
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 from pynwb import NWBFile
@@ -1123,3 +1124,60 @@ def interval_list_complement(intervals1, intervals2, min_length=0.0):
     return (
         Interval(intervals1).subtract(intervals2, min_length=min_length).times
     )
+
+
+def plot_specific_interval_lists(nwb_copy_file_name, interval_list_names, start_time=0, return_fig=False):
+    """
+    Parameters
+    ----------    
+    interval_list_names: list(str)
+        names of interval lists you want to compare
+    nwb_copy_file_name: str
+        output from get_nwb_copy_filename
+    start_time: int (seconds)
+        set the 0 time for your interval comparison plot (for example, the first timepoint of s1)
+
+    Returns
+    -------
+    None
+        this function displays a timeline plot of the intervals you want to compare
+    """
+    n_compare = len(interval_list_names)
+
+    # plot broken bar horizontals
+    fig, ax = plt.subplots(figsize=(20, 2 / 3 * n_compare))
+
+    # get n colors
+    cmap = plt.get_cmap("turbo", n_compare)
+    custom_palette = [mpl.colors.rgb2hex(cmap(i)) for i in range(cmap.N)]
+
+    def convert_intervals_to_range(intervals, start_time):
+        int_range = []
+        for interval in intervals:
+            int_min = (interval[0] - start_time) / 60  # and convert to seconds
+            int_width = (interval[1] - interval[0]) / 60  # and convert to seconds
+            int_range.append((int_min, int_width))
+        return int_range
+
+    for i, (interval_list_name, color) in enumerate(
+        zip(interval_list_names, custom_palette)
+    ):
+        interval_list = (
+            IntervalList
+            & {
+                "nwb_file_name": nwb_copy_file_name,
+                "interval_list_name": interval_list_name,
+            }
+        ).fetch1("valid_times")
+        int_range = convert_intervals_to_range(interval_list, start_time)
+        ax.broken_barh(int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7)
+
+    ax.set_ylim(5, 10 * (n_compare + 1) + 5)
+    ax.set_xlabel("time from start (s)", fontsize=16)
+    ax.set_yticks(np.arange(n_compare) * 10 + 15, labels=interval_list_names, fontsize=16)
+    ax.set_xticks(ax.get_xticks(), labels=ax.get_xticklabels(), fontsize=16)
+
+    if return_fig:
+        return fig
+
+    
