@@ -221,6 +221,9 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+            # non-general fix: pop off optogenetic epochs if present
+            if "optogenetic_epochs" in nwbf.intervals:
+                nwbf.intervals.pop("optogenetic_epochs")
             # add the version of spyglass that created this file
             if nwbf.source_script is None:
                 nwbf.source_script = f"spyglass={sg_version}"
