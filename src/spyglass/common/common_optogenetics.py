@@ -156,6 +156,15 @@ class Virus(SpyglassMixin, dj.Manual):
     manufacturer: varchar(255)  # manufacturer of the virus
     """
 
+    def insert_from_nwb_object(self, virus_object):
+        key = dict(
+            virus_name=virus_object.construct_name,
+            construct_name=virus_object.construct_name,
+            description=virus_object.description,
+            manufacturer=virus_object.manufacturer,
+        )
+        self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
+
 
 @schema
 class VirusInjection(SpyglassMixin, dj.Manual):
@@ -163,8 +172,7 @@ class VirusInjection(SpyglassMixin, dj.Manual):
     # Virus injection information
     -> Session
     -> Virus
-    injection_id: int  # differentiates between multiple injections of the same virus
-    ---
+    injection_object_id: varchar(64)  # object id of the injection
     name: varchar(255)  # name of the injection
     description: varchar(255)  # description of the injection
     hemisphere: enum('left', 'right')  # hemisphere of the injection
@@ -178,6 +186,30 @@ class VirusInjection(SpyglassMixin, dj.Manual):
     volume: float # volume of the injection (in uL)
     titer: float # titer of the virus (in vG/ml)
     """
+
+    def insert_from_nwb_object(self, nwb_file_name, virus_injection_object):
+        key = dict(
+            nwb_file_name=nwb_file_name,
+            virus_name=virus_injection_object.virus.construct_name,
+            injection_object_id=virus_injection_object.object_id,
+            name=virus_injection_object.name,
+            description=virus_injection_object.description,
+            hemisphere=virus_injection_object.hemisphere,
+            location=virus_injection_object.location,
+            ap_location=virus_injection_object.ap_in_mm,
+            ml_location=virus_injection_object.ml_in_mm,
+            dv_location=virus_injection_object.dv_in_mm,
+            pitch=virus_injection_object.pitch_in_deg,
+            roll=virus_injection_object.roll_in_deg,
+            yaw=virus_injection_object.yaw_in_deg,
+            volume=virus_injection_object.volume_in_uL,
+            titer=virus_injection_object.virus.titer_in_vg_per_ml,
+        )
+
+        Virus().insert_from_nwb_object(virus_injection_object.virus)
+        self.insert1(
+            key,
+        )
 
 
 @schema
