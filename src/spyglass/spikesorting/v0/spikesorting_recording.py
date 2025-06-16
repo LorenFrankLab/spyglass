@@ -445,7 +445,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         """Update file hashes for all entries in the table.
 
         Only used for transitioning to recompute NWB files, see #1093."""
-        for key in tqdm(self & 'hash=""', desc="Updating hashes"):
+        for key in tqdm(self & "hash is NULL", desc="Updating hashes"):
             key["hash"] = self._dir_hash(key["recording_path"])
             self.update1(key)
 
@@ -647,7 +647,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         return recording
 
-    def cleanup(self, dry_run=False):
+    def cleanup(self, dry_run=False, verbose=True):
         """Removes the recording data from the recording directory."""
         rec_dir = Path(recording_dir)
         tracked = set(self.fetch("recording_path"))
@@ -657,7 +657,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in tqdm(untracked, desc="Removing untracked folders"):
+        for folder in tqdm(
+            untracked, desc="Removing untracked folders", disable=not verbose
+        ):
             try:
                 shutil_rmtree(folder)
             except PermissionError:
