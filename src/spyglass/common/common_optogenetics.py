@@ -18,7 +18,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
     intratrain_interval: float  # period in ms
     intertrain_interval: float  # intertrain interval in ms
     stimulus_power: float  # stimulus power in mW
-    stimulus_object_id: varchar(32)  # object id of the dio corresponding to the optogenetic stimulation
+    stimulus_object_id: varchar(64)  # object id of the dio corresponding to the optogenetic stimulation
     """
 
     _nwb_table = Nwbfile
@@ -34,11 +34,15 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ripple_inserts = []
         theta_inserts = []
         speed_inserts = []
+        spatial_inserts = []
         for _, row in opto_epoch_df.iterrows():
             # master table key for epoch
-            epoch_key = dict(
+            base_key = dict(
                 nwb_file_name=nwb_key["nwb_file_name"],
                 epoch=row["epoch_number"],
+            )
+            epoch_key = dict(
+                base_key,
                 description=row["convenience_code"],
                 pulse_length=row["pulse_length_in_ms"],
                 pulses_per_train=row["number_pulses_per_pulse_train"],
@@ -51,7 +55,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             # Ripple trigger part if present
             if row.get("ripple_filter_on", None):
                 ripple_key = dict(
-                    epoch_key,
+                    base_key,
                     threshold_sd=row["ripple_filter_threshold_sd "],
                     n_above_threshold=row["ripple_filter_num_above_threshold"],
                     lockout_period=row[
@@ -62,7 +66,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             # Theta trigger part if present
             if row.get("theta_filter_on", None):
                 theta_key = dict(
-                    epoch_key,
+                    base_key,
                     filter_phase=row["theta_filter_target_phase"],
                     reference_ntrode=row["theta_filter_reference_ntrode"],
                     lockout_period=row[
@@ -73,7 +77,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             # Speed conditional part if present
             if row.get("speed_filter_on", None):
                 speed_key = dict(
-                    epoch_key,
+                    base_key,
                     speed_threshold=row["speed_filter_threshold"],
                     active_above_threshold=row[
                         "speed_filter_on_above_threshold"
@@ -81,12 +85,20 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
                 )
                 speed_inserts.append(speed_key)
             # Spatial conditional part if present
-            # TODO
+            spatial_nodes = row.get("spatial_filter_nodes", None)
+            if spatial_nodes is not None:
+                spatial_key = dict(
+                    base_key,
+                    nodes=spatial_nodes
+                    * row.spatial_filter_cameras_cm_per_pixel,
+                )
+                spatial_inserts.append(spatial_key)
         # insert keys
         self.insert(epoch_inserts)
         self.RippleTrigger.insert(ripple_inserts)
         self.ThetaTrigger.insert(theta_inserts)
         self.SpeedConditional.insert(speed_inserts)
+        self.SpatialConditional.insert(spatial_inserts)
 
     class RippleTrigger(SpyglassMixin, dj.Part):
         definition = """
