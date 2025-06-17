@@ -1,4 +1,10 @@
+import re
+
 import datajoint as dj
+from ndx_optogenetics import (
+    OpticalFiberLocationsTable,
+    OptogeneticVirusInjection,
+)
 
 from spyglass.common import Nwbfile, Session, TaskEpoch
 from spyglass.utils.dj_mixin import SpyglassMixin
@@ -171,8 +177,9 @@ class VirusInjection(SpyglassMixin, dj.Manual):
     definition = """
     # Virus injection information
     -> Session
-    -> Virus
     injection_object_id: varchar(64)  # object id of the injection
+    ---
+    -> Virus
     name: varchar(255)  # name of the injection
     description: varchar(255)  # description of the injection
     hemisphere: enum('left', 'right')  # hemisphere of the injection
@@ -188,6 +195,17 @@ class VirusInjection(SpyglassMixin, dj.Manual):
     """
 
     def insert_from_nwb_object(self, nwb_file_name, virus_injection_object):
+        """
+        Insert a VirusInjection entry from an NWB object.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file containing the virus injection data.
+        virus_injection_object : OptogeneticVirusInjection
+            An instance of the OptogeneticVirusInjection class containing the
+            virus injection data.
+        """
         key = dict(
             nwb_file_name=nwb_file_name,
             virus_name=virus_injection_object.virus.construct_name,
@@ -211,12 +229,21 @@ class VirusInjection(SpyglassMixin, dj.Manual):
             key,
         )
 
+    def make(self, key):
+        # for use with populate_all_common
+        nwb = (Nwbfile() & key).fetch_nwb()[0]
+        for obj in nwb.objects.values():
+            if isinstance(obj, OptogeneticVirusInjection):
+                VirusInjection().insert_from_nwb_object(
+                    key["nwb_file_name"], obj
+                )
+
 
 @schema
 class OpticalFiberDevice(SpyglassMixin, dj.Manual):
     definition = """
     # Optical fiber device information
-    name: varchar(255)  # name of the device
+    fiber_name: varchar(255)  # name of the device
     ---
     model: varchar(255)  # model of the device
     manufacturer: varchar(255)
@@ -227,15 +254,37 @@ class OpticalFiberDevice(SpyglassMixin, dj.Manual):
     ferrule_diameter: float # diameter of the ferrule (in mm)
     """
 
+    def insert_from_nwb_object(self, fiber_object):
+        """
+        Insert an OpticalFiberDevice entry from an NWB object.
+
+        Parameters
+        ----------
+        fiber_object : OpticalFiberDevice
+            An instance of the OpticalFiberDevice class containing the fiber
+            device data.
+        """
+        key = dict(
+            fiber_name=fiber_object.model.fiber_name,
+            model=fiber_object.model.fiber_model,
+            manufacturer=fiber_object.model.manufacturer,
+            numerical_aperture=fiber_object.model.numerical_aperture,
+            core_diameter=fiber_object.model.core_diameter_in_um,
+            active_length=fiber_object.model.active_length_in_mm,
+            ferrule_name=re.sub(r"[^ -~]", "", fiber_object.model.ferrule_name),
+            ferrule_diameter=fiber_object.model.ferrule_diameter_in_mm,
+        )
+        self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
+
 
 @schema
 class OpticalFiberImplant(SpyglassMixin, dj.Manual):
     definition = """
     # Optical fiber implant information
     -> Session
-    -> OpticalFiberDevice
     implant_id: int
     ---
+    -> OpticalFiberDevice
     location: varchar(255)  # location of the implant
     hemisphere: enum('left', 'right')
     ap_location: float # anterior-posterior location of the implant (in mm)
@@ -245,3 +294,45 @@ class OpticalFiberImplant(SpyglassMixin, dj.Manual):
     roll: float
     yaw: float
     """
+
+    def insert_from_nwb_object(self, nwb_file_name, implant_table_object):
+        """
+        Insert an OpticalFiberImplant entry from an NWB object.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file containing the implant data.
+        implant_object : OpticalFiberLocationsTable
+            An instance of the OpticalFiberLocationsTable class containing the
+            implant data.
+        """
+        inserts = []
+        for row in implant_table_object:
+            key = dict(
+                nwb_file_name=nwb_file_name,
+                fiber_name=row.optical_fiber.values[0].model.fiber_name,
+                implant_id=row.index.values[0],
+                location=row.location.values[0],
+                hemisphere=row.hemisphere.values[0],
+                ap_location=row.ap_in_mm.values[0],
+                ml_location=row.ml_in_mm.values[0],
+                dv_location=row.dv_in_mm.values[0],
+                pitch=row.pitch_in_deg.values[0],
+                roll=row.roll_in_deg.values[0],
+                yaw=row.yaw_in_deg.values[0],
+            )
+            inserts.append(key)
+
+        for fiber_obj in implant_table_object.optical_fiber:
+            OpticalFiberDevice().insert_from_nwb_object(fiber_obj)
+        self.insert(inserts, skip_duplicates=True)
+
+    def make(self, key):
+        # for use with populate_all_common
+        nwb = (Nwbfile() & key).fetch_nwb()[0]
+        for obj in nwb.objects.values():
+            if isinstance(obj, OpticalFiberLocationsTable):
+                OpticalFiberImplant().insert_from_nwb_object(
+                    key["nwb_file_name"], obj
+                )
