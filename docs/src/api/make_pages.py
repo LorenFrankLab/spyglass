@@ -1,5 +1,4 @@
-"""Generate the api pages and navigation.
-"""
+"""Generate the api pages and navigation."""
 
 from pathlib import Path
 
@@ -13,7 +12,11 @@ add_limit = None
 
 nav = mkdocs_gen_files.Nav()
 for path in sorted(Path("src/spyglass/").glob("**/*.py")):
-    if path.stem in ignored_stems or "cython" in path.stem:
+    if (
+        path.stem in ignored_stems
+        or "cython" in path.stem
+        or "checkpoint" in path.stem
+    ):
         continue
     rel_path = path.relative_to("src/spyglass")
 

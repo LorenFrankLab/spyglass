@@ -1,10 +1,10 @@
 from contextlib import nullcontext
 from functools import cached_property
+from os import environ as os_environ
 from time import time
 from typing import List
 
 import datajoint as dj
-from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
@@ -70,6 +70,9 @@ class SpyglassMixin(ExportMixin):
 
         Checks that schema prefix is in SHARED_MODULES.
         """
+        # Uncomment to force Spyglass version check. See #439
+        # _ = self._has_updated_sg_version
+
         if self.is_declared:
             return
         if self.database and self.database.split("_")[0] not in [
@@ -88,6 +91,14 @@ class SpyglassMixin(ExportMixin):
             )
 
     # -------------------------- Misc helper methods --------------------------
+
+    def dict_to_pk(self, key):
+        """Return primary key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.primary_key}
+
+    def dict_to_full_key(self, key):
+        """Return full key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.heading.names}
 
     @property
     def camel_name(self):
@@ -113,6 +124,42 @@ class SpyglassMixin(ExportMixin):
             logger.error(f"No file_like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+    def restrict_by_list(
+        self, field: str, values: list, return_restr=False
+    ) -> QueryExpression:
+        """Restrict a field by list of values."""
+        if field not in self.heading.attributes:
+            raise KeyError(f"Field '{field}' not in {self.camel_name}.")
+        quoted_vals = '"' + '","'.join(map(str, values)) + '"'
+        restr = self & f"{field} IN ({quoted_vals})"
+        return restr if return_restr else self & restr
+
+    def get_params_blob_from_key(self, key: dict, default="default") -> dict:
+        """Get params blob from table using key, assuming 1 primary key.
+
+        Defaults to 'default' if no entry is found.
+
+        TODO: Split SpyglassMixin to SpyglassParamsMixin.
+        """
+        pk = self.primary_key[0]
+        blob_fields = [
+            k.name for k in self.heading.attributes.values() if k.is_blob
+        ]
+        if len(blob_fields) != 1:
+            raise ValueError(
+                f"Table must have only 1 blob field, found {len(blob_fields)}"
+            )
+        blob_attr = blob_fields[0]
+
+        if isinstance(key, str):
+            key = {pk: key}
+        if not isinstance(key, dict):
+            raise ValueError("key must be a dictionary")
+        passed_key = key.get(pk, None)
+        if not passed_key:
+            logger.warning("No key passed, using default")
+        return (self & {pk: passed_key or default}).fetch1(blob_attr)
 
     def find_insert_fail(self, key):
         """Find which parent table is causing an IntergrityError on insert."""
@@ -146,16 +193,16 @@ class SpyglassMixin(ExportMixin):
 
         required_fields = required_fields or cls.primary_key
         if isinstance(key, (str, dict)):  # check is either keys or substrings
-            if not all(
-                field in key for field in required_fields
-            ):  # check if all required fields are in key
-                if not len(query := cls() & key) == 1:  # check if key is unique
-                    raise KeyError(
-                        f"Key is neither fully specified nor a unique entry in"
-                        + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
-                        + f"Required fields: {required_fields}\n\tResult: {query}"
-                    )
-                key = query.fetch1("KEY")
+            if all(field in key for field in required_fields):
+                return key  # return if all required fields are present
+
+            if not len(query := cls() & key) == 1:  # check if key is unique
+                raise KeyError(
+                    "Key is neither fully specified nor a unique entry in"
+                    + f"table.\n\tTable: {cls.full_table_name}\n\tKey: {key}"
+                    + f"Required fields: {required_fields}\n\tResult: {query}"
+                )
+            key = query.fetch1("KEY")
 
         return key
 
@@ -408,7 +455,7 @@ class SpyglassMixin(ExportMixin):
         if None in experimenters:
             raise PermissionError(
                 "Please ensure all Sessions have an experimenter in "
-                + f"SessionExperimenter:\n{sess_summary}"
+                + f"Session.Experimenter:\n{sess_summary}"
             )
 
         user_name = LabMember().get_djuser_name(dj_user)
@@ -458,6 +505,16 @@ class SpyglassMixin(ExportMixin):
         if not ret:
             logger.warning(f"Please update DataJoint to {target_dj} or later.")
         return ret
+
+    @cached_property
+    def _has_updated_sg_version(self):
+        """Return True if Spyglass version is up to date."""
+        if os_environ.get("SPYGLASS_UPDATED", False):
+            return True
+
+        from spyglass.common.common_version import SpyglassVersions
+
+        return SpyglassVersions().is_up_to_date
 
     def cautious_delete(
         self, force_permission: bool = False, dry_run=False, *args, **kwargs
@@ -841,8 +898,8 @@ class SpyglassMixin(ExportMixin):
                 "Connection ID",  # t.PROCESSLIST_ID -- User connection ID
                 "User",  # t.PROCESSLIST_USER -- User
                 "Host",  # t.PROCESSLIST_HOST -- User machine
-                "Process Database",  # t.PROCESSLIST_DB -- Thread database
                 "Time (s)",  # t.PROCESSLIST_TIME -- Time in seconds
+                "Process Database",  # t.PROCESSLIST_DB -- Thread database
                 "Process",  # t.PROCESSLIST_COMMAND -- Likely Query
                 "State",  # t.PROCESSLIST_STATE
                 "Query",  # t.PROCESSLIST_INFO -- Actual query
@@ -869,8 +926,6 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
     A part table for Spyglass Group tables. Assists in propagating
     delete calls from upstream tables to downstream tables.
     """
-
-    # TODO: See #1163
 
     def delete(self, *args, **kwargs):
         """Delete master and part entries."""

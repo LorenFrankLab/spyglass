@@ -39,9 +39,9 @@ def add_member_team(common_lab, add_admin):
                 last_name="Basic",
             ),
             dict(
-                lab_member_name="This Loner",
+                lab_member_name="This Solo",
                 first_name="This",
-                last_name="Loner",
+                last_name="Solo",
             ),
         ],
         skip_duplicates=True,
@@ -55,8 +55,8 @@ def add_member_team(common_lab, add_admin):
                 admin=0,
             ),
             dict(
-                lab_member_name="This Loner",
-                google_user_name="This Loner",
+                lab_member_name="This Solo",
+                google_user_name="This Solo",
                 datajoint_user_name="this_loner",
                 admin=0,
             ),

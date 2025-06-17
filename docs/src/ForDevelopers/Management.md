@@ -3,10 +3,6 @@
 While Spyglass can help you organize your data, there are a number of things
 you'll need to do to manage users, database backups, and file cleanup.
 
-Some these tasks should be set to run regularly.
-[Cron jobs](https://www.hostinger.com/tutorials/cron-job) can help with
-automation.
-
 ## MySQL Version
 
 The Frank Lab's database is running MySQL 8.0 with a number of custom
@@ -62,7 +58,7 @@ expand the privileges of the `dj_user` role.
 ### Setting Passwords
 
 New users are generated with the password `temppass`. In order to change this,
-we recommend downloading DataJoint `0.14.2` (currently pre-release).
+we recommend downloading DataJoint `0.14.2` or later.
 
 ```console
 git clone https://github.com/datajoint/datajoint-python/
@@ -221,38 +217,30 @@ mysqldump --all-databases --max_allowed_packet=512M --user=${back_user} --passwo
 
 </details>
 
-## File Cleanup
+## Table/File Cleanup
 
 Spyglass is designed to hold metadata for analyses that reference NWB files on
 disk. There are several tables that retain lists of files that have been
 generated during analyses. If someone deletes analysis entries, files will still
 be on disk.
 
-Additionally, there are periphery tables such as `IntervalList` which are used
-to store entries created by downstream tables. These entries are not
-automatically deleted when the downstream entry is removed. To minimize interference
-with ongoing user entry creation, we recommend running these cleanups on a less frequent
-basis (e.g. weekly).
+Additionally, there are key tables such as `IntervalList` and `AnalysisNwbfile`,
+which are used to store entries created by downstream tables. These entries are
+not always deleted when the downstream entry is removed, creating 'orphans'.
 
-To remove orphaned files and entries, we run the following commands in our cron jobs:
+`IntervalList` relies on a string primary key uniqueness. This could cause
+issues if a user were to (a) run a `make` function on a computed table that
+generates a new `IntervalList` entry, then (b) delete the computed entry but not
+the `IntervalList` entry, then (c) run the `make` function again. If this `make`
+function were set up to skip duplicates, it may cause the new computed entry to
+attach to the old `IntervalList` entry. While all Spyglass `make`s are
+idempotent (using `replace` or throwing errors on duplicates), user custom
+`make` functions may not be. Spyglass takes the additional precaution of
+removing all `IntervalList` orphan entries with each delete call.
 
-```python
-from spyglass.common import AnalysisNwbfile, IntervalList
-from spyglass.spikesorting import SpikeSorting
-from spyglass.common.common_nwbfile import schema as nwbfile_schema
-from spyglass.decoding.v1.sorted_spikes import schema as spikes_schema
-from spyglass.decoding.v1.clusterless import schema as clusterless_schema
-
-
-def main():
-    AnalysisNwbfile().nightly_cleanup()
-    SpikeSorting().nightly_cleanup()
-    IntervalList().cleanup()
-    nwbfile_schema.external['analysis'].delete(delete_external_files=True))
-    nwbfile_schema.external['raw'].delete(delete_external_files=True))
-    spikes_schema.external['analysis'].delete(delete_external_files=True))
-    clusterless_schema.external['analysis'].delete(delete_external_files=True))
-```
-
-The `delete` calls above use DataJoint's `ExternalTable.delete` method, which
-will remove files from disk that are no longer referenced in the database.
+Similar orphan cleanups for `Nwbfile`, `AnalysisNwbfile`, `SpikeSorting`, and
+`DecodingOutput` are not as critical and can be run less frequently.
+[this script](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/run_jobs.sh)
+in our cron jobs. See
+[this README](https://github.com/LorenFrankLab/spyglass/blob/master/maintenance_scripts/README.md)
+for additional information on how to set up cron jobs.

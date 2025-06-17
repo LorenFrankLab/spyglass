@@ -7,6 +7,7 @@ import numpy as np
 from datajoint.utils import to_camel_case
 from pandas import DataFrame
 
+from spyglass.common import get_position_interval_epoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
@@ -23,6 +24,31 @@ schema = dj.schema("position_v1_trodes_position")
 class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the position (centroid, velocity, orientation)
+
+    Parameters
+    ----------
+    trodes_pos_params_name: str
+        Name for this set of parameters
+    params: dict
+        Dictionary of parameters for position calculation, including...
+        max_LED_separation: float
+            Maximum separation between LEDs in pixels
+        max_plausible_speed: float
+            Maximum plausible speed in cm/s
+        position_smoothing_duration: float
+            Duration for smoothing position in seconds
+        speed_smoothing_std_dev: float
+            Standard deviation for smoothing speed in seconds
+        orient_smoothing_std_dev: float
+            Standard deviation for smoothing orientation in radians
+        led1_is_front: int
+            Whether LED1 is the front LED (1) or not (0)
+        is_upsampled: int
+            Whether the data is upsampled (1) or not (0)
+        upsampling_sampling_rate: float
+            Sampling rate for upsampling in Hz
+        upsampling_interpolation_method: str
+            Interpolation method for upsampling (e.g., 'linear', 'cubic')
     """
 
     definition = """
@@ -176,9 +202,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         logger.info(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         raw_position = RawPosition.PosObject & key
         spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
@@ -213,14 +237,10 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
         from ..position_merge import PositionOutput
 
-        # TODO: change to mixin camelize function
-        part_name = to_camel_case(self.table_name.split("__")[-1])
-
         # TODO: The next line belongs in a merge table function
         PositionOutput._merge_insert(
-            [orig_key], part_name=part_name, skip_duplicates=True
+            [orig_key], part_name=self.camel_name, skip_duplicates=True
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     @staticmethod
     def generate_pos_components(*args, **kwargs):
@@ -249,6 +269,21 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         return IntervalPositionInfo._data_to_df(
             self.fetch_nwb()[0], prefix="", add_frame_ind=add_frame_ind
         )
+
+    def fetch_pose_dataframe(self):
+        """Not applicable for TrodesPosV1 pipeline."""
+        raise NotImplementedError("No pose data for TrodesPosV1")
+
+    def fetch_video_path(self, key=dict()):
+        """Fetch the video path for the position data."""
+        key = (self & key).fetch1("KEY")
+        nwb_file_name, interval_list_name = self.fetch1(
+            "nwb_file_name", "interval_list_name"
+        )
+        epoch = get_position_interval_epoch(nwb_file_name, interval_list_name)
+        return get_video_info({"nwb_file_name": nwb_file_name, "epoch": epoch})[
+            0
+        ]
 
 
 @schema
@@ -287,13 +322,8 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
         logger.info("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
+        epoch = get_position_interval_epoch(
+            key["nwb_file_name"], key["interval_list_name"]
         )
 
         (

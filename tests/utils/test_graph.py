@@ -18,6 +18,7 @@ def restr_graph(leaf, verbose, lin_merge_key):
     yield RestrGraph(
         seed_table=leaf,
         leaves={leaf.full_table_name: True},
+        include_files=True,
         cascade=True,
         verbose=verbose,
     )

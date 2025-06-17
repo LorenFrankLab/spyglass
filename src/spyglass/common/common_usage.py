@@ -67,11 +67,26 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, warning=True) -> None:
-        """Log a deprecation warning for a feature."""
+    def deprecate_log(cls, name, alt=None, warning=True) -> None:
+        """Log a deprecation warning for a feature.
+
+        Parameters
+        ----------
+        name : str
+            The name of the feature to deprecate.
+        alt : str, optional
+            What to use instead. Default no such message.
+        warning : bool, optional
+            Whether to log a warning. Default is True.
+        """
         if warning:
-            logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
-        cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
+            msg = f"\n\tUse {alt} instead" if alt else ""
+            logger.warning(
+                f"DEPRECATION scheduled for Spyglass 0.6.0: {name}{msg}"
+            )
+        cls.insert1(
+            dict(dj_user=dj.config["database.user"], function=name[:64])
+        )
 
 
 @schema
@@ -193,7 +208,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         """Add external tables to a RestrGraph for a given restriction/key.
 
         Tables added as nodes with restrictions based on file paths. Names
-        added to visited set to appear in restr_ft obj bassed to SQLDumpHelper.
+        added to visited set to appear in restr_ft obj passed to SQLDumpHelper.
+
+        This process adds files explicitly listed in the ExportSelection.File
+        by the logging process. A separate RestrGraph process, cascade_files, is
+        used to track all tables with fk-ref to file tables, and cascade up to
+        externals.
 
         Parameters
         ----------
@@ -207,7 +227,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-
+        # only add items if found respective file types
         if raw_files := self._list_raw_files(key):
             raw_tbl = self._externals["raw"]
             raw_name = raw_tbl.full_table_name
@@ -227,8 +247,6 @@ class ExportSelection(SpyglassMixin, dj.Manual):
                 analysis_name, ft=analysis_tbl, restr=analysis_restr
             )
             restr_graph.visited.add(analysis_name)
-
-        restr_graph.visited.update({raw_name, analysis_name})
 
         return restr_graph
 
@@ -255,9 +273,18 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         )
 
         restr_graph = RestrGraph(
-            seed_table=self, leaves=leaves, verbose=verbose, cascade=cascade
+            seed_table=self,
+            leaves=leaves,
+            verbose=verbose,
+            cascade=False,
+            include_files=True,
         )
-        return self._add_externals_to_restr_graph(restr_graph, key)
+        restr_graph = self._add_externals_to_restr_graph(restr_graph, key)
+
+        if cascade:
+            restr_graph.cascade()
+
+        return restr_graph
 
     def preview_tables(self, **kwargs) -> list[dj.FreeTable]:
         """Return a list of restricted FreeTables for a given restriction/key.
@@ -376,7 +403,7 @@ class Export(SpyglassMixin, dj.Computed):
                 + f" and including {links} instead"
             )
             unlinked_files.update(links)
-        file_paths = unlinked_files  # TODO: what if linked items have links?
+        file_paths = unlinked_files
 
         table_inserts = [
             {**key, **rd, "table_id": i}

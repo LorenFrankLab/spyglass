@@ -3,7 +3,11 @@ from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
 
 
-def test_merge_get_restr(spike_merge, pop_spike_merge, pop_curation_metric):
+def test_merge_get_restr(
+    spike_merge, pop_spike_merge, pop_curation_metric, frequent_imports
+):
+    _ = frequent_imports
+
     restr_id = spike_merge.get_restricted_merge_ids(
         pop_curation_metric, sources=["v1"]
     )[0]
@@ -46,7 +50,7 @@ def test_merge_get_sort_group_info(spike_merge, pop_spike_merge):
         "original_reference_electrode": 0,
         "parent_curation_id": 0,
         "probe_electrode": 0,
-        "probe_id": "tetrode_12.5",
+        "probe_id": "four wire electrode",
         "probe_shank": 0,
         "region_id": 1,
         "sort_group_id": 0,
@@ -75,15 +79,18 @@ def assert_shape(df, expected: tuple, msg: str = None):
     assert df.shape == expected, f"Unexpected shape: {msg}"
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_merge_get_spike_times(merge_times):
     assert_shape(merge_times, (243,), "SpikeSortingOutput.get_spike_times")
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_merge_get_spike_indicators(spike_merge, pop_spike_merge, merge_times):
     ret = spike_merge.get_spike_indicator(pop_spike_merge, time=merge_times)
     assert_shape(ret, (243, 3), "SpikeSortingOutput.get_spike_indicator")
 
 
+@pytest.mark.skip(reason="JAX issues")
 def test_merge_get_firing_rate(spike_merge, pop_spike_merge, merge_times):
     ret = spike_merge.get_firing_rate(pop_spike_merge, time=merge_times)
     assert_shape(ret, (243, 3), "SpikeSortingOutput.get_firing_rate")

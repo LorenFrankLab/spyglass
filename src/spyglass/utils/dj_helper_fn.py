@@ -3,6 +3,7 @@
 import inspect
 import multiprocessing.pool
 import os
+import re
 from pathlib import Path
 from typing import Iterable, List, Type, Union
 from uuid import uuid4
@@ -32,6 +33,33 @@ PERIPHERAL_TABLES = [
     "`common_nwbfile`.`nwbfile_kachery`",
     "`common_nwbfile`.`nwbfile`",
 ]
+
+
+def sanitize_unix_name(name: str) -> str:
+    """Sanitize a string to be a valid unix name.
+
+    This function replaces any invalid characters with underscores and
+    removes leading and trailing whitespace. It warns the user if the name
+    has been changed.
+
+    Parameters
+    ----------
+    name : str
+        Name to sanitize.
+
+    Returns
+    -------
+    str
+        Sanitized name.
+    """
+    invalid_chars = r"[^a-zA-Z0-9_.-]+"
+    sanitized_name = re.sub(invalid_chars, "_", name.strip().replace(" ", "_"))
+    if sanitized_name != name:
+        logger.warning(
+            f"Name '{name}' contains invalid characters. "
+            + f"Sanitized to '{sanitized_name}'."
+        )
+    return sanitized_name
 
 
 def ensure_names(
@@ -77,9 +105,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -258,7 +286,6 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     )
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
-    # TODO: check that the query_expression restricts tbl - CBroz
     nwb_files = (
         query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
@@ -312,10 +339,10 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     )
 
     for file_name in nwb_files:
-        file_path = file_path_fn(file_name)
-        if not os.path.exists(file_path):  # retrieve the file from kachery.
-            # This also opens the file and stores the file object
-            get_nwb_file(file_path)
+        file_path = file_path_fn(file_name, from_schema=True)
+        if not os.path.exists(file_path):
+            # get from kachery/dandi or recompute, store in cache
+            get_nwb_file(file_path, query_expression)
 
     # logging arg only if instanced table inherits Mixin
     inst = (  # instancing may not be necessary
@@ -500,8 +527,8 @@ def _resolve_external_table(
 ):
     """Function to resolve database vs. file property discrepancies.
 
-    WARNING: This should only be used when editing file metadata. Can violate data
-    integrity if impproperly used.
+    WARNING: This should only be used when editing file metadata. Can violate
+    data integrity if improperly used.
 
     Parameters
     ----------
@@ -510,7 +537,8 @@ def _resolve_external_table(
     file_name : str
         name of the file to edit
     location : str, optional
-        which external table the file is in, current options are ["analysis", "raw], by default "analysis"
+        which external table the file is in, current options are
+        ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
     from spyglass.common.common_nwbfile import schema as common_schema
@@ -518,17 +546,15 @@ def _resolve_external_table(
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
-    external_table = (
-        common_schema.external[location] & f"filepath LIKE '%{file_name}'"
-    )
-    external_key = external_table.fetch1()
+    external_table = common_schema.external[location]
+    external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
     external_key.update(
         {
             "size": Path(filepath).stat().st_size,
             "contents_hash": dj.hash.uuid_from_file(filepath),
         }
     )
-    common_schema.external[location].update1(external_key)
+    external_table.update1(external_key)
 
 
 def make_file_obj_id_unique(nwb_path: str):

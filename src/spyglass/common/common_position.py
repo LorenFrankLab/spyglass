@@ -1,6 +1,5 @@
 import bottleneck
 import datajoint as dj
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pynwb
@@ -15,7 +14,11 @@ from position_tools import (
 from position_tools.core import gaussian_smooth
 from tqdm import tqdm_notebook as tqdm
 
-from spyglass.common.common_behav import RawPosition, VideoFile
+from spyglass.common.common_behav import (
+    RawPosition,
+    VideoFile,
+    get_position_interval_epoch,
+)
 from spyglass.common.common_interval import IntervalList  # noqa F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import raw_dir, test_mode, video_dir
@@ -36,6 +39,30 @@ schema = dj.schema("common_position")
 class PositionInfoParameters(SpyglassMixin, dj.Lookup):
     """
     Parameters for extracting the smoothed position, orientation and velocity.
+
+    Parameters
+    ----------
+    position_info_param_name : str
+        Name for this set of parameters
+    max_separation : float
+        Max distance (in cm) between head LEDs. Default is 9.0 cm
+    max_speed : float
+        Max speed (in cm/s) of animal. Default is 300.0 cm/s
+    position_smoothing_duration : float
+        Size of moving window (s) for smoothing position. Default is 0.125s
+    speed_smoothing_std_dev : float
+        Smoothing standard deviation (s) for speed. Default is 0.100 s
+    head_orient_smoothing_std_dev : float
+        Smoothing standard deviation (s) for head orientation. Default is 0.001s
+    led1_is_front : int
+        1 if 1st LED is front LED, else 1st LED is back. Default is 1.
+    is_upsampled : int
+        1 if upsampling to higher sampling rate, else 0. Default is 0.
+    upsampling_sampling_rate : float
+        The rate to be upsampled to. Default is NULL.
+    upsampling_interpolation_method : str
+        Interpolation method for upsampling. Default is 'linear'. See
+        pandas.DataFrame.interpolation for list of methods.
     """
 
     definition = """
@@ -88,9 +115,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         """Insert smoothed head position, orientation and velocity."""
         logger.info(f"Computing position for: {key}")
 
-        analysis_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         raw_position = RawPosition.PosObject & key
         spatial_series = raw_position.fetch_nwb()[0]["raw_position"]
@@ -116,8 +141,6 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         )
 
         AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
-
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 
@@ -508,6 +531,13 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
         return df
 
+    def fetch_pose_dataframe(self):
+        raise NotImplementedError("No Pose data available for this table")
+
+    def fetch_video_path(self, key=dict()):
+        key = (self & key).fetch1("KEY")
+        return (self & key).fetch_nwb()[0]["head_position"].get_comments()
+
 
 @schema
 class PositionVideo(SpyglassMixin, dj.Computed):
@@ -547,13 +577,8 @@ class PositionVideo(SpyglassMixin, dj.Computed):
         ).fetch1_dataframe()
 
         logger.info("Loading video data...")
-        epoch = (
-            int(
-                key["interval_list_name"]
-                .replace("pos ", "")
-                .replace(" valid times", "")
-            )
-            + 1
+        epoch = get_position_interval_epoch(
+            key["nwb_file_name"], key["interval_list_name"]
         )
         video_info = (VideoFile() & {**nwb_dict, "epoch": epoch}).fetch1()
         io = pynwb.NWBHDF5IO(raw_dir + "/" + video_info["nwb_file_name"], "r")

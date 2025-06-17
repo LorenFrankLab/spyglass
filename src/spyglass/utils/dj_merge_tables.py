@@ -1,7 +1,7 @@
+import re
 from inspect import getmodule
 from itertools import chain as iter_chain
 from pprint import pprint
-from re import sub as re_sub
 from time import time
 from typing import List, Union
 
@@ -27,10 +27,10 @@ MERGE_DEFINITION = (
 def is_merge_table(table):
     """Return True if table fields exactly match Merge table."""
 
-    def trim_def(definition):
-        return re_sub(
-            r"\n\s*\n", "\n", re_sub(r"#.*\n", "\n", definition.strip())
-        ).replace(" ", "")
+    def trim_def(definition):  # ignore full-line comments
+        no_comment = re.sub(r"^\s*#.*\n", "\n", definition, flags=re.MULTILINE)
+        no_blanks = re.sub(r"\n\s*\n", "\n", no_comment.strip())
+        return no_blanks.replace(" ", "")
 
     if isinstance(table, str):
         table = dj.FreeTable(dj.conn(), table)
@@ -261,8 +261,8 @@ class Merge(ExportMixin, dj.Manual):
         datajoint.expression.Union
         """
 
-        parts = [
-            cls() * p  # join with master to include sec key (i.e., 'source')
+        parts = [  # join with master to include sec key (i.e., 'source')
+            cls().join(p, log_export=False)
             for p in cls._merge_restrict_parts(
                 restriction=restriction,
                 add_invalid_restrict=False,
@@ -560,7 +560,16 @@ class Merge(ExportMixin, dj.Manual):
                 .fetch_nwb()
             )
             if return_merge_ids:
-                merge_ids.extend([k[self._reserved_pk] for k in source_restr])
+                merge_ids.extend(
+                    [
+                        (
+                            self
+                            & self._merge_restrict_parts(file)
+                            & source_restr
+                        ).fetch1(self._reserved_pk)
+                        for file in nwb_list
+                    ]
+                )
         if return_merge_ids:
             return nwb_list, merge_ids
         return nwb_list
@@ -707,7 +716,11 @@ class Merge(ExportMixin, dj.Manual):
             self._source_class_dict = {
                 part_name: getattr(module, part_name)
                 for part_name in self.parts(camel_case=True)
+                if hasattr(module, part_name)
             }
+        for part_name in self.parts(camel_case=True):
+            if part_name not in self._source_class_dict:
+                logger.warning(f"Missing code for {part_name}")
         return self._source_class_dict
 
     def _normalize_source(
@@ -737,8 +750,6 @@ class Merge(ExportMixin, dj.Manual):
         source: Union[str, dict, dj.Table]
             Accepts a CamelCase name of the source, or key as a dict, or a part
             table.
-        init: bool, optional
-            Default False. If True, returns an instance of the class.
 
         Returns
         -------
@@ -943,7 +954,8 @@ def delete_downstream_merge(
     from spyglass.utils.dj_mixin import SpyglassMixin
 
     ActivityLog().deprecate_log(
-        "delete_downstream_merge. Use Table.delete_downstream_merge"
+        name="delete_downstream_merge",
+        alternate="Table.delete_downstream_merge",
     )
 
     if not isinstance(table, SpyglassMixin):

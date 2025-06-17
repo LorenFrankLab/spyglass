@@ -11,16 +11,17 @@ import datajoint as dj
 from spyglass.utils.logging import logger
 
 SHARED_MODULES = [
+    "behavior",
     "common",
-    "spikesorting",
     "decoding",
-    "position",
-    "linearization",
-    "ripple",
     "lfp",
-    "waveform",
+    "linearization",
     "mua",
+    "position",
+    "ripple",
     "sharing",
+    "spikesorting",
+    # EDIT: waveform not used as a spyglass schema prefix
 ]
 GRANT_ALL = "GRANT ALL PRIVILEGES ON "
 GRANT_SEL = "GRANT SELECT ON "
@@ -50,11 +51,14 @@ class DatabaseSettings:
         - dj_user:   select for all prefix, all for user prefix, all for shared
         - dj_admin:     all for all prefix
 
-        Note: To add dj_user role to all those with common access, run:
-            query = "SELECT user, host FROM mysql.db WHERE Db LIKE 'common%';"
-            users = dj.conn().query(query).fetchall()
-            for user in users:
-                dj.conn().query(f"GRANT dj_user TO '{user[0][0]}'@'%';")
+        Note: To add dj_user role to all those with common access, run...
+
+        ```python
+        query = "SELECT user, host FROM mysql.db WHERE Db LIKE 'common%';"
+        users = dj.conn().query(query).fetchall()
+        for user in users:
+            dj.conn().query(f"GRANT dj_user TO '{user[0][0]}'@'%';")
+        ```
 
         Parameters
         ----------

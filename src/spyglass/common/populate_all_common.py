@@ -1,6 +1,7 @@
 from typing import List, Union
 
 import datajoint as dj
+from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
     PositionSource,
@@ -16,6 +17,7 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
@@ -80,9 +82,12 @@ def single_transaction_make(
                 for parent in parents[1:]:
                     key_source *= parent.proj()
 
-            if table.__name__ == "PositionSource":
+            table_name = to_camel_case(table.table_name)
+            if table_name == "PositionSource":
                 # PositionSource only uses nwb_file_name - full calls redundant
                 key_source = dj.U("nwb_file_name") & key_source
+            if table_name in ["ImportedPose", "ImportedLFP"]:
+                key_source = Nwbfile()
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
@@ -116,6 +121,8 @@ def populate_all_common(
     List
         A list of keys for InsertError entries if any errors occurred.
     """
+    from spyglass.lfp.lfp_imported import ImportedLFP
+    from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
     declare_all_merge_tables()
@@ -135,14 +142,16 @@ def populate_all_common(
             DIOEvents,  # Depends on Session
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
+            SensorData,  # Depends on Session
             # NwbfileKachery, # Not used by default
-            # SensorData, # Not used by default. Generates large files
         ],
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
             PositionSource,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
+            ImportedPose,  # Depends on Session
+            ImportedLFP,  # Depends on ElectrodeGroup
         ],
         [
             RawPosition,  # Depends on PositionSource

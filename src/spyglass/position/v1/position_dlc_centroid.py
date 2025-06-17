@@ -28,8 +28,35 @@ schema = dj.schema("position_v1_dlc_centroid")
 
 @schema
 class DLCCentroidParams(SpyglassMixin, dj.Manual):
-    """
-    Parameters for calculating the centroid
+    """Parameters for calculating the centroid
+
+    Parameters
+    ----------
+    dlc_centroid_params_name : str
+        Name for this set of parameters
+    params : dict
+        Dictionary of parameters, including...
+        centroid_method : str
+            Method for determining centroid. Options are:
+            'two_pt_centroid': Two-point centroid calculation
+            'four_led_centroid': Four-LED centroid calculation
+            'null': No centroid calculation
+        points : dict
+            Dictionary of bodyparts to use for centroid calculation
+        interpolate : bool
+            Whether to interpolate over NaNs in the data
+        interp_params : dict
+            Parameters for interpolation like max_cm_to_interp: float
+        smooth : bool
+            Whether to smooth the data
+        smoothing_params : dict
+            Parameters for smoothing the data
+            smoothing_duration : float
+            smooth_method : str (e.g. 'moving_avg')
+        max_LED_separation : float
+            Maximum separation between LEDs for centroid calculation
+        speed_smoothing_std_dev : float
+            Standard deviation for Gaussian smoothing of speed data
     """
 
     definition = """
@@ -179,6 +206,28 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
         points = params.get("points")
         centroid_method = params.get("centroid_method")
+
+        # Handle the null centroid case
+        if centroid_method == "null":
+            logger.logger.warning("Null centroid method selected")
+            analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+            null_obj_id = AnalysisNwbfile().add_nwb_object(
+                analysis_file_name, pd.DataFrame()
+            )
+            key.update(
+                {
+                    "analysis_file_name": analysis_file_name,
+                    "dlc_position_object_id": null_obj_id,
+                    "dlc_velocity_object_id": null_obj_id,
+                }
+            )
+            AnalysisNwbfile().add(
+                nwb_file_name=key["nwb_file_name"],
+                analysis_file_name=key["analysis_file_name"],
+            )
+            self.insert1(key)
+            return
+
         required_points = _key_to_points.get(centroid_method)
         for point in required_points:
             if points[point] not in self._available_bodyparts(key):
@@ -358,4 +407,5 @@ _key_to_points = {
     "four_led_centroid": ["greenLED", "redLED_L", "redLED_C", "redLED_R"],
     "two_pt_centroid": ["point1", "point2"],
     "one_pt_centroid": ["point1"],
+    "null": [],
 }
