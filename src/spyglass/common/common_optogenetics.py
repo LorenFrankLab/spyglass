@@ -1,12 +1,13 @@
 import re
 
 import datajoint as dj
+import numpy as np
 from ndx_optogenetics import (
     OpticalFiberLocationsTable,
     OptogeneticVirusInjection,
 )
 
-from spyglass.common import Nwbfile, Session, TaskEpoch
+from spyglass.common import IntervalList, Nwbfile, Session, TaskEpoch
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_optogenetics")
@@ -105,6 +106,27 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         self.ThetaTrigger.insert(theta_inserts)
         self.SpeedConditional.insert(speed_inserts)
         self.SpatialConditional.insert(spatial_inserts)
+
+    def get_stimulus_on_intervals(self, key):
+        key = (self & key).fetch1("KEY")
+        nwb = (self & key).fetch_nwb()[0]
+        stimulus = nwb["stimulus"]
+        stim_time = stimulus.timestamps
+        stim_data = stimulus.data
+        # restrict data to the epoch
+        epoch_interval = (IntervalList & (TaskEpoch & key)).fetch_interval()
+        epoch_ind = epoch_interval.contains(stim_time, as_indices=True)
+        stim_time = stim_time[epoch_ind]
+        stim_data = stim_data[epoch_ind]
+        # make interval for stimulu on times
+        t_on = stim_time[stim_data == 1]
+        t_off = stim_time[stim_data == 0]
+        if t_off[0] < t_on[0]:
+            t_off = t_off[1:]
+        if t_on[-1] > t_off[-1]:
+            t_off.append(stim_time[-1])
+        stim_on_interval = np.array([t_on, t_off]).T
+        return stim_on_interval
 
     class RippleTrigger(SpyglassMixin, dj.Part):
         definition = """
