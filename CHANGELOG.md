@@ -125,7 +125,7 @@ ImportedLFP().drop()
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
     - Reconcile spikeinterface value for `channel_id` when `channel_name` column
-      present in nwb file electrodes table #1310
+      present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
       `SortedSpikesGroup.fetch_spike_data` #1320
 - Behavior
