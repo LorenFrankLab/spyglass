@@ -82,6 +82,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
         
     def plot_intervals(self, start_time=0, return_fig=False):
         """
+        Plots all intervals in the given IntervalList table
+
         Parameters
         ----------    
         start_time: int (seconds)
@@ -89,8 +91,11 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         Returns
         -------
-        None
-            this function displays a timeline plot of the intervals you want to compare
+        fig: matplotlib.figure.Figure
+            if return_fig is True
+        None: 
+            if return_fig is False
+
         """
         interval_lists_df = pd.DataFrame(self)
         interval_list_names = interval_lists_df['interval_list_name'].values
@@ -108,7 +113,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             return [
                 ((i[0] - start_time) / 60, (i[1] - i[0]) / 60)
                 for i in intervals
-            ]  # return time in seconds
+            ]  # return time in minutes
 
         all_intervals = interval_lists_df['valid_times'].values
         for i, (intervals, color) in enumerate(zip(all_intervals, custom_palette)):
@@ -116,7 +121,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
             ax.broken_barh(int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7)
 
         ax.set_ylim(5, 10 * (n_compare + 1) + 5)
-        ax.set_xlabel("time from start (s)", fontsize=16)
+        ax.set_xlabel("time from start (min)", fontsize=16)
         ax.set_yticks(np.arange(n_compare) * 10 + 15, labels=interval_list_names, fontsize=16)
         ax.set_xticks(ax.get_xticks(), labels=ax.get_xticklabels(), fontsize=16)
 
