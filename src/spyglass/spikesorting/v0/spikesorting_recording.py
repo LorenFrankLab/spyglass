@@ -312,7 +312,6 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
-
     definition = """
     -> SpikeSortingRecordingSelection
     ---
@@ -322,36 +321,30 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
-    _use_transaction, _allow_insert = False, True
 
-    def make(self, key):
-        """Populates the SpikeSortingRecording table with the recording data.
+    def make_fetch(self, key):
+        # make decomposes passed obj, so make it a list if only one item
+        return [self._get_sort_interval_valid_times(key)]
 
-        1. Fetches ...
-            - Sort interval and parameters from SpikeSortingRecordingSelection
-                and SpikeSortingPreprocessingParameters
-            - Channel IDs and reference electrode from SortGroup, filtered by
-                filtereing parameters
-        2. Saves the recording data to the recording directory
-        3. Inserts the path to the recording data into SpikeSortingRecording
-        """
+    def make_compute(self, key, sort_interval_valid_times):
         rec_info = self._make_file(key)
-
-        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         sort_interval_valid_times.set_key(
             nwb_file_name=key["nwb_file_name"],
             interval_list_name=rec_info["name"],
             pipeline="spikesorting_recording_v0",
         )
-        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
-
         self_insert = dict(
             key,
             sort_interval_list_name=rec_info["name"],
             recording_path=rec_info["path"],
         )
+        return self_insert, sort_interval_valid_times
+
+    def make_insert(self, key, self_insert, sort_interval_valid_times):
+        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
         self.insert1(self_insert)
         self._record_environment(self_insert)
+
 
     def _record_environment(self, key):
         """Record environment details for this recording."""

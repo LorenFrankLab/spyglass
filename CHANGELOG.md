@@ -128,6 +128,7 @@ ImportedLFP().drop()
       present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
       `SortedSpikesGroup.fetch_spike_data` #1320
+    - Implement short-transaction `SpikeSortingRecording.make` #XXXX
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
