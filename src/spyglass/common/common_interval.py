@@ -1,6 +1,7 @@
 import itertools
 from functools import reduce
 from typing import Iterable, List, Optional, Tuple, TypeVar, Union
+import warnings
 
 import datajoint as dj
 import matplotlib.pyplot as plt
@@ -98,9 +99,16 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         """
         interval_lists_df = pd.DataFrame(self)
+
+        if len(interval_lists_df['nwb_file_name'].unique()) > 1:
+            raise ValueError('>1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name.')
+
         interval_list_names = interval_lists_df['interval_list_name'].values
 
         n_compare = len(interval_list_names)
+
+        if n_compare > 100:
+            warnings.warn(f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.", UserWarning)
 
         # plot broken bar horizontals
         fig, ax = plt.subplots(figsize=(20, 2 / 3 * n_compare))
