@@ -99,9 +99,10 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     ]
                 )
 
-        IntervalList().insert(interval_keys, **kwargs)
-        self.insert(master_keys, **kwargs)
-        self.BodyPart().insert(part_keys, **kwargs)
+        with self.connection.transaction:
+            IntervalList().insert(interval_keys, **kwargs)
+            self.insert(master_keys, **kwargs)
+            self.BodyPart().insert(part_keys, **kwargs)
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
