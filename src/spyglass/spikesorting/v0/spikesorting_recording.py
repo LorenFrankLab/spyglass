@@ -345,7 +345,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         self.insert1(self_insert)
         self._record_environment(self_insert)
 
-
     def _record_environment(self, key):
         """Record environment details for this recording."""
         from spyglass.spikesorting.v0 import spikesorting_recompute as rcp
