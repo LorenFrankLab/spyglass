@@ -128,7 +128,8 @@ ImportedLFP().drop()
     - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
-    - Update transaction and parallel make settings for `v0` and `v1` `SpikeSorting` tables #1270
+    - Update transaction and parallel make settings for `v0` and `v1`
+      `SpikeSorting` tables #1270
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
