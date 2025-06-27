@@ -613,7 +613,7 @@ def _quick_get_analysis_path(file: str):
     if path.exists():
         return path
 
-    print(f"File {file} not found in {analysis_dir}")
+    logger.warning(f"File {file} not found in {analysis_dir}")
     return None
 
 
