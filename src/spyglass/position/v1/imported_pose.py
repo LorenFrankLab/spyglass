@@ -61,7 +61,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                 # use the timestamps from the first body part to define valid times
                 timestamps = list(obj.pose_estimation_series.values())[
                     0
-                ].timestamps[:]
+                ].get_timestamps()
                 sampling_rate = estimate_sampling_rate(
                     timestamps, filename=nwb_file_name
                 )
@@ -128,9 +128,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         index = None
         pose_df = {}
         body_parts = list(pose_estimations.keys())
-        index = pd.Index(
-            pose_estimations[body_parts[0]].timestamps[:], name="time"
-        )
+        index = pose_estimations[body_parts[0]].get_timestamps()
         for body_part in body_parts:
             bp_data = pose_estimations[body_part].data
             part_df = {
