@@ -1,4 +1,5 @@
 import os
+import sys
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
@@ -207,6 +208,26 @@ class SpyglassMixin(ExportMixin):
             key = query.fetch1("KEY")
 
         return key
+
+    def ensure_single_entry(self, key: dict = dict()):
+        """Ensure that the key corresponds to a single entry in the table.
+
+        Parameters
+        ----------
+        key : dict
+            The key to check.
+
+        Returns
+        -------
+        dict
+            The key if it corresponds to a single entry, otherwise raises an error.
+        """
+        if len(self & key) != 1:
+            raise KeyError(
+                f"Please restrict {self.full_table_name} to 1 entry when calling "
+                f"{sys._getframe(1).f_code.co_name}(). "
+                f"Found {len(self & key)} entries"
+            )
 
     # ------------------------------- fetch_nwb -------------------------------
 

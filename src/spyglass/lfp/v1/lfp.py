@@ -193,10 +193,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a single dataframe."""
-        if not len(self) == 1:
-            raise ValueError(
-                "LFPV1.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,

@@ -489,10 +489,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetches the position data as a pandas dataframe."""
-        if not len(self) == 1:
-            raise ValueError(
-                "IntervalPositionInfo.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod

@@ -266,10 +266,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the marks in a readable format"""
-        if not len(self) == 1:
-            raise ValueError(
-                "UnitMarks.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
@@ -454,10 +451,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the first dataframe"""
-        if not len(self) == 1:
-            raise ValueError(
-                "UnitMarksIndicator.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
