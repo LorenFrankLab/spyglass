@@ -216,10 +216,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -923,21 +923,29 @@ class SpyglassMixin(ExportMixin):
         return df
 
     # --------------------------- Check disc usage ------------------------------
-    def get_table_storage_usage(self):
+    def get_table_storage_usage(self, human_readable=False, parallel=False):
         """Total size of all analysis files in the table.
         Uses the analysis_file_name field to find the file paths and sum their
         sizes.
+        Parameters
+        ----------
+        human_readable : bool, optional
+            If True, return a human-readable string of the total size.
+            Default False, returns total size in bytes.
 
         Returns
         -------
-        tuple
-            (human-readable string, total size in bytes)
+        Union[str, int]
+            Total size of all analysis files in the table. If human_readable is
+            True, returns a string with the size in bytes, KiB, MiB, GiB, TiB,
+            or PiB. If human_readable is False, returns the total size in bytes.
+
         """
         if "analysis_file_name" not in self.heading.names:
             logger.warning(
                 f"{self.full_table_name} does not have an analysis_file_name field."
             )
-            return "0 Mib", 0
+            return "0 Mib" if human_readable else 0
         file_names = self.fetch("analysis_file_name")
         file_paths = [
             _quick_get_analysis_path(file_name) for file_name in file_names
@@ -945,14 +953,15 @@ class SpyglassMixin(ExportMixin):
         file_paths = [path for path in file_paths if path is not None]
         file_sizes = [os.stat(path).st_size for path in file_paths]
         total_size = sum(file_sizes)
+        if not human_readable:
+            return total_size
         human_size = total_size
         for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
             if human_size < 1024.0 or unit == "PiB":
                 break
             human_size /= 1024.0
         human_size = f"{human_size:.2f} {unit}"
-
-        return human_size, total_size
+        return human_size
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
