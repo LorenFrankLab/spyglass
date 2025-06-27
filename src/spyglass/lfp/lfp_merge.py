@@ -46,6 +46,7 @@ class LFPOutput(_Merge, SpyglassMixin):
     def fetch1_dataframe(self, *attrs, **kwargs):
         """Fetch a single dataframe from the merged table."""
         # Note: `proj` below facilitates operator syntax eg Table & restrict
+        self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb(self.proj())[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,

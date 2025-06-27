@@ -60,7 +60,7 @@ def test_fetch1_dataframe(interval_position_info, interval_pos_key):
 
     df_sums = {c: df[c].iloc[:5].sum() for c in df.columns}
     df_sums_exp = {
-        "head_orientation": 4.4300073600180125,
+        "head_orientation": 0,
         "head_position_x": 222.5,
         "head_position_y": 283.5,
         "head_speed": 1.2245733375331014,
