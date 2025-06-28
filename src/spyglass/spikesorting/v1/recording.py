@@ -662,9 +662,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
             nwbfile = io.read()
             electrodes_table = nwbfile.electrodes
-            channel_names = electrodes_table.get("colnames")
-            if channel_names is None:
+            if "channel_name" not in electrodes_table.colnames:
                 return channel_ids
+            channel_names = electrodes_table["channel_name"]
             return [channel_names[ch] for ch in channel_ids]
 
 

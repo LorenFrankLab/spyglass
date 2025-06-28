@@ -560,7 +560,16 @@ class Merge(ExportMixin, dj.Manual):
                 .fetch_nwb()
             )
             if return_merge_ids:
-                merge_ids.extend([k[self._reserved_pk] for k in source_restr])
+                merge_ids.extend(
+                    [
+                        (
+                            self
+                            & self._merge_restrict_parts(file)
+                            & source_restr
+                        ).fetch1(self._reserved_pk)
+                        for file in nwb_list
+                    ]
+                )
         if return_merge_ids:
             return nwb_list, merge_ids
         return nwb_list
