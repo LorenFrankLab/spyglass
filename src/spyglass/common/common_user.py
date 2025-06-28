@@ -5,7 +5,7 @@ from json import dumps as json_dumps
 from os import environ as os_environ
 from pathlib import Path
 from subprocess import run as sub_run
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import datajoint as dj
 import yaml
@@ -40,24 +40,91 @@ class UserEnvironment(dj.Manual):
     @cached_property
     def env(self) -> Union[dict, str]:
         """Fetch the current Conda environment as a string."""
-        result = sub_run(
+        conda_export = sub_run(
             ["conda", "env", "export"],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        if result.returncode != 0:
+        if conda_export.returncode != 0:
             logger.error(
                 "Failed to retrieve the Conda environment. "
                 + "Recompute feature disabled."
             )
             return ""
 
-        return {
+        ret = {
             k: v
-            for k, v in yaml.safe_load(result.stdout).items()
+            for k, v in yaml.safe_load(conda_export.stdout).items()
             if k not in ["name", "prefix"]
         }
+
+        pip_freeze = sub_run(
+            ["pip", "freeze"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if pip_freeze.returncode != 0:
+            logger.error(
+                "Failed to retrieve the pip environment. "
+                + "Recompute feature disabled."
+            )
+            return ""
+
+        custom_install = re.compile(  # -e git+url#egg=package
+            r"^-e[ ]+git\+(?P<url>[^#]+)\#egg=(?P<package>[A-Za-z0-9_.-]+)$"
+        )
+
+        pip_custom = dict()
+        for line in pip_freeze.stdout.splitlines():
+            if re.compile(r"(feedstock|conda-forge|edeno|==)").search(line):
+                continue  # ignore file-based conda-managed packages
+            if re.compile(r"file://").search(line):
+                # capture local file paths
+                dep_name, path = line.split(" @ ", maxsplit=1)
+                pip_custom[dep_name] = path
+                continue
+            if match := custom_install.match(line.strip()):
+                # capture custom pip installs from git,
+                # replace underscores with dashes to match conda convention
+                pip_custom[match.group("package").replace("_", "-")] = (
+                    match.group("url")
+                )
+                continue
+            logger.error(
+                f"Failed to parse: {line}\nRecompute feature disabled."
+            )
+            return
+        if pip_custom:
+            logger.warning(
+                "Custom pip installs found in the environment.\n"
+                + "Recompute feature may not work as expected."
+            )
+
+        conda_pips = []  # Find the element in the dependency list that is pip
+        for conda_dep in ret.get("dependencies", []):
+            if isinstance(conda_dep, dict):
+                conda_pips = conda_dep.get("pip", None)
+                break
+
+        for i, pip_dep in enumerate(conda_pips):  # append custom pip installs
+            dep_name, version = pip_dep.split("==", maxsplit=1)
+            if dep_name in pip_custom:
+                pip_path = pip_custom.pop(dep_name)  # remove from list
+                conda_pips[i] = f"{dep_name}=={version} @ {pip_path}"
+
+        if pip_custom:  # add any remaining custom pip installs
+            logger.warning(
+                "Custom pip installs not found in the conda environment. "
+                + "Adding them to the conda environment."
+            )
+            __import__("pdb").set_trace()
+            for dep_name, pip_path in pip_custom.items():
+                # needs `==` for parsing later
+                conda_pips.append(f"{dep_name}==None @ {pip_path}")
+
+        return ret
 
     def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
@@ -218,3 +285,24 @@ class UserEnvironment(dj.Manual):
             )
 
         return not bool(mismatches)  # True if no mismatches
+
+    def get_dep_version(
+        self, dep_name: str, env_id: Optional[str] = None
+    ) -> Union[List[Dict[str, str]], Dict[str, str]]:
+        """Get the version of a specific dependency in the environment."""
+        if not env_id and len(self) > 1:
+            ret = dict()
+            for env_id in self.fetch("env_id"):
+                ret.update(self.get_dep_version(dep_name, env_id))
+            return ret
+
+        restr = f"env_id='{env_id}'" if env_id else True
+        query = self & restr
+        if not query:
+            logger.error(f"No environment found with env_id '{env_id}'.")
+            return ""
+
+        env_id, env = query.fetch1("env_id", "env")
+        dependencies = self.parse_env_dict(env)
+
+        return {env_id: dependencies.get(dep_name, "")}

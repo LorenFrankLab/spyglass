@@ -609,9 +609,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         needs_update = self & "electrodes_id is NULL or hash is NULL"
 
         for key in tqdm(needs_update):
-            analysis_file_path = AnalysisNwbfile.get_abs_path(
-                key["analysis_file_name"]
-            )
+            try:
+                analysis_file_path = AnalysisNwbfile.get_abs_path(
+                    key["analysis_file_name"]
+                )
+            except dj.DataJointError:
+                continue
             with H5File(analysis_file_path, "r") as f:
                 elect_id = f[elect_attr].attrs["object_id"]
 
