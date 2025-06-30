@@ -1,4 +1,5 @@
 import re
+from pprint import pprint
 from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
@@ -6,6 +7,8 @@ from os import environ as os_environ
 from pathlib import Path
 from subprocess import run as sub_run
 from typing import Dict, List, Optional, Union
+import json
+
 
 import datajoint as dj
 import yaml
@@ -20,6 +23,94 @@ DEFAULT_ENV_ID = (
     + os_environ.get("CONDA_DEFAULT_ENV", "base")
     + "_00"
 )
+SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
+
+
+@schema
+class CondaChannelPackages(dj.Lookup):
+    definition = """
+    channel   : varchar(127)
+    subdir="" : varchar(63)
+    package   : varchar(127)
+    """
+
+    _moitored_channels = [("edeno", "linux-64"), ("franklab", "linux-64")]
+
+    def __init__(self, *args, **kwargs):
+        """Initialize the CondaChannelPackages table."""
+        super().__init__(*args, **kwargs)
+        # Ensure the table is populated with monitored channels
+        self.insert_from_channels(self._moitored_channels)
+
+    def insert_from_channels(self, channels=None) -> List[Dict[str, str]]:
+        """Fetch package listings from all channels."""
+        ret = []
+        for channel, subdir in channels or self._moitored_channels:
+            if not (self & f'channel="{channel}"'):
+                ret.extend(self.fetch_from_channel(channel, subdir))
+        self.insert(ret, skip_duplicates=True)
+
+    def fetch_from_channel(self, channel: str, subdir: str = None) -> None:
+        """
+        Fetch package listings from ``conda search``.
+
+        Parameters
+        ----------
+        channel : str
+            Literal channel string such as ``"edeno"``.
+        subdir : str, optional
+            Subdirectory within the channel, such as ``"linux-64"``.
+            If None, the channel root is used.
+
+        Raises
+        ------
+        RuntimeError
+            When the underlying ``conda search`` call fails.
+        """
+        channel_subdir = f"{channel}/{subdir}" if subdir else channel
+        subdir_cmd = ["--subdir", subdir] if subdir else []
+
+        cmd = ["conda", "search", "-c", channel, *subdir_cmd, "--json"]
+
+        completed = sub_run(cmd, **SUBPROCESS_KWARGS)
+        if completed.returncode != 0:
+            raise RuntimeError(
+                f"Failed to fetch packages from channel {channel} with "
+                f"command: {' '.join(cmd)}\n"
+                f"Error: {completed.stderr}"
+            )
+
+        data = json.loads(completed.stdout)
+
+        existing_pachages = (self & f'channel="{channel}"').fetch("package")
+        packages = []
+        for pkg_name, builds in data.items():
+            if pkg_name in existing_pachages:
+                continue
+            if any(
+                build["channel"].rstrip("/").endswith(channel_subdir)
+                for build in builds
+            ):
+                packages.append(pkg_name)
+
+        return [
+            dict(channel=channel, subdir=subdir, package=pkg)
+            for pkg in packages
+        ]
+
+    def accept_package(self, pip_freeze_line: str) -> bool:
+        """Check if a pip freeze line is stored package."""
+        found = False
+        for channel, _ in self._moitored_channels:
+            if channel in pip_freeze_line:
+                found = channel
+                break
+        if not found:
+            return False
+        if not any(
+            channel in pip_freeze_line for channel, _ in self._moitored_channels
+        ):
+            return False
 
 
 @schema
@@ -40,12 +131,9 @@ class UserEnvironment(dj.Manual):
     @cached_property
     def env(self) -> Union[dict, str]:
         """Fetch the current Conda environment as a string."""
-        conda_export = sub_run(
-            ["conda", "env", "export"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+
+        # ---------------- Start with Conda environment export ----------------
+        conda_export = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
         if conda_export.returncode != 0:
             logger.error(
                 "Failed to retrieve the Conda environment. "
@@ -59,12 +147,8 @@ class UserEnvironment(dj.Manual):
             if k not in ["name", "prefix"]
         }
 
-        pip_freeze = sub_run(
-            ["pip", "freeze"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        # ------------------------ Fetch pip editables ------------------------
+        pip_freeze = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
         if pip_freeze.returncode != 0:
             logger.error(
                 "Failed to retrieve the pip environment. "
@@ -72,26 +156,55 @@ class UserEnvironment(dj.Manual):
             )
             return ""
 
-        custom_install = re.compile(  # -e git+url#egg=package
-            r"^-e[ ]+git\+(?P<url>[^#]+)\#egg=(?P<package>[A-Za-z0-9_.-]+)$"
+        # Ignore basic a==0.0.0 pip installs
+        basic_format = re.compile(  # allows suffixes like a1, dev, post1, etc.
+            r"[\w\d_.-]+==\d+(?:\.\d+)*(?:(?:a|b|rc|\.post)[\d]+|dev[\d]*)?$"
         )
 
+        # Ignore conda-managed packages from accepted sources
+        sources = "conda-forge|feedstock_root|croot"
+        ignored_conda_source = re.compile(rf"[/\\](?:{sources})[/\\]")
+
+        # Capture custom pip installs
+        comment_install = re.compile(  # # package==version (as comment)
+            r"^\s*#.*?\((?P<package>[A-Za-z0-9_.-]+)==(?P<version>[^)]+)\)$"
+        )
+        editable_path = re.compile(r"^-e[ ]+(?P<path>\S+)$")  # -e /path/a
+
         pip_custom = dict()
+        freeze_comments = dict()
         for line in pip_freeze.stdout.splitlines():
-            if re.compile(r"(feedstock|conda-forge|edeno|==)").search(line):
+            line = line.strip()
+            if basic_format.match(line) or ignored_conda_source.search(line):
                 continue  # ignore file-based conda-managed packages
-            if re.compile(r"file://").search(line):
+            if "file://" in line or "@ git+" in line:
                 # capture local file paths
                 dep_name, path = line.split(" @ ", maxsplit=1)
                 pip_custom[dep_name] = path
                 continue
-            if match := custom_install.match(line.strip()):
-                # capture custom pip installs from git,
-                # replace underscores with dashes to match conda convention
-                pip_custom[match.group("package").replace("_", "-")] = (
-                    match.group("url")
+            if line.startswith("-e git+") and "#egg=" in line:
+                url, package = line.split("#egg=", maxsplit=1)
+                # conda convention uses dashes
+                pip_custom[package.replace("_", "-")] = url.split(
+                    "git+", maxsplit=1
+                )[-1]
+                continue
+            if match := comment_install.match(line):
+                print("Found comment install:", line)
+                freeze_comments[match.group("package").replace("_", "-")] = (
+                    match.group("version")
                 )
                 continue
+            if match := editable_path.match(line):
+                path = match.group("path")
+                path_name = Path(path).name.replace("_", "-")
+                if path_name not in freeze_comments:
+                    raise ValueError(
+                        f"Editable path found w/o a preceding comment: {line}"
+                    )
+                pip_custom[path_name] = f"{freeze_comments[path_name]} @ {path}"
+                continue
+            raise ValueError
             logger.error(
                 f"Failed to parse: {line}\nRecompute feature disabled."
             )
@@ -99,9 +212,11 @@ class UserEnvironment(dj.Manual):
         if pip_custom:
             logger.warning(
                 "Custom pip installs found in the environment.\n"
-                + "Recompute feature may not work as expected."
+                + "Recompute feature may not work as expected.\n"
             )
+            pprint(pip_custom)
 
+        # ------- Augment the conda environment with custom pip installs -------
         conda_pips = []  # Find the element in the dependency list that is pip
         for conda_dep in ret.get("dependencies", []):
             if isinstance(conda_dep, dict):
@@ -119,7 +234,6 @@ class UserEnvironment(dj.Manual):
                 "Custom pip installs not found in the conda environment. "
                 + "Adding them to the conda environment."
             )
-            __import__("pdb").set_trace()
             for dep_name, pip_path in pip_custom.items():
                 # needs `==` for parsing later
                 conda_pips.append(f"{dep_name}==None @ {pip_path}")
