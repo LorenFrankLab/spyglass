@@ -79,6 +79,8 @@ ImportedLFP().drop()
 - Only add merge parts to `source_class_dict` if present in codebase #1237
 - Remove cli module #1250
 - Fix column error in `check_threads` method #1256
+- Export python env and store in newly created analysis files #1270
+- Enforce single table entry in `fetch1_dataframe` calls #1270
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
     #1311
 - Track Spyglass version in dedicated table for enforcing updates #1281
@@ -96,6 +98,7 @@ ImportedLFP().drop()
 - Common
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
+    - Calculate mode of timestep size in log scale when estimating sampling rate #1270
     - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
     - Allow ingestion of multi-row task epoch tables #1278
     - Add `SensorData` to `populate_all_common` #1281
@@ -111,6 +114,8 @@ ImportedLFP().drop()
         of `DLCPoseEstimation` #1208
     - Enable import of existing pose data to `ImportedPose` in position pipeline
         #1247
+    - Change key value `position_source` to "imported" during ingestion #1270
+    - Define orientation as `nan` for single-led data #1270
     - Sanitize new project names for unix file system #1247
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
@@ -123,6 +128,8 @@ ImportedLFP().drop()
     - Revise cleanup for `v0.SpikeSorting` #1271
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
+    - Update transaction and parallel make settings for `v0` and `v1`
+      `SpikeSorting` tables #1270
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209

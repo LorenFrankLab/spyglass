@@ -478,15 +478,8 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetches the filtered data as a dataframe"""
-        filtered_nwb = self.fetch_nwb()
-
-        if len(filtered_nwb) != 1:
-            raise ValueError(
-                "Expected 1 filtered data, but got "
-                + f"{len(filtered_nwb)} for this LFPBandSelection"
-            )
-
-        filtered_nwb = filtered_nwb[0]
+        self.ensure_single_entry()
+        filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["lfp_band"].data,
             index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),

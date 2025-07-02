@@ -464,6 +464,13 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
         # convert back to between -pi and pi
         orientation[~is_nan] = np.angle(np.exp(1j * orientation[~is_nan]))
 
+        # set orientation to NaN in single LED data
+        if np.all(front_LED == 0) or np.all(back_LED == 0):
+            logger.warning(
+                "Single LED data detected. Setting orientation to NaN."
+            )
+            orientation = np.full_like(orientation, np.nan)
+
         velocity = get_velocity(
             position,
             time=time,
@@ -482,6 +489,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetches the position data as a pandas dataframe."""
+        self.ensure_single_entry()
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod

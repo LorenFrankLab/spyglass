@@ -1,3 +1,5 @@
+import os
+import sys
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
@@ -16,6 +18,8 @@ from pymysql.err import DataError
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    _quick_get_analysis_path,
+    bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
     get_nwb_table,
@@ -206,6 +210,21 @@ class SpyglassMixin(ExportMixin):
 
         return key
 
+    def ensure_single_entry(self, key: dict = dict()):
+        """Ensure that the key corresponds to a single entry in the table.
+
+        Parameters
+        ----------
+        key : dict
+            The key to check.
+        """
+        if len(self & key) != 1:
+            raise KeyError(
+                f"Please restrict {self.full_table_name} to 1 entry when calling "
+                f"{sys._getframe(1).f_code.co_name}(). "
+                f"Found {len(self & key)} entries"
+            )
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
@@ -214,10 +233,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -919,6 +938,42 @@ class SpyglassMixin(ExportMixin):
             df = df[keep_cols]
 
         return df
+
+    # --------------------------- Check disc usage ------------------------------
+    def get_table_storage_usage(self, human_readable=False):
+        """Total size of all analysis files in the table.
+        Uses the analysis_file_name field to find the file paths and sum their
+        sizes.
+        Parameters
+        ----------
+        human_readable : bool, optional
+            If True, return a human-readable string of the total size.
+            Default False, returns total size in bytes.
+
+        Returns
+        -------
+        Union[str, int]
+            Total size of all analysis files in the table. If human_readable is
+            True, returns a string with the size in bytes, KiB, MiB, GiB, TiB,
+            or PiB. If human_readable is False, returns the total size in bytes.
+
+        """
+        if "analysis_file_name" not in self.heading.names:
+            logger.warning(
+                f"{self.full_table_name} does not have an analysis_file_name field."
+            )
+            return "0 Mib" if human_readable else 0
+        file_names = self.fetch("analysis_file_name")
+        file_paths = [
+            _quick_get_analysis_path(file_name) for file_name in file_names
+        ]
+        file_paths = [path for path in file_paths if path is not None]
+        file_sizes = [os.stat(path).st_size for path in file_paths]
+        total_size = sum(file_sizes)
+        if not human_readable:
+            return total_size
+        human_size = bytes_to_human_readable(total_size)
+        return human_size
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
