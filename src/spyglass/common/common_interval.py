@@ -1,11 +1,11 @@
 import itertools
+import warnings
 from functools import reduce
 from typing import Iterable, List, Optional, Tuple, TypeVar, Union
-import warnings
 
 import datajoint as dj
-import matplotlib.pyplot as plt
 import matplotlib as mpl
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from pynwb import NWBFile
@@ -80,13 +80,13 @@ class IntervalList(SpyglassMixin, dj.Manual):
         if not len(self) == 1:
             raise ValueError(f"Expected one row, got {len(self)}")
         return Interval(self.fetch1())
-        
+
     def plot_intervals(self, start_time=0, return_fig=False):
         """
         Plots all intervals in the given IntervalList table
 
         Parameters
-        ----------    
+        ----------
         start_time: int (seconds)
             set the 0 time for your interval comparison plot (for example, the first timepoint of s1)
 
@@ -94,21 +94,26 @@ class IntervalList(SpyglassMixin, dj.Manual):
         -------
         fig: matplotlib.figure.Figure
             if return_fig is True
-        None: 
+        None:
             if return_fig is False
 
         """
         interval_lists_df = pd.DataFrame(self)
 
-        if len(interval_lists_df['nwb_file_name'].unique()) > 1:
-            raise ValueError('>1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name.')
+        if len(interval_lists_df["nwb_file_name"].unique()) > 1:
+            raise ValueError(
+                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+            )
 
-        interval_list_names = interval_lists_df['interval_list_name'].values
+        interval_list_names = interval_lists_df["interval_list_name"].values
 
         n_compare = len(interval_list_names)
 
         if n_compare > 100:
-            warnings.warn(f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.", UserWarning)
+            warnings.warn(
+                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                UserWarning,
+            )
 
         # plot broken bar horizontals
         fig, ax = plt.subplots(figsize=(20, 2 / 3 * n_compare))
@@ -123,14 +128,22 @@ class IntervalList(SpyglassMixin, dj.Manual):
                 for i in intervals
             ]  # return time in minutes
 
-        all_intervals = interval_lists_df['valid_times'].values
-        for i, (intervals, color) in enumerate(zip(all_intervals, custom_palette)):
+        all_intervals = interval_lists_df["valid_times"].values
+        for i, (intervals, color) in enumerate(
+            zip(all_intervals, custom_palette)
+        ):
             int_range = convert_intervals_to_range(intervals, start_time)
-            ax.broken_barh(int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7)
+            ax.broken_barh(
+                int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7
+            )
 
         ax.set_ylim(5, 10 * (n_compare + 1) + 5)
         ax.set_xlabel("time from start (min)", fontsize=16)
-        ax.set_yticks(np.arange(n_compare) * 10 + 15, labels=interval_list_names, fontsize=16)
+        ax.set_yticks(
+            np.arange(n_compare) * 10 + 15,
+            labels=interval_list_names,
+            fontsize=16,
+        )
         ax.set_xticks(ax.get_xticks(), labels=ax.get_xticklabels(), fontsize=16)
 
         if return_fig:
