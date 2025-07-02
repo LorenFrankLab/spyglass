@@ -217,11 +217,6 @@ class SpyglassMixin(ExportMixin):
         ----------
         key : dict
             The key to check.
-
-        Returns
-        -------
-        dict
-            The key if it corresponds to a single entry, otherwise raises an error.
         """
         if len(self & key) != 1:
             raise KeyError(
