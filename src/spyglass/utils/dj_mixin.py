@@ -19,6 +19,7 @@ from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
     _quick_get_analysis_path,
+    bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
     get_nwb_table,
@@ -976,12 +977,7 @@ class SpyglassMixin(ExportMixin):
         total_size = sum(file_sizes)
         if not human_readable:
             return total_size
-        human_size = total_size
-        for unit in ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]:
-            if human_size < 1024.0 or unit == "PiB":
-                break
-            human_size /= 1024.0
-        human_size = f"{human_size:.2f} {unit}"
+        human_size = bytes_to_human_readable(total_size)
         return human_size
 
 

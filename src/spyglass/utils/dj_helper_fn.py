@@ -672,6 +672,18 @@ def str_to_bool(value) -> bool:
     return str(value).lower() in ("y", "yes", "t", "true", "1")
 
 
+def bytes_to_human_readable(size: int) -> str:
+    """Convert a byte size to a human-readable format."""
+    msg_template = "{size:.2f} {unit}"
+
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size < 1024:
+            return msg_template.format(size=size, unit=unit)
+        size /= 1024
+
+    return msg_template.format(size=size, unit="PB")
+
+
 def accept_divergence(key, new_value, existing_value, test_mode=False):
     """prompt to accept divergence in values between existing and new entries"""
     if test_mode:
