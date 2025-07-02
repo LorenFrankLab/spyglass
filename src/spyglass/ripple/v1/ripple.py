@@ -239,10 +239,7 @@ class RippleTimesV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the marks in a readable format"""
-        if not len(self) == 1:
-            raise ValueError(
-                "RippleTimesV1.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> List[pd.DataFrame]:

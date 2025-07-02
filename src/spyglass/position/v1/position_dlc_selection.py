@@ -175,10 +175,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
-        if not len(self) == 1:
-            raise ValueError(
-                "DLCPosV1.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),

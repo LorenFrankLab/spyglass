@@ -198,8 +198,5 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> DataFrame:
         """Fetch a single dataframe."""
-        if not len(self) == 1:
-            raise ValueError(
-                "LinearizedPositionV1.fetch1_dataframe() requires a single key to be selected."
-            )
+        self.ensure_single_entry()
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")
