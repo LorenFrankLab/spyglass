@@ -81,22 +81,32 @@ class IntervalList(SpyglassMixin, dj.Manual):
             raise ValueError(f"Expected one row, got {len(self)}")
         return Interval(self.fetch1())
 
-    def plot_intervals(self, start_time=0, return_fig=False):
+    def plot_intervals(
+        self, start_time: float = 0, return_fig: bool = False
+    ) -> Optional[plt.Figure]:
         """
-        Plots all intervals in the given IntervalList table
+        Plot all intervals in the given IntervalList table.
 
         Parameters
         ----------
-        start_time: int (seconds)
-            set the 0 time for your interval comparison plot (for example, the first timepoint of s1)
+        start_time : float, optional
+            The reference time (in seconds) for the interval comparison plot.
+            For example, the first timepoint of a session. Defaults to 0.
+        return_fig : bool, optional
+            If True, return the matplotlib Figure object. Defaults to False.
 
         Returns
         -------
-        fig: matplotlib.figure.Figure
-            if return_fig is True
-        None:
-            if return_fig is False
+        fig : matplotlib.figure.Figure or None
+            The matplotlib Figure object if `return_fig` is True, otherwise None.
 
+        Raises
+        ------
+        ValueError
+            If more than one unique `nwb_file_name` is found in the IntervalList.
+            The intended use is to compare intervals within a single NWB file.
+        UserWarning
+            If more than 100 intervals are being plotted.
         """
         interval_lists_df = pd.DataFrame(self)
 
@@ -144,7 +154,9 @@ class IntervalList(SpyglassMixin, dj.Manual):
             labels=interval_list_names,
             fontsize=16,
         )
-        ax.set_xticks(ax.get_xticks(), labels=ax.get_xticklabels(), fontsize=16)
+        ax.set_xticks(ax.get_xticks())
+        ax.set_xticklabels(ax.get_xticklabels())
+        ax.tick_params(axis="x", labelsize=16)
 
         if return_fig:
             return fig
