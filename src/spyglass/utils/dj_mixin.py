@@ -944,7 +944,7 @@ class SpyglassMixin(ExportMixin):
         return df
 
     # --------------------------- Check disc usage ------------------------------
-    def get_table_storage_usage(self, human_readable=False, parallel=False):
+    def get_table_storage_usage(self, human_readable=False):
         """Total size of all analysis files in the table.
         Uses the analysis_file_name field to find the file paths and sum their
         sizes.
