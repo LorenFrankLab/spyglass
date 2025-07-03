@@ -30,7 +30,6 @@ from tqdm import tqdm
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
-from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
@@ -161,7 +160,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @cached_property
     def env_dict(self):
-        return USER_TBL.insert_current_env()
+        logger.info("Initializing UserEnvironment")
+        return UserEnvironment().insert_current_env()
 
     def insert(
         self, rows, limit=None, at_creation=False, force_attempt=False, **kwargs
@@ -192,6 +192,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             rows = [rows]
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
+
+        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
+        if at_creation and editable_env:
+            at_creation = False  # no assume pass if generated with editable env
 
         inserts = []
         for row in rows:

@@ -7,7 +7,6 @@ from os import environ as os_environ
 from pathlib import Path
 from subprocess import run as sub_run
 from typing import Dict, List, Optional, Union
-import json
 
 
 import datajoint as dj
@@ -27,93 +26,6 @@ SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
 
 
 @schema
-class CondaChannelPackages(dj.Lookup):
-    definition = """
-    channel   : varchar(127)
-    subdir="" : varchar(63)
-    package   : varchar(127)
-    """
-
-    _moitored_channels = [("edeno", "linux-64"), ("franklab", "linux-64")]
-
-    def __init__(self, *args, **kwargs):
-        """Initialize the CondaChannelPackages table."""
-        super().__init__(*args, **kwargs)
-        # Ensure the table is populated with monitored channels
-        self.insert_from_channels(self._moitored_channels)
-
-    def insert_from_channels(self, channels=None) -> List[Dict[str, str]]:
-        """Fetch package listings from all channels."""
-        ret = []
-        for channel, subdir in channels or self._moitored_channels:
-            if not (self & f'channel="{channel}"'):
-                ret.extend(self.fetch_from_channel(channel, subdir))
-        self.insert(ret, skip_duplicates=True)
-
-    def fetch_from_channel(self, channel: str, subdir: str = None) -> None:
-        """
-        Fetch package listings from ``conda search``.
-
-        Parameters
-        ----------
-        channel : str
-            Literal channel string such as ``"edeno"``.
-        subdir : str, optional
-            Subdirectory within the channel, such as ``"linux-64"``.
-            If None, the channel root is used.
-
-        Raises
-        ------
-        RuntimeError
-            When the underlying ``conda search`` call fails.
-        """
-        channel_subdir = f"{channel}/{subdir}" if subdir else channel
-        subdir_cmd = ["--subdir", subdir] if subdir else []
-
-        cmd = ["conda", "search", "-c", channel, *subdir_cmd, "--json"]
-
-        completed = sub_run(cmd, **SUBPROCESS_KWARGS)
-        if completed.returncode != 0:
-            raise RuntimeError(
-                f"Failed to fetch packages from channel {channel} with "
-                f"command: {' '.join(cmd)}\n"
-                f"Error: {completed.stderr}"
-            )
-
-        data = json.loads(completed.stdout)
-
-        existing_pachages = (self & f'channel="{channel}"').fetch("package")
-        packages = []
-        for pkg_name, builds in data.items():
-            if pkg_name in existing_pachages:
-                continue
-            if any(
-                build["channel"].rstrip("/").endswith(channel_subdir)
-                for build in builds
-            ):
-                packages.append(pkg_name)
-
-        return [
-            dict(channel=channel, subdir=subdir, package=pkg)
-            for pkg in packages
-        ]
-
-    def accept_package(self, pip_freeze_line: str) -> bool:
-        """Check if a pip freeze line is stored package."""
-        found = False
-        for channel, _ in self._moitored_channels:
-            if channel in pip_freeze_line:
-                found = channel
-                break
-        if not found:
-            return False
-        if not any(
-            channel in pip_freeze_line for channel, _ in self._moitored_channels
-        ):
-            return False
-
-
-@schema
 class UserEnvironment(dj.Manual):
     definition = """ # User conda env. Default ID is User_CondaEnv_00
     env_id: varchar(127)  # Unique environment identifier
@@ -122,11 +34,14 @@ class UserEnvironment(dj.Manual):
     env: blob  # Conda environment
     timestamp=CURRENT_TIMESTAMP: timestamp  # Automatic timestamp
     UNIQUE INDEX (env_hash)
+    has_editable=0: bool  # Whether the environment has editable installs
     """
 
     # Note: this tables establishes the convention of an environment ID that
     # substrings {user}_{env_name}_{num} where num is a two-digit number.
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
+
+    _has_editable = False  # Flag to track if the env has editable installs
 
     @cached_property
     def env(self) -> Union[dict, str]:
@@ -160,16 +75,14 @@ class UserEnvironment(dj.Manual):
         basic_format = re.compile(  # allows suffixes like a1, dev, post1, etc.
             r"[\w\d_.-]+==\d+(?:\.\d+)*(?:(?:a|b|rc|\.post)[\d]+|dev[\d]*)?$"
         )
-
         # Ignore conda-managed packages from accepted sources
-        sources = "conda-forge|feedstock_root|croot"
+        sources = "feedstock_root|croot|conda-bld"  # accepts each in path
         ignored_conda_source = re.compile(rf"[/\\](?:{sources})[/\\]")
 
-        # Capture custom pip installs
-        comment_install = re.compile(  # # package==version (as comment)
+        # Capture custom pip installs: 1 `# package==version`, 2 `-e path`
+        comment_install = re.compile(
             r"^\s*#.*?\((?P<package>[A-Za-z0-9_.-]+)==(?P<version>[^)]+)\)$"
         )
-        editable_path = re.compile(r"^-e[ ]+(?P<path>\S+)$")  # -e /path/a
 
         pip_custom = dict()
         freeze_comments = dict()
@@ -177,7 +90,7 @@ class UserEnvironment(dj.Manual):
             line = line.strip()
             if basic_format.match(line) or ignored_conda_source.search(line):
                 continue  # ignore file-based conda-managed packages
-            if "file://" in line or "@ git+" in line:
+            if " @ " in line and ("file://" in line or "git+" in line):
                 # capture local file paths
                 dep_name, path = line.split(" @ ", maxsplit=1)
                 pip_custom[dep_name] = path
@@ -185,34 +98,34 @@ class UserEnvironment(dj.Manual):
             if line.startswith("-e git+") and "#egg=" in line:
                 url, package = line.split("#egg=", maxsplit=1)
                 # conda convention uses dashes
-                pip_custom[package.replace("_", "-")] = url.split(
-                    "git+", maxsplit=1
-                )[-1]
+                pip_custom[package.replace("_", "-")] = url.split("git+")[-1]
+                self._has_editable = True
                 continue
             if match := comment_install.match(line):
-                print("Found comment install:", line)
                 freeze_comments[match.group("package").replace("_", "-")] = (
                     match.group("version")
                 )
                 continue
-            if match := editable_path.match(line):
-                path = match.group("path")
+            if match := re.compile(r"^-e[ ]+(?P<path>\S+)$").match(line):
+                path = match.group("path")  # editable path
                 path_name = Path(path).name.replace("_", "-")
                 if path_name not in freeze_comments:
                     raise ValueError(
                         f"Editable path found w/o a preceding comment: {line}"
                     )
                 pip_custom[path_name] = f"{freeze_comments[path_name]} @ {path}"
+                self._has_editable = True
                 continue
             raise ValueError
             logger.error(
                 f"Failed to parse: {line}\nRecompute feature disabled."
             )
             return
+
         if pip_custom:
             logger.warning(
                 "Custom pip installs found in the environment.\n"
-                + "Recompute feature may not work as expected.\n"
+                + "\tRecompute feature may not work as expected.\n"
             )
             pprint(pip_custom)
 
@@ -230,10 +143,6 @@ class UserEnvironment(dj.Manual):
                 conda_pips[i] = f"{dep_name}=={version} @ {pip_path}"
 
         if pip_custom:  # add any remaining custom pip installs
-            logger.warning(
-                "Custom pip installs not found in the conda environment. "
-                + "Adding them to the conda environment."
-            )
             for dep_name, pip_path in pip_custom.items():
                 # needs `==` for parsing later
                 conda_pips.append(f"{dep_name}==None @ {pip_path}")
@@ -318,6 +227,7 @@ class UserEnvironment(dj.Manual):
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
                 "env": self.env,
+                "has_editable": self._has_editable,
             },
             skip_duplicates=False,
         )

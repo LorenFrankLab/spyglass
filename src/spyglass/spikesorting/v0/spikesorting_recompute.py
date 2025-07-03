@@ -28,7 +28,6 @@ from tqdm import tqdm
 
 from spyglass.common.common_user import UserEnvironment  # noqa F401
 from spyglass.settings import recording_dir, temp_dir
-from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
@@ -204,6 +203,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     logged_at_creation=0: bool
     """
 
+    @cached_property
+    def env_dict(self) -> dict:
+        logger.info("Initializing UserEnvironment")
+        return UserEnvironment().insert_current_env()
+
     def insert(
         self,
         rows: List[dict],
@@ -223,16 +227,20 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         for row in rows:
             if not RecordingRecomputeVersions & row:
                 RecordingRecomputeVersions().make(row)
-        if not USER_TBL.this_env:  # likely not using conda
+        if not self.env_dict.get("env_id"):  # likely not using conda
             logger.warning("Cannot log for recompute without UserEnvironment.")
             return
+
+        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
+        if at_creation and editable_env:
+            at_creation = False  # no assume pass if generated with editable env
 
         inserts = []
         for row in rows:
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
-            key_pk.update(USER_TBL.this_env)
+            key_pk.update(self.env_dict)
             key_pk.setdefault("logged_at_creation", at_creation)
             inserts.append(key_pk)
         super().insert(inserts, **kwargs)
@@ -280,7 +288,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
         """Restricted table matching pynwb env and pip env."""
-        return self & USER_TBL.this_env
+        return self & self.env_dict
 
 
 @schema
