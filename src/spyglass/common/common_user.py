@@ -1,11 +1,13 @@
 import re
+from pprint import pprint
 from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
 from os import environ as os_environ
 from pathlib import Path
 from subprocess import run as sub_run
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
+
 
 import datajoint as dj
 import yaml
@@ -20,6 +22,7 @@ DEFAULT_ENV_ID = (
     + os_environ.get("CONDA_DEFAULT_ENV", "base")
     + "_00"
 )
+SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
 
 
 @schema
@@ -31,33 +34,120 @@ class UserEnvironment(dj.Manual):
     env: blob  # Conda environment
     timestamp=CURRENT_TIMESTAMP: timestamp  # Automatic timestamp
     UNIQUE INDEX (env_hash)
+    has_editable=0: bool  # Whether the environment has editable installs
     """
 
     # Note: this tables establishes the convention of an environment ID that
     # substrings {user}_{env_name}_{num} where num is a two-digit number.
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
+    _has_editable = False  # Flag to track if the env has editable installs
+
     @cached_property
     def env(self) -> Union[dict, str]:
         """Fetch the current Conda environment as a string."""
-        result = sub_run(
-            ["conda", "env", "export"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        if result.returncode != 0:
+
+        # ---------------- Start with Conda environment export ----------------
+        conda_export = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
+        if conda_export.returncode != 0:
             logger.error(
                 "Failed to retrieve the Conda environment. "
                 + "Recompute feature disabled."
             )
             return ""
 
-        return {
+        ret = {
             k: v
-            for k, v in yaml.safe_load(result.stdout).items()
+            for k, v in yaml.safe_load(conda_export.stdout).items()
             if k not in ["name", "prefix"]
         }
+
+        # ------------------------ Fetch pip editables ------------------------
+        pip_freeze = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
+        if pip_freeze.returncode != 0:
+            logger.error(
+                "Failed to retrieve the pip environment. "
+                + "Recompute feature disabled."
+            )
+            return ""
+
+        # Ignore basic a==0.0.0 pip installs
+        basic_format = re.compile(  # allows suffixes like a1, dev, post1, etc.
+            r"[\w\d_.-]+==\d+(?:\.\d+)*(?:(?:a|b|rc|\.post)[\d]+|dev[\d]*)?$"
+        )
+        # Ignore conda-managed packages from accepted sources
+        sources = "feedstock_root|croot|conda-bld"  # accepts each in path
+        ignored_conda_source = re.compile(rf"[/\\](?:{sources})[/\\]")
+
+        # Capture custom pip installs: 1 `# package==version`, 2 `-e path`
+        comment_install = re.compile(
+            r"^\s*#.*?\((?P<package>[A-Za-z0-9_.-]+)==(?P<version>[^)]+)\)$"
+        )
+
+        pip_custom = dict()
+        freeze_comments = dict()
+        for line in pip_freeze.stdout.splitlines():
+            line = line.strip()
+            if basic_format.match(line) or ignored_conda_source.search(line):
+                continue  # ignore file-based conda-managed packages
+            if " @ " in line and ("file://" in line or "git+" in line):
+                # capture local file paths
+                dep_name, path = line.split(" @ ", maxsplit=1)
+                pip_custom[dep_name] = path
+                continue
+            if line.startswith("-e git+") and "#egg=" in line:
+                url, package = line.split("#egg=", maxsplit=1)
+                # conda convention uses dashes
+                pip_custom[package.replace("_", "-")] = url.split("git+")[-1]
+                self._has_editable = True
+                continue
+            if match := comment_install.match(line):
+                freeze_comments[match.group("package").replace("_", "-")] = (
+                    match.group("version")
+                )
+                continue
+            if match := re.compile(r"^-e[ ]+(?P<path>\S+)$").match(line):
+                path = match.group("path")  # editable path
+                path_name = Path(path).name.replace("_", "-")
+                if path_name not in freeze_comments:
+                    raise ValueError(
+                        f"Editable path found w/o a preceding comment: {line}"
+                    )
+                pip_custom[path_name] = f"{freeze_comments[path_name]} @ {path}"
+                self._has_editable = True
+                continue
+            raise ValueError
+            logger.error(
+                f"Failed to parse: {line}\nRecompute feature disabled."
+            )
+            return
+
+        if pip_custom:
+            logger.warning(
+                "Custom pip installs found in the environment.\n"
+                + "\tRecompute feature may not work as expected.\n"
+            )
+            pprint(pip_custom)
+
+        # ------- Augment the conda environment with custom pip installs -------
+        conda_pips = []  # Find the element in the dependency list that is pip
+        for conda_dep in ret.get("dependencies", []):
+            if isinstance(conda_dep, dict):
+                conda_pips = conda_dep.get("pip", None)
+                break
+
+        for i, pip_dep in enumerate(conda_pips):  # append custom pip installs
+            dep_name, version = pip_dep.split("==", maxsplit=1)
+            if dep_name in pip_custom:
+                pip_path = pip_custom.pop(dep_name)  # remove from list
+                conda_pips[i] = f"{dep_name}=={version} @ {pip_path}"
+
+        if pip_custom:  # add any remaining custom pip installs
+            for dep_name, pip_path in pip_custom.items():
+                # needs `==` for parsing later
+                conda_pips.append(f"{dep_name}==None @ {pip_path}")
+
+        return ret
 
     def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
@@ -137,6 +227,7 @@ class UserEnvironment(dj.Manual):
                 "env_id": self._increment_id(env_id),
                 "env_hash": self.env_hash,
                 "env": self.env,
+                "has_editable": self._has_editable,
             },
             skip_duplicates=False,
         )
@@ -218,3 +309,24 @@ class UserEnvironment(dj.Manual):
             )
 
         return not bool(mismatches)  # True if no mismatches
+
+    def get_dep_version(
+        self, dep_name: str, env_id: Optional[str] = None
+    ) -> Union[List[Dict[str, str]], Dict[str, str]]:
+        """Get the version of a specific dependency in the environment."""
+        if not env_id and len(self) > 1:
+            ret = dict()
+            for env_id in self.fetch("env_id"):
+                ret.update(self.get_dep_version(dep_name, env_id))
+            return ret
+
+        restr = f"env_id='{env_id}'" if env_id else True
+        query = self & restr
+        if not query:
+            logger.error(f"No environment found with env_id '{env_id}'.")
+            return ""
+
+        env_id, env = query.fetch1("env_id", "env")
+        dependencies = self.parse_env_dict(env)
+
+        return {env_id: dependencies.get(dep_name, "")}

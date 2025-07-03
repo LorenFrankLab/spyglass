@@ -82,7 +82,7 @@ ImportedLFP().drop()
 - Export python env and store in newly created analysis files #1270
 - Enforce single table entry in `fetch1_dataframe` calls #1270
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
-    #1311
+    #1311, #1340
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
@@ -107,8 +107,8 @@ ImportedLFP().drop()
     - `IntervalList.fetch_interval` now returns `Interval` object #1293
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
-    - Prompt user to verify compatibility between new insert and existing
-      table entries # 1318
+    - Prompt user to verify compatibility between new insert and existing table
+        entries # 1318
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -134,9 +134,9 @@ ImportedLFP().drop()
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
     - Reconcile spikeinterface value for `channel_id` when `channel_name` column
-      present in nwb file electrodes table #1310, #1334
+        present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
-      `SortedSpikesGroup.fetch_spike_data` #1320
+        `SortedSpikesGroup.fetch_spike_data` #1320
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
