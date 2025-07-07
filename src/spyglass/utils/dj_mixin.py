@@ -1,3 +1,5 @@
+import os
+import sys
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
@@ -5,7 +7,6 @@ from time import time
 from typing import List
 
 import datajoint as dj
-from datajoint.condition import make_condition
 from datajoint.errors import DataJointError
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
@@ -17,6 +18,8 @@ from pymysql.err import DataError
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    _quick_get_analysis_path,
+    bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
     get_nwb_table,
@@ -93,6 +96,14 @@ class SpyglassMixin(ExportMixin):
 
     # -------------------------- Misc helper methods --------------------------
 
+    def dict_to_pk(self, key):
+        """Return primary key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.primary_key}
+
+    def dict_to_full_key(self, key):
+        """Return full key from dictionary."""
+        return {k: v for k, v in key.items() if k in self.heading.names}
+
     @property
     def camel_name(self):
         """Return table name in camel case."""
@@ -117,6 +128,42 @@ class SpyglassMixin(ExportMixin):
             logger.error(f"No file_like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
+
+    def restrict_by_list(
+        self, field: str, values: list, return_restr=False
+    ) -> QueryExpression:
+        """Restrict a field by list of values."""
+        if field not in self.heading.attributes:
+            raise KeyError(f"Field '{field}' not in {self.camel_name}.")
+        quoted_vals = '"' + '","'.join(map(str, values)) + '"'
+        restr = self & f"{field} IN ({quoted_vals})"
+        return restr if return_restr else self & restr
+
+    def get_params_blob_from_key(self, key: dict, default="default") -> dict:
+        """Get params blob from table using key, assuming 1 primary key.
+
+        Defaults to 'default' if no entry is found.
+
+        TODO: Split SpyglassMixin to SpyglassParamsMixin.
+        """
+        pk = self.primary_key[0]
+        blob_fields = [
+            k.name for k in self.heading.attributes.values() if k.is_blob
+        ]
+        if len(blob_fields) != 1:
+            raise ValueError(
+                f"Table must have only 1 blob field, found {len(blob_fields)}"
+            )
+        blob_attr = blob_fields[0]
+
+        if isinstance(key, str):
+            key = {pk: key}
+        if not isinstance(key, dict):
+            raise ValueError("key must be a dictionary")
+        passed_key = key.get(pk, None)
+        if not passed_key:
+            logger.warning("No key passed, using default")
+        return (self & {pk: passed_key or default}).fetch1(blob_attr)
 
     def find_insert_fail(self, key):
         """Find which parent table is causing an IntergrityError on insert."""
@@ -163,6 +210,21 @@ class SpyglassMixin(ExportMixin):
 
         return key
 
+    def ensure_single_entry(self, key: dict = dict()):
+        """Ensure that the key corresponds to a single entry in the table.
+
+        Parameters
+        ----------
+        key : dict
+            The key to check.
+        """
+        if len(self & key) != 1:
+            raise KeyError(
+                f"Please restrict {self.full_table_name} to 1 entry when calling "
+                f"{sys._getframe(1).f_code.co_name}(). "
+                f"Found {len(self & key)} entries"
+            )
+
     # ------------------------------- fetch_nwb -------------------------------
 
     @cached_property
@@ -171,10 +233,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -877,14 +939,48 @@ class SpyglassMixin(ExportMixin):
 
         return df
 
+    # --------------------------- Check disc usage ------------------------------
+    def get_table_storage_usage(self, human_readable=False):
+        """Total size of all analysis files in the table.
+        Uses the analysis_file_name field to find the file paths and sum their
+        sizes.
+        Parameters
+        ----------
+        human_readable : bool, optional
+            If True, return a human-readable string of the total size.
+            Default False, returns total size in bytes.
+
+        Returns
+        -------
+        Union[str, int]
+            Total size of all analysis files in the table. If human_readable is
+            True, returns a string with the size in bytes, KiB, MiB, GiB, TiB,
+            or PiB. If human_readable is False, returns the total size in bytes.
+
+        """
+        if "analysis_file_name" not in self.heading.names:
+            logger.warning(
+                f"{self.full_table_name} does not have an analysis_file_name field."
+            )
+            return "0 Mib" if human_readable else 0
+        file_names = self.fetch("analysis_file_name")
+        file_paths = [
+            _quick_get_analysis_path(file_name) for file_name in file_names
+        ]
+        file_paths = [path for path in file_paths if path is not None]
+        file_sizes = [os.stat(path).st_size for path in file_paths]
+        total_size = sum(file_sizes)
+        if not human_readable:
+            return total_size
+        human_size = bytes_to_human_readable(total_size)
+        return human_size
+
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
     """
     A part table for Spyglass Group tables. Assists in propagating
     delete calls from upstream tables to downstream tables.
     """
-
-    # TODO: See #1163
 
     def delete(self, *args, **kwargs):
         """Delete master and part entries."""

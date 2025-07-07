@@ -1,6 +1,5 @@
-import os
 import uuid
-from time import time
+from pathlib import Path
 from typing import Any, Dict, List, Union
 
 import datajoint as dj
@@ -238,6 +237,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     """
 
     _use_transaction, _allow_insert = False, True
+    _waves_cache = {}  # Cache waveforms for burst merge
 
     def make(self, key):
         """Populate MetricCuration table.
@@ -256,54 +256,25 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         7. Saves the waveforms, metrics, labels, and merge groups to an
             analysis NWB file and inserts into MetricCuration table.
         """
-
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # FETCH
-        nwb_file_name = (
-            SpikeSortingSelection * MetricCurationSelection & key
-        ).fetch1("nwb_file_name")
+        upstream = (
+            SpikeSortingSelection
+            * WaveformParameters
+            * MetricParameters
+            * MetricCurationParameters
+            * MetricCurationSelection
+            & key
+        ).fetch1()
 
-        # TODO: reduce fetch calls on same tables
-        waveform_params = (
-            WaveformParameters * MetricCurationSelection & key
-        ).fetch1("waveform_params")
-        metric_params = (
-            MetricParameters * MetricCurationSelection & key
-        ).fetch1("metric_params")
-        label_params, merge_params = (
-            MetricCurationParameters * MetricCurationSelection & key
-        ).fetch1("label_params", "merge_params")
-        sorting_id, curation_id = (MetricCurationSelection & key).fetch1(
-            "sorting_id", "curation_id"
-        )
+        nwb_file_name = upstream["nwb_file_name"]
+        metric_params = upstream["metric_params"]
+        label_params = upstream["label_params"]
+        merge_params = upstream["merge_params"]
+
         # DO
-        # load recording and sorting
-        recording = CurationV1.get_recording(
-            {"sorting_id": sorting_id, "curation_id": curation_id}
-        )
-        sorting = CurationV1.get_sorting(
-            {"sorting_id": sorting_id, "curation_id": curation_id}
-        )
-        # extract waveforms
-        if "whiten" in waveform_params:
-            if waveform_params.pop("whiten"):
-                recording = sp.whiten(recording, dtype=np.float64)
-
-        waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
-        os.makedirs(waveforms_dir, exist_ok=True)
-
         logger.info("Extracting waveforms...")
+        waveforms = self.get_waveforms(key)
 
-        # Extract non-sparse waveforms by default
-        waveform_params.setdefault("sparse", False)
-
-        waveforms = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting,
-            folder=waveforms_dir,
-            overwrite=True,
-            **waveform_params,
-        )
         # compute metrics
         logger.info("Computing metrics...")
         metrics = {}
@@ -334,13 +305,65 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
-    @classmethod
-    def get_waveforms(cls):
-        """Returns waveforms identified by metric curation. Not implemented."""
-        return NotImplementedError
+    def get_waveforms(
+        self, key: dict, overwrite: bool = True, fetch_all: bool = False
+    ):
+        """Returns waveforms identified by metric curation.
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCuration
+        overwrite : bool, optional
+            whether to overwrite existing waveforms, by default True
+        fetch_all : bool, optional
+            fetch all spikes for units, by default False. Overrides
+            max_spikes_per_unit in waveform_params
+        """
+        key_hash = dj.hash.key_hash(key)
+        if cached := self._waves_cache.get(key_hash):
+            return cached
+
+        query = (MetricCurationSelection & key) * WaveformParameters
+        if len(query) != 1:
+            raise ValueError(f"Found {len(query)} entries for: {key}")
+
+        sort_key = query.fetch("sorting_id", "curation_id", as_dict=True)[0]
+        recording = CurationV1.get_recording(sort_key)
+        sorting = CurationV1.get_sorting(sort_key)
+
+        # extract waveforms
+        waveform_params = query.fetch1("waveform_params")
+        if "whiten" in waveform_params:
+            if waveform_params.pop("whiten"):
+                recording = sp.whiten(recording, dtype=np.float64)
+
+        waveforms_dir = temp_dir + "/" + str(key["metric_curation_id"])
+        wf_dir_obj = Path(waveforms_dir)
+        wf_dir_obj.mkdir(parents=True, exist_ok=True)
+        if not any(wf_dir_obj.iterdir()):  # if the directory is empty
+            overwrite = True
+
+        if fetch_all:
+            waveform_params["max_spikes_per_unit"] = None
+            waveforms_dir += "_all"
+
+        # Extract non-sparse waveforms by default
+        waveform_params.setdefault("sparse", False)
+        waveforms = si.extract_waveforms(
+            recording=recording,
+            sorting=sorting,
+            folder=waveforms_dir,
+            overwrite=overwrite,
+            load_if_exists=not overwrite,
+            **waveform_params,
+        )
+
+        self._waves_cache[key_hash] = waveforms
+
+        return waveforms
 
     @classmethod
     def get_metrics(cls, key: dict):

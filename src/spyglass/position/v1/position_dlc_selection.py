@@ -1,6 +1,5 @@
 import copy
 from pathlib import Path
-from time import time
 
 import datajoint as dj
 import numpy as np
@@ -64,7 +63,6 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         """
         orig_key = copy.deepcopy(key)
         # Add to Analysis NWB file
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         key["pose_eval_result"] = self.evaluate_pose_estimation(key)
 
         pos_nwb = (DLCCentroid & key).fetch_nwb()[0]
@@ -177,6 +175,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
+        self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),

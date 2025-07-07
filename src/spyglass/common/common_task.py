@@ -7,6 +7,7 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
 
 schema = dj.schema("common_task")
@@ -73,11 +74,19 @@ class Task(SpyglassMixin, dj.Manual):
             existing = query.fetch1()
             for key in set(task_dict).union(existing):
                 if unequal_vals(key, task_dict, existing):
-                    raise ValueError(
-                        f"Task {task_dict['task_name']} already exists "
-                        + f"with different values for {key}: "
-                        + f"{task_dict.get(key)} != {existing.get(key)}"
-                    )
+                    if not accept_divergence(
+                        key,
+                        task_dict.get(key),
+                        existing.get(key),
+                        self._test_mode,
+                    ):
+                        # If the user does not accept the divergence,
+                        # raise an error to prevent data inconsistency
+                        raise ValueError(
+                            f"Task {task_dict['task_name']} already exists "
+                            + f"with different values for {key}: "
+                            + f"{task_dict.get(key)} != {existing.get(key)}"
+                        )
         # Insert the tasks into the table
         self.insert(inserts)
 
@@ -200,8 +209,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     IntervalList() & {"nwb_file_name": nwb_file_name}
                 ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
-                    # TODO in beans file, task_epochs[0] is 1x2 dset of ints,
-                    # so epoch would be an int
                     key["epoch"] = epoch
                     target_interval = self.get_epoch_interval_name(
                         epoch, session_intervals
@@ -303,8 +310,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             loading data into the TaskEpoch table.
         """
 
-        # TODO this could be more strict and check data types, but really it
-        # should be schematized
         return (
             Task.is_nwb_task_table(task_table)
             and hasattr(task_table, "camera_id")

@@ -6,9 +6,9 @@ import pandas as pd
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import file_log, infer_output_dir
-from spyglass.position.v1.position_dlc_pose_estimation import (
+from spyglass.position.v1.position_dlc_pose_estimation import (  # noqa: F401
     DLCPoseEstimation,
-)  # noqa: F401
+)
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterp
 from spyglass.utils import SpyglassMixin, logger
 
@@ -55,6 +55,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single dataframe."""
+            self.ensure_single_entry()
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -130,9 +131,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
                 + f"bodyparts_params_dict {len(bp_params_dict)}"
             )
 
-        # TODO: change to DLCSmoothInterp.heading.names
-        table_column_names = list(table_entries[0].dtype.fields.keys())
-
+        table_column_names = DLCSmoothInterp.heading.names
         part_keys = [
             {
                 **{k: v for k, v in zip(table_column_names, table_entry[0])},

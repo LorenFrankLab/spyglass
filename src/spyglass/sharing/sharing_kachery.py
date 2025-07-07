@@ -136,33 +136,24 @@ class AnalysisNwbfileKachery(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate with the uri of the analysis file"""
-        # note that we're assuming that the user has initialized a kachery-cloud
-        # client with kachery-cloud-init. Uncomment the line below once we are
-        # sharing linked files as well.
+        analysis_file = key["analysis_file_name"]
+        abs_path = AnalysisNwbfile.get_abs_path(analysis_file)
 
-        # linked_key = copy.deepcopy(key)
+        logger.info(f"Linking {analysis_file} in kachery-cloud...")
 
-        logger.info(f'Linking {key["analysis_file_name"]} in kachery-cloud...')
-        # set the kachery zone
+        KacheryZone.set_zone(key)  # set the kachery zone
 
-        KacheryZone.set_zone(key)
+        key["analysis_file_uri"] = kcl.link_file(abs_path)
+        kachery_zone = os.environ[kachery_zone_envar]
+        kachery_cloud_dir = os.environ[kachery_cloud_dir_envar]
 
-        key["analysis_file_uri"] = kcl.link_file(
-            AnalysisNwbfile().get_abs_path(key["analysis_file_name"])
-        )
-        logger.info(
-            os.environ[kachery_zone_envar], os.environ[kachery_cloud_dir_envar]
-        )
-        logger.info(AnalysisNwbfile().get_abs_path(key["analysis_file_name"]))
+        logger.info(kachery_zone, kachery_cloud_dir)
+        logger.info(abs_path)
         logger.info(kcl.load_file(key["analysis_file_uri"]))
+
         self.insert1(key)
 
-        # we also need to insert any linked files
-        # TODO: change this to automatically detect all linked files
-        # self.LinkedFile.insert1(key)
-
-        # reset the Kachery zone and cloud_dir to the defaults
-        KacheryZone.reset_zone()
+        KacheryZone.reset_zone()  # reset the zone/cloud_dir to the defaults
 
     @staticmethod
     def download_file(

@@ -188,6 +188,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     """
 
     _use_transaction, _allow_insert = False, True
+    _parallel_make = True  # True if n_workers > 1
 
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
@@ -197,7 +198,6 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time.time()
 
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
@@ -343,7 +343,6 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             (SpikeSortingSelection & key).fetch1("nwb_file_name"),
             key["analysis_file_name"],
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key, skip_duplicates=True)
 
     @classmethod

@@ -76,4 +76,8 @@ jobs:
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc tests/
+        pytest --no-docker --no-dlc --cov=spyglass-neuro --cov-report=xml tests/
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

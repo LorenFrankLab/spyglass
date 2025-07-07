@@ -182,6 +182,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int   # in Unix time, to the nearest second
     """
 
+    _parallel_make = True
+
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
@@ -193,26 +195,22 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
            (this is redundant with 2; will change in the future)
 
         """
-        # CBroz: does this not work w/o arg? as .populate() ?
-        recording_path = (SpikeSortingRecording & key).fetch1("recording_path")
-        recording = si.load_extractor(recording_path)
+        recording = SpikeSortingRecording().load_recording(key)
 
         # first, get the timestamps
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
         _ = recording.get_sampling_frequency()
+
         # then concatenate the recordings
         # Note: the timestamps are lost upon concatenation,
         # i.e. concat_recording.get_times() doesn't return true timestamps anymore.
         # but concat_recording.recoring_list[i].get_times() will return correct
         # timestamps for ith recording.
-        if recording.get_num_segments() > 1 and isinstance(
-            recording, si.AppendSegmentRecording
-        ):
-            recording = si.concatenate_recordings(recording.recording_list)
-        elif recording.get_num_segments() > 1 and isinstance(
-            recording, si.BinaryRecordingExtractor
-        ):
-            recording = si.concatenate_recordings([recording])
+        if recording.get_num_segments() > 1:
+            if isinstance(recording, si.AppendSegmentRecording):
+                recording = si.concatenate_recordings(recording.recording_list)
+            elif isinstance(recording, si.BinaryRecordingExtractor):
+                recording = si.concatenate_recordings([recording])
 
         # load artifact intervals
         artifact_times = (
@@ -303,7 +301,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         """Placeholder to override mixin method"""
         raise NotImplementedError
 
-    def cleanup(self, dry_run=False):
+    def cleanup(self, dry_run=False, verbose=True):
         """Clean up spike sorting directories that are not in the table."""
         sort_dir = Path(sorting_dir)
         tracked = set(self.fetch("sorting_path"))
@@ -313,7 +311,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in tqdm(untracked, desc="Removing untracked folders"):
+        for folder in tqdm(
+            untracked, desc="Removing untracked folders", disable=not verbose
+        ):
             try:
                 shutil.rmtree(folder)
             except PermissionError:
@@ -327,7 +327,5 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         )
         return sorting_name
 
-    # TODO: write a function to import sorting done outside of dj
-
     def _import_sorting(self, key):
-        raise NotImplementedError
+        raise NotImplementedError("Not supported in V0. Use V1 instead.")

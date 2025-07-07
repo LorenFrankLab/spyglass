@@ -164,6 +164,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single bodypart dataframe."""
+            self.ensure_single_entry()
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -350,7 +351,6 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 analysis_file_name=key["analysis_file_name"],
             )
             self.BodyPart.insert1(key)
-            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a concatenated dataframe of all bodyparts."""

@@ -135,7 +135,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
         position_nwb = PositionOutput().fetch_nwb(
             {"merge_id": key["pos_merge_id"]}
         )[0]
-        key["analysis_file_name"] = AnalysisNwbfile().create(  # logged
+        key["analysis_file_name"] = AnalysisNwbfile().create(
             position_nwb["nwb_file_name"]
         )
         position = np.asarray(
@@ -196,8 +196,7 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
             [orig_key], part_name=part_name, skip_duplicates=True
         )
 
-        AnalysisNwbfile().log(key, table=self.full_table_name)
-
     def fetch1_dataframe(self) -> DataFrame:
         """Fetch a single dataframe."""
+        self.ensure_single_entry()
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")

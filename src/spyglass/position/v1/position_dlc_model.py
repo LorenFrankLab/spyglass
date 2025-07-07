@@ -232,7 +232,6 @@ class DLCModel(SpyglassMixin, dj.Computed):
                 dlc_config.update(params["params"])
                 del params["params"]
 
-        # TODO: clean-up. this feels sloppy
         shuffle = params.pop("shuffle", 1)
         trainingsetindex = params.pop("trainingsetindex", None)
 

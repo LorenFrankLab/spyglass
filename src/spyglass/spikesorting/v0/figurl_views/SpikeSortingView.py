@@ -46,11 +46,12 @@ class SpikeSortingView(SpyglassMixin, dj.Computed):
             SpikeSorting & {"sorting_id": key["sorting_id"]}
         ).fetch1()
 
-        recording_path = recording_record["recording_path"]
         sorting_path = sorting_record["sorting_path"]
 
         # Load the SI extractors
-        recording: si.BaseRecording = si.load_extractor(recording_path)
+        recording: si.BaseRecording = SpikeSortingRecording().load_recording(
+            {"recording_id": key["recording_id"]}
+        )
         sorting: si.BaseSorting = si.load_extractor(sorting_path)
 
         with kcl.TemporaryDirectory() as tmpdir:

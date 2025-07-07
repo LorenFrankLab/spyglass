@@ -19,10 +19,6 @@ class BrainRegion(SpyglassMixin, dj.Lookup):
     atlas_source=NULL: varchar(128)      # Source atlas (e.g., 'Allen CCF v3', 'Paxinos Rat 6th Ed')
     """
 
-    # TODO consider making (region_name, subregion_name, subsubregion_name) a
-    # primary key subregion_name='' and subsubregion_name='' will be necessary
-    # but that seems OK
-
     @classmethod
     def fetch_add(
         cls,

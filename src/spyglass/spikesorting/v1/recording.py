@@ -1,30 +1,31 @@
 import uuid
-from time import time
+from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 
 import datajoint as dj
+import hdmf
 import numpy as np
 import probeinterface as pi
 import pynwb
 import spikeinterface as si
 import spikeinterface.extractors as se
+from h5py import File as H5File
 from hdmf.data_utils import GenericDataChunkIterator
+from tqdm import tqdm
 
 from spyglass.common import Session  # noqa: F401
 from spyglass.common.common_device import Probe
 from spyglass.common.common_ephys import Electrode, Raw  # noqa: F401
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import test_mode
+from spyglass.settings import analysis_dir, test_mode
 from spyglass.spikesorting.utils import (
     _get_recording_timestamps,
     get_group_by_shank,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.nwb_hash import NwbfileHasher
 
 schema = dj.schema("spikesorting_v1_recording")
 
@@ -189,7 +190,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     object_id: varchar(40) # Object ID for the processed recording in NWB file
+    electrodes_id=null: varchar(40) # Object ID for the processed electrodes
+    hash=null: varchar(32) # Hash of the NWB file
     """
+
+    use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populate SpikeSortingRecording.
@@ -202,43 +207,159 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             - NWB file to AnalysisNwbfile
             - Recording ids to SpikeSortingRecording
         """
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
-        # DO:
-        # - get valid times for sort interval
-        # - proprocess recording
-        # - write recording to NWB file
-        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
-        recording, timestamps = self._get_preprocessed_recording(key)
-        recording_nwb_file_name, recording_object_id = _write_recording_to_nwb(
-            recording,
-            timestamps,
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
+        nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
+            "nwb_file_name"
         )
-        key["analysis_file_name"] = recording_nwb_file_name
-        key["object_id"] = recording_object_id
+
+        key.update(self._make_file(key))
 
         # INSERT:
         # - valid times into IntervalList
         # - analysis NWB file holding processed recording into AnalysisNwbfile
         # - entry into SpikeSortingRecording
+        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
+        sort_interval_valid_times.set_key(
+            nwb_file_name=nwb_file_name,
+            interval_list_name=key["recording_id"],
+            pipeline="spikesorting_recording_v1",
+        )
         IntervalList.insert1(
-            {
-                "nwb_file_name": (SpikeSortingRecordingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-                "interval_list_name": key["recording_id"],
-                "valid_times": sort_interval_valid_times,
-                "pipeline": "spikesorting_recording_v1",
-            }
+            sort_interval_valid_times.as_dict, skip_duplicates=True
         )
-        AnalysisNwbfile().add(
-            (SpikeSortingRecordingSelection & key).fetch1("nwb_file_name"),
-            key["analysis_file_name"],
-        )
-        AnalysisNwbfile().log(
-            recording_nwb_file_name, table=self.full_table_name
-        )
+        AnalysisNwbfile().add(nwb_file_name, key["analysis_file_name"])
+
         self.insert1(key)
+        self._record_environment(key)
+
+    def _record_environment(self, key):
+        """Record environment details for this recording."""
+        from spyglass.spikesorting.v1 import recompute as rcp
+
+        rcp.RecordingRecomputeSelection().insert(key, at_creation=True)
+
+    @classmethod
+    def _make_file(
+        cls,
+        key: dict = None,
+        recompute_file_name: str = None,
+        save_to: Union[str, Path] = None,
+        rounding: int = 4,
+    ):
+        """Preprocess recording and write to NWB file.
+
+        All `_make_file` methods should exit early if the file already exists.
+
+        - Get valid times for sort interval from IntervalList
+        - Preprocess recording
+        - Write processed recording to NWB file
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecordingSelection table
+        recompute_file_name : str, Optional
+            If specified, recompute this file. Use as resulting file name.
+            If none, generate a new file name. Used for recomputation after
+            typical deletion.
+        save_to : Union[str,Path], Optional
+            Default None, save to analysis directory. If provided, save to
+            specified path. Used for recomputation prior to deletion.
+        """
+        if not key and not recompute_file_name:
+            raise ValueError(
+                "Either key or recompute_file_name must be specified."
+            )
+        if isinstance(key, dict):
+            key = {k: v for k, v in key.items() if k in cls.primary_key}
+
+        hash = None
+        recompute = recompute_file_name and not key and not save_to
+
+        if recompute or save_to:  # if we expect file to exist
+            file_path = AnalysisNwbfile.get_abs_path(
+                recompute_file_name, from_schema=True
+            )
+        if recompute:  # If recompute, check if file exists
+            if Path(file_path).exists():  # No need to recompute
+                return
+            logger.info(f"Recomputing {recompute_file_name}.")
+            query = cls & {"analysis_file_name": recompute_file_name}
+            # Use deleted file's ids and hash for recompute
+            key, recompute_object_id, recompute_electrodes_id = query.fetch1(
+                "KEY", "object_id", "electrodes_id"
+            )
+        elif save_to:  # recompute prior to deletion, save copy to temp_dir
+            elect_id = cls._validate_file(file_path)
+            obj_id = (cls & key).fetch1("object_id")
+            recompute_object_id, recompute_electrodes_id = obj_id, elect_id
+        else:
+            recompute_object_id, recompute_electrodes_id = None, None
+
+        parent = SpikeSortingRecordingSelection & key
+        (recording_nwb_file_name, recording_object_id, electrodes_id) = (
+            _write_recording_to_nwb(
+                **cls()._get_preprocessed_recording(key),
+                nwb_file_name=parent.fetch1("nwb_file_name"),
+                recompute_file_name=recompute_file_name,
+                recompute_object_id=recompute_object_id,
+                recompute_electrodes_id=recompute_electrodes_id,
+                save_to=save_to,
+            )
+        )
+
+        hash = AnalysisNwbfile().get_hash(
+            recording_nwb_file_name,
+            from_schema=True,
+            precision_lookup=rounding,
+            return_hasher=bool(save_to),
+        )
+
+        if recompute:
+            AnalysisNwbfile()._update_external(recompute_file_name, hash)
+
+        return dict(
+            analysis_file_name=recording_nwb_file_name,
+            object_id=recording_object_id,
+            electrodes_id=electrodes_id,
+            hash=hash,
+        )
+
+    @classmethod
+    def _validate_file(self, file_path: str) -> str:
+        """Validate the NWB file exists and contains required upstream data.
+
+        Parameters
+        ----------
+        file_path : str
+            path to the NWB file to validate
+
+        Returns
+        -------
+        elect_id : str
+            ProcessedElectricalSeries/electrodes object ID
+
+        Raises
+        ------
+        FileNotFoundError
+            If the file does not exist
+        KeyError
+            If the file does not contain electrodes or upstream objects
+        """
+        elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
+        if not Path(file_path).exists():
+            raise FileNotFoundError(f"File {file_path} not found.")
+
+        # ensure partial objects are present in existing file
+        with H5File(file_path, "r") as f:
+            elect_parts = elect_attr.split("/")
+            for i in range(len(elect_parts)):
+                mid_path = "/".join(elect_parts[: i + 1])
+                if mid_path in f.keys():
+                    continue
+                raise KeyError(f"H5 object missing, {mid_path}: {file_path}")
+            elect_id = f[elect_attr].attrs["object_id"]
+
+        return elect_id
 
     @classmethod
     def get_recording(cls, key: dict) -> si.BaseRecording:
@@ -249,11 +370,14 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         key : dict
             primary key of SpikeSorting table
         """
-
         analysis_file_name = (cls & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )
+
+        if not Path(analysis_file_abs_path).exists():
+            cls._make_file(key, recompute_file_name=analysis_file_name)
+
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
         )
@@ -291,7 +415,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": sort_interval_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         valid_interval_times = (
             IntervalList
@@ -299,13 +423,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": "raw data valid times",
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
 
         # DO: - take intersection between sort interval and valid times
-        return interval_list_intersect(
-            sort_interval,
-            valid_interval_times,
-            min_length=params["min_segment_length"],
+        return sort_interval.intersect(
+            valid_interval_times, min_length=params["min_segment_length"]
         )
 
     def _get_preprocessed_recording(self, key: dict):
@@ -331,6 +453,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         # - the reference channel
         # - probe type
         # - filter parameters
+
+        # TODO: Reduce number of fetches
         nwb_file_name = (SpikeSortingRecordingSelection & key).fetch1(
             "nwb_file_name"
         )
@@ -355,27 +479,21 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording_channel_ids = np.setdiff1d(channel_ids, ref_channel_id)
         all_channel_ids = np.unique(np.append(channel_ids, ref_channel_id))
 
+        # Electrode's fk to probe is nullable, so we need to check if present
+        query = Electrode * Probe & {"nwb_file_name": nwb_file_name}
+        if len(query) == 0:
+            raise ValueError(f"No probe info found for {nwb_file_name}.")
+
         probe_type_by_channel = []
         electrode_group_by_channel = []
         for channel_id in channel_ids:
-            probe_type_by_channel.append(
-                (
-                    Electrode * Probe
-                    & {
-                        "nwb_file_name": nwb_file_name,
-                        "electrode_id": channel_id,
-                    }
-                ).fetch1("probe_type")
-            )
+            # TODO: limit to one unique fetch. use set
+            c_query = query & {"electrode_id": channel_id}
+            probe_type_by_channel.append(c_query.fetch1("probe_type"))
             electrode_group_by_channel.append(
-                (
-                    Electrode
-                    & {
-                        "nwb_file_name": nwb_file_name,
-                        "electrode_id": channel_id,
-                    }
-                ).fetch1("electrode_group_name")
+                c_query.fetch1("electrode_group_name")
             )
+
         probe_type = np.unique(probe_type_by_channel)
         filter_params = (
             SpikeSortingPreprocessingParameters * SpikeSortingRecordingSelection
@@ -393,8 +511,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         all_timestamps = recording.get_times()
 
-        # TODO: make sure the following works for recordings that don't have explicit timestamps
-        valid_sort_times = self._get_sort_interval_valid_times(key)
+        # Note: _consolidate_intervals is only used in spike sorting.v1
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
         valid_sort_times_indices = _consolidate_intervals(
             valid_sort_times, all_timestamps
         )
@@ -423,8 +541,18 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             ]
 
         # slice in channels; include ref channel in first slice, then exclude it in second slice
+        spyglass_ids = (
+            all_channel_ids if ref_channel_id >= 0 else recording_channel_ids
+        )
+        spikeinterface_ids = self._get_spikeinterface_channel_ids(
+            nwb_file_name, spyglass_ids
+        )
+        recording = recording.channel_slice(
+            channel_ids=spikeinterface_ids,
+            renamed_channel_ids=spyglass_ids,
+        )
+
         if ref_channel_id >= 0:
-            recording = recording.channel_slice(channel_ids=all_channel_ids)
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="single",
@@ -435,20 +563,13 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 channel_ids=recording_channel_ids
             )
         elif ref_channel_id == -2:
-            recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
-            )
             recording = si.preprocessing.common_reference(
                 recording,
                 reference="global",
                 operator="median",
                 dtype=np.float64,
             )
-        elif ref_channel_id == -1:
-            recording = recording.channel_slice(
-                channel_ids=recording_channel_ids
-            )
-        else:
+        elif ref_channel_id != -1:
             raise ValueError(
                 "Invalid reference channel ID. Use -1 to skip referencing. Use "
                 + "-2 to reference via global median. Use positive integer to "
@@ -479,13 +600,77 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             tetrode.set_device_channel_indices(np.arange(4))
             recording = recording.set_probe(tetrode, in_place=True)
 
-        return recording, np.asarray(timestamps)
+        return dict(recording=recording, timestamps=np.asarray(timestamps))
+
+    def update_ids(self):
+        """Update electrodes_id, and hash in SpikeSortingRecording table.
+
+        Only used for transitioning to recompute NWB files, see #1093.
+        """
+        elect_attr = "acquisition/ProcessedElectricalSeries/electrodes"
+        needs_update = self & "electrodes_id is NULL or hash is NULL"
+
+        for key in tqdm(needs_update):
+            analysis_file_path = AnalysisNwbfile.get_abs_path(
+                key["analysis_file_name"]
+            )
+            with H5File(analysis_file_path, "r") as f:
+                elect_id = f[elect_attr].attrs["object_id"]
+
+            updated = dict(
+                key,
+                electrodes_id=elect_id,
+                hash=NwbfileHasher(analysis_file_path).hash,
+            )
+
+            self.update1(updated)
+
+    def recompute(self, key: dict):
+        """Recompute the processed recording.
+
+        Parameters
+        ----------
+        key : dict
+            primary key of SpikeSortingRecording table
+        """
+        raise NotImplementedError("Recompute not implemented.")
+
+    @staticmethod
+    def _get_spikeinterface_channel_ids(
+        nwb_file_name: str, channel_ids: List[Union[int, str]]
+    ):
+        """Given a file name and channel ids, return channel names.
+
+        SpikeInterface uses channel_names instead of index number if present in
+        nwb electrodes table. This function ensures match in channel_id values
+        for indexing.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            file name of the NWB file
+        channel_ids : List[int]
+            list of channel indexes (electrode_id) to be converted
+
+        Returns
+        -------
+        List[Union[int, str]]
+            list of channel_id values used by spikeinterface
+        """
+        nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name)
+        with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
+            nwbfile = io.read()
+            electrodes_table = nwbfile.electrodes
+            if "channel_name" not in electrodes_table.colnames:
+                return channel_ids
+            channel_names = electrodes_table["channel_name"]
+            return [channel_names[ch] for ch in channel_ids]
 
 
 def _consolidate_intervals(intervals, timestamps):
     """Convert a list of intervals (start_time, stop_time)
-    to a list of intervals (start_index, stop_index) by comparing to a list of timestamps;
-    then consolidates overlapping or adjacent intervals
+    to a list of intervals (start_index, stop_index) by comparing to a list of
+    timestamps; then consolidates overlapping or adjacent intervals
 
     Parameters
     ----------
@@ -498,9 +683,8 @@ def _consolidate_intervals(intervals, timestamps):
     if intervals.ndim == 1:
         intervals = intervals.reshape(-1, 2)
     if intervals.shape[1] != 2:
-        raise ValueError(
-            "Input array must have shape (N, 2) where N is the number of intervals."
-        )
+        raise ValueError("Input array must have shape (N_Intervals, 2).")
+
     # Check if intervals are sorted. If not, sort them.
     if not np.all(intervals[:-1] <= intervals[1:]):
         intervals = np.sort(intervals, axis=0)
@@ -519,11 +703,11 @@ def _consolidate_intervals(intervals, timestamps):
 
     # Loop through the rest of the intervals to join them if needed
     for next_start, next_stop in zip(start_indices, stop_indices):
-        # If the stop time of the current interval is equal to or greater than the next start time minus 1
+        # If the stop time of the current interval is equal to or greater than
+        # the next start time minus 1
         if stop >= next_start - 1:
-            stop = max(
-                stop, next_stop
-            )  # Extend the current interval to include the next one
+            # Extend the current interval to include the next one
+            stop = max(stop, next_stop)
         else:
             # Add the current interval to the consolidated list
             consolidated.append((start, stop))
@@ -540,6 +724,10 @@ def _write_recording_to_nwb(
     recording: si.BaseRecording,
     timestamps: Iterable,
     nwb_file_name: str,
+    recompute_file_name: Optional[str] = None,
+    recompute_object_id: Optional[str] = None,
+    recompute_electrodes_id: Optional[str] = None,
+    save_to: Union[str, Path] = None,
 ):
     """Write a recording in NWB format
 
@@ -549,6 +737,17 @@ def _write_recording_to_nwb(
     timestamps : iterable
     nwb_file_name : str
         name of NWB file the recording originates
+    recompute_file_name : str, optional
+        name of the NWB file to recompute
+    recompute_object_id : str, optional
+        object ID for recomputed processed electrical series object,
+        acquisition/ProcessedElectricalSeries.
+    recompute_electrodes_id : str, optional
+        object ID for recomputed electrodes sub-object,
+        acquisition/ProcessedElectricalSeries/electrodes.
+    save_to : Union[str, Path], optional
+        Default None, save to analysis directory. If provided, save to specified
+        path. For use in recompute prior to deletion.
 
     Returns
     -------
@@ -556,8 +755,37 @@ def _write_recording_to_nwb(
         name of analysis NWB file containing the preprocessed recording
     """
 
-    analysis_nwb_file = AnalysisNwbfile().create(nwb_file_name)
-    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(analysis_nwb_file)
+    recompute_args = (
+        recompute_file_name,
+        recompute_object_id,
+        recompute_electrodes_id,
+    )
+    recompute = any(recompute_args)
+    if recompute and not all(recompute_args):
+        raise ValueError(
+            "If recomputing, must specify all of recompute_file_name, "
+            "recompute_object_id, and recompute_electrodes_id."
+        )
+
+    series_name = "ProcessedElectricalSeries"
+    series_attr = "acquisition/" + series_name
+    elect_attr = series_attr + "/electrodes"
+
+    analysis_nwb_file = AnalysisNwbfile().create(
+        nwb_file_name=nwb_file_name,
+        recompute_file_name=recompute_file_name,
+        alternate_dir=save_to,
+    )
+    analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
+        analysis_nwb_file,
+        from_schema=recompute,
+    )
+
+    abs_obj = Path(analysis_nwb_file_abs_path)
+    if save_to and abs_obj.is_relative_to(analysis_dir):
+        relative = abs_obj.relative_to(analysis_dir)
+        analysis_nwb_file_abs_path = Path(save_to) / relative
+
     with pynwb.NWBHDF5IO(
         path=analysis_nwb_file_abs_path,
         mode="a",
@@ -580,15 +808,28 @@ def _write_recording_to_nwb(
             electrodes=table_region,
             timestamps=timestamps_iterator,
             filtering="Bandpass filtered for spike band",
-            description=f"Referenced and filtered recording from {nwb_file_name} for spike sorting",
+            description="Referenced and filtered recording from "
+            + f"{nwb_file_name} for spike sorting",
             conversion=np.unique(recording.get_channel_gains())[0] * 1e-6,
         )
+
         nwbfile.add_acquisition(processed_electrical_series)
-        recording_object_id = nwbfile.acquisition[
-            "ProcessedElectricalSeries"
-        ].object_id
+
+        recording_object_id = nwbfile.acquisition[series_name].object_id
+        electrodes_id = nwbfile.acquisition[series_name].electrodes.object_id
+
         io.write(nwbfile)
-    return analysis_nwb_file, recording_object_id
+
+    if recompute_object_id:
+        # logger.info(f"Recomputed {recompute_file_name}, fixing object IDs.")
+        with H5File(analysis_nwb_file_abs_path, "a") as f:
+            f[series_attr].attrs["object_id"] = recompute_object_id
+            f[elect_attr].attrs["object_id"] = recompute_electrodes_id
+        recording_object_id = recompute_object_id
+        electrodes_id = recompute_electrodes_id
+        analysis_nwb_file = recompute_file_name
+
+    return analysis_nwb_file, recording_object_id, electrodes_id
 
 
 # For writing recording to NWB file
