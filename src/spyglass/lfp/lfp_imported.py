@@ -58,13 +58,19 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
         for i, es_object in enumerate(lfp_es_objects):
             if len(self & {"lfp_object_id": es_object.object_id}) > 0:
                 logger.warning(
-                    f"Skipping {es_object.object_id} because it already exists in ImportedLFP."
+                    f"Skipping {es_object.object_id} because it already exists "
+                    + "in ImportedLFP."
+                )
+                continue
+            if es_object.timestamps is None:
+                logger.warning(
+                    f"Skipping lfp without timestamps: {es_object.object_id}"
                 )
                 continue
             electrodes_df = es_object.electrodes.to_dataframe()
             electrode_ids = electrodes_df.index.values
 
-            # check if existing electrode group for this set of electrodes exists
+            # check if existing group for this set of electrodes exists
             session_key = {
                 "nwb_file_name": nwb_file_name,
             }

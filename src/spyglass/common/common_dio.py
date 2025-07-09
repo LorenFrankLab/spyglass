@@ -54,6 +54,12 @@ class DIOEvents(SpyglassMixin, dj.Imported):
         dio_inserts = []
         time_range_list = []
         for event_series in behav_events.time_series.values():
+            if not event_series.timestamps:
+                logger.warning(
+                    f"No timestamps found for DIO event {event_series.name} "
+                    + f"in {nwb_file_name}. Skipping."
+                )
+                continue
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
             dio_inserts.append(key.copy())
