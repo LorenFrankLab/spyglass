@@ -1,6 +1,7 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 
 import inspect
+import math
 import multiprocessing.pool
 import os
 import re
@@ -700,3 +701,28 @@ def accept_divergence(key, new_value, existing_value, test_mode=False):
         + f"'{new_value}' ?\n"
     )
     return str_to_bool(response)
+
+
+def _replace_nan_with_default(data_dict, default_value=-1.0):
+    """
+    Replace NaN values in a dictionary with a default value.
+    
+    This is necessary because DataJoint cannot properly format queries 
+    with NaN values, causing errors during probe insertion/validation.
+    
+    Args:
+        data_dict: Dictionary that may contain NaN values
+        default_value: Value to replace NaN with (default: -1.0)
+    
+    Returns:
+        Dictionary with NaN values replaced
+    """
+    if not isinstance(data_dict, dict):
+        return data_dict
+        
+    result = data_dict.copy()
+    for key, value in result.items():
+        if isinstance(value, float) and math.isnan(value):
+            result[key] = default_value
+    
+    return result

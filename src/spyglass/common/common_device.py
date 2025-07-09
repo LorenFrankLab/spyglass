@@ -1,11 +1,10 @@
 import datajoint as dj
-import math
 import ndx_franklab_novela
 
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
+from spyglass.utils.dj_helper_fn import accept_divergence, _replace_nan_with_default
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_device")
@@ -334,31 +333,6 @@ class ProbeType(SpyglassMixin, dj.Manual):
     manufacturer = "": varchar(200)  # manufacturer of this probe
     num_shanks: int                  # number of shanks on this probe
     """
-
-
-def _replace_nan_with_default(data_dict, default_value=-1.0):
-    """
-    Replace NaN values in a dictionary with a default value.
-    
-    This is necessary because DataJoint cannot properly format queries 
-    with NaN values, causing errors during probe insertion/validation.
-    
-    Args:
-        data_dict: Dictionary that may contain NaN values
-        default_value: Value to replace NaN with (default: -1.0)
-    
-    Returns:
-        Dictionary with NaN values replaced
-    """
-    if not isinstance(data_dict, dict):
-        return data_dict
-        
-    result = data_dict.copy()
-    for key, value in result.items():
-        if isinstance(value, float) and math.isnan(value):
-            result[key] = default_value
-    
-    return result
 
 
 @schema
@@ -809,10 +783,10 @@ class Probe(SpyglassMixin, dj.Manual):
             for dim in ["rel_x", "rel_y", "rel_z", "contact_size"]:
                 if dim in nwbfile.electrodes[elec_index]:
                     value = nwbfile.electrodes[elec_index, dim]
-                    # Replace NaN with default value to avoid DataJoint query issues
-                    if isinstance(value, float) and math.isnan(value):
-                        value = -1.0
                     elect_dict[elec_index][dim] = value
+            
+            # Apply NaN replacement to the entire electrode dictionary
+            elect_dict[elec_index] = _replace_nan_with_default(elect_dict[elec_index])
 
         if not device_found:
             logger.warning(

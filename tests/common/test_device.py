@@ -1,6 +1,8 @@
 import pytest
 from numpy import array_equal
 
+from spyglass.utils.dj_helper_fn import _replace_nan_with_default
+
 
 def test_invalid_device(common, populate_exception, mini_insert):
     device_dict = common.DataAcquisitionDevice.fetch(as_dict=True)[0]
@@ -45,3 +47,30 @@ def test_create_probe(common, mini_devices, mini_path, mini_copy_name):
     assert array_equal(
         before, after
     ), "Probe create_from_nwbfile had unexpected effect"
+
+
+def test_replace_nan_with_default():
+    """Test that NaN values in probe geometry fields are properly replaced with -1.0."""
+    # Test with NaN values (similar to the issue case)
+    test_data = {
+        "probe_id": "nTrode32_probe description",
+        "probe_shank": 0,
+        "contact_size": float("nan"),
+        "probe_electrode": 194,
+        "rel_x": float("nan"),
+        "rel_y": float("nan"),
+        "rel_z": float("nan"),
+    }
+
+    result = _replace_nan_with_default(test_data)
+
+    # Check that NaN values were replaced with -1.0
+    assert result["contact_size"] == -1.0
+    assert result["rel_x"] == -1.0
+    assert result["rel_y"] == -1.0
+    assert result["rel_z"] == -1.0
+
+    # Check that non-NaN values were preserved
+    assert result["probe_id"] == "nTrode32_probe description"
+    assert result["probe_shank"] == 0
+    assert result["probe_electrode"] == 194
