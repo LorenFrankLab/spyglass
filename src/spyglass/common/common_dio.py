@@ -45,7 +45,8 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             return  # See #849
 
         # Times for these events correspond to the valid times for the raw data
-        # If no raw data found, create a default interval list named "dio data valid times"
+        # If no raw data found, create a default interval list named
+        # "dio data valid times"
         if raw_query := (Raw() & {"nwb_file_name": nwb_file_name}):
             key["interval_list_name"] = (raw_query).fetch1("interval_list_name")
         else:
@@ -55,7 +56,7 @@ class DIOEvents(SpyglassMixin, dj.Imported):
         time_range_list = []
         for event_series in behav_events.time_series.values():
             timestamps = event_series.get_timestamps()
-            if not timestamps.any():
+            if len(timestamps) == 0:  # Can be either np array or HDMF5 dataset
                 logger.warning(
                     f"No timestamps found for DIO event {event_series.name} "
                     + f"in {nwb_file_name}. Skipping."

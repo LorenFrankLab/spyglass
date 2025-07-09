@@ -63,7 +63,7 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
                 )
                 continue
             timestamps = es_object.get_timestamps()
-            if not timestamps.any():
+            if len(timestamps) == 0:
                 logger.warning(
                     f"Skipping lfp without timestamps: {es_object.object_id}"
                 )
