@@ -1,4 +1,5 @@
 import datajoint as dj
+import math
 import ndx_franklab_novela
 
 from spyglass.common.errors import PopulateException
@@ -335,6 +336,31 @@ class ProbeType(SpyglassMixin, dj.Manual):
     """
 
 
+def _replace_nan_with_default(data_dict, default_value=-1.0):
+    """
+    Replace NaN values in a dictionary with a default value.
+    
+    This is necessary because DataJoint cannot properly format queries 
+    with NaN values, causing errors during probe insertion/validation.
+    
+    Args:
+        data_dict: Dictionary that may contain NaN values
+        default_value: Value to replace NaN with (default: -1.0)
+    
+    Returns:
+        Dictionary with NaN values replaced
+    """
+    if not isinstance(data_dict, dict):
+        return data_dict
+        
+    result = data_dict.copy()
+    for key, value in result.items():
+        if isinstance(value, float) and math.isnan(value):
+            result[key] = default_value
+    
+    return result
+
+
 @schema
 class Probe(SpyglassMixin, dj.Manual):
     definition = """
@@ -563,7 +589,7 @@ class Probe(SpyglassMixin, dj.Manual):
             for electrode in shank.shanks_electrodes.values():
                 # the next line will need to be fixed if we have different sized
                 # contacts on a shank
-                elect_dict[electrode.name] = {
+                elect_dict[electrode.name] = _replace_nan_with_default({
                     "probe_id": new_probe_dict["probe_id"],
                     "probe_shank": shank_dict[shank.name]["probe_shank"],
                     "contact_size": nwb_probe_obj.contact_size,
@@ -571,7 +597,7 @@ class Probe(SpyglassMixin, dj.Manual):
                     "rel_x": electrode.rel_x,
                     "rel_y": electrode.rel_y,
                     "rel_z": electrode.rel_z,
-                }
+                })
 
     @classmethod
     def _read_config_probe_data(
@@ -597,7 +623,7 @@ class Probe(SpyglassMixin, dj.Manual):
             "Electrode", []
         )
         for i, e in enumerate(elect_dict_list):
-            elect_dict[str(i)] = {
+            elect_dict[str(i)] = _replace_nan_with_default({
                 "probe_id": probe_id,
                 "probe_shank": e["probe_shank"],
                 "probe_electrode": e["probe_electrode"],
@@ -605,7 +631,7 @@ class Probe(SpyglassMixin, dj.Manual):
                 "rel_x": e.get("rel_x"),
                 "rel_y": e.get("rel_y"),
                 "rel_z": e.get("rel_z"),
-            }
+            })
 
         # make the probe type if not in database
         new_probe_type_dict.update(
@@ -780,11 +806,13 @@ class Probe(SpyglassMixin, dj.Manual):
                 "probe_electrode": elec_index,
             }
 
-            for dim in ["rel_x", "rel_y", "rel_z"]:
+            for dim in ["rel_x", "rel_y", "rel_z", "contact_size"]:
                 if dim in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index][dim] = nwbfile.electrodes[
-                        elec_index, dim
-                    ]
+                    value = nwbfile.electrodes[elec_index, dim]
+                    # Replace NaN with default value to avoid DataJoint query issues
+                    if isinstance(value, float) and math.isnan(value):
+                        value = -1.0
+                    elect_dict[elec_index][dim] = value
 
         if not device_found:
             logger.warning(
