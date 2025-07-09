@@ -62,7 +62,8 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
                     + "in ImportedLFP."
                 )
                 continue
-            if es_object.timestamps is None:
+            timestamps = es_object.get_timestamps()
+            if not timestamps.any():
                 logger.warning(
                     f"Skipping lfp without timestamps: {es_object.object_id}"
                 )
@@ -88,17 +89,14 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
 
             # estimate the sampling rate or read in if available
             sampling_rate = es_object.rate or estimate_sampling_rate(
-                es_object.timestamps[: int(1e6)]
+                timestamps[: int(1e6)]
             )
 
             # create a new interval list for the valid times
             interval_key = {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": f"imported lfp {i} valid times",
-                "valid_times": get_valid_intervals(
-                    es_object.timestamps,
-                    sampling_rate,
-                ),
+                "valid_times": get_valid_intervals(timestamps, sampling_rate),
                 "pipeline": "imported_lfp",
             }
             IntervalList().insert1(interval_key)
