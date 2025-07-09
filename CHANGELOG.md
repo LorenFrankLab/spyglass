@@ -110,7 +110,7 @@ ImportedLFP().drop()
     - Allow insert with dio events but no e-series data #1318
     - Prompt user to verify compatibility between new insert and existing table
         entries # 1318
-    - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #XXXX
+    - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -150,7 +150,7 @@ ImportedLFP().drop()
     - Updating the LFPBandSelection logic with comprehensive validation and batch
         insertion for electrodes and references. #1280
     - Implement `ImportedLFP.make()` for ingestion from nwb files #1278, #1302
-    - Skip empty timeseries ingestion for `ImportedLFP` #XXXX
+    - Skip empty timeseries ingestion for `ImportedLFP` #1347
 
 ## [0.5.4] (December 20, 2024)
 
