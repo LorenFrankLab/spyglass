@@ -254,6 +254,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, add_frame_ind=True) -> DataFrame:
         """Fetch the position data as a pandas DataFrame."""
+        self.ensure_single_entry()
         pos_params = self.fetch1("trodes_pos_params_name")
         if (
             add_frame_ind
