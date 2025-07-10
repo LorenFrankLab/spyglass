@@ -98,7 +98,8 @@ ImportedLFP().drop()
 - Common
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
-    - Calculate mode of timestep size in log scale when estimating sampling rate #1270
+    - Calculate mode of timestep size in log scale when estimating sampling rate
+        #1270
     - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
     - Allow ingestion of multi-row task epoch tables #1278
     - Add `SensorData` to `populate_all_common` #1281
@@ -107,8 +108,9 @@ ImportedLFP().drop()
     - `IntervalList.fetch_interval` now returns `Interval` object #1293
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
-    - Prompt user to verify compatibility between new insert and existing
-      table entries # 1318
+    - Prompt user to verify compatibility between new insert and existing table
+        entries # 1318
+    - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -129,14 +131,14 @@ ImportedLFP().drop()
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
     - Update transaction and parallel make settings for `v0` and `v1`
-      `SpikeSorting` tables #1270
+        `SpikeSorting` tables #1270
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
     - Reconcile spikeinterface value for `channel_id` when `channel_name` column
-      present in nwb file electrodes table #1310, #1334
+        present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
-      `SortedSpikesGroup.fetch_spike_data` #1320
+        `SortedSpikesGroup.fetch_spike_data` #1320
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
@@ -148,6 +150,7 @@ ImportedLFP().drop()
     - Updating the LFPBandSelection logic with comprehensive validation and batch
         insertion for electrodes and references. #1280
     - Implement `ImportedLFP.make()` for ingestion from nwb files #1278, #1302
+    - Skip empty timeseries ingestion for `ImportedLFP` #1347
 
 ## [0.5.4] (December 20, 2024)
 
