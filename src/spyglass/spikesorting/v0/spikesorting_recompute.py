@@ -149,15 +149,12 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         query = SpikeSortingRecording() & key
         rec_path = Path(query.fetch1("recording_path"))
 
-        if not rec_path.exists():
-            logger.warning(f"Recording path not found: {rec_path}")
-            return
-        if not rec_path.is_dir():
-            logger.warning(f"Recording path is not a directory: {rec_path}")
-            return
-        if rec_path.is_dir() and not any(rec_path.iterdir()):
-            logger.warning(f"Recording path is empty: {rec_path}")
-            return
+        missing_dir = not rec_path.exists() or not rec_path.is_dir()
+        empty_dir = rec_path.is_dir() and not any(rec_path.iterdir())
+
+        if missing_dir or empty_dir:
+            logger.warning(f"Problem with recording path: {rec_path}")
+            return  # pragma: no cover
 
         si_version = self._extract_version(
             [
@@ -246,7 +243,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         super().insert(inserts, **kwargs)
 
         if not inserts:
-            logger.warning("No rows inserted.")
+            logger.warning("No rows inserted.")  # pragma: no cover
 
     def attempt_all(
         self,

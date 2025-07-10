@@ -50,11 +50,11 @@ class UserEnvironment(dj.Manual):
         # ---------------- Start with Conda environment export ----------------
         conda_export = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
         if conda_export.returncode != 0:
-            logger.error(
+            logger.error(  # pragma: no cover
                 "Failed to retrieve the Conda environment. "
                 + "Recompute feature disabled."
             )
-            return ""
+            return ""  # pragma: no cover
 
         ret = {
             k: v
@@ -96,7 +96,9 @@ class UserEnvironment(dj.Manual):
                 pip_custom[dep_name] = path
                 continue
             if line.startswith("-e git+") and "#egg=" in line:
-                url, package = line.split("#egg=", maxsplit=1)
+                url, package = line.split(
+                    "#egg=", maxsplit=1
+                )  # pragma: no cover
                 # conda convention uses dashes
                 pip_custom[package.replace("_", "-")] = url.split("git+")[-1]
                 self._has_editable = True
