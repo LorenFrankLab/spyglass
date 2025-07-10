@@ -32,12 +32,9 @@ from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
-from spyglass.utils.nwb_hash import (
-    NwbfileHasher,
-    get_file_namespaces,
-    bytes_to_human_readable,
-)
+from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
 schema = dj.schema("spikesorting_v1_recompute")
 
@@ -122,10 +119,10 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         try:
             path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
         except (FileNotFoundError, dj.DataJointError) as e:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 f"Issue w/{parent['analysis_file_name']}. Skipping.\n{e}"
             )
-            return
+            return  # pragma: no cover
 
         nwb_deps = get_file_namespaces(path).copy()
 
@@ -194,8 +191,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             raise ValueError("Rows must be a list of dicts")
 
         editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
-        if at_creation and editable_env:
-            at_creation = False  # no assume pass if generated with editable env
+        if at_creation and editable_env:  # assume fail if editable env
+            at_creation = False  # # pragma: no cover
 
         inserts = []
         for row in rows:
@@ -345,7 +342,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old, new = self._get_paths(key, as_str=True)
         if not new.exists():
             logger.warning(f"New file does not exist: {new.name}")
-            return None, None
+            return None, None  # pragma: no cover
 
         if old not in self._file_cache:
             self._file_cache[old] = h5py_File(old, "r")
@@ -461,13 +458,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         except ValueError as e:
             e_info = e.args[0]
             if "probe info" in e_info:  # make failed bc missing probe info
-                self.insert1(
+                self.insert1(  # pragma: no cover
                     dict(key, matched=False, err_msg=e_info), **allow_ins
                 )
             else:  # unexpected ValueError
-                raise
+                raise  # pragma: no cover
         except KeyError as err:
-            e_info = err.args[0]
+            e_info = err.args[0]  # pragma: no cover
             if "H5 object missing" in e_info:  # failed bc missing parent obj
                 e = e_info.split(", ")[1].split(":")[0].strip()
                 self.insert1(
@@ -479,22 +476,22 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                     **allow_ins,
                 )
             elif "ndx-" in e_info:  # failed bc missing pynwb extension
-                raise ModuleNotFoundError(
+                raise ModuleNotFoundError(  # pragma: no cover
                     "Please install the missing pynwb extension:\n\t" + e_info
                 )
             else:
                 raise
         except TypeError as err:
-            e_info = err.args[0]
+            e_info = err.args[0]  # pragma: no cover
             if "unexpected keyword" in e_info:
-                self.insert1(
+                self.insert1(  # pragma: no cover
                     dict(key, matched=False, err_msg=e_info), **allow_ins
                 )
             else:
                 logger.warning(f"TypeError: {err}: {new.name}")
         else:
             return new_vals
-        return dict(hash=None)
+        return dict(hash=None)  # pragma: no cover
 
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
@@ -530,7 +527,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher = self._hash_one(old, rounding)
 
         if new_hasher.hash == old_hasher.hash:
-            # logger.info(f"Matched {new.name}")
             self.insert1(dict(key, matched=True))
             if not self._other_roundings(key, operator="!="):
                 # if no other recompute attempts

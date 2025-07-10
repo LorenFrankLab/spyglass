@@ -451,7 +451,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             path = key["recording_path"]
             if not Path(path).exists():
                 logger.warning(f"Recording path {path} does not exist")
-                continue
+                continue  # pragma: no cover
             key["hash"] = self._dir_hash(key["recording_path"])
             self.update1(key)
 

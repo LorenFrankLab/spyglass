@@ -615,8 +615,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 analysis_file_path = AnalysisNwbfile.get_abs_path(
                     key["analysis_file_name"]
                 )
-            except dj.DataJointError:
-                continue
+            except dj.DataJointError:  # file checksum error
+                continue  # pragma: no cover
             with H5File(analysis_file_path, "r") as f:
                 elect_id = f[elect_attr].attrs["object_id"]
 

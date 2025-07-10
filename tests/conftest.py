@@ -1490,3 +1490,9 @@ def pop_spikes_group(
         unit_filter_params_name="default_exclusion",
     )
     yield spike_v1_group.SortedSpikesGroup().fetch("KEY", as_dict=True)[0]
+
+
+@pytest.fixture(scope="session")
+def user_env_tbl(common):
+    """Fixture to access the UserEnvironment table."""
+    yield common.UserEnvironment()

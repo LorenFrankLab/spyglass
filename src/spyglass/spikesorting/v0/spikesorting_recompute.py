@@ -32,8 +32,9 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
-from spyglass.utils.nwb_hash import DirectoryHasher, bytes_to_human_readable
+from spyglass.utils.nwb_hash import DirectoryHasher
 
 schema = dj.schema("spikesorting_recompute_v0")
 
@@ -78,11 +79,11 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             self.make(key)
         ret = bool(self.this_env & key_pk)
         if not ret and show_err:
-            this_entry = (self & key_pk).fetch(
+            this_entry = (self & key_pk).fetch(  # pragma: no cover
                 "spikeinterface", "probeinterface", as_dict=True
             )[0]
-            need = sort_dict(this_entry)
-            have = sort_dict(
+            need = sort_dict(this_entry)  # pragma: no cover
+            have = sort_dict(  # pragma: no cover
                 dict(spikeinterface=si_version, probeinterface=pi_version)
             )
             logger.error(f"Versions mismatch: {need} != {have}")
@@ -166,12 +167,12 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         n_versions = len(si_version)
         if n_versions != 1:
             logger.warning(f"{n_versions} si versions found: {si_version}")
-            return
+            return  # pragma: no cover
 
         probe_path = rec_path / "probe.json"
         if not probe_path.exists():
             logger.warning(f"Probe file not found for {key['nwb_file_name']}")
-            return
+            return  # pragma: no cover
 
         with open(rec_path / "probe.json", "r") as file:
             pi_version = json.load(file).get("version", None)
@@ -229,8 +230,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             return
 
         editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
-        if at_creation and editable_env:
-            at_creation = False  # no assume pass if generated with editable env
+        if at_creation and editable_env:  # no assume pass if gen w/editable env
+            at_creation = False  # pragma: no cover
 
         inserts = []
         for row in rows:
@@ -344,6 +345,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 return
 
             old, new = RecordingRecompute()._get_paths(key)
+
             this_file = key.get("name")
 
             if this_file.endswith("raw"):
@@ -390,7 +392,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if self & rec_key & "matched=1":
             logger.info(f"Already matched {rec_key['nwb_file_name']}")
             (RecordingRecomputeSelection & key).delete(safemode=False)
-            return
+            return  # pragma: no cover
 
         # Skip recompute for files logged at creation
         parent = self._parent_key(key)
@@ -411,13 +413,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 )["hash"]
             )
         except ValueError as err:
-            e_info = err.args[0]
+            e_info = err.args[0]  # pragma: no cover
             # Some spikeinterface versions can't handle small batches
             if "greater than padlen" in e_info:
                 logger.error(f"Failed to recompute {log_key}: {e_info}")
                 self.insert1({**key, "matched": False, "err_msg": e_info[:255]})
-                return
-            raise
+                return  # pragma: no cover
+            raise  # pragma: no cover
 
         # hack pending table alter
         old_hash = parent.get("hash") or self._hash_one(old).hash
