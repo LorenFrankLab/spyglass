@@ -27,10 +27,13 @@ def test_bad_prefix(caplog, dj_conn, Mixin):
     assert "Schema prefix not in SHARED_MODULES" in caplog.text
 
 
-def test_nwb_table_missing(schema_test, Mixin):
+def test_nwb_table_defaults_to_nwbfile(schema_test, Mixin):
     schema_test(Mixin)
-    with pytest.raises(NotImplementedError):
-        Mixin().fetch_nwb()
+    # Should default to Nwbfile instead of raising NotImplementedError
+    table, attr = Mixin()._nwb_table_tuple
+    from spyglass.common.common_nwbfile import Nwbfile
+    assert table == Nwbfile, f"Expected Nwbfile as default, got {table}"
+    assert attr == "nwb_file_abs_path", f"Expected nwb_file_abs_path, got {attr}"
 
 
 def test_auto_increment(schema_test, Mixin):
