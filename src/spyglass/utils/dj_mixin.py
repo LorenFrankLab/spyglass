@@ -246,14 +246,8 @@ class SpyglassMixin(ExportMixin):
         resolved = getattr(self, "_nwb_table", None) or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile if "-> Nwbfile" in self.definition else None
+            else Nwbfile
         )
-
-        if not resolved:
-            raise NotImplementedError(
-                f"{self.__class__.__name__} does not have a "
-                "(Analysis)Nwbfile foreign key or _nwb_table attribute."
-            )
 
         return (
             resolved,
@@ -263,10 +257,10 @@ class SpyglassMixin(ExportMixin):
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
-        Implementing class must have a foreign key reference to Nwbfile or
-        AnalysisNwbfile (i.e., "-> (Analysis)Nwbfile" in definition)
-        or a _nwb_table attribute. If both are present, the attribute takes
-        precedence.
+        Data source is determined as follows:
+        1. If _nwb_table attribute is present, use it (takes precedence)
+        2. If "-> AnalysisNwbfile" foreign key exists in definition, use AnalysisNwbfile
+        3. Otherwise, default to Nwbfile
 
         Additional logic support Export table logging.
         """
