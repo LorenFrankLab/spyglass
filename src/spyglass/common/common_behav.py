@@ -82,6 +82,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         src_key = dict(**sess_key, source="imported", import_file_name="")
 
         if all_pos is None:
+            logger.info(f"No position data found in {nwb_file_name}. Skipping.")
             return
 
         sources = []
