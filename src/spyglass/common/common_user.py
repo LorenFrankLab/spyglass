@@ -1,13 +1,12 @@
 import re
-from pprint import pprint
 from functools import cached_property
 from hashlib import md5
 from json import dumps as json_dumps
 from os import environ as os_environ
 from pathlib import Path
+from pprint import pprint
 from subprocess import run as sub_run
-from typing import Dict, List, Optional, Union
-
+from typing import Dict, List, Optional, Tuple, Union
 
 import datajoint as dj
 import yaml
@@ -42,131 +41,290 @@ class UserEnvironment(dj.Manual):
     # Substringing isn't ideal, but it simplifies downstream inherited keys.
 
     _has_editable = False  # Flag to track if the env has editable installs
+    _conda_export = dict()  # Cached conda export
+    _conda_pip_dict = dict()  # Pip dependencies from conda export
+    _pip_freeze = list()  # Cached pip freeze output
+    _pip_custom = dict()  # Custom pip installs from the environment
+    _freeze_comments = dict()  # Comments from pip freeze
+    _conda_conflicts = dict()  # Conda and pip conflicts in the environment
 
-    @cached_property
-    def env(self) -> Union[dict, str]:
-        """Fetch the current Conda environment as a string."""
+    def _get_conda_export(self) -> Tuple[dict, dict]:
+        """Fetch the current Conda environment export.
 
-        # ---------------- Start with Conda environment export ----------------
+        - Runs `conda env export` to get the current environment.
+        - Parses the output to extract dependencies, drop name and prefix.
+        - Extracts pip dependencies if present, converts them to a dict.
+
+        Returns
+        -------
+        conda_export : dict
+            The exported Conda environment as a dictionary.
+        conda_pip_dict : dict
+            A dictionary of pip dependencies: Dict[name, package==version]
+        """
         conda_export = sub_run(["conda", "env", "export"], **SUBPROCESS_KWARGS)
         if conda_export.returncode != 0:
             logger.error(  # pragma: no cover
                 "Failed to retrieve the Conda environment. "
                 + "Recompute feature disabled."
             )
-            return ""  # pragma: no cover
+            return None  # pragma: no cover
 
-        ret = {
+        self._conda_export = {
             k: v
             for k, v in yaml.safe_load(conda_export.stdout).items()
-            if k not in ["name", "prefix"]
+            if k not in ["name", "prefix"]  # Exclude name and prefix
         }
 
-        # ------------------------ Fetch pip editables ------------------------
-        pip_freeze = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
-        if pip_freeze.returncode != 0:
-            logger.error(
+        conda_pip_list = []
+        conda_deps = self._conda_export.get("dependencies", [])
+        for i, conda_dep in enumerate(conda_deps):
+            if isinstance(conda_dep, dict):  # extract pip dependencies
+                pip_obj = conda_deps.pop(i)  # remove from list
+                conda_pip_list = pip_obj.pop("pip", None)
+                break
+
+        self._conda_export["dependencies"] = conda_deps
+
+        if conda_pip_list:  # convert to dict
+            self._conda_pip_dict = {
+                dep.split("==", maxsplit=1)[0]: dep for dep in conda_pip_list
+            }
+
+    def _get_pip_freeze(self) -> List[str]:
+        """Fetch the pip freeze output."""
+        ret = sub_run(["pip", "freeze"], **SUBPROCESS_KWARGS)
+        if ret.returncode != 0:
+            logger.error(  # pragma: no cover
                 "Failed to retrieve the pip environment. "
                 + "Recompute feature disabled."
             )
-            return ""
+            return None  # pragma: no cover
 
-        # Ignore basic a==0.0.0 pip installs
-        basic_format = re.compile(  # allows suffixes like a1, dev, post1, etc.
-            r"[\w\d_.-]+==\d+(?:\.\d+)*(?:(?:a|b|rc|\.post)[\d]+|dev[\d]*)?$"
+        self._pip_freeze = [line.strip() for line in ret.stdout.splitlines()]
+
+    @property
+    def _ignored_conda_source(self):
+        """Regex pattern for conda-managed packages from accepted sources.
+
+        Expects each of these sources to be a directory in the path.
+        """
+        sources = "feedstock_root|croot|conda-bld|bld|builder"
+        return re.compile(rf"[/\\](?:{sources})[/\\]")
+
+    @property
+    def _basic_dep_format(self):
+        """Regex patterns for dependency formats.
+
+        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc."""
+        return re.compile(  # allows suffixes like a1, dev, post1, etc.
+            r"""^
+                (?P<pkg>[\w\d.-]+)                  # Package
+                ==                                  # `==` separator
+                (?P<ver>                            # Version
+                    \d+(?:\.\d+)*                   # Major.Minor.Patch
+                    (?:(?:a|b|rc|\.post)\d+|dev\d*) # Suffixes
+                ?)
+            $""",
+            re.VERBOSE,
         )
-        # Ignore conda-managed packages from accepted sources
-        sources = "feedstock_root|croot|conda-bld"  # accepts each in path
-        ignored_conda_source = re.compile(rf"[/\\](?:{sources})[/\\]")
 
-        # Capture custom pip installs: 1 `# package==version`, 2 `-e path`
-        comment_install = re.compile(
-            r"^\s*#.*?\((?P<package>[A-Za-z0-9_.-]+)==(?P<version>[^)]+)\)$"
+    @property
+    def _comment_install(self):
+        """Regex pattern for custom pip installs in comments."""
+        return re.compile(
+            r"^\s*#.*?\((?P<pkg>[A-Za-z0-9_.-]+)==(?P<ver>[^)]+)\)$"
         )
 
-        pip_custom = dict()
-        freeze_comments = dict()
-        for line in pip_freeze.stdout.splitlines():
-            line = line.strip()
-            if basic_format.match(line) or ignored_conda_source.search(line):
-                continue  # ignore file-based conda-managed packages
-            if " @ " in line and ("file://" in line or "git+" in line):
-                # capture local file paths
-                dep_name, path = line.split(" @ ", maxsplit=1)
-                pip_custom[dep_name] = path
-                continue
-            if line.startswith("-e git+") and "#egg=" in line:
-                url, package = line.split(
-                    "#egg=", maxsplit=1
-                )  # pragma: no cover
-                # conda convention uses dashes
-                pip_custom[package.replace("_", "-")] = url.split("git+")[-1]
-                self._has_editable = True
-                continue
-            if match := comment_install.match(line):
-                freeze_comments[match.group("package").replace("_", "-")] = (
-                    match.group("version")
-                )
-                continue
-            if match := re.compile(r"^-e[ ]+(?P<path>\S+)$").match(line):
-                path = match.group("path")  # editable path
-                path_name = Path(path).name.replace("_", "-")
-                if path_name not in freeze_comments:
-                    raise ValueError(
-                        f"Editable path found w/o a preceding comment: {line}"
-                    )
-                pip_custom[path_name] = f"{freeze_comments[path_name]} @ {path}"
-                self._has_editable = True
-                continue
-            raise ValueError
-            logger.error(
-                f"Failed to parse: {line}\nRecompute feature disabled."
-            )
-            return
-
-        if pip_custom:
+    def _warn_if_custom_or_conflict(self):
+        if self._pip_custom:
             logger.warning(
-                "Custom pip installs found in the environment.\n"
-                + "\tRecompute feature may not work as expected.\n"
+                "Custom pip installs found. "
+                + "Recompute feature may not work as expected."
             )
-            pprint(pip_custom)
+            pprint(self._pip_custom, indent=4)
+        if self._conda_conflicts:
+            logger.warning(
+                "Conda/pip conflicts in the environment.\n"
+                + "\tRecompute feature may not work as expected.\n"
+                + "\tUse `pip uninstall pkg` to defer to conda.\n"
+                + "\tConflicts as Package : [pip_version, conda_version]"
+            )
+            pprint(self._conda_conflicts, indent=4)
 
-        # ------- Augment the conda environment with custom pip installs -------
-        conda_pips = []  # Find the element in the dependency list that is pip
-        for conda_dep in ret.get("dependencies", []):
-            if isinstance(conda_dep, dict):
-                conda_pips = conda_dep.get("pip", None)
-                break
+    def _delim_split(
+        self, line: str = None, as_dict=False
+    ) -> Union[Tuple[str, str], dict]:
 
-        for i, pip_dep in enumerate(conda_pips):  # append custom pip installs
-            dep_name, version = pip_dep.split("==", maxsplit=1)
-            if dep_name in pip_custom:
-                pip_path = pip_custom.pop(dep_name)  # remove from list
-                conda_pips[i] = f"{dep_name}=={version} @ {pip_path}"
+        if isinstance(line, list):
+            ret = [self._delim_split(row) for row in line]
+            return {i[0]: i[1] for i in ret} if as_dict else ret
 
-        if pip_custom:  # add any remaining custom pip installs
-            for dep_name, pip_path in pip_custom.items():
-                # needs `==` for parsing later
-                conda_pips.append(f"{dep_name}==None @ {pip_path}")
+        if line is None or not isinstance(line, str):
+            ret = "", None
+        else:
+            for delim in ["==", " @ ", "="]:
+                if delim in line:
+                    ret = line.split(delim, maxsplit=1)
+                    break
+            else:
+                ret = line, ""
 
-        return ret
+        return {ret[0]: ret[1]} if as_dict else tuple(ret)
+
+    def _parse_pip_line(self, line: str) -> bool:
+        """Parse a line from pip freeze output.
+
+        This method handles various formats of pip freeze output, including:
+        - Prebuilt conda packages in paths like `feedstock_root/`
+        - Basic dependency formats like `package==version`, checking conflicts
+        - Custom pip installs with `@` syntax, capturing local file paths
+        - Editable installs with `-e git+` syntax, capturing package names
+
+        Parameters
+        ----------
+        line : str
+            A line from the pip freeze output.
+
+        Returns
+        -------
+        bool
+            True if the line was successfully parsed and handled.
+
+        Raises
+        ------
+        ValueError
+            If the line is an editable path is found without preceding comment.
+        """
+        # ------------------- Ignore conda-managed packages -------------------
+        if self._ignored_conda_source.search(line):
+            return True  # ignore file-based conda-managed packages
+
+        if match := self._basic_dep_format.match(line):
+            package, pip_version = match.group("pkg", "ver")
+            conda_line = self._conda_pip_dict.get(package, None)
+            _, conda_version = self._delim_split(conda_line)
+
+            # --------------- if pip and conda agree, do nothing --------------
+            if line == conda_line:  # same package, same version
+                return True  # no conflict, same version
+
+            # ------- if conda version is none, set pip version in conda ------
+            if conda_version is None:  # append pip-only package
+                logger.info(f"Pip-only package  : {line}")
+                self._conda_pip_dict[package.lower()] = line.lower()
+                return True  # successfully parsed basic dependency
+
+            # --- if conflicting versions, log conflict, overwrite with pip ---
+            logger.info(f"Conda/pip conflict: {line}")
+            self._conda_conflicts[package] = [pip_version, conda_version]
+            self._conda_pip_dict[package] = line
+            return True  # successfully parsed basic dependency conflict
+
+        # ------- if filepath or git path, capture as custom pip install -------
+        if " @ " in line and ("file://" in line or "git+" in line):
+            # capture local file paths
+            dep_name, path = self._delim_split(line)
+            self._pip_custom[dep_name] = line
+            logger.info(f"Custom pip install: {dep_name}")
+            return True  # likely versioned custom install, not 'editable'
+
+        # ------ if editable install from git, track and flag as editable ------
+        if line.startswith("-e git+") and "#egg=" in line:
+            url, package = line.split("#egg=", maxsplit=1)  # pragma: no cover
+            # conda convention uses dashes
+            logger.info(f"Editable from git : {package}")
+            self._pip_custom[package.replace("_", "-")] = line
+            self._has_editable = True
+            return True  # editable install, no version info
+
+        # ------- if comment, then editable, track and flag as editable -------
+        if match := self._comment_install.match(line):
+            pkg = match.group("pkg").replace("_", "-")
+            self._freeze_comments[pkg] = match.group("ver")
+            return True  # comment install, successfully parsed
+
+        if match := re.compile(r"^-e[ ]+(?P<path>\S+)$").match(line):
+            path = match.group("path")  # editable path
+            path_name = Path(path).name.replace("_", "-")
+            comment = self._freeze_comments.get(path_name, None)
+            if comment is None:
+                raise ValueError(
+                    f"Editable path found w/o a preceding comment: {line}"
+                )
+            logger.info(f"Editable from path: {line}")
+            self._pip_custom[path_name] = f"{comment} @ {path}"
+            self._has_editable = True
+            return True  # editable install, from path with comment
+
+        logger.error(f"Failed to parse: {line}\nRecompute feature disabled.")
+        return False  # unrecognized line format
+
+    @cached_property
+    def env(self) -> dict:
+        """Fetch the current Conda environment as a string.
+
+        This method retrieves the current Conda environment, parses it, and
+        augments with conflicts and editable installs from pip freeze.
+
+        It handles the following:
+        - `a==1.2.3` basic format, checking for a different pip version
+        - `a @ file://path/to/package` if trusted conda source, ignore. If
+           user path, add considered editablens install.
+        - `a @ git+https://` assumed to be a git hash, permitted
+        - `-e git+https://...#egg=package` treated as editable install
+
+        Returns
+        -------
+        dict
+            The Conda environment as a dictionary, including pip dependencies.
+        """
+
+        # ---------------- Start with Conda environment export ----------------
+        _ = self._get_conda_export()
+        if not self._conda_export:
+            return ""  # pragma: no cover
+
+        # ------------------------ Fetch pip editables ------------------------
+        _ = self._get_pip_freeze()
+        if not self._pip_freeze:
+            return ""  # pragma: no cover
+
+        for line in self._pip_freeze:
+            parsed = self._parse_pip_line(line)
+            if not parsed:
+                return ""  # pragma: no cover
+
+        _ = self._warn_if_custom_or_conflict()
+
+        # ------- Augment 'pip' section, add custom and freeze section -------
+        conda_deps = self._conda_export.pop("dependencies", [])
+        conda_deps.append({"pip": list(self._conda_pip_dict.values())})
+        self._conda_export["dependencies"] = conda_deps
+
+        if self._pip_custom:  # additional sections ignored on `env create -f`
+            self._conda_export["custom"] = self._pip_custom
+        self._conda_export["raw pip freeze"] = self._pip_freeze
+
+        return self._conda_export
 
     def parse_env_dict(self, env: Optional[dict] = None) -> dict:
         """Convert the environment string to a dictionary."""
-        dependencies = dict()
+        env = env or self.env
+
+        deps = dict()
         if not env or not isinstance(env, dict):
-            if env != "":  # only warn if it's not the no-conda empty string
-                logger.error(f"Invalid env {type(env)}: {env}")
-            return dependencies
+            logger.error(f"Invalid env {type(env)}: {env}")
+            return deps
+
         for dep in env.get("dependencies", []):
             if isinstance(dep, str):  # split conda by '='
-                pip_dep, val = dep.split("=", maxsplit=1)
-                dependencies[pip_dep] = val
-            elif isinstance(dep, dict) and "pip" in dep:
-                for pip_dep in dep["pip"]:  # split pip by '=='
-                    pip_key, pip_val = pip_dep.split("==", maxsplit=1)
-                    dependencies.setdefault(pip_key, pip_val)  # no overwrite
-        return dependencies
+                deps.update(self._delim_split(dep, as_dict=True))
+            elif isinstance(dep, dict):
+                for pip_dep in dep.values():
+                    deps.update(self._delim_split(pip_dep, as_dict=True))
+
+        return deps
 
     @cached_property
     def env_hash(self) -> str:
@@ -247,12 +405,23 @@ class UserEnvironment(dj.Manual):
             logger.error(f"No environment found with env_id '{env_id}'.")
             return
 
-        env_dict = dict(query.fetch1("env"), name=env_id)
+        fetched_env, has_editable = query.fetch1("env", "has_editable")
+        if has_editable:
+            logger.warning(
+                "Environment has editable installs. "
+                + "Recompute feature may not work as expected.\n\t"
+                + "Review 'custom' section in the YAML file."
+            )
 
+        env_dict = dict(name=env_id, **fetched_env)
         dest_dir = Path(dest_path) if dest_path else Path.cwd()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_file = dest_dir / f"{env_id}.yaml"
 
-        with open(dest_dir / env_id, "w") as yaml_file:
+        with open(dest_file, "w") as yaml_file:
             yaml_file.write(yaml.dump(env_dict))
+
+        logger.info(f"Environment written to {dest_file.resolve()}")
 
     def has_matching_env(
         self,

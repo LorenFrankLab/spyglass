@@ -1495,4 +1495,6 @@ def pop_spikes_group(
 @pytest.fixture(scope="session")
 def user_env_tbl(common):
     """Fixture to access the UserEnvironment table."""
-    yield common.UserEnvironment()
+    tbl = common.UserEnvironment()
+    tbl.insert_current_env()
+    yield tbl

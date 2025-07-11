@@ -20,6 +20,6 @@ def test_pop_rec_params(pop_rec_params):
     assert fetched == params, "Failed to insert preproc_params"
 
 
-def test_pop_rec(pop_rec):
-    tbl = pop_rec
+def test_pop_rec(pop_rec_v0):
+    tbl = pop_rec_v0
     assert tbl, "Failed to insert into v0.Recording"

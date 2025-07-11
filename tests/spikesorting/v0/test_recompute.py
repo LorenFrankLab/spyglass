@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+import datajoint as dj
 import numpy as np
 import pytest
 
@@ -8,22 +9,24 @@ from tests.conftest import VERBOSE
 
 
 @pytest.fixture(scope="module")
-def recomp_module():
+def recomp_module(pop_rec_v0):
     """Fixture to ensure recompute module is loaded."""
     from spyglass.spikesorting.v0 import spikesorting_recompute as recompute
+
+    _ = pop_rec_v0
 
     return recompute
 
 
-def test_recompute(pop_rec):
-    key = pop_rec.fetch(as_dict=True)[0]
+def test_recompute(pop_rec_v0):
+    key = pop_rec_v0.fetch(as_dict=True)[0]
     path = key["recording_path"]
-    pre_rec = pop_rec.load_recording(key)
+    pre_rec = pop_rec_v0.load_recording(key)
 
     # delete the file to force recompute
     shutil.rmtree(path, ignore_errors=True)
 
-    post_rec = pop_rec.load_recording(key)
+    post_rec = pop_rec_v0.load_recording(key)
 
     assert Path(path).exists(), "Recompute failed"
 
@@ -47,34 +50,43 @@ def recomp_tbl(recomp_module):
     yield recomp_module.RecordingRecompute()
 
 
-def test_selection_restr(user_env_tbl, recomp_selection):
-    """Test that the selection env restriction works."""
-    env_dict = user_env_tbl.this_env
-    manual_restr = recomp_selection & env_dict
-    assert (
-        recomp_selection.this_env == manual_restr
-    ), "Recompute selection table property does not match env restriction"
+@pytest.fixture(scope="module")
+def recomp_repop(pop_rec_v0, recomp_selection, recomp_tbl):
+    """Fixture to ensure recompute repopulation is loaded."""
+    _ = pop_rec_v0  # Ensure pop_rec is used to load the recording
 
-
-def test_recompute_env(pop_rec, recomp_selection, recomp_tbl):
-    """Test recompute to temp_dir"""
-    _ = pop_rec  # Ensure pop_rec is used to load the recording
-
+    _ = recomp_selection.attempt_all()
     key = recomp_selection.fetch("KEY")[0]
     key["logged_at_creation"] = False  # Prevent skip of recompute
     recomp_selection.update1(key)
 
     recomp_tbl.populate(key)
+    yield recomp_tbl
 
-    ret = (recomp_module.RecordingRecompute() & key).fetch1("matched")
+
+def test_recompute_env(recomp_repop):
+    """Test recompute match"""
+
+    ret = (recomp_repop & dj.Top()).fetch1("matched")
     assert ret, "Recompute failed"
 
 
+def test_selection_restr(recomp_repop, user_env_tbl, recomp_selection):
+    """Test that the selection env restriction works."""
+    _ = recomp_repop  # Ensure recompute repop is used to load the recording
+    env_dict = user_env_tbl.this_env
+    manual_restr = recomp_selection & env_dict
+    assert len(recomp_selection.this_env) == len(
+        manual_restr
+    ), "Recompute selection table property does not match env restriction"
+
+
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
-def test_recompute_compare(caplog, recomp_tbl):
+def test_recompute_compare(caplog, recomp_repop, recomp_tbl):
     """Test recompute compare."""
+    _ = recomp_repop
     _ = recomp_tbl.Hash().compare()
-    assert "???" in caplog.text, "Intentional fail"
+    assert caplog.text == "", "No output for matched recompute compare"
 
 
 def test_get_disk_space(recomp_tbl):
