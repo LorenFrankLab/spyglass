@@ -61,7 +61,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                 # use the timestamps from the first body part to define valid times
                 timestamps = list(obj.pose_estimation_series.values())[
                     0
-                ].timestamps[:]
+                ].get_timestamps()
                 sampling_rate = estimate_sampling_rate(
                     timestamps, filename=nwb_file_name
                 )
@@ -117,7 +117,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pd.DataFrame
             DataFrame containing pose data
         """
-        key = key or self.cautious_fetch1("KEY")
+        _ = self.ensure_single_entry()
+        key = key or self.fetch1("KEY")
         query = self & key
         if len(query) != 1:
             raise ValueError(f"Key selected {len(query)} entries: {query}")
@@ -129,9 +130,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         index = None
         pose_df = {}
         body_parts = list(pose_estimations.keys())
-        index = pd.Index(
-            pose_estimations[body_parts[0]].timestamps[:], name="time"
-        )
+        index = pose_estimations[body_parts[0]].get_timestamps()
         for body_part in body_parts:
             bp_data = pose_estimations[body_part].data
             part_df = {
@@ -147,7 +146,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         return pd.concat(pose_df, axis=1)
 
     def fetch_skeleton(self, key=None):
-        key = key or self.cautious_fetch1("KEY")
+        _ = self.ensure_single_entry()
+        key = key or self.fetch1("KEY")
         skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]

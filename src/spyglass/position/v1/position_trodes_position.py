@@ -254,6 +254,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, add_frame_ind=True) -> DataFrame:
         """Fetch the position data as a pandas DataFrame."""
+        _ = self.ensure_single_entry()
         pos_params = self.fetch1("trodes_pos_params_name")
         if (
             add_frame_ind
@@ -276,7 +277,8 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     def fetch_video_path(self, key=True):
         """Fetch the video path for the position data."""
-        key = (self & key).cautious_fetch1("KEY")
+        _ = self.ensure_single_entry()
+        key = (self & key).fetch1("KEY")
         nwb_file_name, interval_list_name = self.fetch1(
             "nwb_file_name", "interval_list_name"
         )

@@ -1,8 +1,10 @@
 import itertools
+import warnings
 from functools import reduce
 from typing import Iterable, List, Optional, Tuple, TypeVar, Union
 
 import datajoint as dj
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -79,25 +81,83 @@ class IntervalList(SpyglassMixin, dj.Manual):
             raise ValueError(f"Expected one row, got {len(self)}")
         return Interval(self.fetch1())
 
-    def plot_intervals(self, figsize=(20, 5), return_fig=False):
-        """Plot the intervals in the interval list."""
-        interval_list = pd.DataFrame(self)
-        fig, ax = plt.subplots(figsize=figsize)
-        interval_count = 0
-        for row in interval_list.itertuples(index=False):
-            for interval in row.valid_times:
-                ax.plot(interval, [interval_count, interval_count])
-                ax.scatter(
-                    interval,
-                    [interval_count, interval_count],
-                    alpha=0.8,
-                    zorder=2,
-                )
-            interval_count += 1
-        ax.set_yticks(np.arange(interval_list.shape[0]))
-        ax.set_yticklabels(interval_list.interval_list_name)
-        ax.set_xlabel("Time [s]")
-        ax.grid(True)
+    def plot_intervals(
+        self, start_time: float = 0, return_fig: bool = False
+    ) -> Optional[plt.Figure]:
+        """
+        Plot all intervals in the given IntervalList table.
+
+        Parameters
+        ----------
+        start_time : float, optional
+            The reference time (in seconds) for the interval comparison plot.
+            For example, the first timepoint of a session. Defaults to 0.
+        return_fig : bool, optional
+            If True, return the matplotlib Figure object. Defaults to False.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure or None
+            The matplotlib Figure object if `return_fig` is True, otherwise None.
+
+        Raises
+        ------
+        ValueError
+            If more than one unique `nwb_file_name` is found in the IntervalList.
+            The intended use is to compare intervals within a single NWB file.
+        UserWarning
+            If more than 100 intervals are being plotted.
+        """
+        interval_lists_df = pd.DataFrame(self)
+
+        if len(interval_lists_df["nwb_file_name"].unique()) > 1:
+            raise ValueError(
+                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+            )
+
+        interval_list_names = interval_lists_df["interval_list_name"].values
+
+        n_compare = len(interval_list_names)
+
+        if n_compare > 100:
+            warnings.warn(
+                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                UserWarning,
+            )
+
+        # plot broken bar horizontals
+        fig, ax = plt.subplots(figsize=(20, 2 / 3 * n_compare))
+
+        # get n colors
+        cmap = plt.get_cmap("turbo", n_compare)
+        custom_palette = [mpl.colors.rgb2hex(cmap(i)) for i in range(cmap.N)]
+
+        def convert_intervals_to_range(intervals, start_time):
+            return [
+                ((i[0] - start_time) / 60, (i[1] - i[0]) / 60)
+                for i in intervals
+            ]  # return time in minutes
+
+        all_intervals = interval_lists_df["valid_times"].values
+        for i, (intervals, color) in enumerate(
+            zip(all_intervals, custom_palette)
+        ):
+            int_range = convert_intervals_to_range(intervals, start_time)
+            ax.broken_barh(
+                int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7
+            )
+
+        ax.set_ylim(5, 10 * (n_compare + 1) + 5)
+        ax.set_xlabel("time from start (min)", fontsize=16)
+        ax.set_yticks(
+            np.arange(n_compare) * 10 + 15,
+            labels=interval_list_names,
+            fontsize=16,
+        )
+        ax.set_xticks(ax.get_xticks())
+        ax.set_xticklabels(ax.get_xticklabels())
+        ax.tick_params(axis="x", labelsize=16)
+
         if return_fig:
             return fig
 

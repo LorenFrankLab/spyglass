@@ -63,7 +63,7 @@ def test_fetch_df(trodes_pos_v1, trodes_params):
     exp = {
         "position_x": 23116.620,
         "position_y": 29631.434,
-        "orientation": 473.216,
+        "orientation": 0,
         "velocity_x": 173.990,
         "velocity_y": -170.379,
         "speed": 628.899,

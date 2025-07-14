@@ -105,8 +105,7 @@ class SensorData(SpyglassMixin, dj.Imported):
         """
         if len(self) == 0:
             return None
-        if len(self) > 1:
-            raise ValueError("More than one sensor data object found.")
+        _ = self.ensure_single_entry()
 
         nwb = self.fetch_nwb()[0]
         columns = nwb["sensor_data"].description.split()

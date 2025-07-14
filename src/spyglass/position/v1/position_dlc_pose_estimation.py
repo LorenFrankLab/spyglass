@@ -167,6 +167,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single bodypart dataframe."""
+            _ = self.ensure_single_entry()
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(

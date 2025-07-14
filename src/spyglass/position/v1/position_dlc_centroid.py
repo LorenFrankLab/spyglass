@@ -366,6 +366,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe."""
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         position = nwb_data["dlc_position"]
         if getattr(position, "empty", False):

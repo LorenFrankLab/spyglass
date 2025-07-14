@@ -174,6 +174,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
@@ -307,7 +308,8 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         pd.DataFrame
             pose data
         """
-        key = self.cautious_fetch1("KEY")
+        _ = self.ensure_single_entry()
+        key = self.fetch1("KEY")
         return (DLCPoseEstimation & key).fetch_dataframe()
 
     def fetch_video_path(self, key: dict = dict()) -> str:

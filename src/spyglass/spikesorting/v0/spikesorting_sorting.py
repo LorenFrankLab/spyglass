@@ -182,6 +182,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int   # in Unix time, to the nearest second
     """
 
+    _parallel_make = True
+
     def make(self, key: dict):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
@@ -299,7 +301,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         """Placeholder to override mixin method"""
         raise NotImplementedError
 
-    def cleanup(self, dry_run=False):
+    def cleanup(self, dry_run=False, verbose=True):
         """Clean up spike sorting directories that are not in the table."""
         sort_dir = Path(sorting_dir)
         tracked = set(self.fetch("sorting_path"))
@@ -309,7 +311,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         if dry_run:
             return untracked
 
-        for folder in tqdm(untracked, desc="Removing untracked folders"):
+        for folder in tqdm(
+            untracked, desc="Removing untracked folders", disable=not verbose
+        ):
             try:
                 shutil.rmtree(folder)
             except PermissionError:
