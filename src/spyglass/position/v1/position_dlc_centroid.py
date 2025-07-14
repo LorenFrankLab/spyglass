@@ -115,7 +115,7 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
         )
         points = params.get("points")
         validate_list(  # Ensure points are valid for centroid method
-            required_items=set(points.keys()),
+            required_items=set(points),
             option_list=points,
             name="points",
             condition=centroid_method,

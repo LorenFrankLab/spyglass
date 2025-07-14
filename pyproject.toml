@@ -176,6 +176,7 @@ omit = [ # which submodules have no tests
     # "*/common/*",
     "*/data_import/*",
     "*/decoding/v0/*",
+    "*/figurl_views/*",
     # "*/decoding/*",
     # "*/lfp/*",
     # "*/linearization/*",
