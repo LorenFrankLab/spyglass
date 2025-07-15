@@ -99,7 +99,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     ]
                 )
 
-        with self.connection.transaction:
+        with self._safe_context():
             IntervalList().insert(interval_keys, **kwargs)
             self.insert(master_keys, **kwargs)
             self.BodyPart().insert(part_keys, **kwargs)
