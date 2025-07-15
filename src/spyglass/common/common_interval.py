@@ -36,12 +36,15 @@ class IntervalList(SpyglassMixin, dj.Manual):
     def insert_from_nwbfile(cls, nwbf: NWBFile, *, nwb_file_name: str):
         """Add each entry in the NWB file epochs table to the IntervalList.
 
-        The interval list name for each epoch is set to the first tag for the
-        epoch. If the epoch has no tags, then 'interval_x' will be used as the
-        interval list name, where x is the index (0-indexed) of the epoch in the
-        epochs table. The start time and stop time of the epoch are stored in
-        the valid_times field as a numpy array of [start time, stop time] for
-        each epoch.
+        For each epoch:
+        - intervalList_name is set to the first tag, or 'interval_x' if no tags
+            are present, where x is the index, derived from the tag name.
+        - valid_times is set to a numpy array of [start time, stop time]
+
+        For each invalid time:
+        - interval_list_name is set to 'invalid_interval_x', x is either the
+            tag or the index of the invalid time, derived from the row name.
+        - valid_times is set to a numpy array of [start time, stop time]
 
         Parameters
         ----------
@@ -51,6 +54,11 @@ class IntervalList(SpyglassMixin, dj.Manual):
             The file name of the NWB file, used as a primary key to the Session
             table.
         """
+        _ = cls._insert_epochs_from_nwbfile(nwbf, nwb_file_name)
+        _ = cls._insert_invalid_times_from_nwbfile(nwbf, nwb_file_name)
+
+    def _insert_epochs_from_nwbfile(cls, nwbf: NWBFile, nwb_file_name: str):
+        """Insert epochs from NWB file into IntervalList."""
         if nwbf.epochs is None:
             logger.info("No epochs found in NWB file.")
             return
@@ -75,6 +83,32 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         cls.insert(epoch_inserts, skip_duplicates=True)
 
+    def _insert_invalid_times_from_nwbfile(
+        cls, nwbf: NWBFile, nwb_file_name: str
+    ) -> None:
+        """Insert invalid times from NWB file into IntervalList."""
+        # TODO: Add pytest for this method
+        invalid_times = getattr(nwbf, "invalid_times", None)
+        if invalid_times is None:
+            logger.info("No invalid times found in NWB file.")
+            return
+
+        prefix = "invalid_interval"
+        invalid_times_table = invalid_times.to_dataframe()
+
+        inserts = invalid_times_table.apply(
+            lambda row: {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": (
+                    f"{prefix}_{row.tag}" if row.tag else f"{prefix}_{row.name}"
+                ),
+                "valid_times": np.asarray([[row.start_time, row.stop_time]]),
+            },
+            axis=1,
+        ).tolist()
+
+        cls.insert(inserts, skip_duplicates=True)
+
     def fetch_interval(self):
         """Fetch interval list object for a given key."""
         if not len(self) == 1:
@@ -98,12 +132,12 @@ class IntervalList(SpyglassMixin, dj.Manual):
         Returns
         -------
         fig : matplotlib.figure.Figure or None
-            The matplotlib Figure object if `return_fig` is True, otherwise None.
+            The matplotlib Figure object if `return_fig` is True. Default None.
 
         Raises
         ------
         ValueError
-            If more than one unique `nwb_file_name` is found in the IntervalList.
+            If >1 unique `nwb_file_name` is found in the IntervalList.
             The intended use is to compare intervals within a single NWB file.
         UserWarning
             If more than 100 intervals are being plotted.
@@ -112,7 +146,8 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         if len(interval_lists_df["nwb_file_name"].unique()) > 1:
             raise ValueError(
-                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+                ">1 nwb_file_name found in IntervalList. This function is "
+                + "intended for comparing intervals within one nwb_file_name."
             )
 
         interval_list_names = interval_lists_df["interval_list_name"].values
@@ -121,7 +156,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         if n_compare > 100:
             warnings.warn(
-                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                f"plot_intervals is plotting {n_compare} intervals.",
                 UserWarning,
             )
 
@@ -385,8 +420,6 @@ class Interval:
         """Get item from the interval list."""
         if isinstance(item, (slice, int)):
             return Interval(self.times[item], **self.kwargs)
-        # elif isinstance(item, slice):
-        #     return Interval(self.times[item], **self.kwargs)
         else:
             raise ValueError(
                 f"Unrecognized item type: {type(item)}. Must be int or slice."
