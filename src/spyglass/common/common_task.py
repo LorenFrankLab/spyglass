@@ -135,28 +135,34 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
         config = get_config(nwb_file_abspath, calling_table=self.camel_name)
-        camera_names = dict()
+
+        session_intervals = (
+            IntervalList() & {"nwb_file_name": nwb_file_name}
+        ).fetch("interval_list_name")
 
         # the tasks refer to the camera_id which is unique for the NWB file but
         # not for CameraDevice schema, so we need to look up the right camera
         # map camera ID (in camera name) to camera_name
 
-        for device in nwbf.devices.values():
-            if isinstance(device, ndx_franklab_novela.CameraDevice):
-                # get the camera ID
-                camera_id = int(str.split(device.name)[1])
-                camera_names[camera_id] = device.camera_name
-        if device_list := config.get("CameraDevice"):
-            for device in device_list:
-                camera_names.update(
-                    {
-                        name: id
-                        for name, id in zip(
-                            device.get("camera_name"),
-                            device.get("camera_id", -1),
-                        )
-                    }
-                )
+        camera_names = dict()
+        devices = [
+            d for d in nwbf.devices.values() if isinstance(d, CameraDevice)
+        ]
+        for device in devices:
+            # get the camera ID
+            camera_id = int(str.split(device.name)[1])
+            camera_names[camera_id] = device.camera_name
+
+        for device in config.get("CameraDevice", []):
+            camera_names.update(
+                {
+                    name: id
+                    for name, id in zip(
+                        device.get("camera_name"),
+                        device.get("camera_id", -1),
+                    )
+                }
+            )
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
@@ -183,14 +189,12 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
                 camera_ids = task.camera_id[0]
                 valid_camera_ids = [
-                    camera_id
-                    for camera_id in camera_ids
-                    if camera_id in camera_names.keys()
+                    id for id in camera_ids if id in camera_names
                 ]
                 if valid_camera_ids:
                     key["camera_names"] = [
-                        {"camera_name": camera_names[camera_id]}
-                        for camera_id in valid_camera_ids
+                        {"camera_name": camera_names[id]}
+                        for id in valid_camera_ids
                     ]
                 else:
                     logger.warning(
@@ -198,16 +202,14 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         + f"file {nwbf}\n"
                     )
                 # Add task environment
-                if hasattr(task, "task_environment"):
-                    key["task_environment"] = task.task_environment[0]
+                task_env = task.get("task_environment", None)
+                if task_env:
+                    key["task_environment"] = task_env[0]
 
                 # get the interval list for this task, which corresponds to the
                 # matching epoch for the raw data. Users should define more
                 # restrictive intervals as required for analyses
 
-                session_intervals = (
-                    IntervalList() & {"nwb_file_name": nwb_file_name}
-                ).fetch("interval_list_name")
                 for epoch in task.task_epochs[0]:
                     key["epoch"] = epoch
                     target_interval = self.get_epoch_interval_name(
@@ -238,9 +240,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     {"camera_name": camera_names[camera_id]}
                     for camera_id in valid_camera_ids
                 ]
-            session_intervals = (
-                IntervalList() & {"nwb_file_name": nwb_file_name}
-            ).fetch("interval_list_name")
             for epoch in task.get("task_epochs", []):
                 new_key["epoch"] = epoch
                 target_interval = self.get_epoch_interval_name(
