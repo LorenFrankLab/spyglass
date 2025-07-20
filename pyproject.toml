@@ -45,8 +45,9 @@ dependencies = [
     "hdmf>=3.4.6",
     "ipympl",
     "matplotlib",
-    "ndx_franklab_novela>=0.1.0",
     "ndx-pose",
+    "ndx_franklab_novela>=0.1.0",
+    "ndx_structured_behavior", # PENDING PyPI release!
     "non_local_detector",
     "numpy",
     "opencv-python",

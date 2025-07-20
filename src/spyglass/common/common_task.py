@@ -31,10 +31,9 @@ class Task(SpyglassMixin, dj.Manual):
         nwbf : pynwb.NWBFile
             The source NWB file object.
         """
-        tasks_mod = nwbf.processing.get("tasks")
-        if tasks_mod is None:
+        tasks_mod = nwbf.processing.get("tasks", dict())
+        if not tasks_mod:
             logger.warning(f"No tasks processing module found in {nwbf}\n")
-            return
         for task in tasks_mod.data_interfaces.values():
             if self.is_nwb_task_table(task):
                 self.insert_from_task_table(task)
