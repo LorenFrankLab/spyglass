@@ -39,6 +39,19 @@ class Task(SpyglassMixin, dj.Manual):
             if self.is_nwb_task_table(task):
                 self.insert_from_task_table(task)
 
+    def _table_to_dict(self, task_table: pynwb.core.DynamicTable):
+        """Convert a pynwb DynamicTable to a list of dictionaries."""
+        taskdf = task_table.to_dataframe()
+        return taskdf.apply(
+            lambda row: dict(
+                task_name=row.task_name,
+                task_description=row.task_description,
+                task_type=row.task_type,
+                task_subtype=row.task_subtype,
+            ),
+            axis=1,
+        ).tolist()
+
     def insert_from_task_table(self, task_table: pynwb.core.DynamicTable):
         """Insert tasks from a pynwb DynamicTable containing task metadata.
 
@@ -49,15 +62,7 @@ class Task(SpyglassMixin, dj.Manual):
         task_table : pynwb.core.DynamicTable
             The table representing task metadata.
         """
-        taskdf = task_table.to_dataframe()
-
-        task_dicts = taskdf.apply(
-            lambda row: dict(
-                task_name=row.task_name,
-                task_description=row.task_description,
-            ),
-            axis=1,
-        ).tolist()
+        task_dicts = self._table_to_dict(task_table)
 
         # Check if the task is already in the table
         # if so check that the secondary keys all match
@@ -129,21 +134,17 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
      camera_names : blob # list of keys corresponding to entry in CameraDevice
      """
 
-    def make(self, key):
-        """Populate TaskEpoch from the processing module in the NWB file."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
+    def _find_session_intervals(self, nwb_file_name):
+        """Find session intervals for a given NWB file."""
+        return (IntervalList() & {"nwb_file_name": nwb_file_name}).fetch(
+            "interval_list_name"
+        )
 
-        session_intervals = (
-            IntervalList() & {"nwb_file_name": nwb_file_name}
-        ).fetch("interval_list_name")
-
+    def _get_camera_names(self, nwbf, config):
+        """Get camera names from the NWB file and config."""
         # the tasks refer to the camera_id which is unique for the NWB file but
         # not for CameraDevice schema, so we need to look up the right camera
         # map camera ID (in camera name) to camera_name
-
         camera_names = dict()
         devices = [
             d for d in nwbf.devices.values() if isinstance(d, CameraDevice)
@@ -163,6 +164,100 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     )
                 }
             )
+        return camera_names
+
+    def _process_task_table(
+        self, key, task_table, camera_names, nwbf, session_intervals
+    ):
+        task_epoch_inserts = []
+        for task in task_table:
+            key["task_name"] = task.task_name[0]
+
+            # get the CameraDevice used for this task (primary key is
+            # camera name so we need to map from ID to name)
+
+            camera_ids = task.camera_id[0]
+            valid_camera_ids = [id for id in camera_ids if id in camera_names]
+            if valid_camera_ids:
+                key["camera_names"] = [
+                    {"camera_name": camera_names[id]} for id in valid_camera_ids
+                ]
+            else:
+                logger.warning(
+                    f"No camera device found with ID {camera_ids} in NWB "
+                    + f"file {nwbf}\n"
+                )
+            # Add task environment
+            task_env = task.get("task_environment", None)
+            if task_env:
+                key["task_environment"] = task_env[0]
+
+            # get the interval list for this task, which corresponds to the
+            # matching epoch for the raw data. Users should define more
+            # restrictive intervals as required for analyses
+
+            for epoch in task.task_epochs[0]:
+                key["epoch"] = epoch
+                target_interval = self.get_epoch_interval_name(
+                    epoch, session_intervals
+                )
+                if target_interval is None:
+                    logger.warning("Skipping epoch.")
+                    continue
+                key["interval_list_name"] = target_interval
+                task_epoch_inserts.append(key.copy())
+        return task_epoch_inserts
+
+    def _process_config_tasks(
+        self, key, config_tasks, camera_names, session_intervals
+    ):
+        """Process tasks from the config, prep for insert."""
+        task_epoch_inserts = []
+        for task in config_tasks:
+            new_key = {
+                **key,
+                "task_name": task.get("task_name"),
+                "task_environment": task.get("task_environment", None),
+            }
+
+            # add cameras
+            camera_ids = task.get("camera_id", [])
+            valid_camera_ids = [
+                camera_id
+                for camera_id in camera_ids
+                if camera_id in camera_names.keys()
+            ]
+            if valid_camera_ids:
+                new_key["camera_names"] = [
+                    {"camera_name": camera_names[camera_id]}
+                    for camera_id in valid_camera_ids
+                ]
+
+            for epoch in task.get("task_epochs", []):
+                target_interval = self.get_epoch_interval_name(
+                    epoch, session_intervals
+                )
+                if target_interval is None:
+                    logger.warning("Skipping epoch.")
+                    continue
+                task_epoch_inserts.append(
+                    {
+                        **new_key,
+                        "epoch": epoch,
+                        "interval_list_name": target_interval,
+                    }
+                )
+        return task_epoch_inserts
+
+    def make(self, key):
+        """Populate TaskEpoch from the processing module in the NWB file."""
+        nwb_file_name = key["nwb_file_name"]
+        nwb_file_abspath = Nwbfile().get_abs_path(nwb_file_name)
+        nwbf = get_nwb_file(nwb_file_abspath)
+        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
+
+        session_intervals = self._find_session_intervals(nwb_file_name)
+        camera_names = self._get_camera_names(nwbf, config)
 
         # find the task modules and for each one, add the task to the Task
         # schema if it isn't there and then add an entry for each epoch
@@ -181,75 +276,18 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             if not self.is_nwb_task_epoch(task_table):
                 continue
             task_inserts.append(task_table)
-            for task in task_table:
-                key["task_name"] = task.task_name[0]
-
-                # get the CameraDevice used for this task (primary key is
-                # camera name so we need to map from ID to name)
-
-                camera_ids = task.camera_id[0]
-                valid_camera_ids = [
-                    id for id in camera_ids if id in camera_names
-                ]
-                if valid_camera_ids:
-                    key["camera_names"] = [
-                        {"camera_name": camera_names[id]}
-                        for id in valid_camera_ids
-                    ]
-                else:
-                    logger.warning(
-                        f"No camera device found with ID {camera_ids} in NWB "
-                        + f"file {nwbf}\n"
-                    )
-                # Add task environment
-                task_env = task.get("task_environment", None)
-                if task_env:
-                    key["task_environment"] = task_env[0]
-
-                # get the interval list for this task, which corresponds to the
-                # matching epoch for the raw data. Users should define more
-                # restrictive intervals as required for analyses
-
-                for epoch in task.task_epochs[0]:
-                    key["epoch"] = epoch
-                    target_interval = self.get_epoch_interval_name(
-                        epoch, session_intervals
-                    )
-                    if target_interval is None:
-                        logger.warning("Skipping epoch.")
-                        continue
-                    key["interval_list_name"] = target_interval
-                    task_epoch_inserts.append(key.copy())
+            task_epoch_inserts.extend(
+                self._process_task_table(
+                    key, task_table, camera_names, nwbf, session_intervals
+                )
+            )
 
         # Add tasks from config
-        for task in config_tasks:
-            new_key = {
-                **key,
-                "task_name": task.get("task_name"),
-                "task_environment": task.get("task_environment", None),
-            }
-            # add cameras
-            camera_ids = task.get("camera_id", [])
-            valid_camera_ids = [
-                camera_id
-                for camera_id in camera_ids
-                if camera_id in camera_names.keys()
-            ]
-            if valid_camera_ids:
-                new_key["camera_names"] = [
-                    {"camera_name": camera_names[camera_id]}
-                    for camera_id in valid_camera_ids
-                ]
-            for epoch in task.get("task_epochs", []):
-                new_key["epoch"] = epoch
-                target_interval = self.get_epoch_interval_name(
-                    epoch, session_intervals
-                )
-                if target_interval is None:
-                    logger.warning("Skipping epoch.")
-                    continue
-                new_key["interval_list_name"] = target_interval
-                task_epoch_inserts.append(key.copy())
+        task_epoch_inserts.extend(
+            self._process_config_tasks(
+                key, config_tasks, camera_names, session_intervals
+            )
+        )
 
         # check if the task entries are in the Task table and if not, add it
         [
