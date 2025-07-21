@@ -5,7 +5,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, List, Type, Union
+from typing import Any, Iterable, List, Optional, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -689,7 +689,7 @@ def accept_divergence(
     new_value: Any,
     existing_value: Any,
     test_mode: bool = False,
-    table_name: str = None,
+    table_name: Optional[str] = None,
 ):
     """Prompt to accept divergence in values between existing and new entries
 
