@@ -57,7 +57,8 @@ class Subject(SpyglassMixin, dj.Manual):
                 "sex",
             ]
         }
-        if (sex := subject_dict["sex"][0].upper()) in ("M", "F"):
+        sex_field = subject_dict.get("sex") or ["U"]  # If not provided
+        if (sex := sex_field[0].upper()) in ("M", "F", "U"):
             subject_dict["sex"] = sex
         else:
             subject_dict["sex"] = "U"

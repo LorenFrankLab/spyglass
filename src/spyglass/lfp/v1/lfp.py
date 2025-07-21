@@ -193,7 +193,7 @@ class LFPV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a single dataframe."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,

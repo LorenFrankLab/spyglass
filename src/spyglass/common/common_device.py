@@ -4,7 +4,10 @@ import ndx_franklab_novela
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.dj_helper_fn import accept_divergence
+from spyglass.utils.dj_helper_fn import (
+    accept_divergence,
+    _replace_nan_with_default,
+)
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 schema = dj.schema("common_device")
@@ -567,15 +570,17 @@ class Probe(SpyglassMixin, dj.Manual):
             for electrode in shank.shanks_electrodes.values():
                 # the next line will need to be fixed if we have different sized
                 # contacts on a shank
-                elect_dict[electrode.name] = {
-                    "probe_id": new_probe_dict["probe_id"],
-                    "probe_shank": shank_dict[shank.name]["probe_shank"],
-                    "contact_size": nwb_probe_obj.contact_size,
-                    "probe_electrode": int(electrode.name),
-                    "rel_x": electrode.rel_x,
-                    "rel_y": electrode.rel_y,
-                    "rel_z": electrode.rel_z,
-                }
+                elect_dict[electrode.name] = _replace_nan_with_default(
+                    {
+                        "probe_id": new_probe_dict["probe_id"],
+                        "probe_shank": shank_dict[shank.name]["probe_shank"],
+                        "contact_size": nwb_probe_obj.contact_size,
+                        "probe_electrode": int(electrode.name),
+                        "rel_x": electrode.rel_x,
+                        "rel_y": electrode.rel_y,
+                        "rel_z": electrode.rel_z,
+                    }
+                )
 
     @classmethod
     def _read_config_probe_data(
@@ -601,15 +606,17 @@ class Probe(SpyglassMixin, dj.Manual):
             "Electrode", []
         )
         for i, e in enumerate(elect_dict_list):
-            elect_dict[str(i)] = {
-                "probe_id": probe_id,
-                "probe_shank": e["probe_shank"],
-                "probe_electrode": e["probe_electrode"],
-                "contact_size": e.get("contact_size"),
-                "rel_x": e.get("rel_x"),
-                "rel_y": e.get("rel_y"),
-                "rel_z": e.get("rel_z"),
-            }
+            elect_dict[str(i)] = _replace_nan_with_default(
+                {
+                    "probe_id": probe_id,
+                    "probe_shank": e["probe_shank"],
+                    "probe_electrode": e["probe_electrode"],
+                    "contact_size": e.get("contact_size"),
+                    "rel_x": e.get("rel_x"),
+                    "rel_y": e.get("rel_y"),
+                    "rel_z": e.get("rel_z"),
+                }
+            )
 
         # make the probe type if not in database
         new_probe_type_dict.update(
@@ -784,11 +791,15 @@ class Probe(SpyglassMixin, dj.Manual):
                 "probe_electrode": elec_index,
             }
 
-            for dim in ["rel_x", "rel_y", "rel_z"]:
+            for dim in ["rel_x", "rel_y", "rel_z", "contact_size"]:
                 if dim in nwbfile.electrodes[elec_index]:
-                    elect_dict[elec_index][dim] = nwbfile.electrodes[
-                        elec_index, dim
-                    ]
+                    value = nwbfile.electrodes[elec_index, dim]
+                    elect_dict[elec_index][dim] = value
+
+            # Apply NaN replacement to the entire electrode dictionary
+            elect_dict[elec_index] = _replace_nan_with_default(
+                elect_dict[elec_index]
+            )
 
         if not device_found:
             logger.warning(
