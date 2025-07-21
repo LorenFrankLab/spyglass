@@ -109,7 +109,7 @@ ImportedLFP().drop()
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
     - Prompt user to verify compatibility between new insert and existing table
-        entries # 1318
+        entries # 1318, #XXXX
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
