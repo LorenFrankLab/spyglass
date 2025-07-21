@@ -254,7 +254,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, add_frame_ind=True) -> DataFrame:
         """Fetch the position data as a pandas DataFrame."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         pos_params = self.fetch1("trodes_pos_params_name")
         if (
             add_frame_ind
@@ -275,8 +275,9 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         """Not applicable for TrodesPosV1 pipeline."""
         raise NotImplementedError("No pose data for TrodesPosV1")
 
-    def fetch_video_path(self, key=dict()):
+    def fetch_video_path(self, key=True):
         """Fetch the video path for the position data."""
+        _ = self.ensure_single_entry()
         key = (self & key).fetch1("KEY")
         nwb_file_name, interval_list_name = self.fetch1(
             "nwb_file_name", "interval_list_name"
@@ -337,13 +338,13 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         )
 
         # Check if video exists
-        if not video_path:
+        if not video_path:  # pragma: no cover
             self.insert1(dict(**key, has_video=False))
             return
 
         # Check timepoints overlap
         if not set(video_time).intersection(set(pos_df.index)):
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 "No overlapping time points between video and position data"
             )
 
@@ -376,7 +377,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
 
         limit = params.get("limit", None)
 
-        if limit and not test_mode:
+        if limit and not test_mode:  # pragma: no cover
             params["debug"] = True
             output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
         elif test_mode:
@@ -437,7 +438,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
             **params,
         )
 
-        if limit and not test_mode:
+        if limit and not test_mode:  # pragma: no cover
             return vid_maker
 
         self.insert1(dict(**key, has_video=True))

@@ -451,7 +451,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the first dataframe"""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:

@@ -33,7 +33,7 @@ class LinearizedPositionOutput(_Merge, SpyglassMixin):
 
     def fetch1_dataframe(self):
         """Fetch a single dataframe from the merged table."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         return self.fetch_nwb(self.proj())[0]["linearized_position"].set_index(
             "time"
         )
