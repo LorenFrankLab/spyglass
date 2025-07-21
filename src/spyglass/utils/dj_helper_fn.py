@@ -6,7 +6,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Iterable, List, Type, Union
+from typing import Any, Iterable, List, Optional, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -106,9 +106,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -686,16 +686,39 @@ def bytes_to_human_readable(size: int) -> str:
     return msg_template.format(size=size, unit="PB")
 
 
-def accept_divergence(key, new_value, existing_value, test_mode=False):
-    """prompt to accept divergence in values between existing and new entries"""
+def accept_divergence(
+    key: str,
+    new_value: Any,
+    existing_value: Any,
+    test_mode: bool = False,
+    table_name: Optional[str] = None,
+):
+    """Prompt to accept divergence in values between existing and new entries
+
+    Parameters
+    ----------
+    key : str
+        Name of the column where the divergence is found
+    new_value : Any
+        New value to be inserted into the table
+    existing_value : Any
+        Existing value in the table that is different from the new value
+    test_mode : bool, optional
+        If True, will not prompt and return False, by default False
+    table_name : str, optional
+        Name of the table where the divergence is found, by default None
+    """
     if test_mode:
         # If get here in test mode, is because want to test failure
         logger.warning(
-            "accept_divergence called in test mode, returning False without prompt"
+            "accept_divergence called in test mode, returning False w/o prompt"
         )
         return False
+    tbl_msg = ""
+    if table_name:  # optional message with table name
+        tbl_msg = f" of '{table_name}'"
     response = dj.utils.user_choice(
-        f"Existing entry differs in '{key}' column.\n"
+        f"Existing entry differs in '{key}' column{tbl_msg}.\n"
         + "Accept the existing value of: \n"
         + f"'{existing_value}' \n"
         + "in place of the new value: \n"
