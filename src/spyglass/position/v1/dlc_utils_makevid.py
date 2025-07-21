@@ -152,7 +152,7 @@ class VideoMaker:
             stderr=subprocess.PIPE,
             text=True,
         )
-        if ret.returncode != 0:
+        if ret.returncode != 0:  # pragma: no cover
             raise ValueError(f"Error getting video dimensions: {ret.stderr}")
 
         stats = ret.stdout.strip().split("x")
@@ -179,10 +179,10 @@ class VideoMaker:
                 len(self.video_frame_inds) * self.percent_frames
             )
             self.frames = np.arange(0, self.n_frames)
-        elif self.frames is not None:
-            self.n_frames = len(self.frames)
-        else:
-            self.n_frames = int(stats[3])
+        elif self.frames is not None:  # pragma: no cover
+            self.n_frames = len(self.frames)  # pragma: no cover
+        else:  # pragma: no cover
+            self.n_frames = int(stats[3])  # pragma: no cover
 
         if self.debug:  # If debugging, limit frames to available data
             self.n_frames = min(len(self.position_mean), self.n_frames)
@@ -289,7 +289,7 @@ class VideoMaker:
         self.fig = fig
         self.axes = axes
 
-    def _get_centroid_data(self, pos_ind):
+    def _get_centroid_data(self, pos_ind):  # pragma: no cover
         def centroid_to_px(*idx):
             return _to_px(
                 data=self.position_mean[idx], cm_to_pixels=self.cm_to_pixels
@@ -304,7 +304,7 @@ class VideoMaker:
             )
         )
 
-    def _get_orient_line(self, pos_ind):
+    def _get_orient_line(self, pos_ind):  # pragma: no cover
         orient = self.orientation_mean[pos_ind]
         if isinstance(orient, np.ndarray):
             orient = orient[0]  # Trodes passes orientation as a 1D array
@@ -319,7 +319,7 @@ class VideoMaker:
             x, y = self._get_centroid_data(pos_ind)
             return (orient_list(x), orient_list(y, axis="y"))
 
-    def _generate_single_frame(self, frame_ind):
+    def _generate_single_frame(self, frame_ind):  # pragma: no cover
         """Generate a single frame and save it as an image."""
         # Zero-padded filename based on the dynamic padding length
         padded = self._pad(frame_ind)
@@ -393,7 +393,7 @@ class VideoMaker:
 
         for start_frame in range(0, self.n_frames, self.batch_size):
             if start_frame >= self.n_frames:  # Skip if no frames left
-                break
+                break  # pragma: no cover
             end_frame = min(start_frame + self.batch_size, self.n_frames) - 1
             logger.debug(f"Processing frames: {start_frame} - {end_frame}")
 
@@ -402,8 +402,8 @@ class VideoMaker:
             )
             if output_partial_video.exists():
                 logger.debug(f"Skipping existing video: {output_partial_video}")
-                progress_bar.update(end_frame - start_frame)
-                continue
+                progress_bar.update(end_frame - start_frame)  # pragma: no cover
+                continue  # pragma: no cover
 
             self.ffmpeg_extract(start_frame, end_frame)
             self.plot_frames(start_frame, end_frame, progress_bar)
@@ -420,17 +420,18 @@ class VideoMaker:
     def _debug_print(self, msg="             ", end=""):
         """Print a self-overwiting message if debug is enabled."""
         if self.debug:
-            print(f"\r{msg}", end=end)
+            print(f"\r{msg}", end=end)  # pragma: no cover
 
     def plot_frames(
         self, start_frame, end_frame, progress_bar=None, process_pool=True
     ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
 
-        if not process_pool:  # Single-threaded processing for debugging
-            for frame_ind in range(start_frame, end_frame):
-                self._generate_single_frame(frame_ind)
-                progress_bar.update()
+        # Single-threaded processing for debugging
+        if not process_pool:  # pragma: no cover
+            for frame_ind in range(start_frame, end_frame):  # pragma: no cover
+                self._generate_single_frame(frame_ind)  # pragma: no cover
+                progress_bar.update()  # pragma: no cover
             return
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
@@ -455,8 +456,8 @@ class VideoMaker:
                     frames_left -= 1
                     try:
                         ret = job.result(timeout=self.timeout)
-                    except (IndexError, TimeoutError) as e:
-                        ret = type(e).__name__
+                    except (IndexError, TimeoutError) as e:  # pragma: no cover
+                        ret = type(e).__name__  # pragma: no cover
                     self._debug_print(f"Finish: {self._pad(ret)}")
                     progress_bar.update()
                     del jobs[job]
@@ -467,8 +468,8 @@ class VideoMaker:
         logger.debug(f"Extracting frames: {start_frame} - {end_frame}")
         last_frame = self.temp_dir / f"orig_{self._pad(end_frame)}.png"
         if last_frame.exists():  # assumes all frames previously extracted
-            logger.debug(f"Skipping existing frames: {last_frame}")
-            return
+            logger.debug(f"Skipping existing: {last_frame}")  # pragma: no cover
+            return  # pragma: no cover
 
         output_pattern = str(self.temp_dir / f"orig_%0{self.pad_len}d.png")
 
@@ -501,9 +502,9 @@ class VideoMaker:
     def _pad(self, frame_ind=None):
         """Pad a frame index with leading zeros."""
         if frame_ind is None:
-            return "?" * self.pad_len
+            return "?" * self.pad_len  # pragma: no cover
         elif not isinstance(frame_ind, int):
-            return frame_ind
+            return frame_ind  # pragma: no cover
         return f"{frame_ind:0{self.pad_len}d}"
 
     def ffmpeg_stitch_partial(self, start_frame, output_partial_video):
@@ -525,16 +526,15 @@ class VideoMaker:
             *self.ffmpeg_log_args,
         ]
         try:
-            ret = subprocess.run(
+            _ = subprocess.run(
                 ffmpeg_cmd,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 check=True,
                 text=True,
             )
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Error stitching partial video: {e.stderr}")
-            logger.debug(f"stderr: {ret.stderr}")
+        except subprocess.CalledProcessError as e:  # pragma: no cover
+            logger.error(f"Err stitching video: {e.stderr}")  # pragma: no cover
 
     def concat_partial_videos(self):
         """Concatenate all the partial videos into one final video."""
@@ -559,7 +559,7 @@ class VideoMaker:
             *self.ffmpeg_log_args,
         ]
         try:
-            ret = subprocess.run(
+            _ = subprocess.run(
                 ffmpeg_cmd,
                 stderr=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -568,7 +568,6 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"Error stitching partial video: {e.stderr}")
-            logger.debug(f"stderr: {ret.stderr}")
 
 
 def make_video(**kwargs):

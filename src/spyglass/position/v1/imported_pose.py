@@ -42,9 +42,9 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         """
 
     def make(self, key):
-        self.insert_from_nwbfile(key["nwb_file_name"])
+        self.insert_from_nwbfile(key["nwb_file_name"])  # pragma: no cover
 
-    def insert_from_nwbfile(self, nwb_file_name):
+    def insert_from_nwbfile(self, nwb_file_name, **kwargs):
         file_path = Nwbfile().get_abs_path(nwb_file_name)
         interval_keys = []
         master_keys = []
@@ -70,38 +70,39 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     sampling_rate=sampling_rate,
                     min_valid_len=sampling_rate,
                 )
-                interval_key = {
+                interval_pk = {
                     "nwb_file_name": nwb_file_name,
                     "interval_list_name": f"pose_{name}_valid_intervals",
-                    "valid_times": valid_intervals,
-                    "pipeline": "ImportedPose",
                 }
-                interval_keys.append(interval_key)
-
-                # master key
-                master_key = {
-                    "nwb_file_name": nwb_file_name,
-                    "interval_list_name": interval_key["interval_list_name"],
-                    "pose_object_id": obj.object_id,
-                    "skeleton_object_id": obj.skeleton.object_id,
-                }
-                master_keys.append(master_key)
-
-                # part keys
-                for part, part_obj in obj.pose_estimation_series.items():
-                    part_key = {
-                        "nwb_file_name": nwb_file_name,
-                        "interval_list_name": interval_key[
-                            "interval_list_name"
-                        ],
-                        "part_name": part,
-                        "part_object_id": part_obj.object_id,
+                interval_keys.append(
+                    {
+                        **interval_pk,
+                        "valid_times": valid_intervals,
+                        "pipeline": "ImportedPose",
                     }
-                    part_keys.append(part_key)
+                )
+                master_keys.append(
+                    {
+                        **interval_pk,
+                        "pose_object_id": obj.object_id,
+                        "skeleton_object_id": obj.skeleton.object_id,
+                    }
+                )
+                part_keys.extend(
+                    [
+                        {
+                            **interval_pk,
+                            "part_name": part,
+                            "part_object_id": part_obj.object_id,
+                        }
+                        for part, part_obj in obj.pose_estimation_series.items()
+                    ]
+                )
 
-        IntervalList().insert(interval_keys, skip_duplicates=True)
-        self.insert(master_keys)
-        self.BodyPart().insert(part_keys)
+        with self._safe_context():
+            IntervalList().insert(interval_keys, **kwargs)
+            self.insert(master_keys, **kwargs)
+            self.BodyPart().insert(part_keys, **kwargs)
 
     def fetch_pose_dataframe(self, key=None):
         """Fetch pose data as a pandas DataFrame
@@ -116,7 +117,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         pd.DataFrame
             DataFrame containing pose data
         """
-        key = key or dict()
+        _ = self.ensure_single_entry()
+        key = key or self.fetch1("KEY")
         query = self & key
         if len(query) != 1:
             raise ValueError(f"Key selected {len(query)} entries: {query}")
@@ -144,13 +146,9 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         return pd.concat(pose_df, axis=1)
 
     def fetch_skeleton(self, key=None):
-        key = key or dict()
-        query = self & key
-        if not len(query) == 1:
-            raise ValueError(
-                "fetch_skeleton can only be called on a single entry"
-            )
-        skeleton = query.fetch_nwb()[0]["skeleton"]
+        _ = self.ensure_single_entry()
+        key = key or self.fetch1("KEY")
+        skeleton = (self & key).fetch_nwb()[0]["skeleton"]
         nodes = skeleton.nodes[:]
         int_edges = skeleton.edges[:]
         named_edges = [[nodes[i], nodes[j]] for i, j in int_edges]

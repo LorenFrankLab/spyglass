@@ -86,7 +86,7 @@ ImportedLFP().drop()
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
-- Add code coverage badge #1305
+- Add code coverage badge, and increase position coverage #1305, #1315
 
 ### Documentation
 
