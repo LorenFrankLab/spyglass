@@ -18,18 +18,6 @@ IGNORED_KEYS = ["version", "source_script"]
 PRECISION_LOOKUP = dict(ProcessedElectricalSeries=4)
 
 
-def bytes_to_human_readable(size: int) -> str:
-    """Convert a byte size to a human-readable format."""
-    msg_template = "{size:.2f} {unit}"
-
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size < 1024:
-            return msg_template.format(size=size, unit=unit)
-        size /= 1024
-
-    return msg_template.format(size=size, unit="PB")
-
-
 def get_file_namespaces(file_path: Union[str, Path]) -> dict:
     """Get all namespace versions from an NWB file.
 
