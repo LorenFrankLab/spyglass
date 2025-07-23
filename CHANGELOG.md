@@ -122,6 +122,7 @@ ImportedLFP().drop()
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
     - Accept imported timestamps defined by `rate` and `start_time` #1322
+    - Fix bug preventing DLC config updates #1352
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249

@@ -559,6 +559,7 @@ def add_to_config(
     kwargs.update(
         {str(k): v for k, v in kwargs.items() if not isinstance(k, str)}
     )
+    data.update(kwargs)
 
     with open(config, "w") as fw:
         yaml.dump(data, fw)
