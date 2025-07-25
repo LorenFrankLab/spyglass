@@ -95,7 +95,7 @@ class TaskRecordingTypes(SpyglassMixin, dj.Manual):
 
         definition = """
         -> TaskRecordingTypes
-        argument_name             : varchar(32)  # Argument name
+        argument_name             : varchar(255)  # Argument name
         ---
         argument_description=NULL : varchar(255)
         expression=NULL           : varchar(127)
