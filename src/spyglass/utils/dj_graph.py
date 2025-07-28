@@ -124,6 +124,7 @@ class AbstractGraph(ABC):
         verbose : bool, optional
             Whether to print verbose output. Default False
         """
+        self.path = None  # Allow subclasses to set path
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
@@ -281,7 +282,7 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    def _is_out(self, table, warn=True, keep_alias=False):
+    def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
         if self.graph.nodes.get(table):
@@ -342,7 +343,10 @@ class AbstractGraph(ABC):
         ft1 = self._get_ft(table1) & restr
         ft2 = self._get_ft(table2)
 
+        path = f"{self._camel(table1)} -> {self._camel(table2)}"
+
         if len(ft1) == 0 or len(ft2) == 0:
+            self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
@@ -352,15 +356,52 @@ class AbstractGraph(ABC):
         ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            result = (
-                "EMPTY"
-                if len(ret) == 0
-                else "FULL" if len(ft2) == len(ret) else "partial"
-            )
-            path = f"{self._camel(table1)} -> {self._camel(table2)}"
+            is_empty = len(ret) == 0
+            is_full = len(ft2) == len(ret)
+            result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
             self._log_truncate(f"Bridge Link: {path}: result {result}")
+            logger.debug(join)
 
         return ret
+
+    def _get_adjacent_path_item(
+        self, table: str, direction: Direction = Direction.UP
+    ) -> str:
+        """Get adjacent path item in the graph.
+
+        Used to get the next table in the path for a given direction.
+
+        Parameters
+        ----------
+        table : str
+            Table name
+        direction : Direction, optional
+            Direction to cascade. Default 'up'
+
+        Returns
+        -------
+        str
+            Name of the next table in the path or empty string if not found.
+        """
+        null_return = {table: dict()}  # parent func treats as dead end
+
+        if not self.path or table not in self.path:
+            return null_return  # if path is empty or table not in path
+
+        index = self.path.index(table)
+        next_index = index - 1 if direction == Direction.UP else index + 1
+
+        if next_index in [-1, len(self.path)]:  # Out of bounds
+            return null_return
+
+        next_tbl = self.path[next_index]
+
+        try:
+            edge = self.graph.edges[table, next_tbl]
+        except KeyError:  # if shortest path is not direct
+            edge = self.graph.edges[next_tbl, table]
+
+        return {next_tbl: edge}
 
     def _get_next_tables(self, table: str, direction: Direction) -> Tuple:
         """Get next tables/func based on direction.
@@ -382,6 +423,9 @@ class AbstractGraph(ABC):
         Tuple[Dict[str, Dict[str, str]], Callable
             Tuple of next tables and next function to get parent/child tables.
         """
+        if self.path:
+            return self._get_adjacent_path_item(table, direction), None
+
         G = self.graph
         dir_dict = {"direction": direction}
 
@@ -988,8 +1032,7 @@ class TableChain(RestrGraph):
             [
                 t
                 for t in self.undirect_graph.nodes
-                if t not in except_tables
-                and self._is_out(t, warn=False, keep_alias=True)
+                if t not in except_tables and self._is_out(t, warn=False)
             ]
         )
         self.no_visit.update(ignore_tables)
@@ -1192,6 +1235,9 @@ class TableChain(RestrGraph):
         search_graph = (  # Copy to ensure orig not modified by no_visit
             self.graph.copy() if directed else self.undirect_graph.copy()
         )
+
+        # Ignore nodes that should not be visited #1353
+        search_graph.remove_nodes_from(self.no_visit)
 
         try:
             path = shortest_path(search_graph, source, target)

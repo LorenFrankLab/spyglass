@@ -434,7 +434,7 @@ class SpyglassMixin(ExportMixin):
         """Path from Session table to self. False if no connection found."""
         TableChain = self._graph_deps[0]
 
-        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
+        return TableChain(parent=self._delete_deps[2], child=self)
 
     @cached_property
     def _test_mode(self) -> bool:
