@@ -112,6 +112,8 @@ class AbstractGraph(ABC):
     restr_ft: Get non-empty FreeTables for visited nodes with restrictions.
     as_dict: Get visited nodes as a list of dictionaries of
         {table_name: restriction}
+    path: List of table names to traverse in the graph, optionally set by
+        child classes. Used in TableChain.
     """
 
     def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
@@ -124,7 +126,6 @@ class AbstractGraph(ABC):
         verbose : bool, optional
             Whether to print verbose output. Default False
         """
-        self.path = None  # Allow subclasses to set path
         self.seed_table = seed_table
         self.connection = seed_table.connection
 
@@ -365,7 +366,7 @@ class AbstractGraph(ABC):
         return ret
 
     def _get_adjacent_path_item(
-        self, table: str, direction: Direction = Direction.UP
+        self, path: List, table: str, direction: Direction = Direction.UP
     ) -> str:
         """Get adjacent path item in the graph.
 
@@ -385,16 +386,16 @@ class AbstractGraph(ABC):
         """
         null_return = {table: dict()}  # parent func treats as dead end
 
-        if not self.path or table not in self.path:
+        if table not in path:
             return null_return  # if path is empty or table not in path
 
-        index = self.path.index(table)
+        index = path.index(table)
         next_index = index - 1 if direction == Direction.UP else index + 1
 
-        if next_index in [-1, len(self.path)]:  # Out of bounds
+        if next_index in [-1, len(path)]:  # Out of bounds
             return null_return
 
-        next_tbl = self.path[next_index]
+        next_tbl = path[next_index]
 
         try:
             edge = self.graph.edges[table, next_tbl]
@@ -423,8 +424,14 @@ class AbstractGraph(ABC):
         Tuple[Dict[str, Dict[str, str]], Callable
             Tuple of next tables and next function to get parent/child tables.
         """
-        if self.path:
-            return self._get_adjacent_path_item(table, direction), None
+
+        path = getattr(self, "path", None)  # * Avoid refactor for now. #1356
+        if path is not None:
+            return self._get_adjacent_path_item(path, table, direction), None
+
+        # * Ideally, would only grab path once. This is a workaround to avoid
+        # a refactor that would set a null value. As-is, initializing a value in
+        # AbstractGraph would always render 'No link', skipping the search.
 
         G = self.graph
         dir_dict = {"direction": direction}
@@ -969,10 +976,35 @@ class TableChain(RestrGraph):
         direction: Direction = Direction.NONE,
         search_restr: str = None,
         cascade: bool = False,
-        verbose: bool = False,
         banned_tables: List[str] = None,
+        verbose: bool = False,
         **kwargs,
     ):
+        """Initialize a TableChain object.
+
+        Parameters
+        ----------
+        parent : Table, optional
+            Parent table of the chain. Default None.
+        child : Table, optional
+            Child table of the chain. Default None.
+        direction : Direction, optional
+            Direction of the chain. Default 'none'. If both parent and child
+            are provided, direction is inferred from the link type.
+        search_restr : str, optional
+            Restriction to search for in the chain. If provided, the chain will
+            search for where this restriction can be applied. Default None,
+            expecting this restriction to be passed when invoking `cascade`.
+        cascade : bool, optional
+            Whether to cascade the restrictions through the chain on
+            initialization. Default False.
+        banned_tables : List[str], optional
+            List of table names to ignore in the graph traversal. Default None.
+            If provided, these tables will not be visited during the search.
+            Useful for excluding peripheral tables or other unwanted nodes.
+        verbose : bool, optional
+            Whether to print verbose output. Default False.
+        """
         self.parent = ensure_names(parent)
         self.child = ensure_names(child)
 
@@ -1258,6 +1290,7 @@ class TableChain(RestrGraph):
     def path(self) -> list:
         """Return list of full table names in chain."""
         if self.searched_path and not self.has_link:
+            self._log_truncate("No path found, already searched")
             return None
 
         path = None
@@ -1271,6 +1304,10 @@ class TableChain(RestrGraph):
                 self.link_type = "directed with peripheral"
             elif path := self.find_path(directed=False):
                 self.link_type = "undirected with peripheral"
+
+        if path is None:
+            self._log_truncate("No path found")
+
         self.searched_path = True
 
         return path
