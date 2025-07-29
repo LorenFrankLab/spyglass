@@ -286,7 +286,7 @@ class AbstractGraph(ABC):
     def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
-        if self.graph.nodes.get(table):
+        if table in self.graph.nodes:
             return False
         ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
         if warn and ret:  # Log warning if outside
@@ -366,7 +366,7 @@ class AbstractGraph(ABC):
         return ret
 
     def _get_adjacent_path_item(
-        self, path: List, table: str, direction: Direction = Direction.UP
+        self, table: str, direction: Direction = Direction.UP
     ) -> str:
         """Get adjacent path item in the graph.
 
@@ -386,16 +386,28 @@ class AbstractGraph(ABC):
         """
         null_return = {table: dict()}  # parent func treats as dead end
 
+        path = getattr(self, "path", [])
         if table not in path:
             return null_return  # if path is empty or table not in path
 
-        index = path.index(table)
-        next_index = index - 1 if direction == Direction.UP else index + 1
+        idx = path.index(table)
+        is_up = direction == Direction.UP
+        next_idx = idx - 1 if is_up else idx + 1
 
-        if next_index in [-1, len(path)]:  # Out of bounds
+        if next_idx in [-1, len(path)]:  # Out of bounds
             return null_return
 
-        next_tbl = path[next_index]
+        next_tbl = path[next_idx]
+
+        if next_tbl.isnumeric():  # Skip alias nodes
+            next_next = next_idx - 1 if is_up else next_idx + 1
+            table = next_tbl  # for alias, want edge from alias to subsequent
+            next_tbl = path[next_next]
+        if next_tbl.isnumeric():
+            raise ValueError(
+                f"Multiple sequential alias nodes found in path {path}. "
+                + "This should not happen. Please report this issue."
+            )
 
         try:
             edge = self.graph.edges[table, next_tbl]
@@ -424,14 +436,6 @@ class AbstractGraph(ABC):
         Tuple[Dict[str, Dict[str, str]], Callable
             Tuple of next tables and next function to get parent/child tables.
         """
-
-        path = getattr(self, "path", None)  # * Avoid refactor for now. #1356
-        if path is not None:
-            return self._get_adjacent_path_item(path, table, direction), None
-
-        # * Ideally, would only grab path once. This is a workaround to avoid
-        # a refactor that would set a null value. As-is, initializing a value in
-        # AbstractGraph would always render 'No link', skipping the search.
 
         G = self.graph
         dir_dict = {"direction": direction}
@@ -488,7 +492,13 @@ class AbstractGraph(ABC):
         self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
-        next_tables, next_func = self._get_next_tables(table, direction)
+        if getattr(self, "found_path", None):  # * Avoid refactor #1356
+            # * Ideally, would only grab path once
+            # Workaround to avoid a class-inheritance refactor
+            next_tables = self._get_adjacent_path_item(table, direction)
+            next_func = None  # Won't be called bc numeric in path raises
+        else:
+            next_tables, next_func = self._get_next_tables(table, direction)
 
         if next_list := next_tables.keys():
             self._log_truncate(
@@ -1022,6 +1032,7 @@ class TableChain(RestrGraph):
         self.no_visit.difference_update(set([self.parent, self.child]))
 
         self.searched_tables = set()
+        self.found_path = False
         self.found_restr = False
         self.link_type = None
         self.searched_path = False
@@ -1214,14 +1225,15 @@ class TableChain(RestrGraph):
             return
 
         self.searched_tables.add(table)
+
         next_tables, next_func = self._get_next_tables(table, self.direction)
 
         for next_table, data in next_tables.items():
             if next_table.isnumeric():
                 next_table, data = next_func(next_table).popitem()
-            self._log_truncate(
-                f"Search Link: {self._camel(table)} -> {self._camel(next_table)}"
-            )
+
+            link = f"{self._camel(table)} -> {self._camel(next_table)}"
+            self._log_truncate(f"Search Link: {link}")
 
             if next_table in self.no_visit or table == next_table:
                 reason = "Already Saw" if next_table == table else "Banned Tbl "
@@ -1280,6 +1292,7 @@ class TableChain(RestrGraph):
             return None
 
         self._log_truncate(f"Path Found : {path}")
+        self.found_path = True
 
         ignore_nodes = self.graph.nodes - set(path)
         self.no_visit.update(ignore_nodes)
@@ -1291,6 +1304,9 @@ class TableChain(RestrGraph):
         """Return list of full table names in chain."""
         if self.searched_path and not self.has_link:
             self._log_truncate("No path found, already searched")
+            return None
+        if not (self.parent and self.child):
+            self._log_truncate("No parent or child set, cannot find path.")
             return None
 
         path = None
