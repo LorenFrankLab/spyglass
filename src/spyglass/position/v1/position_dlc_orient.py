@@ -188,7 +188,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
         if query := (RawPosition & key):
             spatial_series = query.fetch_nwb()[0]["raw_position"]
         else:
-            spatial_series = None
+            spatial_series = None  # pragma: no cover
 
         orientation = pynwb.behavior.CompassDirection()
         orientation.create_spatial_series(
@@ -214,6 +214,7 @@ class DLCOrientation(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe"""
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(

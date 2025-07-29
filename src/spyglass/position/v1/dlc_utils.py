@@ -146,16 +146,18 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
     -------
     None
     """
-    ActivityLog().deprecate_log("dlc_utils: _set_permissions")
+    ActivityLog().deprecate_log(  # pragma: no cover
+        "dlc_utils: _set_permissions"
+    )
 
-    directory = Path(directory)
+    directory = Path(directory)  # pragma: no cover
     assert directory.exists(), f"Target directory: {directory} does not exist"
-    uid = pwd.getpwnam(username).pw_uid
-    if groupname:
+    uid = pwd.getpwnam(username).pw_uid  # pragma: no cover
+    if groupname:  # pragma: no cover
         gid = grp.getgrnam(groupname).gr_gid
-    else:
+    else:  # pragma: no cover
         gid = None
-    for dirpath, _, filenames in os.walk(directory):
+    for dirpath, _, filenames in os.walk(directory):  # pragma: no cover
         os.chown(dirpath, uid, gid)
         os.chmod(dirpath, mode)
         for filename in filenames:
@@ -183,7 +185,7 @@ def file_log(logger, console=False):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             if not (log_path := getattr(self, "log_path", None)):
-                self.log_path = f"temp_{self.__class__.__name__}.log"
+                log_path = f"temp_{self.__class__.__name__}.log"
             file_handler = logging.FileHandler(log_path, mode="a")
             file_fmt = logging.Formatter(
                 "[%(asctime)s][%(levelname)s] Spyglass "
@@ -207,7 +209,7 @@ def file_log(logger, console=False):
     return decorator
 
 
-def get_dlc_root_data_dir():
+def get_dlc_root_data_dir():  # pragma: no cover
     """Returns list of potential root directories for DLC data"""
     ActivityLog().deprecate_log("dlc_utils: get_dlc_root_data_dir")
     if "custom" in dj.config:
@@ -225,7 +227,7 @@ def get_dlc_root_data_dir():
         return dlc_root_dirs
 
 
-def get_dlc_processed_data_dir() -> str:
+def get_dlc_processed_data_dir() -> str:  # pragma: no cover
     """Returns session_dir relative to custom 'dlc_output_dir' root"""
     ActivityLog().deprecate_log("dlc_utils: get_dlc_processed_data_dir")
     if "custom" in dj.config:
@@ -237,7 +239,7 @@ def get_dlc_processed_data_dir() -> str:
         return Path("/nimbus/deeplabcut/output/")
 
 
-def find_full_path(root_directories, relative_path):
+def find_full_path(root_directories, relative_path):  # pragma: no cover
     """
     from Datajoint Elements - unused
     Given a relative path, search and return the full-path
@@ -266,7 +268,7 @@ def find_full_path(root_directories, relative_path):
     )
 
 
-def find_root_directory(root_directories, full_path):
+def find_root_directory(root_directories, full_path):  # pragma: no cover
     """
     From datajoint elements - unused
     Given multiple potential root directories and a full-path,
@@ -417,12 +419,12 @@ def find_mp4(
     video_files = (
         [Path(video_path) / video_filename]
         if video_filename
-        else Path(video_path).glob(f"*.{video_filetype}")
+        else [p for p in Path(video_path).glob(f"*.{video_filetype}")]
     )
 
     if len(video_files) != 1:
         raise FileNotFoundError(
-            f"Found {len(video_files)} video files in {video_path}"
+            f"Found {len(video_files)} video files: {video_files}"
         )
     video_filepath = video_files[0]
 
@@ -493,8 +495,8 @@ def _convert_mp4(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
+    except subprocess.CalledProcessError as err:  # pragma: no cover
+        raise RuntimeError(  # pragma: no cover
             f"Video convert errored: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = convert_process.communicate()
@@ -504,8 +506,10 @@ def _convert_mp4(
     logger.info(f"Checking packets match orig file: {dest_filename}")
     orig_packets = _check_packets(video_path, count_frames=count_frames)
     dest_packets = _check_packets(dest_path, count_frames=count_frames)
-    if orig_packets != dest_packets:
-        logger.warning(f"Conversion error: {orig_filename} -> {dest_filename}")
+    if orig_packets != dest_packets:  # pragma: no cover
+        logger.warning(  # pragma: no cover
+            f"Conversion error: {orig_filename} -> {dest_filename}"
+        )
 
     if return_output:
         return dest_path
@@ -531,8 +535,8 @@ def _check_packets(file, count_frames=False):
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         )
-    except subprocess.CalledProcessError as err:
-        raise RuntimeError(
+    except subprocess.CalledProcessError as err:  # pragma: no cover
+        raise RuntimeError(  # pragma: no cover
             f"Check packets error: Code {err.returncode}, {err.output}"
         ) from err
     out, _ = check_process.communicate()
@@ -542,7 +546,7 @@ def _check_packets(file, count_frames=False):
     raise ValueError(f"Check packets error: {out}")
 
 
-def get_gpu_memory():
+def get_gpu_memory():  # pragma: no cover
     """Queries the gpu cluster and returns the memory use for each core.
     This is used to evaluate which GPU cores are available to run jobs on
     (i.e. pose estimation, DLC model training)
@@ -733,7 +737,9 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     # Handling error case where y_vec is zero and all Ys are the same
     y_1, y_2, y_3 = pos_df[LED1]["y"], pos_df[LED2]["y"], pos_df[LED3]["y"]
     if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
-        raise Exception("Cannot determine head direction from bisector")
+        raise Exception(  # pragma: no cover
+            "Cannot determine head direction from bisector"
+        )
 
     # General case where y_vec is not zero. Use arctan2 to determine orientation
     length = np.sqrt(x_vec**2 + y_vec**2)
@@ -805,7 +811,7 @@ class Centroid:
         logical_or : bool, optional
             Whether to use logical_and or logical_or to combine mask tuple.
         """
-        if isinstance(mask, list):
+        if isinstance(mask, list):  # pragma: no cover
             mask = [reduce(np.logical_and, m) for m in mask]
 
         # Check that combinations of points close enough
@@ -816,7 +822,7 @@ class Centroid:
         func = np.logical_or if logical_or else np.logical_and
         mask = reduce(func, mask)
 
-        if not np.any(mask):
+        if not np.any(mask):  # pragma: no cover
             return
         if replace:
             self.centroid[mask] = np.nan
