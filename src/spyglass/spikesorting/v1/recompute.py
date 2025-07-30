@@ -533,8 +533,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 new.unlink(missing_ok=True)
             return
 
-        # logger.info(f"Comparing mismatched {new.name}")
-
         names, hashes = [], []
         for obj in set({**old_hasher.objs, **new_hasher.objs}):
             old_obj, old_hash = old_hasher.objs.get(obj, (None, None))

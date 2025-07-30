@@ -137,12 +137,18 @@ class UserEnvironment(dj.Manual):
         )
 
     def _warn_if_custom_or_conflict(self):
-        if self._pip_custom:
+        pip_custom_no_spy = {
+            k: "".join(v)
+            for k, v in self._pip_custom.items()
+            if "spyglass" not in k
+        }
+        if pip_custom_no_spy:
             logger.warning(
                 "Custom pip installs found. "
                 + "Recompute feature may not work as expected."
             )
             pprint(self._pip_custom, indent=4)
+
         if self._conda_conflicts:
             logger.warning(
                 "Conda/pip conflicts in the environment.\n"
@@ -211,7 +217,7 @@ class UserEnvironment(dj.Manual):
 
             # ------- if conda version is none, set pip version in conda ------
             if conda_version is None:  # append pip-only package
-                logger.info(f"Pip-only package  : {line}")
+                logger.debug(f"Pip-only package  : {line}")
                 self._conda_pip_dict[package.lower()] = line.lower()
                 return True  # successfully parsed basic dependency
 
@@ -226,16 +232,17 @@ class UserEnvironment(dj.Manual):
             # capture local file paths
             dep_name, path = self._delim_split(line)
             self._pip_custom[dep_name] = line
-            logger.info(f"Custom pip install: {dep_name}")
+            logger.debug(f"Custom pip install: {dep_name}")
             return True  # likely versioned custom install, not 'editable'
 
         # ------ if editable install from git, track and flag as editable ------
         if line.startswith("-e git+") and "#egg=" in line:
             url, package = line.split("#egg=", maxsplit=1)  # pragma: no cover
             # conda convention uses dashes
-            logger.info(f"Editable from git : {package}")
+            logger.debug(f"Editable from git : {package}")
             self._pip_custom[package.replace("_", "-")] = line
-            self._has_editable = True
+            if "spyglass" not in package:  # allow spyglass editable from git
+                self._has_editable = True
             return True  # editable install, no version info
 
         # ------- if comment, then editable, track and flag as editable -------
