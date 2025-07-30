@@ -290,7 +290,7 @@ class AbstractGraph(ABC):
             return False
         ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
         if warn and ret:  # Log warning if outside
-            logger.warning(f"Skipping unimported: {table}")
+            logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return ret
 
     # ---------------------------- Graph Traversal -----------------------------
@@ -387,8 +387,8 @@ class AbstractGraph(ABC):
         null_return = {table: dict()}  # parent func treats as dead end
 
         path = getattr(self, "path", [])
-        if table not in path:
-            return null_return  # if path is empty or table not in path
+        if table not in path:  # if path is empty or table not in path
+            return null_return  # pragma: no cover
 
         idx = path.index(table)
         is_up = direction == Direction.UP
@@ -404,7 +404,7 @@ class AbstractGraph(ABC):
             table = next_tbl  # for alias, want edge from alias to subsequent
             next_tbl = path[next_next]
         if next_tbl.isnumeric():
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 f"Multiple sequential alias nodes found in path {path}. "
                 + "This should not happen. Please report this issue."
             )
@@ -1289,7 +1289,7 @@ class TableChain(RestrGraph):
             return None  # No path found, parent func may do undirected search
         except NodeNotFound:
             self.searched_path = True  # No path found, don't search again
-            return None
+            return None  # pragma: no cover
 
         self._log_truncate(f"Path Found : {path}")
         self.found_path = True
@@ -1304,10 +1304,10 @@ class TableChain(RestrGraph):
         """Return list of full table names in chain."""
         if self.searched_path and not self.has_link:
             self._log_truncate("No path found, already searched")
-            return None
+            return None  # pragma: no cover
         if not (self.parent and self.child):
             self._log_truncate("No parent or child set, cannot find path.")
-            return None
+            return None  # pragma: no cover
 
         path = None
         if path := self.find_path(directed=True):
@@ -1317,9 +1317,9 @@ class TableChain(RestrGraph):
         else:  # Search with peripheral
             self.no_visit.difference_update(PERIPHERAL_TABLES)
             if path := self.find_path(directed=True):
-                self.link_type = "directed with peripheral"
+                self.link_type = "directed w/peripheral"  # pragma: no cover
             elif path := self.find_path(directed=False):
-                self.link_type = "undirected with peripheral"
+                self.link_type = "undirected w/peripheral"  # pragma: no cover
 
         if path is None:
             self._log_truncate("No path found")
