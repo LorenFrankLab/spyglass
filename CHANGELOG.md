@@ -86,7 +86,7 @@ ImportedLFP().drop()
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
-- Add code coverage badge #1305
+- Add code coverage badge, and increase position coverage #1305, #1315
 
 ### Documentation
 
@@ -109,7 +109,7 @@ ImportedLFP().drop()
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
     - Prompt user to verify compatibility between new insert and existing table
-        entries # 1318
+        entries # 1318, #1350
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
@@ -122,6 +122,7 @@ ImportedLFP().drop()
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
     - Accept imported timestamps defined by `rate` and `start_time` #1322
+    - Fix bug preventing DLC config updates #1352
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249

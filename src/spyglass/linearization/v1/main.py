@@ -198,5 +198,5 @@ class LinearizedPositionV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> DataFrame:
         """Fetch a single dataframe."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         return self.fetch_nwb()[0]["linearized_position"].set_index("time")
