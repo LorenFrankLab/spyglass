@@ -105,7 +105,7 @@ ImportedLFP().drop()
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
-    - `IntervalList.fetch_interval` now returns `Interval` object #1293, #13XX
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293, #1357
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
     - Prompt user to verify compatibility between new insert and existing table
