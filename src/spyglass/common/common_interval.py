@@ -870,20 +870,30 @@ class Interval:
             else Interval(new_interval, **self.kwargs)
         )
 
-    def to_indices(self, timestamps: np.ndarray) -> List[List[int]]:
+    def to_indices(
+        self, timestamps: np.ndarray, as_interval: bool = False
+    ) -> List[List[int]]:
         """Convert intervals to indices in the given timestamps.
 
         Parameters
         ----------
         timestamps : array_like
             The timestamps to convert the intervals to indices in.
+        as_interval : bool, optional
+            If True, return as an Interval object. Defaults to False.
 
         Returns
         -------
         np.ndarray
             The indices of the intervals in the given timestamps.
         """
-        return np.searchsorted(timestamps, self.times.ravel()).reshape(-1, 2)
+        ret = np.searchsorted(timestamps, self.times.ravel()).reshape(-1, 2)
+        if as_interval:
+            if not hasattr(ret[0], "__len__"):
+                # handle list of ints case from v0.spikesorting_artifact
+                ret = [ret]
+            ret = Interval(ret)
+        return ret
 
     def to_seconds(self, timestamps: np.ndarray) -> List[Tuple[float]]:
         """Convert intervals to seconds in the given timestamps.
@@ -1147,15 +1157,12 @@ def interval_set_difference_inds(intervals1, intervals2):
 
     Parameters
     ----------
-    intervals1 : _type_
-        _description_
-    intervals2 : _type_
-        _description_
+    intervals1 : IntervalLike
+    intervals2 : IntervalLike
 
     Returns
     -------
-    _type_
-        _description_
+    np.ndarray
     """
     from spyglass.common.common_usage import ActivityLog
 

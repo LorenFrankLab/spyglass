@@ -121,24 +121,24 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             recording, **artifact_params, **job_kwargs
         )
 
+        # set up a name for no-artifact times using recording id
+        artifact_removed_name = (
+            f"{recording_name}_{key['artifact_params_name']}"
+            + "_artifact_removed_valid_times"
+        )
+
         key.update(
             {
-                "artifact_times": artifact_times,
+                "artifact_times": artifact_times.times,
                 "artifact_removed_valid_times": artifact_removed_valid_times,
-                "artifact_removed_interval_list_name": (
-                    # set up a name for no-artifact times using recording id
-                    recording_name
-                    + "_"
-                    + key["artifact_params_name"]
-                    + "_artifact_removed_valid_times"
-                ),
+                "artifact_removed_interval_list_name": artifact_removed_name,
             }
         )
 
         interval_key = {
             "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": key["artifact_removed_interval_list_name"],
-            "valid_times": key["artifact_removed_valid_times"],
+            "interval_list_name": artifact_removed_name,
+            "valid_times": artifact_removed_valid_times,
             "pipeline": "spikesorting_artifact_v0",
         }
 
@@ -152,7 +152,8 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
 class ArtifactRemovedIntervalList(SpyglassMixin, dj.Manual):
     definition = """
     # Stores intervals without detected artifacts.
-    # Note that entries can come from either ArtifactDetection() or alternative artifact removal analyses.
+    # Note that entries can come from either ArtifactDetection() or
+    # alternative artifact removal analyses.
     artifact_removed_interval_list_name: varchar(170)
     ---
     -> ArtifactDetectionSelection
@@ -280,21 +281,12 @@ def _get_artifact_times(
     artifact_intervals_s = Interval(
         artifact_frames, from_inds=True
     ).add_removal_window(removal_window_ms, valid_timestamps)
-    artifact_interv_idx = artifact_intervals_s.to_indices(valid_timestamps)
-
-    # compute set difference between intervals (of indices)
-    try:
-        # if artifact_intervals_new is a list of lists then
-        # len(artifact_intervals_new[0]) is the number of intervals otherwise
-        # artifact_intervals_new is a list of ints and
-        # len(artifact_intervals_new[0]) is not defined
-        len(artifact_interv_idx[0])
-    except TypeError:
-        # convert to list of lists
-        artifact_interv_idx = [artifact_interv_idx.times]
+    artifact_interv_idx = artifact_intervals_s.to_indices(
+        valid_timestamps, as_interval=True
+    )
 
     artifact_removed_valid_times = artifact_interv_idx.subtract(
         [(0, len(valid_timestamps) - 1)], reverse=True
     ).to_seconds(valid_timestamps)
 
-    return np.asarray(artifact_removed_valid_times.times), artifact_intervals_s
+    return np.asarray(artifact_removed_valid_times), artifact_intervals_s
