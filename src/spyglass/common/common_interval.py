@@ -872,7 +872,7 @@ class Interval:
 
     def to_indices(
         self, timestamps: np.ndarray, as_interval: bool = False
-    ) -> List[List[int]]:
+    ) -> Union[List[List[int]], Interval]:
         """Convert intervals to indices in the given timestamps.
 
         Parameters
@@ -889,10 +889,12 @@ class Interval:
         """
         ret = np.searchsorted(timestamps, self.times.ravel()).reshape(-1, 2)
         if as_interval:
+            if len(ret) == 0:
+                return Interval([], **self.kwargs)
             if not hasattr(ret[0], "__len__"):
                 # handle list of ints case from v0.spikesorting_artifact
                 ret = [ret]
-            ret = Interval(ret)
+            ret = Interval(ret, **self.kwargs)
         return ret
 
     def to_seconds(self, timestamps: np.ndarray) -> List[Tuple[float]]:
