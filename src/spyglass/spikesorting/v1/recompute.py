@@ -602,5 +602,5 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if dj.utils.user_choice(msg).lower() == "yes":
             for path in attempt_paths:
                 path.unlink(missing_ok=True)
-
-        super().delete(*args, **kwargs)
+            kwargs["safemode"] = False  # pragma: no cover
+            super().delete(*args, **kwargs)
