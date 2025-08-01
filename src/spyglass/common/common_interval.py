@@ -872,7 +872,7 @@ class Interval:
 
     def to_indices(
         self, timestamps: np.ndarray, as_interval: bool = False
-    ) -> Union[List[List[int]], Interval]:
+    ) -> Union[List[List[int]], T]:
         """Convert intervals to indices in the given timestamps.
 
         Parameters
