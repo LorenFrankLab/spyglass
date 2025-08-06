@@ -1,3 +1,5 @@
+import os
+import sys
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
@@ -16,6 +18,8 @@ from pymysql.err import DataError
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
+    _quick_get_analysis_path,
+    bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
     get_nwb_table,
@@ -205,6 +209,34 @@ class SpyglassMixin(ExportMixin):
             key = query.fetch1("KEY")
 
         return key
+
+    def cautious_fetch1(self, *args, **kwargs):
+        """Fetch one entry from the table."
+
+        Raises
+        ------
+        KeyError
+            If the table is empty or if the key is not unique.
+        """
+        count = len(self)
+        if count != 1:
+            raise KeyError(f"Method expects a single entry, but found {count}")
+        return self.fetch1(*args, **kwargs)
+
+    def ensure_single_entry(self, key: dict = True):
+        """Ensure that the key corresponds to a single entry in the table.
+
+        Parameters
+        ----------
+        key : dict
+            The key to check. Default to True, no further restriction of `self`.
+        """
+        if len(self & key) != 1:
+            raise KeyError(
+                f"Please restrict {self.full_table_name} to 1 entry when calling "
+                f"{sys._getframe(1).f_code.co_name}(). "
+                f"Found {len(self & key)} entries"
+            )
 
     # ------------------------------- fetch_nwb -------------------------------
 
@@ -402,7 +434,11 @@ class SpyglassMixin(ExportMixin):
         """Path from Session table to self. False if no connection found."""
         TableChain = self._graph_deps[0]
 
-        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
+        return TableChain(
+            parent=self._delete_deps[2],
+            child=self,
+            banned_tables=["`common_lab`.`lab_team`"],  # See #1353
+        )
 
     @cached_property
     def _test_mode(self) -> bool:
@@ -919,6 +955,42 @@ class SpyglassMixin(ExportMixin):
             df = df[keep_cols]
 
         return df
+
+    # --------------------------- Check disc usage ------------------------------
+    def get_table_storage_usage(self, human_readable=False):
+        """Total size of all analysis files in the table.
+        Uses the analysis_file_name field to find the file paths and sum their
+        sizes.
+        Parameters
+        ----------
+        human_readable : bool, optional
+            If True, return a human-readable string of the total size.
+            Default False, returns total size in bytes.
+
+        Returns
+        -------
+        Union[str, int]
+            Total size of all analysis files in the table. If human_readable is
+            True, returns a string with the size in bytes, KiB, MiB, GiB, TiB,
+            or PiB. If human_readable is False, returns the total size in bytes.
+
+        """
+        if "analysis_file_name" not in self.heading.names:
+            logger.warning(
+                f"{self.full_table_name} does not have an analysis_file_name field."
+            )
+            return "0 Mib" if human_readable else 0
+        file_names = self.fetch("analysis_file_name")
+        file_paths = [
+            _quick_get_analysis_path(file_name) for file_name in file_names
+        ]
+        file_paths = [path for path in file_paths if path is not None]
+        file_sizes = [os.stat(path).st_size for path in file_paths]
+        total_size = sum(file_sizes)
+        if not human_readable:
+            return total_size
+        human_size = bytes_to_human_readable(total_size)
+        return human_size
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):

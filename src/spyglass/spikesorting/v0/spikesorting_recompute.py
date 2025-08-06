@@ -24,14 +24,15 @@ import datajoint as dj
 from packaging.version import parse as version_parse
 from probeinterface import __version__ as pi_version
 from spikeinterface import __version__ as si_version
+from tqdm import tqdm
 
 from spyglass.common.common_user import UserEnvironment  # noqa F401
 from spyglass.settings import recording_dir, temp_dir
-from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
 
@@ -70,7 +71,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         ) & self._package_restr("probeinterface", pi_version)
 
     def _has_matching_env(
-        self, key: dict, show_err: Optional[bool] = True
+        self, key: dict, show_err: Optional[bool] = False
     ) -> bool:
         """Check current env for matching pynwb dependency versions."""
         key_pk = self.dict_to_pk(key)
@@ -78,12 +79,11 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             self.make(key)
         ret = bool(self.this_env & key_pk)
         if not ret and show_err:
-            need = sort_dict(
-                (self & key).fetch1(
-                    "spikeinterface", "probeinterface", as_dict=True
-                )
-            )
-            have = sort_dict(
+            this_entry = (self & key_pk).fetch(  # pragma: no cover
+                "spikeinterface", "probeinterface", as_dict=True
+            )[0]
+            need = sort_dict(this_entry)  # pragma: no cover
+            have = sort_dict(  # pragma: no cover
                 dict(spikeinterface=si_version, probeinterface=pi_version)
             )
             logger.error(f"Versions mismatch: {need} != {have}")
@@ -150,6 +150,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         query = SpikeSortingRecording() & key
         rec_path = Path(query.fetch1("recording_path"))
 
+        missing_dir = not rec_path.exists() or not rec_path.is_dir()
+        empty_dir = rec_path.is_dir() and not any(rec_path.iterdir())
+
+        if missing_dir or empty_dir:
+            logger.warning(f"Problem with recording path: {rec_path}")
+            return  # pragma: no cover
+
         si_version = self._extract_version(
             [
                 rec_path / f"{fname}.json"
@@ -159,7 +166,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         si_version.discard(None)
         n_versions = len(si_version)
         if n_versions != 1:
-            raise ValueError(f"{n_versions} si versions found: {si_version}")
+            logger.warning(f"{n_versions} si versions found: {si_version}")
+            return  # pragma: no cover
+
+        probe_path = rec_path / "probe.json"
+        if not probe_path.exists():
+            logger.warning(f"Probe file not found for {key['nwb_file_name']}")
+            return  # pragma: no cover
 
         with open(rec_path / "probe.json", "r") as file:
             pi_version = json.load(file).get("version", None)
@@ -171,6 +184,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
                 spikeinterface=next(iter(si_version)),
             ),
             allow_direct_insert=True,
+            skip_duplicates=True,
         )
 
 
@@ -187,8 +201,17 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     logged_at_creation=0: bool
     """
 
+    @cached_property
+    def env_dict(self) -> dict:
+        logger.info("Initializing UserEnvironment")
+        return UserEnvironment().insert_current_env()
+
     def insert(
-        self, rows: List[dict], at_creation: Optional[bool] = False, **kwargs
+        self,
+        rows: List[dict],
+        at_creation: Optional[bool] = False,
+        force_attempt=False,
+        **kwargs,
     ) -> None:
         """Custom insert to ensure dependencies are added to each row."""
 
@@ -202,19 +225,26 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         for row in rows:
             if not RecordingRecomputeVersions & row:
                 RecordingRecomputeVersions().make(row)
-        if not USER_TBL.this_env:  # likely not using conda
+        if not self.env_dict.get("env_id"):  # likely not using conda
             logger.warning("Cannot log for recompute without UserEnvironment.")
             return
+
+        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
+        if at_creation and editable_env:  # no assume pass if gen w/editable env
+            at_creation = False  # pragma: no cover
 
         inserts = []
         for row in rows:
             key_pk = self.dict_to_pk(row)
-            if not REC_VER_TBL._has_matching_env(key_pk):
+            if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
-            key_pk.update(USER_TBL.this_env)
+            key_pk.update(self.env_dict)
             key_pk.setdefault("logged_at_creation", at_creation)
             inserts.append(key_pk)
         super().insert(inserts, **kwargs)
+
+        if not inserts:
+            logger.warning("No rows inserted.")  # pragma: no cover
 
     def attempt_all(
         self,
@@ -247,6 +277,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 "logged_at_creation": False,
             }
             for key in source.fetch("KEY", as_dict=True)
+            if len(RecordingRecompute & key) == 0
         ]
         self.insert(inserts, at_creation=False, **kwargs)
 
@@ -255,7 +286,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
         """Restricted table matching pynwb env and pip env."""
-        return self & USER_TBL.this_env
+        return self & self.env_dict
 
 
 @schema
@@ -264,6 +295,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     -> RecordingRecomputeSelection
     ---
     matched:bool
+    err_msg=null: varchar(255)
     """
 
     _hasher_cache = dict()
@@ -309,16 +341,17 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 return [self.compare(row) for row in rows]
 
             if not key.get("name"):
-                self.compare(self & key)
+                self.compare(key=(self & key).fetch(as_dict=True))
                 return
 
             old, new = RecordingRecompute()._get_paths(key)
+
             this_file = key.get("name")
-            msg = f" {this_file}\n\t{old}\n\t{new}"
-            if str(old).endswith("raw"):
-                print("Cannot compare raw files" + msg)
+
+            if this_file.endswith("raw"):
+                print(f"Cannot compare raw files: {this_file}")
                 return
-            print("Comparing" + msg)
+            print(f"Comparing {this_file}")
             return H5pyComparator(old / this_file, new / this_file)
 
     def _parent_key(self, key: dict) -> dict:
@@ -355,6 +388,12 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         return (str(old), str(new)) if as_str else (old, new)
 
     def make(self, key: dict) -> None:
+        rec_key = {k: v for k, v in key.items() if k != "env_id"}
+        if self & rec_key & "matched=1":
+            logger.info(f"Already matched {rec_key['nwb_file_name']}")
+            (RecordingRecomputeSelection & key).delete(safemode=False)
+            return  # pragma: no cover
+
         # Skip recompute for files logged at creation
         parent = self._parent_key(key)
         log_key = key.get("nwb_file_name", key)
@@ -363,28 +402,31 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             self.insert1({**key, "matched": True})
             return
 
-        # Ensure dependencies unchanged since selection insert
-        if not REC_VER_TBL._has_matching_env(key):
-            logger.info(
-                f"Skipping due to pip mismatch, {key['env_id']}: {log_key}"
-            )
-            return
-
         old, new = self._get_paths(key)
 
-        new_hasher = (
-            self._hash_one(new)
-            if new.exists()
-            else SpikeSortingRecording()._make_file(
-                key, base_dir=self._get_temp_dir(key), return_hasher=True
-            )["hash"]
-        )
+        try:
+            new_hasher = (
+                self._hash_one(new)
+                if new.exists()
+                else SpikeSortingRecording()._make_file(
+                    key, base_dir=self._get_temp_dir(key), return_hasher=True
+                )["hash"]
+            )
+        except ValueError as err:
+            e_info = err.args[0]  # pragma: no cover
+            # Some spikeinterface versions can't handle small batches
+            if "greater than padlen" in e_info:
+                logger.error(f"Failed to recompute {log_key}: {e_info}")
+                self.insert1({**key, "matched": False, "err_msg": e_info[:255]})
+                return  # pragma: no cover
+            raise  # pragma: no cover
 
         # hack pending table alter
         old_hash = parent.get("hash") or self._hash_one(old).hash
 
         if old_hash == new_hasher.hash:
-            logger.info(f"Matched {log_key}")
+            if "tmp" in str(new) and new.exists():
+                shutil_rmtree(new, ignore_errors=True)
             self.insert1({**key, "matched": True})
             return
 
@@ -406,6 +448,27 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self.insert1(dict(key, matched=False))
         self.Name().insert(names)
         self.Hash().insert(hashes)
+
+    def get_disk_space(self, which="new", restr: dict = None) -> Path:
+        """Return the new file(s) disk space for a given key or restriction.
+
+        Parameters
+        ----------
+        which : str
+            Which file to check disk space for, 'old' or 'new'. Default 'new'.
+        restr : dict, optional
+            Restriction for RecordingRecompute. Default is "matched=0".
+        """
+        restr = restr or "matched=0"
+        total_size = 0
+        for key in tqdm(self & restr, desc="Calculating disk space"):
+            old, new = self._get_paths(key)
+            this = old if which == "old" else new
+            if this.exists():
+                total_size += sum(
+                    f.stat().st_size for f in this.glob("**/*") if f.is_file()
+                )
+        return f"Total: {bytes_to_human_readable(total_size)}"
 
     def delete_files(
         self,

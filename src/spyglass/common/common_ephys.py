@@ -54,7 +54,7 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
                 region_name=electrode_group.location
             )
             if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
-                key["probe_id"] = electrode_group.device.probe_description
+                key["probe_id"] = electrode_group.device.probe_type
             key["description"] = electrode_group.description
             if isinstance(
                 electrode_group, ndx_franklab_novela.NwbElectrodeGroup
@@ -167,7 +167,7 @@ class Electrode(SpyglassMixin, dj.Imported):
             ) and all(col in elect_data for col in extra_cols):
                 key.update(
                     {
-                        "probe_id": elect_data.group.device.probe_description,
+                        "probe_id": elect_data.group.device.probe_type,
                         "probe_shank": elect_data.probe_shank,
                         "probe_electrode": elect_data.probe_electrode,
                         "bad_channel": (
@@ -575,6 +575,7 @@ class LFP(SpyglassMixin, dj.Imported):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP data as a pandas DataFrame."""
+        _ = self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
@@ -951,6 +952,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP band data as a pandas DataFrame."""
+        _ = self.ensure_single_entry()
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,

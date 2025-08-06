@@ -266,6 +266,7 @@ class UnitMarks(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the marks in a readable format"""
+        self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:
@@ -450,6 +451,7 @@ class UnitMarksIndicator(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Convenience function for returning the first dataframe"""
+        _ = self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:

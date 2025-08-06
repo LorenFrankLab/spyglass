@@ -1,15 +1,15 @@
-import os
 from pathlib import Path
 
 import datajoint as dj
 import ruamel.yaml as yaml
 
+from spyglass.position.utils import get_most_recent_file
+from spyglass.position.utils_dlc import get_dlc_model_eval
+from spyglass.position.v1 import dlc_reader
+from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
+from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import str_to_bool
-
-from . import dlc_reader
-from .position_dlc_project import BodyPart, DLCProject  # noqa: F401
-from .position_dlc_training import DLCModelTraining  # noqa: F401
 
 schema = dj.schema("position_v1_dlc_model")
 
@@ -21,7 +21,7 @@ class DLCModelInput(SpyglassMixin, dj.Manual):
     """
 
     definition = """
-    dlc_model_name : varchar(64)  # Different than dlc_model_name in DLCModelSource... not great
+    dlc_model_name : varchar(64)  # Different than DLCModelSource.dlc_model_name
     -> DLCProject
     ---
     project_path         : varchar(255) # Path to project directory
@@ -100,16 +100,21 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 
         n_found = len(table_query)
         if n_found != 1:
-            logger.warning(
-                f"Found {len(table_query)} entries found for project "
+            logger.warning(  # pragma: no cover
+                f"Found {len(table_query)} entries for project "
                 + f"{project_name}:\n{table_query}"
             )
 
         choice = "y"
         if n_found > 1 and not cls._test_mode:
-            choice = dj.utils.user_choice("Use first entry?")[0]
+            choice = dj.utils.user_choice("Use first entry?")[
+                0
+            ]  # pragma: no cover
         if n_found == 0 or choice != "y":
-            return
+            # shouldn't his delete the parent? Why master w/o part?
+            return  # pragma: no cover
+
+        key = key or dict()  # handle case where key is None
 
         part_table.insert1(
             {
@@ -205,8 +210,15 @@ class DLCModel(SpyglassMixin, dj.Computed):
 
         _, model_name, table_source = (DLCModelSource & key).fetch1().values()
 
-        SourceTable = getattr(DLCModelSource, table_source)
         params = (DLCModelParams & key).fetch1("params")
+
+        SourceTable = getattr(DLCModelSource, table_source)
+        query = SourceTable & key
+        if not query:
+            logger.error(  # pragma: no cover
+                f"Key not in {SourceTable.__name__} table: {key}"
+            )
+            return  # pragma: no cover
         project_path = Path((SourceTable & key).fetch1("project_path"))
 
         available_config = list(project_path.glob("*config.y*ml"))
@@ -222,7 +234,9 @@ class DLCModel(SpyglassMixin, dj.Computed):
         )
 
         if not config_path.exists():
-            raise FileNotFoundError(f"config does not exist: {config_path}")
+            raise FileNotFoundError(  # pragma: no cover
+                f"config does not exist: {config_path}"
+            )
 
         if config_path.suffix in (".yml", ".yaml"):
             with open(config_path, "rb") as f:
@@ -236,7 +250,9 @@ class DLCModel(SpyglassMixin, dj.Computed):
         trainingsetindex = params.pop("trainingsetindex", None)
 
         if not isinstance(trainingsetindex, int):
-            raise KeyError("no trainingsetindex specified in key")
+            raise KeyError(  # pragma: no cover
+                "trainingsetindex must be an integer"
+            )
 
         model_prefix = params.pop("model_prefix", "")
         model_description = params.pop("model_description", model_name)
@@ -250,7 +266,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
             "TrainingFraction",
         ]
         if not set(needed_attributes).issubset(set(dlc_config)):
-            raise KeyError(
+            raise KeyError(  # pragma: no cover
                 f"Missing required config attributes: {needed_attributes}"
             )
 
@@ -309,11 +325,7 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
     """
 
     def make(self, key):
-        """.populate() method will launch evaluation for each unique entry in Model."""
-        import csv
-
-        from deeplabcut import evaluate_network
-        from deeplabcut.utils.auxiliaryfunctions import get_evaluation_folder
+        """Evaluate trained model"""
 
         dlc_config, project_path, model_prefix, shuffle, trainingsetindex = (
             DLCModel & key
@@ -325,35 +337,14 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
             "trainingsetindex",
         )
 
-        yml_path, _ = dlc_reader.read_yaml(project_path)
-
-        evaluate_network(
-            yml_path,
-            Shuffles=[shuffle],  # this needs to be a list
-            trainingsetindex=trainingsetindex,
-            comparisonbodyparts="all",
-        )
-
-        eval_folder = get_evaluation_folder(
-            trainFraction=dlc_config["TrainingFraction"][trainingsetindex],
+        results = get_dlc_model_eval(
+            yml_path=dlc_reader.read_yaml(project_path)[0],
+            model_prefix=model_prefix,
             shuffle=shuffle,
-            cfg=dlc_config,
-            modelprefix=model_prefix,
+            trainingsetindex=trainingsetindex,
+            dlc_config=dlc_config,
         )
-        eval_path = project_path / eval_folder
-        assert (
-            eval_path.exists()
-        ), f"Couldn't find evaluation folder:\n{eval_path}"
 
-        eval_csvs = list(eval_path.glob("*csv"))
-        max_modified_time = 0
-        for eval_csv in eval_csvs:
-            modified_time = os.path.getmtime(eval_csv)
-            if modified_time > max_modified_time:
-                eval_csv_latest = eval_csv
-        with open(eval_csv_latest, newline="") as f:
-            results = list(csv.DictReader(f, delimiter=","))[0]
-        # in testing, test_error_p returned empty string
         self.insert1(
             dict(
                 key,
