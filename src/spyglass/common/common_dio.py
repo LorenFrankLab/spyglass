@@ -45,15 +45,39 @@ class DIOEvents(SpyglassMixin, dj.Imported):
             return  # See #849
 
         # Times for these events correspond to the valid times for the raw data
-        key["interval_list_name"] = (
-            Raw() & {"nwb_file_name": nwb_file_name}
-        ).fetch1("interval_list_name")
+        # If no raw data found, create a default interval list named
+        # "dio data valid times"
+        if raw_query := (Raw() & {"nwb_file_name": nwb_file_name}):
+            key["interval_list_name"] = (raw_query).fetch1("interval_list_name")
+        else:
+            key["interval_list_name"] = "dio data valid times"
 
         dio_inserts = []
+        time_range_list = []
         for event_series in behav_events.time_series.values():
+            timestamps = event_series.get_timestamps()
+            if len(timestamps) == 0:  # Can be either np array or HDMF5 dataset
+                logger.warning(
+                    f"No timestamps found for DIO event {event_series.name} "
+                    + f"in {nwb_file_name}. Skipping."
+                )
+                continue
             key["dio_event_name"] = event_series.name
             key["dio_object_id"] = event_series.object_id
             dio_inserts.append(key.copy())
+            time_range_list.extend([timestamps[0], timestamps[-1]])
+
+        if key["interval_list_name"] == "dio data valid times":
+            # insert a default interval list for DIO events if no raw data
+            interval_key = {
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": key["interval_list_name"],
+                "valid_times": np.array(
+                    [[np.min(time_range_list), np.max(time_range_list)]]
+                ),
+            }
+            IntervalList.insert1(interval_key)
+
         self.insert(
             dio_inserts,
             skip_duplicates=True,

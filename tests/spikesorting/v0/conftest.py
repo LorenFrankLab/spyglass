@@ -50,7 +50,7 @@ def pop_rec_params(spike_v0):
 
 
 @pytest.fixture(scope="session")
-def pop_rec(
+def pop_rec_v0(
     spike_v0,
     pop_sort_group,
     pop_sort_interval,
@@ -80,9 +80,9 @@ def pop_rec(
 
 
 @pytest.fixture(scope="session")
-def pop_art(spike_v0, pop_rec):
+def pop_art(spike_v0, pop_rec_v0):
     spike_v0.ArtifactDetectionParameters().insert_default()
-    art_key = dict(pop_rec.fetch1("KEY"), artifact_params_name="none")
+    art_key = dict(pop_rec_v0.fetch1("KEY"), artifact_params_name="none")
     spike_v0.ArtifactDetectionSelection.insert1(art_key, skip_duplicates=True)
     spike_v0.ArtifactDetection.populate(art_key)
 
