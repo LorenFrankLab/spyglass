@@ -27,10 +27,96 @@ def test_bad_prefix(caplog, dj_conn, Mixin):
     assert "Schema prefix not in SHARED_MODULES" in caplog.text
 
 
-def test_nwb_table_missing(schema_test, Mixin):
+def test_nwb_table_defaults_to_nwbfile(schema_test, Mixin, common):
     schema_test(Mixin)
-    with pytest.raises(NotImplementedError):
-        Mixin().fetch_nwb()
+    # Should default to Nwbfile instead of raising NotImplementedError
+    table, attr = Mixin()._nwb_table_tuple
+    assert table == common.Nwbfile, f"Expected Nwbfile as default, got {table}"
+    assert (
+        attr == "nwb_file_abs_path"
+    ), f"Expected nwb_file_abs_path, got {attr}"
+
+
+def test_nwb_table_tuple_comprehensive(schema_test, SpyglassMixin, common):
+    """Test _nwb_table_tuple logic for all scenarios including the new default behavior."""
+    import datajoint as dj
+
+    AnalysisNwbfile = common.AnalysisNwbfile
+    Nwbfile = common.Nwbfile
+
+    # Test table with explicit _nwb_table attribute
+    class TableWithNwbTableAttr(SpyglassMixin, dj.Lookup):
+        definition = """
+        id : int
+        """
+        _nwb_table = common.AnalysisNwbfile
+        contents = [(0,)]
+
+    schema_test(TableWithNwbTableAttr)
+    table, attr = TableWithNwbTableAttr()._nwb_table_tuple
+    assert table == common.AnalysisNwbfile, "Should use _nwb_table attribute"
+    assert attr == "analysis_file_abs_path", "Should use analysis file path"
+
+    # Test table with AnalysisNwbfile FK in definition
+    class TableWithAnalysisNwbfileFK(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> AnalysisNwbfile
+        id : int
+        """
+        contents = []
+
+    schema_test(TableWithAnalysisNwbfileFK)
+    table, attr = TableWithAnalysisNwbfileFK()._nwb_table_tuple
+    assert table == common.AnalysisNwbfile, "Should detect AnalysisNwbfile FK"
+    assert attr == "analysis_file_abs_path", "Should use analysis file path"
+
+    # Test table with explicit Nwbfile FK in definition
+    class TableWithNwbfileFK(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> Nwbfile
+        id : int
+        """
+        contents = []
+
+    schema_test(TableWithNwbfileFK)
+    table, attr = TableWithNwbfileFK()._nwb_table_tuple
+    assert table == common.Nwbfile, "Should detect Nwbfile FK"
+    assert attr == "nwb_file_abs_path", "Should use nwb file path"
+
+    # Test table with no FK reference (should default to Nwbfile)
+    class TableWithNoFK(SpyglassMixin, dj.Lookup):
+        definition = """
+        id : int
+        """
+        contents = [(0,)]
+
+    schema_test(TableWithNoFK)
+    table, attr = TableWithNoFK()._nwb_table_tuple
+    assert table == common.Nwbfile, "Should default to Nwbfile when no FK found"
+    assert attr == "nwb_file_abs_path", "Should use nwb file path by default"
+
+
+def test_nwb_table_precedence(schema_test, SpyglassMixin, common):
+    """Test that _nwb_table attribute takes precedence over FK definitions."""
+    import datajoint as dj
+
+    AnalysisNwbfile = common.AnalysisNwbfile
+
+    # _nwb_table should override FK in definition
+    class TableWithBoth(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> AnalysisNwbfile
+        id : int
+        """
+        _nwb_table = common.Nwbfile  # Should override the FK
+        contents = []
+
+    schema_test(TableWithBoth)
+    table, attr = TableWithBoth()._nwb_table_tuple
+    assert table == common.Nwbfile, "_nwb_table should take precedence over FK"
+    assert (
+        attr == "nwb_file_abs_path"
+    ), "Should use nwb file path from _nwb_table"
 
 
 def test_auto_increment(schema_test, Mixin):
