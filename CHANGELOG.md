@@ -82,7 +82,7 @@ ImportedLFP().drop()
 - Export python env and store in newly created analysis files #1270
 - Enforce single table entry in `fetch1_dataframe` calls #1270
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
-    #1311
+    #1311, #1340
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
