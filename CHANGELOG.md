@@ -93,7 +93,7 @@ ImportedLFP().drop()
 
 - Add documentation for custom pipeline #1281
 - Add developer note on initializing `hatch` #1281
-- Add concrete example for long-distance restrictions #13XX
+- Add concrete example for long-distance restrictions #1361
 
 ### Pipelines
 
