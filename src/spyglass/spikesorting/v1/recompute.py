@@ -25,13 +25,14 @@ import pynwb
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
 from hdmf.build import TypeMap
+from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
-from spyglass.spikesorting import USER_TBL
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 
@@ -69,7 +70,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             restr.append(self.dict_to_pk(key))
         return self & restr
 
-    def _has_matching_env(self, key: dict, show_err=True) -> bool:
+    def _has_matching_env(self, key: dict, show_err=False) -> bool:
         """Check current env for matching pynwb versions."""
         if not self & key:
             self.make(key)
@@ -98,7 +99,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         return this_env
 
     def namespace_dict(self, type_map: TypeMap):
-        """Remap namespace names to hyphenated field names for DJ compatibility."""
+        """Return a dictionary of namespaces and their versions."""
         name_cat = type_map.namespace_catalog
         return {
             field: name_cat.get_namespace(field).get("version", None)
@@ -115,7 +116,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             )
 
         parent = query.fetch1()
-        path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
+        try:
+            path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
+        except (FileNotFoundError, dj.DataJointError) as e:
+            logger.warning(  # pragma: no cover
+                f"Issue w/{parent['analysis_file_name']}. Skipping.\n{e}"
+            )
+            return  # pragma: no cover
 
         nwb_deps = get_file_namespaces(path).copy()
 
@@ -150,10 +157,26 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @cached_property
     def env_dict(self):
-        return USER_TBL.insert_current_env()
+        logger.info("Initializing UserEnvironment")
+        return UserEnvironment().insert_current_env()
 
-    def insert(self, rows, limit=None, at_creation=False, **kwargs) -> None:
-        """Custom insert to ensure dependencies are added to each row."""
+    def insert(
+        self, rows, limit=None, at_creation=False, force_attempt=False, **kwargs
+    ) -> None:
+        """Custom insert to ensure dependencies are added to each row.
+
+        Parameters
+        ----------
+        rows : list or dict
+            Row(s) to insert.
+        limit : int, optional
+            Maximum number of rows to insert. Default is None, inserts all.
+        at_creation : bool, optional
+            Whether the rows are logged at creation. Default is False.
+        force_attempt : bool, optional
+            Whether to force an attempt to insert rows even if the environment
+            does not match. Default is False.
+        """
 
         if not self.env_dict.get("env_id"):  # likely not using conda
             logger.warning("Cannot log for recompute without UserEnvironment.")
@@ -167,10 +190,14 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         if not isinstance(rows[0], dict):
             raise ValueError("Rows must be a list of dicts")
 
+        editable_env = (UserEnvironment & self.env_dict).fetch1("has_editable")
+        if at_creation and editable_env:  # assume fail if editable env
+            at_creation = False  # # pragma: no cover
+
         inserts = []
         for row in rows:
-            row_pk = self.dict_to_pk(row)
-            if not REC_VER_TBL._has_matching_env(row_pk):
+            key_pk = self.dict_to_pk(row)
+            if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
             full_key = self.dict_to_full_key(row)
             full_key.update(dict(self.env_dict, logged_at_creation=at_creation))
@@ -186,6 +213,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         restr: Optional[dict] = True,
         rounding: Optional[int] = None,
         limit: Optional[int] = None,
+        force_attempt: bool = False,
         **kwargs,
     ) -> None:
         """Insert recompute attempts for all existing files.
@@ -203,14 +231,16 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             retrospective recompute attempts, randomly selecting potential
             recompute attaempts can be useful for trying a diverse set of
             files.
+        force_attempt : bool, optional
+            Whether to force an attempt to insert rows even if the environment
+            does not match. Default is False.
         """
-        source = REC_VER_TBL.this_env & restr
+        upstream = REC_VER_TBL if force_attempt else REC_VER_TBL.this_env
+        source = upstream & restr
         kwargs["skip_duplicates"] = True
 
         if limit:
             source &= dj.condition.Top(limit=limit, order_by="RAND()")
-
-        logger.info(f"Inserting recompute attempts for {len(source)} files.")
 
         inserts = [
             {
@@ -219,10 +249,14 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 "rounding": rounding or self.default_rounding,
             }
             for key in source.fetch("KEY", as_dict=True)
+            if len(RecordingRecompute & key) == 0
         ]
         if not inserts:
             logger.info(f"No rows to insert from:\n\t{source}")
             return
+
+        logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
+
         self.insert(inserts, at_creation=False, **kwargs)
 
     # --- Gatekeep recompute attempts ---
@@ -260,7 +294,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         """
 
         def get_objs(self, key, name=None):
-            old, new = (self & key).fetch1("old", "new")
+            old, new = RecordingRecompute()._get_paths(key)
             if old is not None and new is not None:
                 return old, new
             old, new = RecordingRecompute()._open_files(key)
@@ -273,10 +307,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 for row in key or self:
                     comps.append(self.compare(row))
                 return comps
-
-            if not key.get("name"):
-                self.compare(self & key)
-                return
 
             return H5pyComparator(*self.get_objs(key, name=name))
 
@@ -310,6 +340,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             self._cleanup_registered = True
 
         old, new = self._get_paths(key, as_str=True)
+        if not new.exists():
+            logger.warning(f"New file does not exist: {new.name}")
+            return None, None  # pragma: no cover
+
         if old not in self._file_cache:
             self._file_cache[old] = h5py_File(old, "r")
         if new not in self._file_cache:
@@ -410,6 +444,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         _, new = self._get_paths(key)
         parent = self.get_parent_key(key)
         default_rounding = RecordingRecomputeSelection().default_rounding
+        allow_ins = dict(allow_direct_insert=True)
 
         try:
             new_vals = SpikeSortingRecording()._make_file(
@@ -423,35 +458,53 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         except ValueError as e:
             e_info = e.args[0]
             if "probe info" in e_info:  # make failed bc missing probe info
-                self.insert1(dict(key, matched=False, err_msg=e_info))
-            else:  # unexpected ValueError, will retry
-                logger.warning(f"ValueError: {e}: {new.name}")
+                self.insert1(  # pragma: no cover
+                    dict(key, matched=False, err_msg=e_info), **allow_ins
+                )
+            else:  # unexpected ValueError
+                raise  # pragma: no cover
         except KeyError as err:
-            e_info = err.args[0]
+            e_info = err.args[0]  # pragma: no cover
             if "H5 object missing" in e_info:  # failed bc missing parent obj
                 e = e_info.split(", ")[1].split(":")[0].strip()
-                self.insert1(dict(key, matched=False, err_msg=e_info))
+                self.insert1(
+                    dict(key, matched=False, err_msg=e_info),
+                    **allow_ins,
+                )
                 self.Name().insert1(
-                    dict(key, name=f"Parent missing {e}", missing_from="old")
+                    dict(key, name=f"Parent missing {e}", missing_from="old"),
+                    **allow_ins,
+                )
+            elif "ndx-" in e_info:  # failed bc missing pynwb extension
+                raise ModuleNotFoundError(  # pragma: no cover
+                    "Please install the missing pynwb extension:\n\t" + e_info
                 )
             else:
-                logger.warning(f"KeyError: {err}: {new.name}")
+                raise
+        except TypeError as err:
+            e_info = err.args[0]  # pragma: no cover
+            if "unexpected keyword" in e_info:
+                self.insert1(  # pragma: no cover
+                    dict(key, matched=False, err_msg=e_info), **allow_ins
+                )
+            else:
+                logger.warning(f"TypeError: {err}: {new.name}")
         else:
             return new_vals
+        return dict(hash=None)  # pragma: no cover
 
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
+        rec_dict = dict(recording_id=key["recording_id"])
+        if self & rec_dict & "matched=1":
+            return
+
         parent = self.get_parent_key(key)
         rounding = key.get("rounding")
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
             self.insert1(dict(key, matched=True))
-
-        # Ensure dependencies unchanged since selection insert
-        if not RecordingRecomputeSelection()._has_matching_env(key):
-            logger.info(f"Skipping due to env mismatch: {key}")
-            return
 
         # Ensure not duplicate work for lesser precision
         if self._is_lower_rounding(key) and not force_check:
@@ -474,14 +527,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher = self._hash_one(old, rounding)
 
         if new_hasher.hash == old_hasher.hash:
-            logger.info(f"Matched {new.name}")
             self.insert1(dict(key, matched=True))
             if not self._other_roundings(key, operator="!="):
                 # if no other recompute attempts
                 new.unlink(missing_ok=True)
             return
-
-        logger.info(f"Comparing mismatched {new.name}")
 
         names, hashes = [], []
         for obj in set({**old_hasher.objs, **new_hasher.objs}):
@@ -498,6 +548,25 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self.insert1(dict(key, matched=False))
         self.Name().insert(names)
         self.Hash().insert(hashes)
+
+    def get_disk_space(self, which="new", restr: dict = None) -> Path:
+        """Return the file(s) disk space for a given key or restriction.
+
+        Parameters
+        ----------
+        which : str
+            Which file to check disk space for, 'old' or 'new'. Default 'new'.
+        restr : dict, optional
+            Restriction for RecordingRecompute. Default is "matched=0".
+        """
+        restr = restr or "matched=0"
+        total_size = 0
+        for key in tqdm(self & restr, desc="Calculating disk space"):
+            old, new = self._get_paths(key)
+            this = old if which == "old" else new
+            if this.exists():
+                total_size += this.stat().st_size
+        return f"Total: {bytes_to_human_readable(total_size)}"
 
     def delete_files(self, restriction=True, dry_run=True) -> None:
         """If successfully recomputed, delete files for a given restriction."""
@@ -527,9 +596,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             _, new = self._get_paths(key)
             attempt_paths.append(new)
 
-        msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_paths)
+        msg = "Delete attempt files?\n\t" + "\n\t".join(
+            str(p) for p in attempt_paths
+        )
         if dj.utils.user_choice(msg).lower() == "yes":
             for path in attempt_paths:
                 path.unlink(missing_ok=True)
-
-        super().delete(*args, **kwargs)
+            kwargs["safemode"] = False  # pragma: no cover
+            super().delete(*args, **kwargs)
