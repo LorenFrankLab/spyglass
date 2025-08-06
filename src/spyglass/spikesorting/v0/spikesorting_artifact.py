@@ -127,9 +127,11 @@ class ArtifactDetection(SpyglassMixin, dj.Computed):
             + "_artifact_removed_valid_times"
         )
 
+        artifact_array = getattr(artifact_times, "times", artifact_times)
+
         key.update(
             {
-                "artifact_times": artifact_times.times,
+                "artifact_times": artifact_array,
                 "artifact_removed_valid_times": artifact_removed_valid_times,
                 "artifact_removed_interval_list_name": artifact_removed_name,
             }
