@@ -41,6 +41,9 @@ def test_nwb_table_tuple_comprehensive(schema_test, SpyglassMixin, common):
     """Test _nwb_table_tuple logic for all scenarios including the new default behavior."""
     import datajoint as dj
 
+    AnalysisNwbfile = common.AnalysisNwbfile
+    Nwbfile = common.Nwbfile
+
     # Test table with explicit _nwb_table attribute
     class TableWithNwbTableAttr(SpyglassMixin, dj.Lookup):
         definition = """
@@ -96,6 +99,8 @@ def test_nwb_table_tuple_comprehensive(schema_test, SpyglassMixin, common):
 def test_nwb_table_precedence(schema_test, SpyglassMixin, common):
     """Test that _nwb_table attribute takes precedence over FK definitions."""
     import datajoint as dj
+
+    AnalysisNwbfile = common.AnalysisNwbfile
 
     # _nwb_table should override FK in definition
     class TableWithBoth(SpyglassMixin, dj.Lookup):
