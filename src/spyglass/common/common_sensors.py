@@ -105,7 +105,7 @@ class SensorData(SpyglassMixin, dj.Imported):
         """
         if len(self) == 0:
             return None
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
 
         nwb = self.fetch_nwb()[0]
         columns = nwb["sensor_data"].description.split()

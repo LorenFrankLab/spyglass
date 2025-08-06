@@ -29,6 +29,7 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
         nwb_file_name: str,
         group_name: str,
         electrode_list: Union[list[int], np.ndarray],
+        **kwargs,
     ) -> None:
         """Adds an LFPElectrodeGroup and the individual electrodes
 
@@ -40,6 +41,8 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
             The name of this group (< 200 char)
         electrode_list : list[int] or np.ndarray
             A list of the electrode ids to include in this group.
+        **kwargs : dict
+            Additional keyword arguments to pass to the insert method.
 
 
         Raises
@@ -113,9 +116,9 @@ class LFPElectrodeGroup(SpyglassMixin, dj.Manual):
         # (Ensures master and parts are inserted together or not at all)
         with LFPElectrodeGroup.connection.transaction:
             # Insert master table entry
-            LFPElectrodeGroup().insert1(master_key)
+            LFPElectrodeGroup().insert1(master_key, **kwargs)
             # Insert part table entries
-            LFPElectrodeGroup.LFPElectrode.insert(part_keys)
+            LFPElectrodeGroup.LFPElectrode.insert(part_keys, **kwargs)
 
         logger.info(
             f"Successfully created/updated LFPElectrodeGroup {nwb_file_name}, {group_name} "
