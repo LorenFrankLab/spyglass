@@ -1,73 +1,28 @@
 # Change Log
 
-## [0.5.5] (Unreleased)
+<!--
+## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
 
 ### Release Notes
 
-<!-- Running draft to be removed immediately prior to release. -->
-
-<!-- When altering tables, import all foreign key references. -->
-
-Table update script
+Running draft to be removed immediately prior to release.
+When altering tables, import all foreign key references.
 
 ```python
-# -- For TrackGraph --
-from spyglass.linearization.v1.main import TrackGraph  # noqa
-
-TrackGraph.alter()  # Add edge map parameter
-
-# -- For dropping deprecated tables --
-import datajoint as dj
-
-dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-
-# -- For v0 recompute --
-from spyglass.spikesorting.v0.spikesorting_recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    IntervalList,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For v1 recompute --
-from spyglass.spikesorting.v1.recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    AnalysisNwbfile,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For LFP pipeline --
-from spyglass.lfp.lfp_imported import ImportedLFP
-from spyglass.lfp.lfp_merge import LFPOutput
-
-if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
-    raise ValueError(
-        "Existing entries found and would be dropped in update. Please delete "
-        + "entries or start a GitHub discussion for migration assistance."
-        + f"\nImportedLFP: {len(ImportedLFP())}"
-        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
-    )
-
-table = LFPOutput().ImportedLFP()
-table_name = table.full_table_name
-
-if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
-    drop_list = [x for x in drop_list if x != table_name]
-    raise ValueError(
-        "Downstream tables exist and would be dropped in update."
-        + "Please drop the following tables first: \n"
-        + "\n ".join([str(t) for t in drop_list])
-    )
-
-LFPOutput().ImportedLFP().drop_quick()
-ImportedLFP().drop()
+#
 ```
+
+### Infrastructure
+
+- Thing
+
+### Pipelines
+
+- Common
+    - Thing
+-->
+
+## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
 
