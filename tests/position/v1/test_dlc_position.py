@@ -1,3 +1,4 @@
+import datajoint as dj
 import numpy as np
 import pandas as pd
 import pytest
@@ -113,7 +114,8 @@ def test_cohort_fetch1_dataframe(si_df):
 
 def test_all_nans(populate_pose_estimation, sgp):
     pose_est_tbl = populate_pose_estimation
-    df = pose_est_tbl.BodyPart().fetch1_dataframe()
+    restr_tbl = pose_est_tbl.BodyPart & dj.Top()
+    df = restr_tbl.fetch1_dataframe()
     with pytest.raises(ValueError):
         sgp.v1.position_dlc_position.nan_inds(df, 10, 0.99, 10)
 
