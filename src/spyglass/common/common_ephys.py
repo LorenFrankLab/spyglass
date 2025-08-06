@@ -575,7 +575,7 @@ class LFP(SpyglassMixin, dj.Imported):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP data as a pandas DataFrame."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         nwb_lfp = self.fetch_nwb()[0]
         return pd.DataFrame(
             nwb_lfp["lfp"].data,
@@ -952,7 +952,7 @@ class LFPBand(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch the LFP band data as a pandas DataFrame."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["filtered_data"].data,

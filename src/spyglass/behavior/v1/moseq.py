@@ -403,7 +403,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     def fetch1_dataframe(self):
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         dataframe = self.fetch_nwb()[0]["moseq"]
         dataframe.set_index("time", inplace=True)
         return dataframe

@@ -1,11 +1,12 @@
 """Helper functions for manipulating information from DataJoint fetch calls."""
 
 import inspect
+import math
 import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Iterable, List, Type, Union
+from typing import Any, Iterable, List, Optional, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -105,9 +106,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -378,7 +379,8 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     ret = []
     for rec_dict in rec_dicts:
         nwbf = get_nwb_file(rec_dict.pop("nwb2load_filepath"))
-        # for each attr that contains substring 'object_id', store key-value: attr name to NWB object
+        # for each attr that contains substring 'object_id', store key-value:
+        # attr name to NWB object
         # remove '_object_id' from attr name
         nwb_objs = {
             id_attr.replace("_object_id", ""): _get_nwb_object(
@@ -684,19 +686,67 @@ def bytes_to_human_readable(size: int) -> str:
     return msg_template.format(size=size, unit="PB")
 
 
-def accept_divergence(key, new_value, existing_value, test_mode=False):
-    """prompt to accept divergence in values between existing and new entries"""
+def accept_divergence(
+    key: str,
+    new_value: Any,
+    existing_value: Any,
+    test_mode: bool = False,
+    table_name: Optional[str] = None,
+):
+    """Prompt to accept divergence in values between existing and new entries
+
+    Parameters
+    ----------
+    key : str
+        Name of the column where the divergence is found
+    new_value : Any
+        New value to be inserted into the table
+    existing_value : Any
+        Existing value in the table that is different from the new value
+    test_mode : bool, optional
+        If True, will not prompt and return False, by default False
+    table_name : str, optional
+        Name of the table where the divergence is found, by default None
+    """
     if test_mode:
         # If get here in test mode, is because want to test failure
         logger.warning(
-            "accept_divergence called in test mode, returning False without prompt"
+            "accept_divergence called in test mode, returning False w/o prompt"
         )
         return False
+    tbl_msg = ""
+    if table_name:  # optional message with table name
+        tbl_msg = f" of '{table_name}'"
     response = dj.utils.user_choice(
-        f"Existing entry differs in '{key}' column.\n"
+        f"Existing entry differs in '{key}' column{tbl_msg}.\n"
         + "Accept the existing value of: \n"
         + f"'{existing_value}' \n"
         + "in place of the new value: \n"
         + f"'{new_value}' ?\n"
     )
     return str_to_bool(response)
+
+
+def _replace_nan_with_default(data_dict, default_value=-1.0):
+    """
+    Replace NaN values in a dictionary with a default value.
+
+    This is necessary because DataJoint cannot properly format queries
+    with NaN values, causing errors during probe insertion/validation.
+
+    Args:
+        data_dict: Dictionary that may contain NaN values
+        default_value: Value to replace NaN with (default: -1.0)
+
+    Returns:
+        Dictionary with NaN values replaced
+    """
+    if not isinstance(data_dict, dict):
+        return data_dict
+
+    result = data_dict.copy()
+    for key, value in result.items():
+        if isinstance(value, float) and math.isnan(value):
+            result[key] = default_value
+
+    return result

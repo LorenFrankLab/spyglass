@@ -1,73 +1,28 @@
 # Change Log
 
-## [0.5.5] (Unreleased)
+<!--
+## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
 
 ### Release Notes
 
-<!-- Running draft to be removed immediately prior to release. -->
-
-<!-- When altering tables, import all foreign key references. -->
-
-Table update script
+Running draft to be removed immediately prior to release.
+When altering tables, import all foreign key references.
 
 ```python
-# -- For TrackGraph --
-from spyglass.linearization.v1.main import TrackGraph  # noqa
-
-TrackGraph.alter()  # Add edge map parameter
-
-# -- For dropping deprecated tables --
-import datajoint as dj
-
-dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-
-# -- For v0 recompute --
-from spyglass.spikesorting.v0.spikesorting_recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    IntervalList,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For v1 recompute --
-from spyglass.spikesorting.v1.recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    AnalysisNwbfile,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For LFP pipeline --
-from spyglass.lfp.lfp_imported import ImportedLFP
-from spyglass.lfp.lfp_merge import LFPOutput
-
-if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
-    raise ValueError(
-        "Existing entries found and would be dropped in update. Please delete "
-        + "entries or start a GitHub discussion for migration assistance."
-        + f"\nImportedLFP: {len(ImportedLFP())}"
-        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
-    )
-
-table = LFPOutput().ImportedLFP()
-table_name = table.full_table_name
-
-if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
-    drop_list = [x for x in drop_list if x != table_name]
-    raise ValueError(
-        "Downstream tables exist and would be dropped in update."
-        + "Please drop the following tables first: \n"
-        + "\n ".join([str(t) for t in drop_list])
-    )
-
-LFPOutput().ImportedLFP().drop_quick()
-ImportedLFP().drop()
+#
 ```
+
+### Infrastructure
+
+- Thing
+
+### Pipelines
+
+- Common
+    - Thing
+-->
+
+## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
 
@@ -82,33 +37,37 @@ ImportedLFP().drop()
 - Export python env and store in newly created analysis files #1270
 - Enforce single table entry in `fetch1_dataframe` calls #1270
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
-    #1311
+    #1311, #1340
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
-- Add code coverage badge #1305
+- Add code coverage badge, and increase position coverage #1305, #1315
+- Force `TableChain` to follow shortest path #1356
 
 ### Documentation
 
 - Add documentation for custom pipeline #1281
 - Add developer note on initializing `hatch` #1281
+- Add concrete example for long-distance restrictions #1361
 
 ### Pipelines
 
 - Common
     - Default `AnalysisNwbfile.create` permissions are now 777 #1226
     - Make `Nwbfile.fetch_nwb` functional # 1256
-    - Calculate mode of timestep size in log scale when estimating sampling rate #1270
+    - Calculate mode of timestep size in log scale when estimating sampling rate
+        #1270
     - Ingest all `ImageSeries` objects in nwb file to `VideoFile` #1278
     - Allow ingestion of multi-row task epoch tables #1278
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
-    - `IntervalList.fetch_interval` now returns `Interval` object #1293
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293, #1357
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
-    - Prompt user to verify compatibility between new insert and existing
-      table entries # 1318
+    - Prompt user to verify compatibility between new insert and existing table
+        entries # 1318, #1350
+    - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
@@ -120,6 +79,7 @@ ImportedLFP().drop()
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
     - Accept imported timestamps defined by `rate` and `start_time` #1322
+    - Fix bug preventing DLC config updates #1352
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -129,14 +89,14 @@ ImportedLFP().drop()
     - Fix type compatibility of `time_slice` in
         `SortedSpikesGroup.fetch_spike_data` #1261
     - Update transaction and parallel make settings for `v0` and `v1`
-      `SpikeSorting` tables #1270
+        `SpikeSorting` tables #1270
     - Disable make transactionsfor `CuratedSpikeSorting` #1288
     - Refactor `SpikeSortingOutput.get_restricted_merge_ids` #1304
     - Add burst merge curation #1209
     - Reconcile spikeinterface value for `channel_id` when `channel_name` column
-      present in nwb file electrodes table #1310, #1334
+        present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
-      `SortedSpikesGroup.fetch_spike_data` #1320
+        `SortedSpikesGroup.fetch_spike_data` #1320
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
@@ -148,6 +108,7 @@ ImportedLFP().drop()
     - Updating the LFPBandSelection logic with comprehensive validation and batch
         insertion for electrodes and references. #1280
     - Implement `ImportedLFP.make()` for ingestion from nwb files #1278, #1302
+    - Skip empty timeseries ingestion for `ImportedLFP` #1347
 
 ## [0.5.4] (December 20, 2024)
 

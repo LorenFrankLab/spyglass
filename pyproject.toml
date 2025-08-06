@@ -52,6 +52,7 @@ dependencies = [
     "opencv-python",
     "panel>=1.4.0",
     "position_tools>=0.1.0",
+    "probeinterface<0.3.0", # Bc some probes fail space checks
     "pubnub<6.4.0",  # TODO: remove this when sortingview is updated
     "pydotplus",
     "pynwb>=2.2.0,<3",
@@ -166,16 +167,18 @@ filterwarnings = [
   "ignore::MissingRequiredBuildWarning:.*",
 ]
 
-[tool.coverage.run]
+[tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
 source = ["*/src/spyglass/*"]
 omit = [ # which submodules have no tests
     "*/__init__.py",
     "*/_version.py",
+    # "*/behavior/*",
+    "*/cli/*",
     # "*/common/*",
     "*/data_import/*",
     "*/decoding/v0/*",
-    # "*/decoding/*",
     "*/figurl_views/*",
+    # "*/decoding/*",
     # "*/lfp/*",
     # "*/linearization/*",
     "*/lock/*",

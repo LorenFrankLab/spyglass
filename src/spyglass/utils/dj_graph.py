@@ -112,6 +112,8 @@ class AbstractGraph(ABC):
     restr_ft: Get non-empty FreeTables for visited nodes with restrictions.
     as_dict: Get visited nodes as a list of dictionaries of
         {table_name: restriction}
+    path: List of table names to traverse in the graph, optionally set by
+        child classes. Used in TableChain.
     """
 
     def __init__(self, seed_table: Table, verbose: bool = False, **kwargs):
@@ -281,14 +283,14 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
-    def _is_out(self, table, warn=True, keep_alias=False):
+    def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
-        if self.graph.nodes.get(table):
+        if table in self.graph.nodes:
             return False
         ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
         if warn and ret:  # Log warning if outside
-            logger.warning(f"Skipping unimported: {table}")
+            logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return ret
 
     # ---------------------------- Graph Traversal -----------------------------
@@ -342,7 +344,10 @@ class AbstractGraph(ABC):
         ft1 = self._get_ft(table1) & restr
         ft2 = self._get_ft(table2)
 
+        path = f"{self._camel(table1)} -> {self._camel(table2)}"
+
         if len(ft1) == 0 or len(ft2) == 0:
+            self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
@@ -352,15 +357,64 @@ class AbstractGraph(ABC):
         ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            result = (
-                "EMPTY"
-                if len(ret) == 0
-                else "FULL" if len(ft2) == len(ret) else "partial"
-            )
-            path = f"{self._camel(table1)} -> {self._camel(table2)}"
+            is_empty = len(ret) == 0
+            is_full = len(ft2) == len(ret)
+            result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
             self._log_truncate(f"Bridge Link: {path}: result {result}")
+            logger.debug(join)
 
         return ret
+
+    def _get_adjacent_path_item(
+        self, table: str, direction: Direction = Direction.UP
+    ) -> str:
+        """Get adjacent path item in the graph.
+
+        Used to get the next table in the path for a given direction.
+
+        Parameters
+        ----------
+        table : str
+            Table name
+        direction : Direction, optional
+            Direction to cascade. Default 'up'
+
+        Returns
+        -------
+        str
+            Name of the next table in the path or empty string if not found.
+        """
+        null_return = {table: dict()}  # parent func treats as dead end
+
+        path = getattr(self, "path", [])
+        if table not in path:  # if path is empty or table not in path
+            return null_return  # pragma: no cover
+
+        idx = path.index(table)
+        is_up = direction == Direction.UP
+        next_idx = idx - 1 if is_up else idx + 1
+
+        if next_idx in [-1, len(path)]:  # Out of bounds
+            return null_return
+
+        next_tbl = path[next_idx]
+
+        if next_tbl.isnumeric():  # Skip alias nodes
+            next_next = next_idx - 1 if is_up else next_idx + 1
+            table = next_tbl  # for alias, want edge from alias to subsequent
+            next_tbl = path[next_next]
+        if next_tbl.isnumeric():
+            raise ValueError(  # pragma: no cover
+                f"Multiple sequential alias nodes found in path {path}. "
+                + "This should not happen. Please report this issue."
+            )
+
+        try:
+            edge = self.graph.edges[table, next_tbl]
+        except KeyError:  # if shortest path is not direct
+            edge = self.graph.edges[next_tbl, table]
+
+        return {next_tbl: edge}
 
     def _get_next_tables(self, table: str, direction: Direction) -> Tuple:
         """Get next tables/func based on direction.
@@ -382,6 +436,7 @@ class AbstractGraph(ABC):
         Tuple[Dict[str, Dict[str, str]], Callable
             Tuple of next tables and next function to get parent/child tables.
         """
+
         G = self.graph
         dir_dict = {"direction": direction}
 
@@ -437,7 +492,13 @@ class AbstractGraph(ABC):
         self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
-        next_tables, next_func = self._get_next_tables(table, direction)
+        if getattr(self, "found_path", None):  # * Avoid refactor #1356
+            # * Ideally, would only grab path once
+            # Workaround to avoid a class-inheritance refactor
+            next_tables = self._get_adjacent_path_item(table, direction)
+            next_func = None  # Won't be called bc numeric in path raises
+        else:
+            next_tables, next_func = self._get_next_tables(table, direction)
 
         if next_list := next_tables.keys():
             self._log_truncate(
@@ -925,10 +986,35 @@ class TableChain(RestrGraph):
         direction: Direction = Direction.NONE,
         search_restr: str = None,
         cascade: bool = False,
-        verbose: bool = False,
         banned_tables: List[str] = None,
+        verbose: bool = False,
         **kwargs,
     ):
+        """Initialize a TableChain object.
+
+        Parameters
+        ----------
+        parent : Table, optional
+            Parent table of the chain. Default None.
+        child : Table, optional
+            Child table of the chain. Default None.
+        direction : Direction, optional
+            Direction of the chain. Default 'none'. If both parent and child
+            are provided, direction is inferred from the link type.
+        search_restr : str, optional
+            Restriction to search for in the chain. If provided, the chain will
+            search for where this restriction can be applied. Default None,
+            expecting this restriction to be passed when invoking `cascade`.
+        cascade : bool, optional
+            Whether to cascade the restrictions through the chain on
+            initialization. Default False.
+        banned_tables : List[str], optional
+            List of table names to ignore in the graph traversal. Default None.
+            If provided, these tables will not be visited during the search.
+            Useful for excluding peripheral tables or other unwanted nodes.
+        verbose : bool, optional
+            Whether to print verbose output. Default False.
+        """
         self.parent = ensure_names(parent)
         self.child = ensure_names(child)
 
@@ -946,6 +1032,7 @@ class TableChain(RestrGraph):
         self.no_visit.difference_update(set([self.parent, self.child]))
 
         self.searched_tables = set()
+        self.found_path = False
         self.found_restr = False
         self.link_type = None
         self.searched_path = False
@@ -988,8 +1075,7 @@ class TableChain(RestrGraph):
             [
                 t
                 for t in self.undirect_graph.nodes
-                if t not in except_tables
-                and self._is_out(t, warn=False, keep_alias=True)
+                if t not in except_tables and self._is_out(t, warn=False)
             ]
         )
         self.no_visit.update(ignore_tables)
@@ -1139,14 +1225,15 @@ class TableChain(RestrGraph):
             return
 
         self.searched_tables.add(table)
+
         next_tables, next_func = self._get_next_tables(table, self.direction)
 
         for next_table, data in next_tables.items():
             if next_table.isnumeric():
                 next_table, data = next_func(next_table).popitem()
-            self._log_truncate(
-                f"Search Link: {self._camel(table)} -> {self._camel(next_table)}"
-            )
+
+            link = f"{self._camel(table)} -> {self._camel(next_table)}"
+            self._log_truncate(f"Search Link: {link}")
 
             if next_table in self.no_visit or table == next_table:
                 reason = "Already Saw" if next_table == table else "Banned Tbl "
@@ -1193,15 +1280,19 @@ class TableChain(RestrGraph):
             self.graph.copy() if directed else self.undirect_graph.copy()
         )
 
+        # Ignore nodes that should not be visited #1353
+        search_graph.remove_nodes_from(self.no_visit)
+
         try:
             path = shortest_path(search_graph, source, target)
         except NetworkXNoPath:
             return None  # No path found, parent func may do undirected search
         except NodeNotFound:
             self.searched_path = True  # No path found, don't search again
-            return None
+            return None  # pragma: no cover
 
         self._log_truncate(f"Path Found : {path}")
+        self.found_path = True
 
         ignore_nodes = self.graph.nodes - set(path)
         self.no_visit.update(ignore_nodes)
@@ -1212,7 +1303,11 @@ class TableChain(RestrGraph):
     def path(self) -> list:
         """Return list of full table names in chain."""
         if self.searched_path and not self.has_link:
-            return None
+            self._log_truncate("No path found, already searched")
+            return None  # pragma: no cover
+        if not (self.parent and self.child):
+            self._log_truncate("No parent or child set, cannot find path.")
+            return None  # pragma: no cover
 
         path = None
         if path := self.find_path(directed=True):
@@ -1222,9 +1317,13 @@ class TableChain(RestrGraph):
         else:  # Search with peripheral
             self.no_visit.difference_update(PERIPHERAL_TABLES)
             if path := self.find_path(directed=True):
-                self.link_type = "directed with peripheral"
+                self.link_type = "directed w/peripheral"  # pragma: no cover
             elif path := self.find_path(directed=False):
-                self.link_type = "undirected with peripheral"
+                self.link_type = "undirected w/peripheral"  # pragma: no cover
+
+        if path is None:
+            self._log_truncate("No path found")
+
         self.searched_path = True
 
         return path

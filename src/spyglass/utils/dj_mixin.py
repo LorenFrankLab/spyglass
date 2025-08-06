@@ -210,13 +210,26 @@ class SpyglassMixin(ExportMixin):
 
         return key
 
-    def ensure_single_entry(self, key: dict = dict()):
+    def cautious_fetch1(self, *args, **kwargs):
+        """Fetch one entry from the table."
+
+        Raises
+        ------
+        KeyError
+            If the table is empty or if the key is not unique.
+        """
+        count = len(self)
+        if count != 1:
+            raise KeyError(f"Method expects a single entry, but found {count}")
+        return self.fetch1(*args, **kwargs)
+
+    def ensure_single_entry(self, key: dict = True):
         """Ensure that the key corresponds to a single entry in the table.
 
         Parameters
         ----------
         key : dict
-            The key to check.
+            The key to check. Default to True, no further restriction of `self`.
         """
         if len(self & key) != 1:
             raise KeyError(
@@ -233,10 +246,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -421,7 +434,11 @@ class SpyglassMixin(ExportMixin):
         """Path from Session table to self. False if no connection found."""
         TableChain = self._graph_deps[0]
 
-        return TableChain(parent=self._delete_deps[2], child=self, verbose=True)
+        return TableChain(
+            parent=self._delete_deps[2],
+            child=self,
+            banned_tables=["`common_lab`.`lab_team`"],  # See #1353
+        )
 
     @cached_property
     def _test_mode(self) -> bool:

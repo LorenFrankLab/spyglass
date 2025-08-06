@@ -489,7 +489,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetches the position data as a pandas dataframe."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         return self._data_to_df(self.fetch_nwb()[0])
 
     @staticmethod
