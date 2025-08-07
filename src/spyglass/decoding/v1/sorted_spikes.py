@@ -245,6 +245,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 / f"{nwb_file_name}_{str(uuid.uuid4())}.nc"
             )
             path_exists = results_path.exists()
+        results_path.parent.mkdir(parents=True, exist_ok=True)
         classifier.save_results(
             results,
             results_path,
