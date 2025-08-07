@@ -91,16 +91,15 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     @staticmethod
     def make_null_position_nwb(key):
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            nwb_file_name=key["nwb_file_name"]
+        a_fname = AnalysisNwbfile().create(nwb_file_name=key["nwb_file_name"])
+        obj_id = AnalysisNwbfile().add_nwb_object(a_fname, pd.DataFrame())
+        return dict(  # modified to avoid editing the original key
+            key,
+            analysis_file_name=a_fname,
+            position_object_id=obj_id,
+            orientation_object_id=obj_id,
+            velocity_object_id=obj_id,
         )
-        obj_id = AnalysisNwbfile().add_nwb_object(
-            key["analysis_file_name"], pd.DataFrame()
-        )
-        key["position_object_id"] = obj_id
-        key["orientation_object_id"] = obj_id
-        key["velocity_object_id"] = obj_id
-        return key
 
     @staticmethod
     def make_dlc_pos_nwb(key, pos_nwb, ori_nwb):
@@ -175,6 +174,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the position data as a DataFrame."""
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(nwb_data["position"].get_spatial_series().timestamps),
@@ -240,7 +240,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         if not (DLCSmoothInterpCohort.BodyPart & centroid_key) and not (
             DLCSmoothInterpCohort.BodyPart & orientation_key
         ):
-            return {}
+            return {}  # pragma: no cover
 
         centroid_bodyparts, centroid_si_params = (
             DLCSmoothInterpCohort.BodyPart & centroid_key
@@ -259,7 +259,9 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
             )
 
         if len(np.unique(likelihood_thresh)) > 1:
-            raise ValueError("more than one likelihood threshold used")
+            raise ValueError(  # pragma: no cover
+                "more than one likelihood threshold used"
+            )
 
         like_thresh = likelihood_thresh[0]
         bodyparts = np.unique([*centroid_bodyparts, *orientation_bodyparts])
@@ -306,6 +308,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
         pd.DataFrame
             pose data
         """
+        _ = self.ensure_single_entry()
         key = self.fetch1("KEY")
         return (DLCPoseEstimation & key).fetch_dataframe()
 
@@ -449,7 +452,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             axis=1,
         )
         if not len(pos_est_df) == len(pos_info_df):
-            raise ValueError(
+            raise ValueError(  # pragma: no cover
                 "Dataframes are not the same length\n"
                 + f"\tPose estim   :  {len(pos_est_df)}\n"
                 + f"\tPosition info: {len(pos_info_df)}"
@@ -509,8 +512,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             **params.get("video_params", {}),
         )
 
-        if limit:  # don't insert if we're just debugging
-            return video_maker
-
         if output_video_filename.exists():
             self.insert1(key)
+
+        if limit:
+            return video_maker

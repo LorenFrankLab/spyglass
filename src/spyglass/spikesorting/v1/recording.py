@@ -194,6 +194,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     hash=null: varchar(32) # Hash of the NWB file
     """
 
+    use_transaction, _allow_insert = False, True
+
     def make(self, key):
         """Populate SpikeSortingRecording.
 
@@ -609,9 +611,12 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         needs_update = self & "electrodes_id is NULL or hash is NULL"
 
         for key in tqdm(needs_update):
-            analysis_file_path = AnalysisNwbfile.get_abs_path(
-                key["analysis_file_name"]
-            )
+            try:
+                analysis_file_path = AnalysisNwbfile.get_abs_path(
+                    key["analysis_file_name"]
+                )
+            except dj.DataJointError:  # file checksum error
+                continue  # pragma: no cover
             with H5File(analysis_file_path, "r") as f:
                 elect_id = f[elect_attr].attrs["object_id"]
 
@@ -659,9 +664,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         with pynwb.NWBHDF5IO(nwb_file_abs_path, mode="r") as io:
             nwbfile = io.read()
             electrodes_table = nwbfile.electrodes
-            channel_names = electrodes_table.get("colnames")
-            if channel_names is None:
+            if "channel_name" not in electrodes_table.colnames:
                 return channel_ids
+            channel_names = electrodes_table["channel_name"]
             return [channel_names[ch] for ch in channel_ids]
 
 

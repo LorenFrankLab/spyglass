@@ -19,6 +19,9 @@ def test_insert_params(sgp):
         defaults.get("params", {}).get("bodypart1") == "greenLED"
     ), "Failed to insert default params"
 
+    # get after insert
+    assert defaults == params_tbl.get_default(), "Failed to get default params"
+
 
 def test_orient_fetch1_dataframe(sgp, orient_key, populate_orient):
     """Fetches dataframe, but example data has one led, no orientation"""
