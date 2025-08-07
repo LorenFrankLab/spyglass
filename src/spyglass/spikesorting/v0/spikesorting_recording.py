@@ -1,5 +1,6 @@
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
+from typing import List, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -322,11 +323,39 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     _parallel_make = True
 
-    def make_fetch(self, key):
+    def make_fetch(self, key: dict) -> List[Interval]:
+        """Fetch times for compute.
+
+        Parameters
+        ----------
+        key, dict
+            Key of SpikeSortingRecordingSelection table
+
+        Returns
+        -------
+        List[Interval]
+            Sort Interval object, as a list of length 1
+        """
         # make decomposes passed obj, so make it a list if only one item
         return [self._get_sort_interval_valid_times(key)]
 
-    def make_compute(self, key, sort_interval_valid_times):
+    def make_compute(
+        self, key: dict, sort_interval_valid_times: Interval
+    ) -> Tuple[dict, Interval]:
+        """Run computation. Generate the file, set Interval key, prep insert.
+
+        Parameters
+        ----------
+        key, dict
+            Key of SpikeSortingRecordingSelection table
+        sort_interval_valid_times, sort
+            Interval object of the sort
+
+        Returns
+        -------
+        Tuple[dict, Interval]
+            Dictionary of self-insert, and updated Interval object
+        """
         rec_info = self._make_file(key)
         sort_interval_valid_times.set_key(
             nwb_file_name=key["nwb_file_name"],
@@ -340,7 +369,20 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         return self_insert, sort_interval_valid_times
 
-    def make_insert(self, key, self_insert, sort_interval_valid_times):
+    def make_insert(
+        self, key: dict, self_insert: dict, sort_interval_valid_times: Interval
+    ) -> None:
+        """Insert into self and IntervalList, document environment.
+
+        Parameters
+        ----------
+        key, dict
+            Key of SpikeSortingRecordingSelection table
+        self_insert, dict
+            Dict of keys for this table
+        sort_interval_valid_times, sort
+            Interval object of the sort
+        """
         IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
         self.insert1(self_insert)
         self._record_environment(self_insert)
