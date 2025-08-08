@@ -67,11 +67,26 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, warning=True) -> None:
-        """Log a deprecation warning for a feature."""
+    def deprecate_log(cls, name, alt=None, warning=True) -> None:
+        """Log a deprecation warning for a feature.
+
+        Parameters
+        ----------
+        name : str
+            The name of the feature to deprecate.
+        alt : str, optional
+            What to use instead. Default no such message.
+        warning : bool, optional
+            Whether to log a warning. Default is True.
+        """
         if warning:
-            logger.warning(f"DEPRECATION scheduled for version 0.6: {name}")
-        cls.insert1(dict(dj_user=dj.config["database.user"], function=name))
+            msg = f"\n\tUse {alt} instead" if alt else ""
+            logger.warning(
+                f"DEPRECATION scheduled for Spyglass 0.6.0: {name}{msg}"
+            )
+        cls.insert1(
+            dict(dj_user=dj.config["database.user"], function=name[:64])
+        )
 
 
 @schema
@@ -212,7 +227,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         restr_graph : RestrGraph
             The updated RestrGraph
         """
-
+        # only add items if found respective file types
         if raw_files := self._list_raw_files(key):
             raw_tbl = self._externals["raw"]
             raw_name = raw_tbl.full_table_name
@@ -388,7 +403,7 @@ class Export(SpyglassMixin, dj.Computed):
                 + f" and including {links} instead"
             )
             unlinked_files.update(links)
-        file_paths = unlinked_files  # TODO: what if linked items have links?
+        file_paths = unlinked_files
 
         table_inserts = [
             {**key, **rd, "table_id": i}

@@ -99,23 +99,28 @@ class LabMember(SpyglassMixin, dj.Manual):
             skip_duplicates=True,
         )
 
-    def _load_admin(cls):
+    def _load_admin(self):
         """Load admin list."""
-        cls._admin = list(
-            (cls.LabMemberInfo & {"admin": True}).fetch("datajoint_user_name")
+        self._admin = list(
+            (self.LabMemberInfo & {"admin": True}).fetch("datajoint_user_name")
         ) + ["root"]
 
     @property
-    def admin(cls) -> list:
+    def admin(self) -> list:
         """Return the list of admin users.
 
         Note: This is cached. If adding a new admin, run _load_admin
         """
-        if not cls._admin:
-            cls._load_admin()
-        return cls._admin
+        if not self._admin:
+            self._load_admin()
+        return self._admin
 
-    def get_djuser_name(cls, dj_user) -> str:
+    @property
+    def user_is_admin(self) -> bool:
+        """Return True if the user is an admin."""
+        return dj.config["database.user"] in self.admin
+
+    def get_djuser_name(self, dj_user) -> str:
         """Return the lab member name associated with a datajoint user name.
 
         Parameters
@@ -128,7 +133,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         str
             The lab member name.
         """
-        query = (cls.LabMemberInfo & {"datajoint_user_name": dj_user}).fetch(
+        query = (self.LabMemberInfo & {"datajoint_user_name": dj_user}).fetch(
             "lab_member_name"
         )
 
@@ -143,7 +148,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         return query[0]
 
     def check_admin_privilege(
-        cls,
+        self,
         error_message: str = "User does not have database admin privileges",
     ):
         """Check if a user has admin privilege.
@@ -153,7 +158,7 @@ class LabMember(SpyglassMixin, dj.Manual):
         error_message: str
             The error message to display if the user is not an admin.
         """
-        if dj.config["database.user"] not in cls.admin:
+        if not self.user_is_admin:
             raise PermissionError(error_message)
 
 

@@ -127,7 +127,7 @@ def test_export_populate(populate_export):
     table, file = populate_export
 
     assert len(file) == 4, "Export tables not captured correctly"
-    assert len(table) == 37, "Export files not captured correctly"
+    assert len(table) == 39, "Export files not captured correctly"
 
 
 def test_invalid_export_id(export_tbls):

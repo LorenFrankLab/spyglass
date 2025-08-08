@@ -1,4 +1,4 @@
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import datajoint as dj
 import numpy as np
@@ -8,12 +8,7 @@ from scipy.signal import hilbert
 
 from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_filter import FirFilterParameters
-from spyglass.common.common_interval import (
-    IntervalList,
-    interval_list_censor,
-    interval_list_contains_ind,
-    interval_list_intersect,
-)
+from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup
 from spyglass.lfp.lfp_merge import LFPOutput
@@ -304,9 +299,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     def make(self, key: dict) -> None:
         """Populate LFPBandV1"""
         # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(  # logged
-            key["nwb_file_name"]
-        )
+        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         # get the NWB object with the lfp data;
         # FIX: change to fetch with additional infrastructure
         lfp_key = {"merge_id": key["lfp_merge_id"]}
@@ -336,7 +329,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": interval_list_name,
             }
-        ).fetch1("valid_times")
+        ).fetch_interval()
         # the valid_times for this interval may be slightly beyond the valid
         # times for the lfp itself, so we have to intersect the two lists
         lfp_valid_times = (
@@ -345,10 +338,11 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "nwb_file_name": key["nwb_file_name"],
                 "interval_list_name": lfp_interval_list,
             }
-        ).fetch1("valid_times")
-        min_length = (LFPBandSelection & key).fetch1("min_interval_len")
-        lfp_band_valid_times = interval_list_intersect(
-            valid_times, lfp_valid_times, min_length=min_length
+        ).fetch_interval()
+
+        lfp_band_valid_times = valid_times.intersect(
+            lfp_valid_times,
+            min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
         )
 
         filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
@@ -363,14 +357,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         timestamps = np.asarray(lfp_object.timestamps)
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
-        included_indices = interval_list_contains_ind(
-            lfp_band_valid_times, timestamps
+        included_indices = lfp_band_valid_times.contains(
+            timestamps, as_indices=True, padding=1
         )
-        # pad the indices by 1 on each side to avoid message in filter_data
-        if included_indices[0] > 0:
-            included_indices[0] -= 1
-        if included_indices[-1] != len(timestamps) - 1:
-            included_indices[-1] += 1
 
         timestamps = timestamps[included_indices[0] : included_indices[-1]]
 
@@ -418,7 +407,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             timestamps,
             lfp_data,
             filter_coeff,
-            lfp_band_valid_times,
+            lfp_band_valid_times.times,
             lfp_band_elect_index,
             decimation,
         )
@@ -436,10 +425,9 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             electrode_table_region = nwbf.create_electrode_table_region(
                 elect_index, "filtered electrode table"
             )
-            eseries_name = "filtered data"
             # TODO: use datatype of data
             es = pynwb.ecephys.ElectricalSeries(
-                name=eseries_name,
+                name="filtered data",
                 data=filtered_data,
                 electrodes=electrode_table_region,
                 timestamps=new_timestamps,
@@ -473,45 +461,25 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                 "interval_list_name": key["interval_list_name"],
             }
         ).fetch("valid_times")
-        if len(tmp_valid_times) == 0:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
+        lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
+        lfp_valid_times.set_key(**key, pipeline="lfp band")
+        if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
             # add an interval list for the LFP valid times
-            IntervalList.insert1(
-                {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "interval_list_name": key["interval_list_name"],
-                    "valid_times": lfp_band_valid_times,
-                    "pipeline": "lfp band",
-                }
-            )
+            IntervalList.insert1(lfp_valid_times.as_dict)
         else:
-            lfp_band_valid_times = interval_list_censor(
-                lfp_band_valid_times, new_timestamps
-            )
             # check that the valid times are the same
             assert np.isclose(
-                tmp_valid_times[0], lfp_band_valid_times
+                tmp_valid_times[0], lfp_band_valid_times.times
             ).all(), (
                 "previously saved lfp band times do not match current times"
             )
 
-        AnalysisNwbfile().log(key, table=self.full_table_name)
         self.insert1(key)
 
     def fetch1_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetches the filtered data as a dataframe"""
-        filtered_nwb = self.fetch_nwb()
-
-        if len(filtered_nwb) == 0:
-            raise ValueError("No filtered data found for this LFPBandSelection")
-        if len(filtered_nwb) > 1:
-            raise ValueError(
-                "Multiple filtered data found for this LFPBandSelection. Expected 1"
-            )
-
-        filtered_nwb = filtered_nwb[0]
+        _ = self.ensure_single_entry()
+        filtered_nwb = self.fetch_nwb()[0]
         return pd.DataFrame(
             filtered_nwb["lfp_band"].data,
             index=pd.Index(filtered_nwb["lfp_band"].timestamps, name="time"),

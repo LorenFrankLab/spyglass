@@ -5,7 +5,12 @@ from spyglass.common.common_device import (
     DataAcquisitionDevice,
     Probe,
 )
-from spyglass.common.common_lab import Institution, Lab, LabMember
+from spyglass.common.common_lab import (
+    Institution,
+    Lab,
+    LabMember,
+    decompose_name,
+)
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
 from spyglass.settings import debug_mode
@@ -178,6 +183,7 @@ class Session(SpyglassMixin, dj.Imported):
 
         for name in experimenter_list:
             # ensure that the foreign key exists and do nothing if not
+            name = decompose_name(name)[0]
             query = LabMember & {"lab_member_name": name}
             if len(query) == 0:
                 logger.warning(

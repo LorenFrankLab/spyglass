@@ -1,4 +1,6 @@
 name: Tests
+permissions:
+  contents: read
 
 on:
   push:
@@ -74,6 +76,14 @@ jobs:
         curl_opts $RAW_DIR $NWBFILE $NWB_URL
         curl_opts $VID_DIR $VID_ONE $VID1URL
         curl_opts $VID_DIR $VID_TWO $VID2URL
+    - name: Move actions coveragerc
+      run: mv tests/.coveragerc .coveragerc
     - name: Run tests
       run: |
-        pytest --no-docker --no-dlc tests/
+        pytest --no-docker --no-dlc \
+          --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
+          tests/
+    - name: Upload coverage reports to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}

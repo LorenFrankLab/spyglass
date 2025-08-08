@@ -6,9 +6,9 @@ import pandas as pd
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.position.v1.dlc_utils import file_log, infer_output_dir
-from spyglass.position.v1.position_dlc_pose_estimation import (
+from spyglass.position.v1.position_dlc_pose_estimation import (  # noqa: F401
     DLCPoseEstimation,
-)  # noqa: F401
+)
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterp
 from spyglass.utils import SpyglassMixin, logger
 
@@ -55,6 +55,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single dataframe."""
+            _ = self.ensure_single_entry()
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -113,16 +114,15 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
         table_entries = []
         bp_params_dict = cohort_selection.pop("bodyparts_params_dict")
         if len(bp_params_dict) == 0:
-            logger.logger.warn(
-                "No bodyparts specified in bodyparts_params_dict"
-            )
+            logger.warn("No bodyparts specified in bodyparts_params_dict")
             self.insert1(key)
             return
         temp_key = cohort_selection.copy()
         for bodypart, params in bp_params_dict.items():
-            temp_key["bodypart"] = bodypart
-            temp_key["dlc_si_params_name"] = params
-            table_entries.append((DLCSmoothInterp & temp_key).fetch())
+            temp_key.update(dict(bodypart=bodypart, dlc_si_params_name=params))
+            query = DLCSmoothInterp & temp_key
+            if len(query):  # added to prevent appending empty array
+                table_entries.append((DLCSmoothInterp & temp_key).fetch())
 
         if not len(table_entries) == len(bp_params_dict):
             raise ValueError(
@@ -130,9 +130,7 @@ class DLCSmoothInterpCohort(SpyglassMixin, dj.Computed):
                 + f"bodyparts_params_dict {len(bp_params_dict)}"
             )
 
-        # TODO: change to DLCSmoothInterp.heading.names
-        table_column_names = list(table_entries[0].dtype.fields.keys())
-
+        table_column_names = DLCSmoothInterp.heading.names
         part_keys = [
             {
                 **{k: v for k, v in zip(table_column_names, table_entry[0])},

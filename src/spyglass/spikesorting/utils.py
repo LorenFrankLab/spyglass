@@ -1,6 +1,8 @@
 import warnings
+from os import environ as os_environ
 from typing import Dict, List
 
+import datajoint as dj
 import numpy as np
 import scipy.stats as stats
 import spikeinterface as si
@@ -173,7 +175,7 @@ def _compute_artifact_chunk(segment_index, start_frame, end_frame, worker_ctx):
         end_frame=end_frame,
     )
 
-    # find the artifact occurrences using one or both thresholds, across channels
+    # find artifact occurrences using one or both thresholds, across channels
     if (amplitude_thresh is not None) and (zscore_thresh is None):
         above_a = np.abs(traces) > amplitude_thresh
         above_thresh = (

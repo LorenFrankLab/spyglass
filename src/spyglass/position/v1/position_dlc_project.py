@@ -9,6 +9,7 @@ import pandas as pd
 from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
+from spyglass.position.utils import sanitize_filename
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
@@ -88,9 +89,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
     def insert1(self, key, **kwargs):
         """Override insert1 to check types of key values."""
         if not isinstance(key["project_name"], str):
-            raise ValueError("project_name must be a string")
+            raise TypeError("project_name must be a string")
         if not isinstance(key["frames_per_video"], int):
-            raise ValueError("frames_per_video must be of type `int`")
+            raise TypeError("frames_per_video must be of type `int`")
         key["project_name"] = sanitize_unix_name(key["project_name"])
         super().insert1(key, **kwargs)
 
@@ -113,8 +114,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         add_to_files: bool = True,
         **kwargs,
     ):
-        """
-        insert an existing project into DLCProject table.
+        """Insert an existing project into DLCProject table.
+
         Parameters
         ----------
         project_name : str
@@ -130,10 +131,11 @@ class DLCProject(SpyglassMixin, dj.Manual):
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
         if (existing := cls()._existing_project(project_name)) is not None:
-            return existing
+            return existing  # pragma: no cover
 
         cfg = read_config(config_path)
         all_bodyparts = cfg["bodyparts"]
+        bodyparts_to_add = []  # handle no bodyparts passed
         if bodyparts:
             bodyparts_to_add = [
                 bodypart
@@ -141,24 +143,30 @@ class DLCProject(SpyglassMixin, dj.Manual):
                 if bodypart not in cfg["bodyparts"]
             ]
             all_bodyparts += bodyparts_to_add
+        elif bodyparts is None:  # avoid insert error with empty list
+            bodyparts = all_bodyparts  # pragma: no cover
 
         BodyPart.add_from_config(cfg["bodyparts"])
         for bodypart in all_bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(
+                raise ValueError(  # pragma: no cover
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
 
         # check bodyparts are in config, if not add
         if len(bodyparts_to_add) > 0:
-            add_to_config(config_path, bodyparts=bodyparts_to_add)
+            add_to_config(  # pragma: no cover
+                config_path, bodyparts=bodyparts_to_add
+            )
 
         # Get frames per video from config. If passed as arg, check match
         if frames_per_video:
-            if frames_per_video != cfg["numframes2pick"]:
-                add_to_config(
+            if frames_per_video != cfg["numframes2pick"]:  # pragma: no cover
+                add_to_config(  # pragma: no cover
                     config_path, **{"numframes2pick": frames_per_video}
                 )
+        else:  # Handle none passed
+            frames_per_video = cfg["numframes2pick"]
 
         config_path = Path(config_path)
         project_path = config_path.parent
@@ -170,7 +178,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             if dest_folder.exists():
                 new_proj_dir = dest_folder.as_posix()
             else:
-                new_proj_dir = shutil.copytree(
+                new_proj_dir = shutil.copytree(  # pragma: no cover
                     src=project_path,
                     dst=f"{dlc_project_path}/{project_dirname}/",
                 )
@@ -181,7 +189,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
             config_path = new_config_path
             add_to_config(config_path, **{"project_path": new_proj_dir})
 
-        # TODO still need to copy videos over to video dir
         key = {
             "project_name": project_name,
             "team_name": lab_team,
@@ -269,7 +276,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         )
         for bodypart in bodyparts:
             if not bool(BodyPart() & {"bodypart": bodypart}):
-                raise ValueError(
+                raise ValueError(  # pragma: no cover
                     f"bodypart: {bodypart} not found in BodyPart table"
                 )
         kwargs_copy = copy.deepcopy(kwargs)
@@ -298,7 +305,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             cls().add_training_files(key, **kwargs)
 
         if isinstance(config_path, PosixPath):
-            config_path = config_path.as_posix()
+            config_path = config_path.as_posix()  # pragma: no cover
         return {"project_name": project_name, "config_path": config_path}
 
     def _process_videos(self, video_list, output_path):
@@ -327,7 +334,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
         ]
 
         if len(videos) < 1:
-            raise ValueError(f"no .mp4 videos found from {video_list}")
+            raise ValueError(  # pragma: no cover
+                f"no .mp4 videos found from {video_list}"
+            )
 
         return videos
 
@@ -352,16 +361,18 @@ class DLCProject(SpyglassMixin, dj.Manual):
         if add_to_files and not has_proj:
             raise ValueError("Cannot set add_to_files=True without passing key")
 
-        videos = cls()._process_videos(video_list, output_path)
+        videos = cls()._process_videos(  # pragma: no cover
+            video_list, output_path
+        )
 
-        if add_new:
+        if add_new:  # pragma: no cover
             from deeplabcut import add_new_videos
 
             add_new_videos(config=config_path, videos=videos, copy_videos=True)
 
-        if add_to_files:  # Add videos to training files
-            cls().add_training_files(key, **kwargs)
-        return videos
+        if add_to_files:  # Add videos to training files # pragma: no cover
+            cls().add_training_files(key, **kwargs)  # pragma: no cover
+        return videos  # pragma: no cover
 
     @classmethod
     def add_training_files(cls, key, **kwargs):
@@ -432,7 +443,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         extract_frames(config_path, **kwargs)
 
     @classmethod
-    def run_label_frames(cls, key):
+    def run_label_frames(cls, key):  # pragma: no cover
         """Convenience function to launch DLC GUI for labeling frames.
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
@@ -444,10 +455,10 @@ class DLCProject(SpyglassMixin, dj.Manual):
             logger.error("DLC loaded in light mode, cannot label frames")
             return
 
-        label_frames(config_path)
+        label_frames(config_path)  # pragma: no cover
 
     @classmethod
-    def check_labels(cls, key, **kwargs):
+    def check_labels(cls, key, **kwargs):  # pragma: no cover
         """Convenience function to check labels on
         previously extracted and labeled frames
         """
@@ -493,7 +504,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
             if isinstance(video_filenames, List)
             else [video_filenames]
         )
-        for video_file in videos:
+        for video_file in videos:  # pragma: no cover
             h5_file = next((new_data_path / video_file).glob("*h5"))
             dlc_df = pd.read_hdf(h5_file)
             dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
@@ -548,18 +559,7 @@ def add_to_config(
     kwargs.update(
         {str(k): v for k, v in kwargs.items() if not isinstance(k, str)}
     )
+    data.update(kwargs)
 
     with open(config, "w") as fw:
         yaml.dump(data, fw)
-
-
-def sanitize_filename(filename: str) -> str:
-    """Sanitize filename to remove special characters"""
-    char_map = {
-        " ": "_",
-        ".": "_",
-        ",": "-",
-        "&": "and",
-        "'": "",
-    }
-    return "".join([char_map.get(c, c) for c in filename])

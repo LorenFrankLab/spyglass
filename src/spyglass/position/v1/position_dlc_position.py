@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Tuple, Union
 
 import datajoint as dj
 import numpy as np
@@ -208,10 +209,11 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
         logger.info("Identifying indices to NaN")
+        likelihood_thresh = params.pop("likelihood_thresh")
         df_w_nans, bad_inds = nan_inds(
             dlc_df.copy(),
             max_dist_between=params["max_cm_between_pts"],
-            likelihood_thresh=params.pop("likelihood_thresh"),
+            likelihood_thresh=likelihood_thresh,
             inds_to_span=params["num_inds_to_span"],
         )
 
@@ -229,13 +231,15 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             smooth_method = smooth_params.get("smooth_method")
             smooth_func = _key_to_smooth_func_dict[smooth_method]
 
+            # Handle duplicate smoothing_duration key
+            smooth_dur = smooth_params.get("smoothing_duration") or params[
+                "smoothing_params"
+            ].pop("smoothing_duration", None)
+
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             logger.info(f"Smoothing using method: {smooth_method}")
             smooth_df = smooth_func(
-                interp_df,
-                smoothing_duration=smooth_params.get("smoothing_duration"),
-                sampling_rate=1 / dt,
-                **params["smoothing_params"],
+                interp_df, smoothing_duration=smooth_dur, sampling_rate=1 / dt
             )
         else:
             smooth_df = interp_df.copy()
@@ -291,10 +295,10 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             analysis_file_name=key["analysis_file_name"],
         )
         self.insert1(key)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe."""
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(
@@ -376,7 +380,7 @@ def nan_inds(
 
         for ind in range(start_point, span[0], -1):
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[ind + 1 : start_point].x),
@@ -402,7 +406,7 @@ def nan_inds(
                 jump_inds_mask[ind] = True
         for ind in range(start_point, span[-1], 1):
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[start_point:ind].x),
@@ -491,8 +495,27 @@ def span_length(x):
     return x[-1] - x[0]
 
 
-def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
-    """Return indices of subthresh points."""
+def get_subthresh_inds(
+    dlc_df: pd.DataFrame, likelihood_thresh: float, ret_sub_thresh: bool = False
+) -> Union[np.ndarray, Tuple[np.ndarray, float]]:
+    """Return indices of subthresh points.
+
+    Parameters
+    ----------
+    dlc_df : pd.DataFrame
+        Dataframe containing the DLC data
+    likelihood_thresh : float
+        Likelihood threshold for subthresh points
+    ret_sub_thresh : bool, default False
+        Whether to return the percentage of subthresh points
+
+    Returns
+    -------
+    all_nan_inds : np.ndarray
+        Indices of subthresh points
+    sub_thresh_percent: float, optional
+        Percentage of subthresh points
+    """
     df_filter = dlc_df["likelihood"] < likelihood_thresh
     sub_thresh_inds = np.where(
         ~np.isnan(dlc_df["likelihood"].where(df_filter))
@@ -500,6 +523,8 @@ def get_subthresh_inds(dlc_df: pd.DataFrame, likelihood_thresh: float):
     nand_inds = np.where(np.isnan(dlc_df["x"]))[0]
     all_nan_inds = list(set(sub_thresh_inds).union(set(nand_inds)))
     all_nan_inds.sort()
-    # TODO: add option to return sub_thresh_percent
-    # sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
+    sub_thresh_percent = (len(sub_thresh_inds) / len(dlc_df)) * 100
+
+    if ret_sub_thresh:
+        return all_nan_inds, sub_thresh_percent
     return all_nan_inds

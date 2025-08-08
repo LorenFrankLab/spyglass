@@ -21,6 +21,7 @@ from spyglass.position.v1.dlc_utils import (
     infer_output_dir,
 )
 from spyglass.position.v1.position_dlc_model import DLCModel
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
 
 from . import dlc_reader
@@ -56,10 +57,11 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         crop_ints : list
             list of 4 integers [x min, x max, y min, y max]
         crop_input : str, optional
-            input string to determine cropping parameters. If None, user is queried
+            input string to determine cropping parameters. If None, query user
         """
         import cv2
 
+        video_path = str(video_path)
         cap = cv2.VideoCapture(video_path)
         _, frame = cap.read()
         fig, ax = plt.subplots(figsize=(20, 10))
@@ -71,17 +73,18 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         ax.grid(visible=True, color="white", lw=0.5, alpha=0.5)
         display(fig)
 
-        if crop_input is None:
-            crop_input = input(
+        if crop_input is None and not test_mode:
+            crop_input = input(  # pragma: no cover
                 "Please enter the crop parameters for your video in format "
                 + "xmin, xmax, ymin, ymax, or 'none'\n"
             )
 
         plt.close()
-        if crop_input.lower() == "none":
+        if crop_input is None or crop_input.lower() == "none":
             return None
         crop_ints = [int(val) for val in crop_input.split(",")]
-        assert all(isinstance(val, int) for val in crop_ints)
+        if not all(isinstance(val, int) and val >= 0 for val in crop_ints):
+            raise ValueError("Crop parameters must be non-negative integers.")
         return crop_ints
 
     def insert_estimation_task(
@@ -164,6 +167,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         def fetch1_dataframe(self) -> pd.DataFrame:
             """Fetch a single bodypart dataframe."""
+            _ = self.ensure_single_entry()
             nwb_data = self.fetch_nwb()[0]
             index = pd.Index(
                 np.asarray(
@@ -242,6 +246,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 output_dir,
                 **analyze_video_params,
             )
+
         dlc_result = dlc_reader.PoseEstimation(output_dir)
         creation_time = datetime.fromtimestamp(
             dlc_result.creation_time
@@ -262,7 +267,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 & {**key, "interval_list_name": interval_list_name}
             ).fetch_nwb()[0]["raw_position"]
         else:
-            spatial_series = None
+            spatial_series = None  # # pragma: no cover
 
         _, _, meters_per_pixel, video_time = get_video_info(key)
         key["meters_per_pixel"] = meters_per_pixel
@@ -333,6 +338,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 description="video_frame_ind",
             )
             nwb_analysis_file = AnalysisNwbfile()
+
             key["dlc_pose_estimation_position_object_id"] = (
                 nwb_analysis_file.add_nwb_object(
                     analysis_file_name=key["analysis_file_name"],
@@ -350,7 +356,6 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 analysis_file_name=key["analysis_file_name"],
             )
             self.BodyPart.insert1(key)
-            AnalysisNwbfile().log(key, table=self.full_table_name)
 
     def fetch_dataframe(self, *attrs, **kwargs) -> pd.DataFrame:
         """Fetch a concatenated dataframe of all bodyparts."""
@@ -408,7 +413,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             axis=1,
         )
 
-    def fetch_video_path(self, key: dict = dict()) -> str:
+    def fetch_video_path(self, key: dict = True) -> str:
         """Return the video path for pose estimate
 
         Parameters

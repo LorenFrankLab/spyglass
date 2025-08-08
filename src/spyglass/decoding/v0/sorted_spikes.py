@@ -8,8 +8,6 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
-import pprint
-
 import datajoint as dj
 import numpy as np
 import pandas as pd
@@ -98,7 +96,7 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
         them into regular intervals given by the sampling rate. The spike
         indicator is stored in an AnalysisNwbfile.
         """
-        pprint.pprint(key)
+        logger.info(key)
         # TODO: intersection of sort interval and interval list
         interval_times = (IntervalList & key).fetch1("valid_times")
 
@@ -166,6 +164,7 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Return the first spike indicator as a dataframe."""
+        _ = self.ensure_single_entry()
         return self.fetch_dataframe()[0]
 
     def fetch_dataframe(self) -> list[pd.DataFrame]:

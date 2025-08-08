@@ -1,6 +1,5 @@
 import os
 from itertools import chain
-from time import time
 
 import datajoint as dj
 import numpy as np
@@ -9,11 +8,11 @@ import pynwb
 import spikeinterface as si
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.decoding.utils import _get_peak_amplitude
 from spyglass.settings import temp_dir
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.waveforms import _get_peak_amplitude
 
 schema = dj.schema("decoding_waveform_features")
 
@@ -127,7 +126,6 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate UnitWaveformFeatures table."""
-        AnalysisNwbfile()._creation_times["pre_create_time"] = time()
         # get the list of feature parameters
         params = (WaveformFeaturesParams & key).fetch1("params")
 
@@ -194,7 +192,6 @@ class UnitWaveformFeatures(SpyglassMixin, dj.Computed):
             nwb_file_name,
             key["analysis_file_name"],
         )
-        AnalysisNwbfile().log(key, table=self.full_table_name)
 
         self.insert1(key)
 

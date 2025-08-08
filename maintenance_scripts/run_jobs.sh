@@ -82,9 +82,10 @@ CONN_TEST="import datajoint as dj; dj.logger.setLevel('ERROR'); dj.conn()"
 conda_run python -c "$CONN_TEST" > /dev/null || \
   { on_fail "Could not connect to the database"; exit 1; }
 
-# Chmod new files
+# Chmod new files in past 2 days
 if $SPYGLASS_CHMOD_FILES; then
-  find $SPYGLASS_BASE_PATH -type f -mtime -1 -exec chmod 644 {} \; || true
+  find $SPYGLASS_BASE_PATH -type f -mtime -2 -exec chmod 644 {} \; || \
+    { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
 fi
 
 # Run cleanup script
