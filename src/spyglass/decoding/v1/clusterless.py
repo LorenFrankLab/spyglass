@@ -279,15 +279,19 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
+        # Make sure the results directory exists
+        results_dir = Path(config["SPYGLASS_ANALYSIS_DIR"]) / nwb_file_name
+        results_dir.mkdir(parents=True, exist_ok=True)
+
         # Generate a unique path for the results file
         path_exists = True
         while path_exists:
             results_path = (
-                Path(config["SPYGLASS_ANALYSIS_DIR"])
-                / nwb_file_name
-                / f"{nwb_file_name}_{str(uuid.uuid4())}.nc"
+                results_dir / f"{nwb_file_name}_{str(uuid.uuid4())}.nc"
             )
+            # if the results_path already exists, try a different uuid
             path_exists = results_path.exists()
+
         classifier.save_results(
             results,
             results_path,

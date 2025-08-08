@@ -22,6 +22,10 @@ When altering tables, import all foreign key references.
     - Thing
 -->
 
+### Decoding
+
+- Ensure results directory is created if it doesn't exist #1362
+
 ## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
