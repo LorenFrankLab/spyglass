@@ -238,7 +238,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
         # Make sure the results directory exists
         results_dir = Path(config["SPYGLASS_ANALYSIS_DIR"]) / nwb_file_name
-        results_dir.parent.mkdir(parents=True, exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
 
         # Generate a unique path for the results file
         path_exists = True
