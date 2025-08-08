@@ -1,7 +1,6 @@
 # Change Log
 
-<!--
-## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
@@ -12,21 +11,11 @@ When altering tables, import all foreign key references.
 #
 ```
 
-### Infrastructure
-
-- Thing
-
-### Pipelines
-
-- Common
-    - Thing
--->
-
-## [0.5.5] (Aug 6, 2025)
-
-### Docs
+### Documentation
 
 - Delete extra pyscripts that were renamed # 1363
+
+## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
 
