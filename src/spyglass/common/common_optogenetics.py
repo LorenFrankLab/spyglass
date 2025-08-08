@@ -7,7 +7,10 @@ from ndx_optogenetics import (
     OptogeneticVirusInjection,
 )
 
-from spyglass.common import IntervalList, Nwbfile, Session, TaskEpoch
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.common.common_task import TaskEpoch
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_optogenetics")
@@ -63,7 +66,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             if row.get("ripple_filter_on", None):
                 ripple_key = dict(
                     base_key,
-                    threshold_sd=row["ripple_filter_threshold_sd "],
+                    threshold_sd=row["ripple_filter_threshold_sd"],
                     n_above_threshold=row["ripple_filter_num_above_threshold"],
                     lockout_period=row[
                         "ripple_filter_lockout_period_in_samples"
@@ -74,7 +77,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             if row.get("theta_filter_on", None):
                 theta_key = dict(
                     base_key,
-                    filter_phase=row["theta_filter_target_phase"],
+                    filter_phase=row["theta_filter_phase_in_deg"],
                     reference_ntrode=row["theta_filter_reference_ntrode"],
                     lockout_period=row[
                         "theta_filter_lockout_period_in_samples"
@@ -85,14 +88,16 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             if row.get("speed_filter_on", None):
                 speed_key = dict(
                     base_key,
-                    speed_threshold=row["speed_filter_threshold"],
+                    speed_threshold=row["speed_filter_threshold_in_cm_per_s"],
                     active_above_threshold=row[
                         "speed_filter_on_above_threshold"
                     ],
                 )
                 speed_inserts.append(speed_key)
             # Spatial conditional part if present
-            spatial_nodes = row.get("spatial_filter_nodes", None)
+            spatial_nodes = row.get(
+                "spatial_filter_region_node_coordinates_in_pixels", None
+            )
             if spatial_nodes is not None:
                 spatial_key = dict(
                     base_key,
@@ -216,6 +221,8 @@ class VirusInjection(SpyglassMixin, dj.Manual):
     titer: float # titer of the virus (in vG/ml)
     """
 
+    _nwb_table = Nwbfile
+
     def insert_from_nwb_object(self, nwb_file_name, virus_injection_object):
         """
         Insert a VirusInjection entry from an NWB object.
@@ -256,9 +263,7 @@ class VirusInjection(SpyglassMixin, dj.Manual):
         nwb = (Nwbfile() & key).fetch_nwb()[0]
         for obj in nwb.objects.values():
             if isinstance(obj, OptogeneticVirusInjection):
-                VirusInjection().insert_from_nwb_object(
-                    key["nwb_file_name"], obj
-                )
+                self.insert_from_nwb_object(key["nwb_file_name"], obj)
 
 
 @schema
