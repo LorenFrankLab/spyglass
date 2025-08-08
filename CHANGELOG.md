@@ -24,6 +24,10 @@ When altering tables, import all foreign key references.
 
 ## [0.5.5] (Aug 6, 2025)
 
+### Docs
+
+- Delete extra pyscripts that were renamed # 1363
+
 ### Infrastructure
 
 - Ensure merge tables are declared during file insertion #1205
