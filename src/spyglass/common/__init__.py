@@ -42,6 +42,13 @@ from spyglass.common.common_interval import (
 )
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_optogenetics import (
+    OpticalFiberDevice,
+    OpticalFiberImplant,
+    OptogeneticProtocol,
+    Virus,
+    VirusInjection,
+)
 from spyglass.common.common_position import (
     IntervalLinearizationSelection,
     IntervalLinearizedPosition,
@@ -57,6 +64,7 @@ from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import Task, TaskEpoch
+from spyglass.common.common_user import UserEnvironment
 from spyglass.common.populate_all_common import populate_all_common
 from spyglass.common.prepopulate import populate_from_yaml, prepopulate_default
 from spyglass.settings import prepopulate
@@ -69,7 +77,6 @@ from spyglass.utils.nwb_helper_fn import (
     get_raw_eseries,
     get_valid_intervals,
 )
-from spyglass.common.common_user import UserEnvironment
 
 __all__ = [
     "LabTeam",
