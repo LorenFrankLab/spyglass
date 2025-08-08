@@ -11,6 +11,7 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
+from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
 
 schema = dj.schema("common_optogenetics")
@@ -38,7 +39,13 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             "nwb_file_name": key["nwb_file_name"],
         }
         nwb = (Nwbfile() & nwb_key).fetch_nwb()[0]
-        opto_epoch_df = nwb.intervals["optogenetic_epochs"].to_dataframe()
+        opto_epoch_obj = nwb.intervals.get("optogenetic_epochs", None)
+        if opto_epoch_obj is None:
+            logger.warning(
+                f"No optogenetic epochs found in NWB file {nwb_key['nwb_file_name']}"
+            )
+            return
+        opto_epoch_df = opto_epoch_obj.to_dataframe()
 
         epoch_inserts = []
         ripple_inserts = []
