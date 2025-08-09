@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import datajoint as dj
 
 # --- Spyglass Imports ---
-from spyglass.common import LabMember, VideoFile
+from spyglass.common import LabTeam, VideoFile
 from spyglass.position.v1 import DLCProject
 from spyglass.utils import logger
 
@@ -16,12 +16,10 @@ from spyglass.utils import logger
 def setup_spyglass_dlc_project(
     project_name: str,
     bodyparts: List[str],
-    lab_member_name: str,
+    lab_team: str,
     video_keys: List[Dict],
     sampler: str = "uniform",
     num_frames: int = 20,
-    train_config_path: str = "",
-    video_sets_path: Optional[str] = None,
     skip_duplicates: bool = True,
     **kwargs,  # Allow pass-through for extract_frames if needed
 ) -> Optional[str]:
@@ -99,17 +97,12 @@ def setup_spyglass_dlc_project(
     """
 
     # --- Input Validation ---
-    if not (LabMember & {"lab_member_name": lab_member_name}):
-        raise ValueError(f"LabMember not found: {lab_member_name}")
+    if not (LabTeam & {"team_name": lab_team}):
+        raise ValueError(f"LabTeam not found: {lab_team}")
 
-    valid_video_keys = []
     for key in video_keys:
         if not (VideoFile & key):
             raise ValueError(f"VideoFile entry not found for key: {key}")
-        valid_video_keys.append(key)
-
-    if not valid_video_keys:
-        raise ValueError("No valid video keys provided.")
 
     project_key = {"project_name": project_name}
     project_exists = bool(DLCProject & project_key)
@@ -121,29 +114,15 @@ def setup_spyglass_dlc_project(
             DLCProject.insert_new_project(
                 project_name=project_name,
                 bodyparts=bodyparts,
-                lab_member_name=lab_member_name,
-                video_keys=valid_video_keys,
-                skip_duplicates=skip_duplicates,  # Should allow continuing if videos already added
-                train_config_path=train_config_path,
-                video_sets_path=video_sets_path,
+                lab_team=lab_team,
+                frames_per_video=num_frames,
+                video_list=video_keys,
             )
             project_exists = True  # Assume success if no error
         elif skip_duplicates:
             logger.warning(
                 f"DLC Project '{project_name}' already exists. Skipping creation."
             )
-            # Ensure provided videos are linked if project exists
-            current_videos = (DLCProject.Video & project_key).fetch("KEY")
-            videos_to_add = [
-                vk for vk in valid_video_keys if vk not in current_videos
-            ]
-            if videos_to_add:
-                logger.info(
-                    f"Adding {len(videos_to_add)} video(s) to existing project '{project_name}'"
-                )
-                project_instance = DLCProject.get_instance(project_name)
-                project_instance.add_videos(videos_to_add, skip_duplicates=True)
-
         elif not skip_duplicates:
             raise dj.errors.DataJointError(
                 f"DLC Project '{project_name}' already exists and skip_duplicates=False."
@@ -153,13 +132,7 @@ def setup_spyglass_dlc_project(
         logger.info(
             f"---- Step 2: Extracting Frames for Project: {project_name} ----"
         )
-        project_instance = DLCProject.get_instance(project_name)
-        project_instance.run_extract_frames(
-            sampler=sampler,
-            num_frames=num_frames,
-            skip_duplicates=skip_duplicates,
-            **kwargs,
-        )
+        DLCProject().run_extract_frames(project_key)
 
         # --- 3. Inform User for Manual Step ---
         logger.info(f"==== Project Setup Complete for: {project_name} ====")
