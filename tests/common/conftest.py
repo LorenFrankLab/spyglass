@@ -265,7 +265,7 @@ def opto_only_nwb(
         comments="",
         description="stimulus channel data",
         data=[0, 1, 0, 1, 0],  # Example data
-        unit="-1",  # TODO change to "N/A",
+        unit="N/A",
         timestamps=[0.0, 1.0, 2.0, 3.0, 4.0],  # Example timestamps
     )
     beh_events.add_timeseries(stimulus)
