@@ -19,6 +19,10 @@ When altering tables, import all foreign key references.
 
 - Ensure results directory is created if it doesn't exist #1362
 
+### Spikesorting
+
+- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+
 ## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
@@ -94,7 +98,6 @@ When altering tables, import all foreign key references.
         present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
         `SortedSpikesGroup.fetch_spike_data` #1320
-    - Implement short-transaction `SpikeSortingRecording.make` #1338
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
