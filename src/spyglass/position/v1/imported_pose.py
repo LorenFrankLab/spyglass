@@ -58,7 +58,8 @@ class ImportedPose(SpyglassMixin, dj.Manual):
             ]
 
             # Loop through all the PoseEstimation objects in the behavior module
-            for name, obj in pose_objects:
+            for obj in pose_objects:
+                name = obj.name
                 # use the timestamps from the first body part to define valid times
                 timestamps = list(obj.pose_estimation_series.values())[
                     0
