@@ -305,7 +305,8 @@ class OpticalFiberDevice(SpyglassMixin, dj.Manual):
             numerical_aperture=fiber_object.model.numerical_aperture,
             core_diameter=fiber_object.model.core_diameter_in_um,
             active_length=fiber_object.model.active_length_in_mm,
-            ferrule_name=re.sub(r"[^ -~]", "", fiber_object.model.ferrule_name),
+            # Remove non-printable ASCII characters from ferrule_name to ensure database compatibility
+            ferrule_name=''.join(c for c in fiber_object.model.ferrule_name if c in string.printable),
             ferrule_diameter=fiber_object.model.ferrule_diameter_in_mm,
         )
         self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
