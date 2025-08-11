@@ -328,7 +328,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        key, dict
+        key: dict
             Key of SpikeSortingRecordingSelection table
 
         Returns
@@ -346,7 +346,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        key, dict
+        key: dict
             Key of SpikeSortingRecordingSelection table
         sort_interval_valid_times, sort
             Interval object of the sort
@@ -376,11 +376,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        key, dict
+        key: dict
             Key of SpikeSortingRecordingSelection table
-        self_insert, dict
+        self_insert: dict
             Dict of keys for this table
-        sort_interval_valid_times, sort
+        sort_interval_valid_times: sort
             Interval object of the sort
         """
         IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
