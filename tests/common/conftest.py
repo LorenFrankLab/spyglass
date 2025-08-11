@@ -399,6 +399,6 @@ def opto_only_nwb(
     yield dummy_name
 
     # Cleanup
-    (common.Nwbfile & {"nwb_file_name": "mock_optogenetics.nwb"}).delete(
+    (common.Nwbfile & {"nwb_file_name": "mock_optogenetics_.nwb"}).delete(
         safemode=False
     )
