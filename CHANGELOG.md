@@ -1,7 +1,6 @@
 # Change Log
 
-<!--
-## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
@@ -12,15 +11,9 @@ When altering tables, import all foreign key references.
 #
 ```
 
-### Infrastructure
+### Documentation
 
-- Thing
-
-### Pipelines
-
-- Common
-    - Thing
--->
+- Delete extra pyscripts that were renamed # 1363
 
 ### Decoding
 
@@ -101,6 +94,7 @@ When altering tables, import all foreign key references.
         present in nwb file electrodes table #1310, #1334
     - Ensure matching order of returned merge_ids and nwb files in
         `SortedSpikesGroup.fetch_spike_data` #1320
+    - Implement short-transaction `SpikeSortingRecording.make` #1338
 - Behavior
     - Implement pipeline for keypoint-moseq extraction of behavior syllables #1056
 - LFP
