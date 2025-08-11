@@ -1,7 +1,6 @@
 # Change Log
 
-<!--
-## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
@@ -12,15 +11,17 @@ When altering tables, import all foreign key references.
 #
 ```
 
-### Infrastructure
+### Documentation
 
-- Thing
+- Delete extra pyscripts that were renamed # 1363
 
-### Pipelines
+### Decoding
 
-- Common
-    - Thing
--->
+- Ensure results directory is created if it doesn't exist #1362
+
+### Spikesorting
+
+- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
