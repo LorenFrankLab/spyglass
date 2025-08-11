@@ -142,7 +142,6 @@ def virus_injection_dict(virus_dict):
         pitch_in_deg=0.0,
         yaw_in_deg=0.0,
         reference="Bregma",
-        virus=virus,
         volume_in_uL=1.0,
     )
 
@@ -162,7 +161,6 @@ def excitation_source_model_dict():
 def excitation_source_dict():
     return dict(
         name="test_source",
-        model=excitation_source_model,
         wavelength_in_nm=450.0,
         power_in_W=1.0,
         intensity_in_W_per_m2=100.0,
@@ -187,7 +185,7 @@ def fiber_model_dict():
 
 @pytest.fixture(scope="function")
 def fiber_implant_dict():
-    dict(
+    return dict(
         implanted_fiber_description="Test fiber implant",
         location="CA1",
         hemisphere="left",
@@ -212,7 +210,7 @@ def opto_epoch_dict():
         number_trains=1,
         intertrain_interval_in_ms=100,
         power_in_mW=77,
-        epoch="epoch_01",
+        epoch_name="epoch_01",
         epoch_number=1,
         convenience_code="test",
         epoch_type="run",
@@ -236,7 +234,17 @@ def opto_epoch_dict():
 
 
 @pytest.fixture(scope="function")
-def opto_only_nwb(raw_dir, common):
+def opto_only_nwb(
+    raw_dir,
+    common,
+    opto_epoch_dict,
+    virus_dict,
+    virus_injection_dict,
+    excitation_source_model_dict,
+    excitation_source_dict,
+    fiber_model_dict,
+    fiber_implant_dict,
+):
     dummy_name = "mock_optogenetics.nwb"
     # Create a mock NWBFile with optogenetic objects
     nwb = mock_NWBFile()
@@ -276,7 +284,7 @@ def opto_only_nwb(raw_dir, common):
     nwb.add_device(camera)
 
     # task info
-    epoch = opto_epoch_dict["epoch"]
+    epoch = opto_epoch_dict["epoch_name"]
     nwb.add_epoch(0.0, 10000.0, epoch)
     task_name = VectorData(
         name="task_name",
@@ -334,7 +342,9 @@ def opto_only_nwb(raw_dir, common):
         **excitation_source_model_dict
     )
 
-    excitation_source = ExcitationSource(**excitation_source_dict)
+    excitation_source = ExcitationSource(
+        **excitation_source_dict, model=excitation_source_model
+    )
 
     # make the fiber objects
     optical_fiber_model = OpticalFiberModel(**fiber_model_dict)

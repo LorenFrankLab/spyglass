@@ -91,7 +91,12 @@ def single_transaction_make(
             if table_name == "PositionSource":
                 # PositionSource only uses nwb_file_name - full calls redundant
                 key_source = dj.U("nwb_file_name") & key_source
-            if table_name in ["ImportedPose", "ImportedLFP", "VirusInjection"]:
+            if table_name in [
+                "ImportedPose",
+                "ImportedLFP",
+                "VirusInjection",
+                "OpticalFiberImplant",
+            ]:
                 key_source = Nwbfile()
 
             for pop_key in (key_source & file_restr).fetch("KEY"):

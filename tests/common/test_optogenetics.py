@@ -36,6 +36,7 @@ def test_optogenetics(
     ], "VirusInjection did not fetch the expected virus construct name."
 
     # Fiber implant checks
+    # common.OpticalFiberImplant().make(key)
     implant_query = common.OpticalFiberImplant & key
     assert (
         len(implant_query) == 1
@@ -54,7 +55,7 @@ def test_optogenetics(
     assert (common.TaskEpoch & protocol_query).fetch1(
         "interval_list_name"
     ) == opto_epoch_dict[
-        "epoch"
+        "epoch_name"
     ], "TaskEpoch did not fetch the expected epoch name."
 
     assert (
