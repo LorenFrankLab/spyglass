@@ -26,6 +26,7 @@ When altering tables, import all foreign key references.
 
 ### Infrastructure
 
+- Add tables for storing optogenetic experiment information #1312
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
 - Add common method `get_position_interval_epoch` #1056
