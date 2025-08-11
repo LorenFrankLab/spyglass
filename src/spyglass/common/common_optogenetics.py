@@ -136,7 +136,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         if t_off[0] < t_on[0]:
             t_off = t_off[1:]
         if t_on[-1] > t_off[-1]:
-            t_off.append(stim_time[-1])
+            t_off = np.append(t_off, stim_time[-1])
         stim_on_interval = np.array([t_on, t_off]).T
         return stim_on_interval
 
