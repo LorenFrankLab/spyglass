@@ -401,19 +401,19 @@ class DLCProject(SpyglassMixin, dj.Manual):
         label_dir = Path(cfg["project_path"]) / "labeled-data"
         training_files = []
 
-        video_inserts = []
         for video in video_names:
             vid_path_obj = Path(video)
             video_name = vid_path_obj.stem
             training_files.extend((label_dir / video_name).glob("*Collected*"))
-            key.update(
+            cls().File().insert1(
                 {
+                    **key,
                     "file_name": video_name,
                     "file_ext": vid_path_obj.suffix[1:],  # remove leading '.'
-                    "file_path": video,
-                }
+                    "file_path": str(vid_path_obj),
+                },
+                **kwargs,
             )
-        cls().File.insert(video_inserts, **kwargs)
 
         if len(training_files) == 0:
             logger.warning("No training files to add")
