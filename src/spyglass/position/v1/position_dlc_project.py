@@ -410,7 +410,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                     **key,
                     "file_name": video_name,
                     "file_ext": vid_path_obj.suffix[1:],  # remove leading '.'
-                    "file_path": str(vid_path_obj),
+                    "file_path": video,
                 },
                 **kwargs,
             )
