@@ -76,11 +76,9 @@ def _process_single_lfp_band(args_tuple: Tuple) -> Optional[Tuple]:
             "target_interval_list_name": target_interval_list_name,
             "lfp_band_sampling_rate": band_params["band_sampling_rate"],
             "min_interval_len": band_params.get("min_interval_len", 1.0),
-            "nwb_file_name": (
-                LFPOutput.merge_get_parent({"merge_id": lfp_merge_id}).fetch1(
-                    "nwb_file_name"
-                )
-            ),  # Needed for set_lfp_band_electrodes FKs
+            "nwb_file_name": LFPOutput.merge_get_parent(
+                {"merge_id": lfp_merge_id}
+            ).fetch1("nwb_file_name"),
         }
 
         # Insert selection using set_lfp_band_electrodes helper
