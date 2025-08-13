@@ -14,6 +14,7 @@ When altering tables, import all foreign key references.
 ### Documentation
 
 - Delete extra pyscripts that were renamed # 1363
+- Add note on fetching changes to setup notebook #1371
 
 ### Infrastructure
 
