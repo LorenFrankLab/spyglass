@@ -301,6 +301,13 @@ class AbstractGraph(ABC):
     def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
+        if table.isnumeric():  # if alias node, determine status from child
+            children = list(self.graph.children(table))
+            if len(children) > 1:
+                raise ValueError(f"Alias has multiple connections: {table}")
+            if children[0].isnumeric():
+                raise ValueError(f"Alias of alias, should not happen: {table}")
+            return self._is_out(children[0])
 
         # If already in imported, return
         if self.graph.nodes.get(table):  # Revert #1356
