@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.14.5
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -223,7 +223,7 @@
 # 2. Developers who wish to work on the code base may want to do an editable
 # install from within their conda environment: `pip install -e /path/to/spyglass/`
 #
-# ### Staying up to date 
+# ### Staying up to date
 #
 # Go get the latest updates and bugfixes between releases, you should occasionally
 # navigate to your spyglass directory and run ...
