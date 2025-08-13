@@ -12,7 +12,7 @@ from itertools import chain as iter_chain
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
-from datajoint import FreeTable, Table
+from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
 from datajoint.hash import key_hash
@@ -283,12 +283,38 @@ class AbstractGraph(ABC):
 
         return ft & restr
 
+    def _has_out_prefix(self, table):
+        return (
+            table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
+        )
+
+    def _spawn_virtual_module(self, table):
+        schema = table.split(".")[0].strip("`")
+        logger.warning(f"Spawning tables for {schema}")
+        vm = VirtualModule(f"RestrGraph_{schema}", schema)
+        v_graph = vm.schema.connection.dependencies
+        v_graph.load()
+
+        self.graph.add_nodes_from(v_graph.nodes(data=True))
+        self.graph.add_edges_from(v_graph.edges(data=True))
+
     def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
-        if table in self.graph.nodes:
+
+        # If already in imported, return
+        if self.graph.nodes.get(table):  # Revert #1356
+            return False  # table in nodes not enough. Must have info
+
+        # If within spyglass, attempt spawn
+        ret = self._has_out_prefix(table)
+        if not ret:
+            _ = self._spawn_virtual_module(table)
+
+        # If spawn successful, return
+        if self.graph.nodes.get(table):
             return False
-        ret = table.split(".")[0].split("_")[0].strip("`") not in SHARED_MODULES
+
         if warn and ret:  # Log warning if outside
             logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return ret
