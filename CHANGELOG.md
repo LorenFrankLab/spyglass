@@ -17,7 +17,8 @@ When altering tables, import all foreign key references.
 
 ### Infrastructure
 
-- Set default codecov threshold for test fail #13XX
+- Set default codecov threshold for test fail #1370
+- Simplify PR template #1370
 
 ### Decoding
 
