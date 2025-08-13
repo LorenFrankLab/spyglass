@@ -223,6 +223,21 @@
 # 2. Developers who wish to work on the code base may want to do an editable
 # install from within their conda environment: `pip install -e /path/to/spyglass/`
 #
+# ### Staying up to date 
+#
+# Go get the latest updates and bugfixes between releases, you should occasionally
+# navigate to your spyglass directory and run ...
+#
+# ```bash
+# # cd /your/project/directory/spyglass/
+# git pull # update files from GitHub
+# pip install . -U # update install from this directory
+# ```
+#
+# Adding `--no-deps` to this last install command will skip over dependency checks,
+# for a faster first pass.
+#
+# If you encounter issues, please try updating first.
 
 # ### Optional Dependencies
 #
