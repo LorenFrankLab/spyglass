@@ -15,19 +15,19 @@ When altering tables, import all foreign key references.
 
 - Delete extra pyscripts that were renamed # 1363
 
-### Decoding
+### Pipelines
 
-- Ensure results directory is created if it doesn't exist #1362
-
-### Spikesorting
-
-- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+- Common
+      - Add tables for storing optogenetic experiment information #1312
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
 
-- Add tables for storing optogenetic experiment information #1312
 - Ensure merge tables are declared during file insertion #1205
 - Update URL for DANDI Docs #1210
 - Add common method `get_position_interval_epoch` #1056
