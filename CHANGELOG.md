@@ -15,6 +15,10 @@ When altering tables, import all foreign key references.
 
 - Delete extra pyscripts that were renamed # 1363
 
+### Infrastructure
+
+- Set default codecov threshold for test fail #13XX
+
 ### Decoding
 
 - Ensure results directory is created if it doesn't exist #1362
