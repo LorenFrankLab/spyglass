@@ -121,21 +121,24 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
             self.SpatialConditional.insert(spatial_inserts)
 
     def get_stimulus_on_intervals(self, key):
-        key = (self & key).fetch1("KEY")
+        self.ensure_single_entry(key)
         nwb = (self & key).fetch_nwb()[0]
         stimulus = nwb["stimulus"]
-        stim_time = stimulus.timestamps
-        stim_data = stimulus.data
+        stim_time = stimulus.get_timestamps()
+
         # restrict data to the epoch
         epoch_interval = (IntervalList & (TaskEpoch & key)).fetch_interval()
         epoch_ind = epoch_interval.contains(stim_time, as_indices=True)
         stim_time = stim_time[epoch_ind]
-        stim_data = stim_data[epoch_ind]
-        # make interval for stimulu on times
+        stim_data = stimulus.data[epoch_ind]
+
+        # make intervals between when the stimulus turns on and off
         t_on = stim_time[stim_data == 1]
         t_off = stim_time[stim_data == 0]
+        # if the first t_on is after the first t_off, remove the first t_off
         if t_off[0] < t_on[0]:
             t_off = t_off[1:]
+        # if the last t_on is after the last t_off, add an end time
         if t_on[-1] > t_off[-1]:
             t_off = np.append(t_off, stim_time[-1])
         stim_on_interval = np.array([t_on, t_off]).T
@@ -158,7 +161,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ---
         filter_phase: float # target phase of the trigger
         reference_ntrode: int # reference ntrode for the trigger
-        lockout_period: float # lockout period in sample steps
+        lockout_period: int # lockout period in sample steps
         """
 
     class SpeedConditional(SpyglassMixin, dj.Part):
@@ -175,14 +178,12 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         # Spatial conditional for optogenetic stimulation
         -> master
         ---
-        nodes: longblob # list of nodes defining polygonal area for optogenetic stimulation
+        nodes: mediumblob # list of nodes defining polygonal area for optogenetic stimulation
         """
 
     def get_stimulus_timeseries(self):
-        if not len(self) == 1:
-            raise ValueError(
-                "get_stimulus_timeseries() only works for single entries"
-            )
+        """Get the stimulus timeseries for the optogenetic protocol."""
+        self.ensure_single_entry()
         return self.fetch_nwb()[0]["stimulus"]
 
 
