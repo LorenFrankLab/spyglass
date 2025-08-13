@@ -54,81 +54,102 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         spatial_inserts = []
         for row in opto_epoch_df.itertuples():
             # master table key for epoch
-            base_key = dict(
-                nwb_file_name=nwb_key["nwb_file_name"],
-                epoch=row.epoch_number,
+            epoch_inserts.append(
+                self.make_epoch_entry(nwb_key["nwb_file_name"], row)
             )
-            epoch_key = dict(
-                base_key,
-                description=row.convenience_code,
-                pulse_length=row.pulse_length_in_ms,
-                pulses_per_train=row.number_pulses_per_pulse_train,
-                period=row.period_in_ms,
-                intertrain_interval=row.intertrain_interval_in_ms,
-                stimulus_power=row.power_in_mW,
-                stimulus_object_id=row.stimulus_signal.object_id,
-            )
-            epoch_inserts.append(epoch_key)
             # Ripple trigger part if present
             if getattr(row, "ripple_filter_on", None):
-                ripple_key = dict(
-                    base_key,
-                    threshold_sd=getattr(
-                        row, "ripple_filter_threshold_sd", None
-                    ),
-                    n_above_threshold=getattr(
-                        row, "ripple_filter_num_above_threshold", None
-                    ),
-                    lockout_period=getattr(
-                        row, "ripple_filter_lockout_period_in_samples", None
-                    ),
+                ripple_inserts.append(
+                    self.make_ripple_trigger_entry(
+                        nwb_key["nwb_file_name"], row
+                    )
                 )
-                ripple_inserts.append(ripple_key)
             # Theta trigger part if present
             if getattr(row, "theta_filter_on", None):
-                theta_key = dict(
-                    base_key,
-                    filter_phase=getattr(
-                        row, "theta_filter_phase_in_deg", None
-                    ),
-                    reference_ntrode=getattr(
-                        row, "theta_filter_reference_ntrode", None
-                    ),
-                    lockout_period=getattr(
-                        row, "theta_filter_lockout_period_in_samples", None
-                    ),
+                theta_inserts.append(
+                    self.make_theta_trigger_entry(nwb_key["nwb_file_name"], row)
                 )
-                theta_inserts.append(theta_key)
             # Speed conditional part if present
             if getattr(row, "speed_filter_on", None):
-                speed_key = dict(
-                    base_key,
-                    speed_threshold=getattr(
-                        row, "speed_filter_threshold_in_cm_per_s", None
-                    ),
-                    active_above_threshold=getattr(
-                        row, "speed_filter_on_above_threshold", None
-                    ),
+                speed_inserts.append(
+                    self.make_speed_filter_entry(nwb_key["nwb_file_name"], row)
                 )
-                speed_inserts.append(speed_key)
             # Spatial conditional part if present
-            spatial_nodes = getattr(
-                row, "spatial_filter_region_node_coordinates_in_pixels", None
-            )
-            if spatial_nodes is not None:
+            if (
+                spatial_nodes := getattr(
+                    row,
+                    "spatial_filter_region_node_coordinates_in_pixels",
+                    None,
+                )
+            ) is not None:
                 spatial_key = dict(
-                    base_key,
+                    nwb_file_name=nwb_key["nwb_file_name"],
+                    epoch=row.epoch_number,
                     nodes=spatial_nodes
                     * row.spatial_filter_cameras_cm_per_pixel,
                 )
                 spatial_inserts.append(spatial_key)
         # insert keys
         with self._safe_context():
+            logger.info("Inserting Protocol")
             self.insert(epoch_inserts)
+            logger.info("Inserting RippleTrigger")
             self.RippleTrigger.insert(ripple_inserts)
+            logger.info("Inserting ThetaTrigger")
             self.ThetaTrigger.insert(theta_inserts)
+            logger.info("Inserting SpeedConditional")
             self.SpeedConditional.insert(speed_inserts)
+            logger.info("Inserting SpatialConditional")
             self.SpatialConditional.insert(spatial_inserts)
+
+    @staticmethod
+    def make_epoch_entry(nwb_file_name, row):
+        return dict(
+            nwb_file_name=nwb_file_name,
+            epoch=row.epoch_number,
+            description=row.convenience_code,
+            pulse_length=row.pulse_length_in_ms,
+            pulses_per_train=row.number_pulses_per_pulse_train,
+            period=row.period_in_ms,
+            intertrain_interval=row.intertrain_interval_in_ms,
+            stimulus_power=row.power_in_mW,
+            stimulus_object_id=row.stimulus_signal.object_id,
+        )
+
+    @staticmethod
+    def make_ripple_trigger_entry(nwb_file_name, row):
+        return dict(
+            nwb_file_name=nwb_file_name,
+            epoch=row.epoch_number,
+            threshold_sd=getattr(row, "ripple_filter_threshold_sd"),
+            n_above_threshold=getattr(row, "ripple_filter_num_above_threshold"),
+            lockout_period=getattr(
+                row, "ripple_filter_lockout_period_in_samples"
+            ),
+        )
+
+    @staticmethod
+    def make_theta_trigger_entry(nwb_file_name, row):
+        return dict(
+            nwb_file_name=nwb_file_name,
+            epoch=row.epoch_number,
+            filter_phase=getattr(row, "theta_filter_phase_in_deg"),
+            reference_ntrode=getattr(row, "theta_filter_reference_ntrode"),
+            lockout_period=getattr(
+                row, "theta_filter_lockout_period_in_samples"
+            ),
+        )
+
+    @staticmethod
+    def make_speed_filter_entry(nwb_file_name, row):
+        return dict(
+            nwb_file_name=nwb_file_name,
+            epoch=row.epoch_number,
+            speed_threshold=getattr(row, "speed_filter_threshold_in_cm_per_s"),
+            active_above_threshold=getattr(
+                row, "speed_filter_on_above_threshold"
+            ),
+        )
 
     def get_stimulus_on_intervals(self, key):
         self.ensure_single_entry(key)
@@ -161,7 +182,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ---
         threshold_sd: float  # standard deviation threshold for ripple detection
         n_above_threshold: int  # number of samples above threshold for ripple detection
-        lockout_period: float  # lockout period in sample steps
+        lockout_period: int  # lockout period in sample steps
         """
 
     class ThetaTrigger(SpyglassMixin, dj.Part):
