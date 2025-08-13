@@ -17,7 +17,7 @@ When altering tables, import all foreign key references.
 
 ### Infrastructure
 
-- Auto-load within-Spyglass tables for graph operations #XXXX
+- Auto-load within-Spyglass tables for graph operations #1368
 
 ### Pipelines
 
