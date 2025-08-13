@@ -1,12 +1,10 @@
-permissions:
-  contents: read
 name: Lint
 permissions:
   contents: read
 
 on:
   push:
-    branches: 
+    branches:
       - '!documentation'
   pull_request:
 
