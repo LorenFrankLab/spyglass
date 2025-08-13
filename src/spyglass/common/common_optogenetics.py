@@ -20,13 +20,13 @@ schema = dj.schema("common_optogenetics")
 @schema
 class OptogeneticProtocol(SpyglassMixin, dj.Manual):
     definition = """
-    # Optogenetics stimulation
+    # Describes the optogenetic stimulation protocol used within an epoch
     -> TaskEpoch
     ---
     description: varchar(255)  # description of the optogenetic stimulation
     pulse_length: float  # pulse length in ms
     pulses_per_train: int  # number of pulses per train
-    intratrain_interval: float  # period in ms
+    period: float  # period in ms
     intertrain_interval: float  # intertrain interval in ms
     stimulus_power: float  # stimulus power in mW
     stimulus_object_id: varchar(64)  # object id of the dio corresponding to the optogenetic stimulation
@@ -52,58 +52,68 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         theta_inserts = []
         speed_inserts = []
         spatial_inserts = []
-        for _, row in opto_epoch_df.iterrows():
+        for row in opto_epoch_df.itertuples():
             # master table key for epoch
             base_key = dict(
                 nwb_file_name=nwb_key["nwb_file_name"],
-                epoch=row["epoch_number"],
+                epoch=row.epoch_number,
             )
             epoch_key = dict(
                 base_key,
-                description=row["convenience_code"],
-                pulse_length=row["pulse_length_in_ms"],
-                pulses_per_train=row["number_pulses_per_pulse_train"],
-                intratrain_interval=row["period_in_ms"],
-                intertrain_interval=row["intertrain_interval_in_ms"],
-                stimulus_power=row["power_in_mW"],
-                stimulus_object_id=row["stimulus_signal"].object_id,
+                description=row.convenience_code,
+                pulse_length=row.pulse_length_in_ms,
+                pulses_per_train=row.number_pulses_per_pulse_train,
+                period=row.period_in_ms,
+                intertrain_interval=row.intertrain_interval_in_ms,
+                stimulus_power=row.power_in_mW,
+                stimulus_object_id=row.stimulus_signal.object_id,
             )
             epoch_inserts.append(epoch_key)
             # Ripple trigger part if present
-            if row.get("ripple_filter_on", None):
+            if getattr(row, "ripple_filter_on", None):
                 ripple_key = dict(
                     base_key,
-                    threshold_sd=row["ripple_filter_threshold_sd"],
-                    n_above_threshold=row["ripple_filter_num_above_threshold"],
-                    lockout_period=row[
-                        "ripple_filter_lockout_period_in_samples"
-                    ],
+                    threshold_sd=getattr(
+                        row, "ripple_filter_threshold_sd", None
+                    ),
+                    n_above_threshold=getattr(
+                        row, "ripple_filter_num_above_threshold", None
+                    ),
+                    lockout_period=getattr(
+                        row, "ripple_filter_lockout_period_in_samples", None
+                    ),
                 )
                 ripple_inserts.append(ripple_key)
             # Theta trigger part if present
-            if row.get("theta_filter_on", None):
+            if getattr(row, "theta_filter_on", None):
                 theta_key = dict(
                     base_key,
-                    filter_phase=row["theta_filter_phase_in_deg"],
-                    reference_ntrode=row["theta_filter_reference_ntrode"],
-                    lockout_period=row[
-                        "theta_filter_lockout_period_in_samples"
-                    ],
+                    filter_phase=getattr(
+                        row, "theta_filter_phase_in_deg", None
+                    ),
+                    reference_ntrode=getattr(
+                        row, "theta_filter_reference_ntrode", None
+                    ),
+                    lockout_period=getattr(
+                        row, "theta_filter_lockout_period_in_samples", None
+                    ),
                 )
                 theta_inserts.append(theta_key)
             # Speed conditional part if present
-            if row.get("speed_filter_on", None):
+            if getattr(row, "speed_filter_on", None):
                 speed_key = dict(
                     base_key,
-                    speed_threshold=row["speed_filter_threshold_in_cm_per_s"],
-                    active_above_threshold=row[
-                        "speed_filter_on_above_threshold"
-                    ],
+                    speed_threshold=getattr(
+                        row, "speed_filter_threshold_in_cm_per_s", None
+                    ),
+                    active_above_threshold=getattr(
+                        row, "speed_filter_on_above_threshold", None
+                    ),
                 )
                 speed_inserts.append(speed_key)
             # Spatial conditional part if present
-            spatial_nodes = row.get(
-                "spatial_filter_region_node_coordinates_in_pixels", None
+            spatial_nodes = getattr(
+                row, "spatial_filter_region_node_coordinates_in_pixels", None
             )
             if spatial_nodes is not None:
                 spatial_key = dict(
@@ -146,7 +156,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class RippleTrigger(SpyglassMixin, dj.Part):
         definition = """
-        # Ripple trigger for optogenetic stimulation
+        # If used, describes the ripple-related trigger for optogenetic stimulation
         -> master
         ---
         threshold_sd: float  # standard deviation threshold for ripple detection
@@ -156,7 +166,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class ThetaTrigger(SpyglassMixin, dj.Part):
         definition = """
-        # Theta trigger for optogenetic stimulation
+        # If used, describes the theta-related trigger for optogenetic stimulation
         -> master
         ---
         filter_phase: float # target phase of the trigger
@@ -166,7 +176,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class SpeedConditional(SpyglassMixin, dj.Part):
         definition = """
-        # Speed conditional for optogenetic stimulation
+        # If used, describes the speed-related condition for optogenetic stimulation
         -> master
         ---
         speed_threshold: float # speed threshold for optogenetic stimulation (cm/s)
@@ -175,7 +185,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class SpatialConditional(SpyglassMixin, dj.Part):
         definition = """
-        # Spatial conditional for optogenetic stimulation
+        # If used, describes the spatial region where optogenetic stimulation is applied
         -> master
         ---
         nodes: mediumblob # list of nodes defining polygonal area for optogenetic stimulation
@@ -190,7 +200,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 @schema
 class Virus(SpyglassMixin, dj.Manual):
     definition = """
-    # Virus information
+    # Information about transgenic viruses
     virus_name: varchar(255)
     ---
     construct_name: varchar(255)  # name of the construct
@@ -211,7 +221,7 @@ class Virus(SpyglassMixin, dj.Manual):
 @schema
 class VirusInjection(SpyglassMixin, dj.Manual):
     definition = """
-    # Virus injection information
+    # Describes injection site and and virus in transgenic experiment
     -> Session
     injection_object_id: varchar(64)  # object id of the injection
     ---
@@ -279,7 +289,7 @@ class VirusInjection(SpyglassMixin, dj.Manual):
 @schema
 class OpticalFiberDevice(SpyglassMixin, dj.Manual):
     definition = """
-    # Optical fiber device information
+    #
     fiber_name: varchar(255)  # name of the device
     ---
     model: varchar(255)  # model of the device
