@@ -113,11 +113,12 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
                 )
                 spatial_inserts.append(spatial_key)
         # insert keys
-        self.insert(epoch_inserts)
-        self.RippleTrigger.insert(ripple_inserts)
-        self.ThetaTrigger.insert(theta_inserts)
-        self.SpeedConditional.insert(speed_inserts)
-        self.SpatialConditional.insert(spatial_inserts)
+        with self._safe_context():
+            self.insert(epoch_inserts)
+            self.RippleTrigger.insert(ripple_inserts)
+            self.ThetaTrigger.insert(theta_inserts)
+            self.SpeedConditional.insert(speed_inserts)
+            self.SpatialConditional.insert(spatial_inserts)
 
     def get_stimulus_on_intervals(self, key):
         key = (self & key).fetch1("KEY")
@@ -260,10 +261,11 @@ class VirusInjection(SpyglassMixin, dj.Manual):
             titer=virus_injection_object.virus.titer_in_vg_per_ml,
         )
 
-        Virus().insert_from_nwb_object(virus_injection_object.virus)
-        self.insert1(
-            key,
-        )
+        with self._safe_context():
+            Virus().insert_from_nwb_object(virus_injection_object.virus)
+            self.insert1(
+                key,
+            )
 
     def make(self, key):
         # for use with populate_all_common
