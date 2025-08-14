@@ -225,7 +225,7 @@
 #
 # ### Staying up to date
 #
-# Go get the latest updates and bugfixes between releases, you should occasionally
+# To get the latest updates and bugfixes between releases, you should occasionally
 # navigate to your spyglass directory and run ...
 #
 # ```bash
