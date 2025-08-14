@@ -14,13 +14,12 @@ This PR.
 # Checklist:
 
 <!--
-For items below with choices, select one (e.g., yes, no) 
-and check the box to indicate that a choice was selected.
-If not applicable, check the box and add `N/A` after the box.
+For items below with `if`, please mark those that do not apply with N/A
+
 For example:
-- [X] This has a choice: no
-- [X] N/A. If choice, other item.
-This comment may be deleted on submission.
+- [X] N/A. If this PR X, related item.
+- [X] If this PR Y, other item.
+- [X] I have updated the `CHANGELOG.md` ...
 
 Alter notes example:
 ```python
@@ -29,10 +28,8 @@ Table.alter() # Comment regarding the change
 ```
 -->
 
-- [ ] This PR should be accompanied by a release: (yes/no/unsure)
-- [ ] If release, I have updated the `CITATION.cff`
-- [ ] This PR makes edits to table definitions: (yes/no)
-- [ ] If table edits, I have included an `alter` snippet for release notes.
+- [ ] If this PR should be accompanied by a release, I have updated the `CITATION.cff`
+- [ ] If this PR edits table definitions, I have included an `alter` snippet for release notes.
 - [ ] If this PR makes changes to position, I ran the relevant tests locally.
+- [ ] If this PR makes user-facing changes, I have added/edited docs/notebooks to reflect the changes
 - [ ] I have updated the `CHANGELOG.md` with PR number and description.
-- [ ] I have added/edited docs/notebooks to reflect the changes
