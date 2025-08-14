@@ -200,7 +200,7 @@ class TaskRecording(SpyglassMixin, dj.Manual):
             return
 
         self_insert = nwb_dict.copy()
-        rec_fields = nwbf.acquisition.get["task_recording"].fields
+        rec_fields = nwbf.acquisition["task_recording"].fields
         for table_name in ["actions", "events", "states"]:
             table_obj = rec_fields.get(table_name)
             if not table_obj:

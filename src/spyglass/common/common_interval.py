@@ -57,6 +57,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
         _ = cls._insert_epochs_from_nwbfile(nwbf, nwb_file_name)
         _ = cls._insert_invalid_times_from_nwbfile(nwbf, nwb_file_name)
 
+    @classmethod
     def _insert_epochs_from_nwbfile(cls, nwbf: NWBFile, nwb_file_name: str):
         """Insert epochs from NWB file into IntervalList."""
         if nwbf.epochs is None:
@@ -83,6 +84,7 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
         cls.insert(epoch_inserts, skip_duplicates=True)
 
+    @classmethod
     def _insert_invalid_times_from_nwbfile(
         cls, nwbf: NWBFile, nwb_file_name: str
     ) -> None:
