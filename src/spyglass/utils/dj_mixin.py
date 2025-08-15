@@ -874,7 +874,7 @@ class SpyglassMixin(ExportMixin):
         )
         if return_graph:
             return rg
-        print(rg.restr_ft)
+        logger.info(rg.restr_ft)
 
     # ------------------------------ Check locks ------------------------------
 

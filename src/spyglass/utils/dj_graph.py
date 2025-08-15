@@ -310,8 +310,11 @@ class AbstractGraph(ABC):
             return self._is_out(children[0])
 
         # If already in imported, return
-        if self.graph.nodes.get(table):  # Revert #1356
-            return False  # table in nodes not enough. Must have info
+        # Reverts #1356: was `table in self.graph.nodes`, now `get`
+        #   - Present nodes may be children of imported, with no data
+        #   - Only imported tables have data retrieved by `get`
+        if self.graph.nodes.get(table):
+            return False
 
         # If within spyglass, attempt spawn
         ret = self._has_out_prefix(table)
