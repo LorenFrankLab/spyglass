@@ -2,13 +2,14 @@ from ndx_optogenetics import OptogeneticVirusInjection
 
 
 def test_virus_injection(
-    opto_only_insert,
+    opto_only_nwb,
     common,
     virus_dict,
 ):
+    # data_import.insert_sessions(opto_only_nwb, raise_err=True)
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
-    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_insert)}
+    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_nwb)}
 
     # Test Virus injection
     injection_query = common.VirusInjection() & key
@@ -27,13 +28,14 @@ def test_virus_injection(
 
 
 def test_optical_fiber(
-    opto_only_insert,
+    opto_only_nwb,
     common,
     fiber_model_dict,
 ):
+    # data_import.insert_sessions(opto_only_nwb, raise_err=True)
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
-    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_insert)}
+    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_nwb)}
     # Fiber implant checks
     # common.OpticalFiberImplant().make(key)
     implant_query = common.OpticalFiberImplant & key
@@ -48,13 +50,15 @@ def test_optical_fiber(
 
 
 def test_optogenetic_protocol(
-    opto_only_insert,
+    opto_only_nwb,
     common,
     opto_epoch_dict,
+    data_import,
 ):
+    # data_import.insert_sessions(opto_only_nwb, raise_err=True)
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
-    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_insert)}
+    key = {"nwb_file_name": get_nwb_copy_filename(opto_only_nwb)}
     # Protocol checks
     protocol_query = common.OptogeneticProtocol() & key
     assert (

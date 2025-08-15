@@ -106,7 +106,7 @@ def dio_only_nwb(raw_dir, common):
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def virus_dict():
     return dict(
         name="test_virus_1",
@@ -117,7 +117,7 @@ def virus_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def virus_injection_dict(virus_dict):
     return dict(
         name="injection_1",
@@ -135,7 +135,7 @@ def virus_injection_dict(virus_dict):
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def excitation_source_model_dict():
     return dict(
         name="test_source_model",
@@ -146,7 +146,7 @@ def excitation_source_model_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def excitation_source_dict():
     return dict(
         name="test_source",
@@ -156,7 +156,7 @@ def excitation_source_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def fiber_model_dict():
     return dict(
         name="test_fiber_model",
@@ -172,7 +172,7 @@ def fiber_model_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def fiber_implant_dict():
     return dict(
         implanted_fiber_description="Test fiber implant",
@@ -187,7 +187,7 @@ def fiber_implant_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def opto_epoch_dict():
     return dict(
         start_time=0.0,
@@ -222,7 +222,7 @@ def opto_epoch_dict():
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def opto_only_nwb(
     raw_dir,
     common,
@@ -233,6 +233,7 @@ def opto_only_nwb(
     excitation_source_dict,
     fiber_model_dict,
     fiber_implant_dict,
+    data_import,
 ):
     dummy_name = "mock_optogenetics.nwb"
     # Create a mock NWBFile with optogenetic objects
@@ -385,14 +386,8 @@ def opto_only_nwb(
     with pynwb.NWBHDF5IO(path, "w") as io:
         io.write(nwb)
 
+    data_import.insert_sessions(dummy_name, raise_err=True)
     yield dummy_name
-
-
-@pytest.fixture(scope="function")
-def opto_only_insert(common, opto_only_nwb, data_import):
-    # insert the session into the database
-    data_import.insert_sessions(opto_only_nwb, raise_err=True)
-    yield opto_only_nwb
 
     # Cleanup
     (common.Nwbfile & {"nwb_file_name": "mock_optogenetics_.nwb"}).delete(
