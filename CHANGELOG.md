@@ -21,13 +21,14 @@ When altering tables, import all foreign key references.
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 
-### Decoding
+### Pipelines
 
-- Ensure results directory is created if it doesn't exist #1362
-
-### Spikesorting
-
-- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+- Common
+      - Add tables for storing optogenetic experiment information #1312
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
