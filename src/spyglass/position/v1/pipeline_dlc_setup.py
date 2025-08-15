@@ -18,10 +18,9 @@ def setup_spyglass_dlc_project(
     bodyparts: List[str],
     lab_team: str,
     video_keys: List[Dict],
-    sampler: str = "uniform",
     num_frames: int = 20,
     skip_duplicates: bool = True,
-    **kwargs,  # Allow pass-through for extract_frames if needed
+    **extract_frames_kwargs,
 ) -> Optional[str]:
     """Sets up a new DeepLabCut project in Spyglass and extracts initial frames.
 
@@ -132,7 +131,8 @@ def setup_spyglass_dlc_project(
         logger.info(
             f"---- Step 2: Extracting Frames for Project: {project_name} ----"
         )
-        DLCProject().run_extract_frames(project_key)
+        extract_frames_kwargs.setdefault("userfeedback", False)
+        DLCProject().run_extract_frames(project_key, **extract_frames_kwargs)
 
         # --- 3. Inform User for Manual Step ---
         logger.info(f"==== Project Setup Complete for: {project_name} ====")

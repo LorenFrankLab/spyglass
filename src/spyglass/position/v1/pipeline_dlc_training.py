@@ -7,6 +7,8 @@ import datajoint as dj
 # --- Spyglass Imports ---
 from spyglass.position.v1 import DLCModelSource  # To check results
 from spyglass.position.v1 import (
+    DLCModel,
+    DLCModelSelection,
     DLCModelTraining,
     DLCModelTrainingParams,
     DLCModelTrainingSelection,
@@ -21,13 +23,9 @@ def run_spyglass_dlc_training_v1(
     project_name: str,
     training_params_name: str,
     dlc_training_params: Dict,
-    sampler: str = "uniform",  # Used to identify training set ID
-    train_config_idx: int = 0,  # Index for train config in DLCProject.File
-    video_set_idx: Optional[
-        int
-    ] = None,  # Index for videoset config in DLCProject.File
-    model_prefix: str = "",
+    dlc_model_params_name: str = "default",
     skip_duplicates: bool = True,
+    training_id: Optional[int] = None,
     **kwargs,  # Pass-through for populate options
 ) -> Optional[str]:
     """Runs the Spyglass v1 DeepLabCut Model Training pipeline.
@@ -103,15 +101,10 @@ def run_spyglass_dlc_training_v1(
     if not (DLCProject & project_key):
         raise ValueError(f"DLCProject not found: {project_name}")
 
-    # Find the TrainingSet ID based on sampler and file indices
-    try:
-        training_set_key = DLCModelTraining.get_training_set_key(
-            project_name, sampler, train_config_idx, video_set_idx
-        )
-    except ValueError as e:
-        raise ValueError(
-            f"Could not find TrainingSet for project '{project_name}' with specified criteria: {e}"
-        )
+    # if training_id is not None or training_id <= 0:
+    #     raise ValueError(
+    #         f"Invalid training_id: {training_id}. Must be positive."
+    #     )
 
     # --- 1. Insert Training Parameters ---
     params_key = {"dlc_training_params_name": training_params_name}
@@ -122,7 +115,6 @@ def run_spyglass_dlc_training_v1(
         DLCModelTrainingParams.insert_new_params(
             paramset_name=training_params_name,
             params=dlc_training_params,
-            paramset_idx=0,  # Assuming first index if new
             skip_duplicates=skip_duplicates,
         )
     elif skip_duplicates:
@@ -136,9 +128,9 @@ def run_spyglass_dlc_training_v1(
 
     # --- 2. Insert Training Selection ---
     selection_key = {
-        **training_set_key,  # Includes project_name, training_set_id
+        **project_key,
         "dlc_training_params_name": training_params_name,
-        "model_prefix": model_prefix,
+        "training_id": 1 if training_id is None else training_id,
     }
     logger.info(
         f"---- Step 2: Inserting Training Selection for Project: {project_name} ----"
@@ -184,10 +176,27 @@ def run_spyglass_dlc_training_v1(
                 f"DLCModelTraining population failed for {selection_key}"
             )
 
-        # Fetch the linked DLCModelSource entry created by the training make method
-        model_source_entry = DLCModelSource & (DLCModelTraining & selection_key)
-        if model_source_entry:
-            dlc_model_name = model_source_entry.fetch1("dlc_model_name")
+        if not (DLCModelSource() & selection_key):
+            raise dj.errors.DataJointError(
+                f"DLCModelSource entry missing for {selection_key}"
+            )
+
+        # Populate DLCModel
+        logger.info(
+            f"---- Step 4: Populating DLCModel for Project: {project_name} ----"
+        )
+        model_key = {
+            **(DLCModelSource & selection_key).fetch1("KEY"),
+            "dlc_model_params_name": dlc_model_params_name,
+        }
+        DLCModelSelection().insert1(
+            model_key,
+            skip_duplicates=True,
+        )
+        DLCModel.populate(model_key)
+
+        if DLCModel & model_key:
+            dlc_model_name = (DLCModel & model_key).fetch1("dlc_model_name")
             logger.info(
                 f"==== Training Complete for Project: {project_name} ===="
             )
