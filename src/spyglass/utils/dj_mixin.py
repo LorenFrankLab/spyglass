@@ -853,6 +853,29 @@ class SpyglassMixin(ExportMixin):
 
         return ret
 
+    def restrict_all(
+        self,
+        restriction: str = True,
+        direction: str = "down",
+        return_graph: bool = False,
+        verbose: bool = False,
+    ) -> List:
+        RestrGraph = self._graph_deps[1]
+        rg = RestrGraph(
+            seed_table=self,
+            leaves=dict(
+                table_name=self.full_table_name,
+                restriction=self.restriction or restriction,
+            ),
+            direction=direction,
+            banned_tables=list(self._banned_search_tables),
+            cascade=True,
+            verbose=verbose,
+        )
+        if return_graph:
+            return rg
+        logger.info(rg.restr_ft)
+
     # ------------------------------ Check locks ------------------------------
 
     def exec_sql_fetchall(self, query):
