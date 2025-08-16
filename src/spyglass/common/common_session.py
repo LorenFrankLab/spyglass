@@ -113,6 +113,8 @@ class Session(SpyglassMixin, dj.Imported):
         logger.info("Session populates Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
 
+        # TODO: Add TaskRecording
+
         Session().insert1(
             {
                 "nwb_file_name": nwb_file_name,
