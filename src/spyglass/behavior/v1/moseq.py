@@ -296,7 +296,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         key : dict
             key to a single MoseqModel table entry
 
-        Returns
+        Returgns
         -------
         List[str]
             list of paths to the training progress plots
@@ -307,6 +307,74 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             "project_dir", "model_name"
         )
         return f"{project_dir}/{model_name}/fitting_progress.pdf"
+
+    def generate_trajectory_plots(
+        self, key: dict = True, output_dir: Path = None, **kwargs
+    ):
+        """calls the moseq function to generate the pose trajectory of each syllable
+
+        Parameters
+        ----------
+        key : dict, optional
+            restriction to the moseq model table, by default True
+        output_dir : Path, optional
+            where to save the figure to, default of None saves to project_dir
+        """
+        self.ensure_single_entry(key)
+        project_dir = (self & key).fetch1("project_dir")
+        model_name = (self & key).fetch1("model_name")
+        results = kpms.load_results(project_dir, model_name)
+        config = kpms.load_config(project_dir)
+        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+            key, format_for_moseq=True
+        )
+        kpms.generate_trajectory_plots(
+            coordinates,
+            results,
+            project_dir,
+            model_name,
+            output_dir=output_dir,
+            **config,
+            **kwargs,
+        )
+
+    def generate_grid_movies(
+        self,
+        key: dict = True,
+        output_dir: Path = None,
+        keypoints_only: bool = True,
+        **kwargs,
+    ):
+        """calls the moseq function to creat video axamples of each identified syllable
+
+        Parameters
+        ----------
+        key : dict, optional
+            restriction to the moseq model table, by default True
+        output_dir : Path, optional
+            where to save the resulting videos, default of None saves to project_dir
+        keypoints_only : bool, optional
+            displays keypoints without the original video, by default True
+        """
+
+        self.ensure_single_entry(key)
+        project_dir = (self & key).fetch1("project_dir")
+        model_name = (self & key).fetch1("model_name")
+        results = kpms.load_results(project_dir, model_name)
+        config = kpms.load_config(project_dir)
+        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+            key, format_for_moseq=True
+        )
+        kpms.generate_grid_movies(
+            results,
+            project_dir,
+            model_name,
+            coordinates=coordinates,
+            keypoints_only=keypoints_only,
+            output_dir=output_dir,
+            **config,
+            **kwargs,
+        )
 
 
 @schema
