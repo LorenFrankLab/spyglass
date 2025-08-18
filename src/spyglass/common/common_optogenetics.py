@@ -177,17 +177,17 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class RippleTrigger(SpyglassMixin, dj.Part):
         definition = """
-        # If used, describes the ripple-related trigger for optogenetic stimulation
+        # Parameters for detecting LFP ripples to trigger optogenetic stimulation
         -> master
         ---
         threshold_sd: float  # standard deviation threshold for ripple detection
         n_above_threshold: int  # number of samples above threshold for ripple detection
-        lockout_period: int  # lockout period in sample steps
+        lockout_period: int  # minimum number of samples between ripple-triggered stimulations
         """
 
     class ThetaTrigger(SpyglassMixin, dj.Part):
         definition = """
-        # If used, describes the theta-related trigger for optogenetic stimulation
+        # Parameters for detecting LFP theta-phase to trigger optogenetic stimulation
         -> master
         ---
         filter_phase: float # target phase of the trigger
@@ -197,7 +197,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class SpeedConditional(SpyglassMixin, dj.Part):
         definition = """
-        # If used, describes the speed-related condition for optogenetic stimulation
+        # Speed-related condition gating optogenetic stimulation
         -> master
         ---
         speed_threshold: float # speed threshold for optogenetic stimulation (cm/s)
@@ -206,7 +206,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     class SpatialConditional(SpyglassMixin, dj.Part):
         definition = """
-        # If used, describes the spatial region where optogenetic stimulation is applied
+        # Spatial region where animal must be for optogenetic stimulation to be applied
         -> master
         ---
         nodes: mediumblob # list of nodes defining polygonal area for optogenetic stimulation
