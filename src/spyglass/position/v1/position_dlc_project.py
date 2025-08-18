@@ -414,7 +414,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
                     "file_path": video,
                 }
             )
-        cls().File().insert1(
+        cls().File().insert(
             video_inserts,
             **kwargs,
         )
