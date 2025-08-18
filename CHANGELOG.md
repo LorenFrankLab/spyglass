@@ -14,6 +14,12 @@ When altering tables, import all foreign key references.
 ### Documentation
 
 - Delete extra pyscripts that were renamed # 1363
+- Add note on fetching changes to setup notebook #1371
+
+### Infrastructure
+
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
 
 ### Decoding
 
