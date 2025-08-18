@@ -25,6 +25,10 @@ When altering tables, import all foreign key references.
 
 - Ensure results directory is created if it doesn't exist #1362
 
+### Position
+
+- Ensure video files are properly added to `DLCProject` # 1367
+
 ### Spikesorting
 
 - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
