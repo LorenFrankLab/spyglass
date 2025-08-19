@@ -212,7 +212,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         config: dict,
         model_params: dict,
     ):
-        """Method to initialize a model. Creates model and runs initional ARHMM fit
+        """Method to initialize a model. Creates model and runs initial ARHMM fit
 
         Parameters
         ----------
@@ -252,20 +252,20 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model_name=model_name + "_ar",
         )
 
-    def analyze_pca(self, key: dict = dict(), explained_variace: float = 0.9):
+    def analyze_pca(self, key: dict = dict(), explained_variance: float = 0.9):
         """Method to analyze the PCA of a model
 
         Parameters
         ----------
         key : dict
             key to a single MoseqModel table entry
-        explained_variace : float, optional
+        explained_variance : float, optional
             minimum explained variance to print, by default 0.9
         """
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
         config = kpms.load_config(project_dir)
-        kpms.print_dims_to_explain_variance(pca, explained_variace)
+        kpms.print_dims_to_explain_variance(pca, explained_variance)
         kpms.plot_scree(pca, project_dir=project_dir)
         kpms.plot_pcs(pca, project_dir=project_dir, **config)
 
@@ -296,7 +296,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         key : dict
             key to a single MoseqModel table entry
 
-        Returgns
+        Returns
         -------
         List[str]
             list of paths to the training progress plots
@@ -345,7 +345,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         keypoints_only: bool = True,
         **kwargs,
     ):
-        """calls the moseq function to creat video axamples of each identified syllable
+        """calls the moseq function to create video examples of each identified syllable
 
         Parameters
         ----------
