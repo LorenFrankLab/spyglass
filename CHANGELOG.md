@@ -21,6 +21,10 @@ When altering tables, import all foreign key references.
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 
+### Behavior
+
+- Add methods for calling moseq visualization functions #1374
+
 ### Decoding
 
 - Ensure results directory is created if it doesn't exist #1362
