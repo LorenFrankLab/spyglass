@@ -34,6 +34,24 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     _nwb_table = Nwbfile
 
+    table_key_to_obj_map = dict(
+        epoch="epoch_number",
+        description="convenience_code",
+        pulse_length="pulse_length_in_ms",
+        pulses_per_train="number_pulses_per_pulse_train",
+        period="period_in_ms",
+        intertrain_interval="intertrain_interval_in_ms",
+        stimulus_power="power_in_mW",
+        threshold_sd="ripple_filter_threshold_sd",
+        n_above_threshold="ripple_filter_num_above_threshold",
+        ripple_lockout_period="ripple_filter_lockout_period_in_samples",
+        filter_phase="theta_filter_phase_in_deg",
+        reference_ntrode="theta_filter_reference_ntrode",
+        theta_lockout_period="theta_filter_lockout_period_in_samples",
+        speed_threshold="speed_filter_threshold_in_cm_per_s",
+        active_above_threshold="speed_filter_on_above_threshold",
+    )
+
     def make(self, key):
         nwb_key = {
             "nwb_file_name": key["nwb_file_name"],
@@ -104,52 +122,60 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 
     @staticmethod
     def make_epoch_entry(nwb_file_name, row):
+        entry = {
+            key: getattr(row, OptogeneticProtocol.table_key_to_obj_map[key])
+            for key in [
+                "epoch",
+                "description",
+                "pulse_length",
+                "pulses_per_train",
+                "period",
+                "intertrain_interval",
+                "stimulus_power",
+            ]
+        }
         return dict(
             nwb_file_name=nwb_file_name,
-            epoch=row.epoch_number,
-            description=row.convenience_code,
-            pulse_length=row.pulse_length_in_ms,
-            pulses_per_train=row.number_pulses_per_pulse_train,
-            period=row.period_in_ms,
-            intertrain_interval=row.intertrain_interval_in_ms,
-            stimulus_power=row.power_in_mW,
             stimulus_object_id=row.stimulus_signal.object_id,
+            **entry,
         )
 
-    @staticmethod
-    def make_ripple_trigger_entry(nwb_file_name, row):
+    @classmethod
+    def make_ripple_trigger_entry(cls, nwb_file_name, row):
+        entry = {
+            key: getattr(row, cls.table_key_to_obj_map[key])
+            for key in [
+                "epoch",
+                "threshold_sd",
+                "n_above_threshold",
+                "ripple_lockout_period",
+            ]
+        }
         return dict(
             nwb_file_name=nwb_file_name,
-            epoch=row.epoch_number,
-            threshold_sd=getattr(row, "ripple_filter_threshold_sd"),
-            n_above_threshold=getattr(row, "ripple_filter_num_above_threshold"),
-            lockout_period=getattr(
-                row, "ripple_filter_lockout_period_in_samples"
-            ),
+            **entry,
         )
 
-    @staticmethod
-    def make_theta_trigger_entry(nwb_file_name, row):
-        return dict(
-            nwb_file_name=nwb_file_name,
-            epoch=row.epoch_number,
-            filter_phase=getattr(row, "theta_filter_phase_in_deg"),
-            reference_ntrode=getattr(row, "theta_filter_reference_ntrode"),
-            lockout_period=getattr(
-                row, "theta_filter_lockout_period_in_samples"
-            ),
-        )
+    @classmethod
+    def make_theta_trigger_entry(cls, nwb_file_name, row):
+        entry = {
+            key: getattr(row, cls.table_key_to_obj_map[key])
+            for key in [
+                "epoch",
+                "filter_phase",
+                "reference_ntrode",
+                "theta_lockout_period",
+            ]
+        }
+        return dict(nwb_file_name=nwb_file_name, **entry)
 
-    @staticmethod
-    def make_speed_filter_entry(nwb_file_name, row):
-        return dict(
-            nwb_file_name=nwb_file_name,
-            epoch=row.epoch_number,
-            speed_threshold=getattr(row, "speed_filter_threshold_in_cm_per_s"),
-            active_above_threshold=getattr(
-                row, "speed_filter_on_above_threshold"
-            ),
-        )
+    @classmethod
+    def make_speed_filter_entry(cls, nwb_file_name, row):
+        entry = {
+            key: getattr(row, cls.table_key_to_obj_map[key])
+            for key in ["epoch", "speed_threshold", "active_above_threshold"]
+        }
+        return dict(nwb_file_name=nwb_file_name, **entry)
 
     def get_stimulus_on_intervals(self, key):
         self.ensure_single_entry(key)
@@ -182,7 +208,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ---
         threshold_sd: float  # standard deviation threshold for ripple detection
         n_above_threshold: int  # number of samples above threshold for ripple detection
-        lockout_period: int  # minimum number of samples between ripple-triggered stimulations
+        ripple_lockout_period: int  # minimum number of samples between ripple-triggered stimulations
         """
 
     class ThetaTrigger(SpyglassMixin, dj.Part):
@@ -192,7 +218,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         ---
         filter_phase: float # target phase of the trigger
         reference_ntrode: int # reference ntrode for the trigger
-        lockout_period: int # lockout period in sample steps
+        theta_lockout_period: int # lockout period in sample steps
         """
 
     class SpeedConditional(SpyglassMixin, dj.Part):
@@ -222,20 +248,25 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
 class Virus(SpyglassMixin, dj.Manual):
     definition = """
     # Information about transgenic viruses
-    virus_name: varchar(255)
+    virus_name: varchar(80)
     ---
     construct_name: varchar(255)  # name of the construct
     description: varchar(255)  # description of the virus
     manufacturer: varchar(255)  # manufacturer of the virus
     """
 
+    table_key_to_obj_map = dict(
+        virus_name="construct_name",
+        construct_name="construct_name",
+        description="description",
+        manufacturer="manufacturer",
+    )
+
     def insert_from_nwb_object(self, virus_object):
-        key = dict(
-            virus_name=virus_object.construct_name,
-            construct_name=virus_object.construct_name,
-            description=virus_object.description,
-            manufacturer=virus_object.manufacturer,
-        )
+        key = {
+            k: getattr(virus_object, v)
+            for k, v in self.table_key_to_obj_map.items()
+        }
         self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
 
 
@@ -263,6 +294,25 @@ class VirusInjection(SpyglassMixin, dj.Manual):
 
     _nwb_table = Nwbfile
 
+    table_key_to_injection_obj_map = dict(
+        injection_object_id="object_id",
+        name="name",
+        description="description",
+        hemisphere="hemisphere",
+        location="location",
+        ap_location="ap_in_mm",
+        ml_location="ml_in_mm",
+        dv_location="dv_in_mm",
+        pitch="pitch_in_deg",
+        roll="roll_in_deg",
+        yaw="yaw_in_deg",
+        volume="volume_in_uL",
+    )
+    table_key_to_virus_obj_map = dict(
+        virus_name="construct_name",
+        titer="titer_in_vg_per_ml",
+    )
+
     def insert_from_nwb_object(self, nwb_file_name, virus_injection_object):
         """
         Insert a VirusInjection entry from an NWB object.
@@ -275,22 +325,18 @@ class VirusInjection(SpyglassMixin, dj.Manual):
             An instance of the OptogeneticVirusInjection class containing the
             virus injection data.
         """
-        key = dict(
-            nwb_file_name=nwb_file_name,
-            virus_name=virus_injection_object.virus.construct_name,
-            injection_object_id=virus_injection_object.object_id,
-            name=virus_injection_object.name,
-            description=virus_injection_object.description,
-            hemisphere=virus_injection_object.hemisphere,
-            location=virus_injection_object.location,
-            ap_location=virus_injection_object.ap_in_mm,
-            ml_location=virus_injection_object.ml_in_mm,
-            dv_location=virus_injection_object.dv_in_mm,
-            pitch=virus_injection_object.pitch_in_deg,
-            roll=virus_injection_object.roll_in_deg,
-            yaw=virus_injection_object.yaw_in_deg,
-            volume=virus_injection_object.volume_in_uL,
-            titer=virus_injection_object.virus.titer_in_vg_per_ml,
+        key = dict(nwb_file_name=nwb_file_name)
+        key.update(
+            {
+                k: getattr(virus_injection_object, v)
+                for k, v in self.table_key_to_injection_obj_map.items()
+            }
+        )
+        key.update(
+            {
+                k: getattr(virus_injection_object.virus, v)
+                for k, v in self.table_key_to_virus_obj_map.items()
+            }
         )
 
         with self._safe_context():
@@ -311,7 +357,7 @@ class VirusInjection(SpyglassMixin, dj.Manual):
 class OpticalFiberDevice(SpyglassMixin, dj.Manual):
     definition = """
     #
-    fiber_name: varchar(255)  # name of the device
+    fiber_name: varchar(80)  # name of the device
     ---
     model: varchar(255)  # model of the device
     manufacturer: varchar(255)
@@ -321,6 +367,17 @@ class OpticalFiberDevice(SpyglassMixin, dj.Manual):
     ferrule_name: varchar(255) # name of the ferrule
     ferrule_diameter: float # diameter of the ferrule (in mm)
     """
+
+    table_key_to_obj_map = dict(
+        fiber_name="fiber_name",
+        model="fiber_model",
+        manufacturer="manufacturer",
+        numerical_aperture="numerical_aperture",
+        core_diameter="core_diameter_in_um",
+        active_length="active_length_in_mm",
+        ferrule_name="ferrule_name",
+        ferrule_diameter="ferrule_diameter_in_mm",
+    )
 
     def insert_from_nwb_object(self, fiber_object):
         """
@@ -332,21 +389,25 @@ class OpticalFiberDevice(SpyglassMixin, dj.Manual):
             An instance of the OpticalFiberDevice class containing the fiber
             device data.
         """
-        key = dict(
-            fiber_name=fiber_object.model.fiber_name,
-            model=fiber_object.model.fiber_model,
-            manufacturer=fiber_object.model.manufacturer,
-            numerical_aperture=fiber_object.model.numerical_aperture,
-            core_diameter=fiber_object.model.core_diameter_in_um,
-            active_length=fiber_object.model.active_length_in_mm,
-            # Remove non-printable ASCII characters from ferrule_name to ensure database compatibility
-            ferrule_name="".join(
-                c
-                for c in fiber_object.model.ferrule_name
-                if c in string.printable
-            ),
-            ferrule_diameter=fiber_object.model.ferrule_diameter_in_mm,
-        )
+        key = {
+            k: getattr(fiber_object.model, v)
+            for k, v in self.table_key_to_obj_map.items()
+        }
+        # key = dict(
+        #     fiber_name=fiber_object.model.fiber_name,
+        #     model=fiber_object.model.fiber_model,
+        #     manufacturer=fiber_object.model.manufacturer,
+        #     numerical_aperture=fiber_object.model.numerical_aperture,
+        #     core_diameter=fiber_object.model.core_diameter_in_um,
+        #     active_length=fiber_object.model.active_length_in_mm,
+        #     # Remove non-printable ASCII characters from ferrule_name to ensure database compatibility
+        #     ferrule_name="".join(
+        #         c
+        #         for c in fiber_object.model.ferrule_name
+        #         if c in string.printable
+        #     ),
+        #     ferrule_diameter=fiber_object.model.ferrule_diameter_in_mm,
+        # )
         self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
 
 
@@ -368,6 +429,18 @@ class OpticalFiberImplant(SpyglassMixin, dj.Manual):
     yaw: float
     """
 
+    table_key_to_obj_map = dict(
+        # implant_id="index",
+        location="location",
+        hemisphere="hemisphere",
+        ap_location="ap_in_mm",
+        ml_location="ml_in_mm",
+        dv_location="dv_in_mm",
+        pitch="pitch_in_deg",
+        roll="roll_in_deg",
+        yaw="yaw_in_deg",
+    )
+
     def insert_from_nwb_object(self, nwb_file_name, implant_table_object):
         """
         Insert an OpticalFiberImplant entry from an NWB object.
@@ -381,20 +454,17 @@ class OpticalFiberImplant(SpyglassMixin, dj.Manual):
             implant data.
         """
         inserts = []
-        for row in implant_table_object:
-            key = dict(
-                nwb_file_name=nwb_file_name,
-                fiber_name=row.optical_fiber.values[0].model.fiber_name,
-                implant_id=row.index.values[0],
-                location=row.location.values[0],
-                hemisphere=row.hemisphere.values[0],
-                ap_location=row.ap_in_mm.values[0],
-                ml_location=row.ml_in_mm.values[0],
-                dv_location=row.dv_in_mm.values[0],
-                pitch=row.pitch_in_deg.values[0],
-                roll=row.roll_in_deg.values[0],
-                yaw=row.yaw_in_deg.values[0],
+        for i, row in enumerate(
+            implant_table_object.to_dataframe().itertuples()
+        ):
+            key = dict(nwb_file_name=nwb_file_name, implant_id=i)
+            key.update(
+                {
+                    k: getattr(row, v)
+                    for k, v in self.table_key_to_obj_map.items()
+                }
             )
+            key["fiber_name"] = row.optical_fiber.model.fiber_name
             inserts.append(key)
 
         for fiber_obj in implant_table_object.optical_fiber:
