@@ -53,7 +53,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
-        return self.namespace_dict(pynwb.get_manager().type_map)
+        return sort_dict(self.namespace_dict(pynwb.get_manager().type_map))
 
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
@@ -65,33 +65,45 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if key_deps != self.nwb_deps:  # comment out to debug
+            if sort_dict(key_deps) != self.nwb_deps:  # comment out to debug
                 continue
             restr.append(self.dict_to_pk(key))
         return self & restr
 
-    def _has_matching_env(self, key: dict, show_err=False) -> bool:
-        """Check current env for matching pynwb versions."""
+    def _has_key(self, key: dict) -> bool:
+        """Attempt make, return status"""
+        if not SpikeSortingRecording & key:
+            logger.warning(
+                f"Attempt to populate Recompute before Recording: {key}"
+            )
         if not self & key:
             self.make(key)
+        return bool(self & key)
 
-        ret = self.this_env & key
+    def _has_matching_env(self, key: dict, show_err=False) -> bool:
+        """Check current env for matching pynwb versions."""
+        if not self._has_key(key):
+            return False
+
+        need = sort_dict(self.key_env(key))
+        ret = self.nwb_dict == need
 
         if not ret and show_err:
-            have = sort_dict(self.nwb_deps)
-            need = sort_dict(self.key_env(key))
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
-                + f"\n\tHave: {have}"
+                + f"\n\tHave: {self.nwb_dict}"
                 + f"\n\tNeed: {need}"
             )
         return bool(ret)
 
     def key_env(self, key):
         """Return the pynwb environment for a given key."""
+
         if not self & key:
             self.make(key)
         query = self & key
+        if len(query) == 0:
+            return None
         if len(query) != 1:
             raise ValueError(f"Key matches {len(query)} entries: {query}")
         this_env = query.fetch("nwb_deps", as_dict=True)[0]["nwb_deps"]
