@@ -326,8 +326,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         """
         self.ensure_single_entry(key)
         query = self & key
-        project_dir = (query).fetch1("project_dir")
-        model_name = (query).fetch1("model_name")
+        project_dir, model_name = (query).fetch1("project_dir", "model_name")
         results = kpms.load_results(project_dir, model_name)
         config = kpms.load_config(project_dir)
         coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
@@ -368,8 +367,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
 
         self.ensure_single_entry(key)
         query = self & key
-        project_dir = query.fetch1("project_dir")
-        model_name = query.fetch1("model_name")
+        project_dir, model_name = (query).fetch1("project_dir", "model_name")
         results = kpms.load_results(project_dir, model_name)
         config = kpms.load_config(project_dir)
         coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
