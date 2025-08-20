@@ -325,11 +325,12 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         None
         """
         self.ensure_single_entry(key)
-        project_dir = (self & key).fetch1("project_dir")
-        model_name = (self & key).fetch1("model_name")
+        query = self & key
+        project_dir = (query).fetch1("project_dir")
+        model_name = (query).fetch1("model_name")
         results = kpms.load_results(project_dir, model_name)
         config = kpms.load_config(project_dir)
-        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+        coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
             key, format_for_moseq=True
         )
         kpms.generate_trajectory_plots(
@@ -366,11 +367,12 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         """
 
         self.ensure_single_entry(key)
-        project_dir = (self & key).fetch1("project_dir")
-        model_name = (self & key).fetch1("model_name")
+        query = self & key
+        project_dir = query.fetch1("project_dir")
+        model_name = query.fetch1("model_name")
         results = kpms.load_results(project_dir, model_name)
         config = kpms.load_config(project_dir)
-        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+        coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
             key, format_for_moseq=True
         )
         kpms.generate_grid_movies(
