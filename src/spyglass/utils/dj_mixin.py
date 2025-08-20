@@ -14,6 +14,7 @@ from datajoint.utils import to_camel_case
 from packaging.version import parse as version_parse
 from pandas import DataFrame
 from pymysql.err import DataError
+from pynwb import NWBHDF5IO, NWBFile
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
@@ -246,10 +247,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             Nwbfile,
-        )
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -723,6 +724,89 @@ class SpyglassMixin(ExportMixin):
         finally:
             pool.close()
             pool.terminate()
+
+    # ---------------------------- NWB data import -----------------------------
+
+    @property
+    def table_key_to_obj_attr() -> dict:
+        """A dictionary of dictionaries mapping table keys to NWB object attributes for each table.
+
+        First level keys are the nwb object.
+        The reserved key "self" refers to the original object.
+        Additional keys can be added to access data from other nwb objects that are attributes of the object (e.g. device.model).
+
+        Second level keys are the table keys to map to the nwb object attributes.
+        """
+        raise NotImplementedError(
+            "Please implement table_key_to_obj_attr in the table class."
+        )
+
+    @property
+    def _source_nwb_object_type(self):
+        """The type of NWB object to import from the NWB file.
+
+        If None, the table is either incompatible with NWB ingestion or must implement
+        get_nwb_objects to return a list of NWB objects to import.
+        """
+        return None
+
+    def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
+        """Generates a list of table entries from an NWB object."""
+        for object_name, mapping in self.table_key_to_obj_attr.items():
+            if object_name != "self":
+                obj_ = getattr(nwb_obj, object_name)
+                if nwb_obj is None:
+                    raise ValueError(
+                        f"NWB object {object_name} not found in {nwb_obj}."
+                    )
+            else:
+                obj_ = nwb_obj
+            key.update({k: getattr(obj_, v) for k, v in mapping.items()})
+        return [key]
+
+    def get_nwb_objects(
+        self,
+        nwb_file: NWBFile,
+    ) -> List:
+        """Returns a list of NWB objects to be imported.
+
+        By default, returns a list with the root nwb_file object.
+        Can be overridden to return a list of other nwb objects (e.g. all devices).
+        """
+        if self._source_nwb_object_type is None:
+            raise ValueError(
+                "get_nwb_objects requires _source_nwb_object_type to be specified "
+                + "or be overidden for the class."
+            )
+        return [
+            obj
+            for obj in nwb_file.objects
+            if isinstance(obj, self._source_nwb_object_type)
+        ]
+
+    def insert_from_nwb(
+        self,
+        nwb_file_name: str,
+    ):
+        """Insert entries into the table from an NWB file.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file to import from.
+        """
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        nwb_key = {"nwb_file_name": nwb_file_name}
+        nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
+        base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
+        entries = []
+        for nwb_obj in self.get_nwb_objects(nwb_file):
+            entries.extend(
+                self.generate_entries_from_nwb_object(nwb_obj),
+                base_entry.copy(),
+            )
+        self.insert(entries, skip_duplicates=True)
 
     # ------------------------------ Restrict by ------------------------------
 
