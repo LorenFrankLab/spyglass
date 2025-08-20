@@ -319,6 +319,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             restriction to the moseq model table, by default True
         output_dir : Path, optional
             where to save the figure to, default of None saves to project_dir
+
+        Returns
+        -------
+        None
         """
         self.ensure_single_entry(key)
         project_dir = (self & key).fetch1("project_dir")
@@ -355,6 +359,10 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             where to save the resulting videos, default of None saves to project_dir
         keypoints_only : bool, optional
             displays keypoints without the original video, by default True
+
+        Returns
+        -------
+        None
         """
 
         self.ensure_single_entry(key)
