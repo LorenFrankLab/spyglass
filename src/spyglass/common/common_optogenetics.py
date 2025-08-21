@@ -391,21 +391,6 @@ class OpticalFiberDevice(SpyglassMixin, dj.Manual):
             k: getattr(fiber_object.model, v)
             for k, v in self.table_key_to_obj_map.items()
         }
-        # key = dict(
-        #     fiber_name=fiber_object.model.fiber_name,
-        #     model=fiber_object.model.fiber_model,
-        #     manufacturer=fiber_object.model.manufacturer,
-        #     numerical_aperture=fiber_object.model.numerical_aperture,
-        #     core_diameter=fiber_object.model.core_diameter_in_um,
-        #     active_length=fiber_object.model.active_length_in_mm,
-        #     # Remove non-printable ASCII characters from ferrule_name to ensure database compatibility
-        #     ferrule_name="".join(
-        #         c
-        #         for c in fiber_object.model.ferrule_name
-        #         if c in string.printable
-        #     ),
-        #     ferrule_diameter=fiber_object.model.ferrule_diameter_in_mm,
-        # )
         self.insert1(key, skip_duplicates=True)  # TODO: check for near matches
 
 
