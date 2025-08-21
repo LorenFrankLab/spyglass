@@ -109,116 +109,128 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
         logger.info(
             f"---- Step 2: Pose Estimation | {dlc_pipeline_description} ----"
         )
-        pose_estimation_selection_key = {
-            **epoch_key,
-            **model_key,  # Includes project_name implicitly
-        }
-        if not (DLCPoseEstimationSelection & pose_estimation_selection_key):
-            # Returns key if successful/exists, None otherwise
-            sel_key = DLCPoseEstimationSelection().insert_estimation_task(
-                pose_estimation_selection_key, skip_duplicates=skip_duplicates
-            )
-            if not sel_key:  # If insert failed (e.g. duplicate and skip=False)
-                if skip_duplicates and (
-                    DLCPoseEstimationSelection & pose_estimation_selection_key
-                ):
-                    logger.warning(
-                        f"Pose Estimation Selection already exists for {pose_estimation_selection_key}"
-                    )
-                else:
-                    raise dj.errors.DataJointError(
-                        f"Failed to insert Pose Estimation Selection for {pose_estimation_selection_key}"
-                    )
-        else:
-            logger.warning(
-                f"Pose Estimation Selection already exists for {pose_estimation_selection_key}"
-            )
+        video_file_nums = (
+            VideoFile() & {"nwb_file_name": nwb_file_name, "epoch": epoch}
+        ).fetch("video_file_num")
 
-        # Ensure selection exists before populating
-        if not (DLCPoseEstimationSelection & pose_estimation_selection_key):
-            raise dj.errors.DataJointError(
-                f"Pose Estimation Selection missing for {pose_estimation_selection_key}"
-            )
-
-        if not (DLCPoseEstimation & pose_estimation_selection_key):
-            logger.info("Populating DLCPoseEstimation...")
-            DLCPoseEstimation.populate(
-                pose_estimation_selection_key, reserve_jobs=True, **kwargs
-            )
-        else:
-            logger.info("DLCPoseEstimation already populated.")
-
-        if not (DLCPoseEstimation & pose_estimation_selection_key):
-            raise dj.errors.DataJointError(
-                f"DLCPoseEstimation population failed for {pose_estimation_selection_key}"
-            )
-        pose_est_key = (
-            DLCPoseEstimation & pose_estimation_selection_key
-        ).fetch1("KEY")
-
-        # --- 3. Smoothing/Interpolation (per bodypart) ---
-        processed_bodyparts_keys = {}  # Store keys for subsequent steps
-        if run_smoothing_interp:
-            logger.info(
-                f"---- Step 3: Smooth/Interpolate | {dlc_pipeline_description} ----"
-            )
-            target_bodyparts = (
-                bodyparts_params_dict.keys()
-                if bodyparts_params_dict
-                else (DLCPoseEstimation.BodyPart & pose_est_key).fetch(
-                    "bodypart"
+        for video_file_num in video_file_nums:
+            pose_estimation_selection_key = {
+                **epoch_key,
+                **model_key,  # Includes project_name implicitly
+                "video_file_num": video_file_num,
+            }
+            if not (DLCPoseEstimationSelection & pose_estimation_selection_key):
+                # Returns key if successful/exists, None otherwise
+                sel_key = DLCPoseEstimationSelection().insert_estimation_task(
+                    pose_estimation_selection_key,
+                    skip_duplicates=skip_duplicates,
                 )
-            )
-
-            for bodypart in target_bodyparts:
-                logger.info(f"Processing bodypart: {bodypart}")
-                current_si_params_name = bodyparts_params_dict.get(
-                    bodypart, dlc_si_params_name
+                if (
+                    not sel_key
+                ):  # If insert failed (e.g. duplicate and skip=False)
+                    if skip_duplicates and (
+                        DLCPoseEstimationSelection
+                        & pose_estimation_selection_key
+                    ):
+                        logger.warning(
+                            f"Pose Estimation Selection already exists for {pose_estimation_selection_key}"
+                        )
+                    else:
+                        raise dj.errors.DataJointError(
+                            f"Failed to insert Pose Estimation Selection for {pose_estimation_selection_key}"
+                        )
+            else:
+                logger.warning(
+                    f"Pose Estimation Selection already exists for {pose_estimation_selection_key}"
                 )
-                if not (
-                    DLCSmoothInterpParams
-                    & {"dlc_si_params_name": current_si_params_name}
-                ):
-                    raise ValueError(
-                        f"DLCSmoothInterpParams not found for {bodypart}: {current_si_params_name}"
-                    )
 
-                si_selection_key = {
-                    **pose_est_key,
-                    "bodypart": bodypart,
-                    "dlc_si_params_name": current_si_params_name,
-                }
-                if not (DLCSmoothInterpSelection & si_selection_key):
-                    DLCSmoothInterpSelection.insert1(
-                        si_selection_key, skip_duplicates=skip_duplicates
-                    )
-                else:
-                    logger.warning(
-                        f"Smooth/Interp Selection already exists for {si_selection_key}"
-                    )
+            # Ensure selection exists before populating
+            if not (DLCPoseEstimationSelection & pose_estimation_selection_key):
+                raise dj.errors.DataJointError(
+                    f"Pose Estimation Selection missing for {pose_estimation_selection_key}"
+                )
 
-                if not (DLCSmoothInterp & si_selection_key):
-                    logger.info(f"Populating DLCSmoothInterp for {bodypart}...")
-                    DLCSmoothInterp.populate(
-                        si_selection_key, reserve_jobs=True, **kwargs
-                    )
-                else:
-                    logger.info(
-                        f"DLCSmoothInterp already populated for {bodypart}."
-                    )
+            if not (DLCPoseEstimation & pose_estimation_selection_key):
+                logger.info("Populating DLCPoseEstimation...")
+                DLCPoseEstimation.populate(
+                    pose_estimation_selection_key, **kwargs
+                )
+            else:
+                logger.info("DLCPoseEstimation already populated.")
 
-                if DLCSmoothInterp & si_selection_key:
-                    processed_bodyparts_keys[bodypart] = (
-                        DLCSmoothInterp & si_selection_key
-                    ).fetch1("KEY")
+            if not (DLCPoseEstimation & pose_estimation_selection_key):
+                raise dj.errors.DataJointError(
+                    f"DLCPoseEstimation population failed for {pose_estimation_selection_key}"
+                )
+            pose_est_key = (
+                DLCPoseEstimation & pose_estimation_selection_key
+            ).fetch1("KEY")
+
+            # --- 3. Smoothing/Interpolation (per bodypart) ---
+            processed_bodyparts_keys = {}  # Store keys for subsequent steps
+            if run_smoothing_interp:
+                logger.info(
+                    f"---- Step 3: Smooth/Interpolate | {dlc_pipeline_description} ----"
+                )
+                if bodyparts_params_dict:
+                    target_bodyparts = bodyparts_params_dict.keys()
                 else:
-                    raise dj.errors.DataJointError(
-                        f"DLCSmoothInterp population failed for {si_selection_key}"
-                    )
-        else:
-            logger.info(
-                f"Skipping Smoothing/Interpolation for {dlc_pipeline_description}"
-            )
+                    target_bodyparts = (
+                        DLCPoseEstimation.BodyPart & pose_est_key
+                    ).fetch("bodypart")
+
+                for bodypart in target_bodyparts:
+                    logger.info(f"Processing bodypart: {bodypart}")
+                    if bodyparts_params_dict is not None:
+                        current_si_params_name = bodyparts_params_dict.get(
+                            bodypart, dlc_si_params_name
+                        )
+                    else:
+                        current_si_params_name = dlc_si_params_name
+                    if not (
+                        DLCSmoothInterpParams
+                        & {"dlc_si_params_name": current_si_params_name}
+                    ):
+                        raise ValueError(
+                            f"DLCSmoothInterpParams not found for {bodypart}: {current_si_params_name}"
+                        )
+
+                    si_selection_key = {
+                        **pose_est_key,
+                        "bodypart": bodypart,
+                        "dlc_si_params_name": current_si_params_name,
+                    }
+                    if not (DLCSmoothInterpSelection & si_selection_key):
+                        DLCSmoothInterpSelection.insert1(
+                            si_selection_key, skip_duplicates=skip_duplicates
+                        )
+                    else:
+                        logger.warning(
+                            f"Smooth/Interp Selection already exists for {si_selection_key}"
+                        )
+
+                    if not (DLCSmoothInterp & si_selection_key):
+                        logger.info(
+                            f"Populating DLCSmoothInterp for {bodypart}..."
+                        )
+                        DLCSmoothInterp.populate(si_selection_key, **kwargs)
+                    else:
+                        logger.info(
+                            f"DLCSmoothInterp already populated for {bodypart}."
+                        )
+
+                    if DLCSmoothInterp & si_selection_key:
+                        processed_bodyparts_keys[bodypart] = (
+                            DLCSmoothInterp & si_selection_key
+                        ).fetch1("KEY")
+                    else:
+                        raise dj.errors.DataJointError(
+                            f"DLCSmoothInterp population failed for {si_selection_key}"
+                        )
+            else:
+                logger.info(
+                    f"Skipping Smoothing/Interpolation for {dlc_pipeline_description}"
+                )
 
         # --- Steps 4-7 require bodyparts_params_dict ---
         if not bodyparts_params_dict:
@@ -253,7 +265,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
             "dlc_si_cohort_selection_name": cohort_selection_name,
             "bodyparts_params_dict": bodyparts_params_dict,
         }
-        if not (DLCSmoothInterpCohortSelection & cohort_selection_key):
+        if not (DLCSmoothInterpCohortSelection & pose_est_key):
             DLCSmoothInterpCohortSelection.insert1(
                 cohort_selection_key, skip_duplicates=skip_duplicates
             )
@@ -264,9 +276,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
 
         if not (DLCSmoothInterpCohort & cohort_selection_key):
             logger.info("Populating DLCSmoothInterpCohort...")
-            DLCSmoothInterpCohort.populate(
-                cohort_selection_key, reserve_jobs=True, **kwargs
-            )
+            DLCSmoothInterpCohort.populate(cohort_selection_key, **kwargs)
         else:
             logger.info("DLCSmoothInterpCohort already populated.")
 
@@ -299,9 +309,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
 
             if not (DLCCentroid & centroid_selection_key):
                 logger.info("Populating DLCCentroid...")
-                DLCCentroid.populate(
-                    centroid_selection_key, reserve_jobs=True, **kwargs
-                )
+                DLCCentroid.populate(centroid_selection_key, **kwargs)
             else:
                 logger.info("DLCCentroid already populated.")
 
@@ -336,9 +344,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
 
             if not (DLCOrientation & orientation_selection_key):
                 logger.info("Populating DLCOrientation...")
-                DLCOrientation.populate(
-                    orientation_selection_key, reserve_jobs=True, **kwargs
-                )
+                DLCOrientation.populate(orientation_selection_key, **kwargs)
             else:
                 logger.info("DLCOrientation already populated.")
 
@@ -368,12 +374,12 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
                 "dlc_si_cohort_centroid": centroid_key[
                     "dlc_si_cohort_selection_name"
                 ],
-                "centroid_analysis_file_name": centroid_key[
-                    "analysis_file_name"
-                ],
                 "dlc_model_name": centroid_key["dlc_model_name"],
-                "epoch": centroid_key["epoch"],
                 "nwb_file_name": centroid_key["nwb_file_name"],
+                "epoch": centroid_key["epoch"],
+                "video_file_num": centroid_key["video_file_num"],
+                "project_name": centroid_key["project_name"],
+                "dlc_model_name": centroid_key["dlc_model_name"],
                 "dlc_model_params_name": centroid_key["dlc_model_params_name"],
                 "dlc_centroid_params_name": centroid_key[
                     "dlc_centroid_params_name"
@@ -381,9 +387,6 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
                 # Keys from DLCOrientation primary key
                 "dlc_si_cohort_orientation": orientation_key[
                     "dlc_si_cohort_selection_name"
-                ],
-                "orientation_analysis_file_name": orientation_key[
-                    "analysis_file_name"
                 ],
                 "dlc_orientation_params_name": orientation_key[
                     "dlc_orientation_params_name"
@@ -400,9 +403,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
 
             if not (DLCPosV1 & pos_selection_key):
                 logger.info("Populating DLCPosV1...")
-                DLCPosV1.populate(
-                    pos_selection_key, reserve_jobs=True, **kwargs
-                )
+                DLCPosV1.populate(pos_selection_key, **kwargs)
             else:
                 logger.info("DLCPosV1 already populated.")
 
@@ -464,9 +465,7 @@ def _process_single_dlc_epoch(args_tuple: Tuple) -> bool:
 
             if not (DLCPosVideo & video_selection_key):
                 logger.info("Populating DLCPosVideo...")
-                DLCPosVideo.populate(
-                    video_selection_key, reserve_jobs=True, **kwargs
-                )
+                DLCPosVideo.populate(video_selection_key, **kwargs)
             else:
                 logger.info("DLCPosVideo already populated.")
         elif generate_video and not final_pos_key:
@@ -503,8 +502,8 @@ def populate_spyglass_dlc_pipeline_v1(
     dlc_orientation_params_name: str = "default",
     bodyparts_params_dict: Optional[Dict[str, str]] = None,
     run_smoothing_interp: bool = True,
-    run_centroid: bool = True,
-    run_orientation: bool = True,
+    run_centroid: bool = False,
+    run_orientation: bool = False,
     generate_video: bool = False,
     dlc_pos_video_params_name: str = "default",
     skip_duplicates: bool = True,
@@ -601,6 +600,15 @@ def populate_spyglass_dlc_pipeline_v1(
     logger.info(
         f"Found {len(epochs_to_process)} epoch(s) to process: {sorted(epochs_to_process)}"
     )
+
+    if bodyparts_params_dict is None and run_centroid:
+        raise ValueError(
+            "bodyparts_params_dict must be provided when running centroid calculation."
+        )
+    if bodyparts_params_dict is None and run_orientation:
+        raise ValueError(
+            "bodyparts_params_dict must be provided when running orientation calculation."
+        )
 
     # --- Prepare arguments for each epoch ---
     process_args_list = []

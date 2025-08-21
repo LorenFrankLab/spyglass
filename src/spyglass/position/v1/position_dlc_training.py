@@ -181,6 +181,13 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             for k, v in dlc_config.items()
             if k in get_param_names(create_training_dataset)
         }
+        if "engine" in training_dataset_kwargs:
+            from deeplabcut.core.engine import Engine
+
+            training_dataset_kwargs["engine"] = Engine(
+                training_dataset_kwargs["engine"]
+            )
+
         logger.info("creating training dataset")
         create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
         # ---- Trigger DLC model training job ----
@@ -197,28 +204,47 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         try:
             with suppress_print_from_package():
+                if "engine" in train_network_kwargs:
+                    from deeplabcut.core.engine import Engine
+
+                    train_network_kwargs["engine"] = Engine(
+                        train_network_kwargs["engine"]
+                    )
                 train_network(dlc_cfg_filepath, **train_network_kwargs)
         except KeyboardInterrupt:  # pragma: no cover
             logger.info("DLC training stopped via Keyboard Interrupt")
 
-        snapshots = (
+        train_path = (
             project_path
             / get_model_folder(
                 trainFraction=dlc_config["train_fraction"],
                 shuffle=dlc_config["shuffle"],
                 cfg=dlc_config,
                 modelprefix=dlc_config["modelprefix"],
+                engine=Engine(dlc_config["engine"]),
             )
             / "train"
-        ).glob("*index*")
+        )
+        snapshots = list(train_path.glob("*.index")) + list(
+            train_path.glob("*.pt")
+        )
 
         # DLC goes by snapshot magnitude when judging 'latest' for
         # evaluation. Here, we mean most recently generated
+        latest_snapshot = None
         max_modified_time = 0
+
         for snapshot in snapshots:
             modified_time = os.path.getmtime(snapshot)
             if modified_time > max_modified_time:
-                latest_snapshot = int(snapshot.stem[9:])
+                # Extract number from filename
+                parts = snapshot.stem.split("-")
+                try:
+                    step_num = int(parts[-1])  # always last part
+                except ValueError:
+                    continue  # skip if it doesn't end with a number
+
+                latest_snapshot = step_num
                 max_modified_time = modified_time
 
         self.insert1(

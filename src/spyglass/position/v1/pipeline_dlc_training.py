@@ -176,9 +176,17 @@ def run_spyglass_dlc_training_v1(
                 f"DLCModelTraining population failed for {selection_key}"
             )
 
-        if not (DLCModelSource() & selection_key):
+        model_source_key = {
+            "project_name": project_key["project_name"],
+            "dlc_model_name": (
+                f"{project_key['project_name']}_"
+                f"{params_key['dlc_training_params_name']}_"
+                f"{selection_key['training_id']:02d}"
+            ),
+        }
+        if not (DLCModelSource() & model_source_key):
             raise dj.errors.DataJointError(
-                f"DLCModelSource entry missing for {selection_key}"
+                f"DLCModelSource entry missing for {model_source_key}"
             )
 
         # Populate DLCModel
@@ -186,7 +194,7 @@ def run_spyglass_dlc_training_v1(
             f"---- Step 4: Populating DLCModel for Project: {project_name} ----"
         )
         model_key = {
-            **(DLCModelSource & selection_key).fetch1("KEY"),
+            **(DLCModelSource & model_source_key).fetch1("KEY"),
             "dlc_model_params_name": dlc_model_params_name,
         }
         DLCModelSelection().insert1(
