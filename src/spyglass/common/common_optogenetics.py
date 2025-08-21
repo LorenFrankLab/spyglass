@@ -341,9 +341,7 @@ class VirusInjection(SpyglassMixin, dj.Manual):
 
         with self._safe_context():
             Virus().insert_from_nwb_object(virus_injection_object.virus)
-            self.insert1(
-                key,
-            )
+            self.insert1(key)
 
     def make(self, key):
         # for use with populate_all_common
