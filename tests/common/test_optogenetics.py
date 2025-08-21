@@ -55,7 +55,6 @@ def test_optogenetic_protocol(
     opto_epoch_dict,
     data_import,
 ):
-    # data_import.insert_sessions(opto_only_nwb, raise_err=True)
     from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
     key = {"nwb_file_name": get_nwb_copy_filename(opto_only_nwb)}
