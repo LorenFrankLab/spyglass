@@ -31,7 +31,8 @@ When altering tables, import all foreign key references.
 
 ### Position
 
-- Ensure video files are properly added to `DLCProject` # 1367
+- Ensure video files are properly added to `DLCProject` #1367
+- DLC parameter handling improvements and default value corrections #1379
 
 ### Spikesorting
 
