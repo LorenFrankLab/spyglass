@@ -431,6 +431,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             "pose_estimation_output_dir",
             "meters_per_pixel",
         )
+        if pose_estimation_params is None:
+            pose_estimation_params = dict()
 
         logger.info(f"video filename: {video_filename}")
         logger.info("Loading position data...")
@@ -508,7 +510,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),
             key_hash=dj.hash.key_hash(key),
-            debug=params.get("debug", True),  # REVERT TO FALSE
+            debug=params.get("debug", False),
             **params.get("video_params", {}),
         )
 
