@@ -17,6 +17,11 @@ from spyglass.common.common_ephys import (
     SampleCount,
 )
 from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_optogenetics import (
+    OpticalFiberImplant,
+    OptogeneticProtocol,
+    VirusInjection,
+)
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_task import TaskEpoch
@@ -86,7 +91,12 @@ def single_transaction_make(
             if table_name == "PositionSource":
                 # PositionSource only uses nwb_file_name - full calls redundant
                 key_source = dj.U("nwb_file_name") & key_source
-            if table_name in ["ImportedPose", "ImportedLFP"]:
+            if table_name in [
+                "ImportedPose",
+                "ImportedLFP",
+                "VirusInjection",
+                "OpticalFiberImplant",
+            ]:
                 key_source = Nwbfile()
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
@@ -152,6 +162,9 @@ def populate_all_common(
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
+            VirusInjection,  # Depends on Session
+            OpticalFiberImplant,  # Depends on Session
+            OptogeneticProtocol,  # Depends on Session and TaskEpoch
         ],
         [
             RawPosition,  # Depends on PositionSource

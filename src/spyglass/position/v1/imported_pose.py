@@ -51,13 +51,15 @@ class ImportedPose(SpyglassMixin, dj.Manual):
         part_keys = []
         with pynwb.NWBHDF5IO(file_path, mode="r") as io:
             nwb = io.read()
-            behavior_module = nwb.get_processing_module("behavior")
+            pose_objects = [
+                obj
+                for obj in nwb.objects.values()
+                if isinstance(obj, ndx_pose.PoseEstimation)
+            ]
 
             # Loop through all the PoseEstimation objects in the behavior module
-            for name, obj in behavior_module.data_interfaces.items():
-                if not isinstance(obj, ndx_pose.PoseEstimation):
-                    continue
-
+            for obj in pose_objects:
+                name = obj.name
                 # use the timestamps from the first body part to define valid times
                 timestamps = list(obj.pose_estimation_series.values())[
                     0
