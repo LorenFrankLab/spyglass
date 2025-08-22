@@ -294,64 +294,6 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
             return -1
         return id_int[0]
 
-    # @classmethod
-    # def insert_from_nwbfile(cls, nwbf, config=None):
-    #     """Insert camera devices from an NWB file
-
-    #     Parameters
-    #     ----------
-    #     nwbf : pynwb.NWBFile
-    #         The source NWB file object.
-    #     config : dict
-    #         Dictionary read from a user-defined YAML file containing values to
-    #         replace in the NWB file.
-
-    #     Returns
-    #     -------
-    #     device_name_list : list
-    #         List of camera device object names found in the NWB file.
-    #     """
-    #     config = config or dict()
-    #     device_name_list = list()
-    #     for device in nwbf.devices.values():
-    #         if isinstance(device, ndx_franklab_novela.CameraDevice):
-    #             id_int = [int(i) for i in device.name.split() if i.isnumeric()]
-    #             if not id_int:
-    #                 logger.warning(
-    #                     f"Camera {device.name} missing a valid integer ID."
-    #                 )
-    #                 continue
-    #             device_dict = {
-    #                 "camera_id": id_int[0],
-    #                 "camera_name": device.camera_name,
-    #                 "manufacturer": device.manufacturer,
-    #                 "model": device.model,
-    #                 "lens": device.lens,
-    #                 "meters_per_pixel": device.meters_per_pixel,
-    #             }
-    #             cls.insert1(device_dict, skip_duplicates=True)
-    #             device_name_list.append(device_dict["camera_name"])
-    #     # Append devices from config file
-    #     if device_list := config.get("CameraDevice"):
-    #         device_inserts = [
-    #             {
-    #                 "camera_id": device.get("camera_id", -1),
-    #                 "camera_name": device.get("camera_name"),
-    #                 "manufacturer": device.get("manufacturer"),
-    #                 "model": device.get("model"),
-    #                 "lens": device.get("lens"),
-    #                 "meters_per_pixel": device.get("meters_per_pixel", 0),
-    #             }
-    #             for device in device_list
-    #         ]
-    #         cls.insert(device_inserts, skip_duplicates=True)
-    #         device_name_list.extend([d["camera_name"] for d in device_inserts])
-    #     if device_name_list:
-    #         logger.info(f"Inserted camera devices {device_name_list}")
-    #     else:
-    #         logger.warning("No conforming camera device metadata found.")
-    #     return device_name_list
-
 
 @schema
 class ProbeType(SpyglassMixin, dj.Manual):
