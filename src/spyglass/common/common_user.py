@@ -147,7 +147,7 @@ class UserEnvironment(dj.Manual):
                 "Custom pip installs found. "
                 + "Recompute feature may not work as expected."
             )
-            pprint(self._pip_custom, indent=4)
+            pprint(pip_custom_no_spy, indent=4)
 
         if self._conda_conflicts:
             logger.warning(
