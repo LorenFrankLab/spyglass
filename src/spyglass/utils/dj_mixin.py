@@ -247,7 +247,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa F401
+        from spyglass.common.common_nwbfile import (
+            AnalysisNwbfile,
+            Nwbfile,
+        )  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -1126,6 +1129,11 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
 class SpyglassIngestion(SpyglassMixin):
     """A mixin for Spyglass tables that ingest data from NWB files."""
 
+    # If true, checks that pre-existing entries are consistent in secondary keys with inserted,
+    # entries and allows for skipping duplicates on insert. If false, raises an error on
+    # duplicate primary keys.
+    _expected_duplicates = False
+
     @property
     def table_key_to_obj_attr() -> dict:
         """A dictionary of dictionaries mapping table keys to NWB object attributes
@@ -1164,7 +1172,7 @@ class SpyglassIngestion(SpyglassMixin):
 
     def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
         """Generates a list of table entries from an NWB object."""
-        entries = []
+        key = key.copy()  # avoid modifying original
         for object_name, mapping in self.table_key_to_obj_attr.items():
             if object_name != "self":
                 obj_ = getattr(nwb_obj, object_name)
@@ -1174,16 +1182,22 @@ class SpyglassIngestion(SpyglassMixin):
                     )
             else:
                 obj_ = nwb_obj
-            entries.append(
+            # entries.append(
+            #     {
+            #         **key,
+            #         **{
+            #             k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
+            #             for k, v in mapping.items()
+            #         },
+            #     }
+            # )
+            key.update(
                 {
-                    **key,
-                    **{
-                        k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
-                        for k, v in mapping.items()
-                    },
+                    k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
+                    for k, v in mapping.items()
                 }
             )
-        return entries
+        return [key]
 
     def get_nwb_objects(
         self,
@@ -1237,16 +1251,33 @@ class SpyglassIngestion(SpyglassMixin):
         nwb_key = {"nwb_file_name": nwb_file_name}
         nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
-        entries = []
+        entries = None
         for nwb_obj in self.get_nwb_objects(nwb_file):
-            entries.extend(
-                self.generate_entries_from_nwb_object(
-                    nwb_obj,
-                    base_entry.copy(),
-                )
+            obj_entries = self.generate_entries_from_nwb_object(
+                nwb_obj,
+                base_entry.copy(),
             )
+            if entries is None:
+                entries = obj_entries
+                continue
+            if isinstance(entries, list):
+                entries.extend(obj_entries)
+            else:
+                for table, table_entries in obj_entries.items():
+                    entries[table].extend(table_entries)
         if config:
             entries.extend(self.generate_entries_from_config(config))
+            # TODO handle for part tables
+
+        if entries is None or len(entries) == 0:
+            logger.info(f"No entries found for {self.camel_name}.")
+            return []
         if execute_inserts:
-            self.insert(entries, skip_duplicates=True)
+            if isinstance(entries, dict):
+                for table, table_entries in entries.items():
+                    table().insert(
+                        table_entries, skip_duplicates=self._expected_duplicates
+                    )
+            else:
+                self.insert(entries, skip_duplicates=self._expected_duplicates)
         return entries
