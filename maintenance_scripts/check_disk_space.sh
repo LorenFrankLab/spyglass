@@ -110,16 +110,16 @@ for i in "${!DRIVE_LIST[@]}"; do
         continue
     fi
 
-    # Send email alert
-    BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
-    SUBJ="${NAME}"
-
-    echo $BODY >> "$SPACE_LOG"
-
-    send_slack_message "$BODY"
-
-    for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do
-        send_email_message "$RECIPIENT" "$SUBJ" "$BODY"
-    done
+    # # Send email alert
+    # BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
+    # SUBJ="${NAME}"
+    #
+    # echo $BODY >> "$SPACE_LOG"
+    #
+    # send_slack_message "$BODY"
+    #
+    # for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do
+    #     send_email_message "$RECIPIENT" "$SUBJ" "$BODY"
+    # done
 
 done
