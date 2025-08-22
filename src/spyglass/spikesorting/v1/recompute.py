@@ -86,12 +86,12 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             return False
 
         need = sort_dict(self.key_env(key))
-        ret = self.nwb_dict == need
+        ret = self.nwb_deps == need
 
         if not ret and show_err:
             logger.warning(
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
-                + f"\n\tHave: {self.nwb_dict}"
+                + f"\n\tHave: {self.nwb_deps}"
                 + f"\n\tNeed: {need}"
             )
         return bool(ret)
