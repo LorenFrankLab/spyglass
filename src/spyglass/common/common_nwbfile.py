@@ -85,22 +85,9 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         ]
 
     @classmethod
-    def _get_file_name(cls, nwb_file_name: str) -> str:
-        """Get valid nwb file name given substring."""
-        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
-
-        if len(query) == 1:
-            return query.fetch1("nwb_file_name")
-
-        raise ValueError(
-            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
-            + f" \n{query}"
-        )
-
-    @classmethod
     def get_file_key(cls, nwb_file_name: str) -> dict:
         """Return primary key using nwb_file_name substring."""
-        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
+        return {"nwb_file_name": nwb_file_name}
 
     @classmethod
     def get_abs_path(
@@ -124,10 +111,17 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        ret = raw_dir + "/" + nwb_file_name
         if new_file:
-            return raw_dir + "/" + nwb_file_name
+            return ret
 
-        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
+        query = cls & cls.get_file_key(nwb_file_name)
+        if len(query) != 1:
+            raise FileNotFoundError(
+                f"Could not find 1 entry for {nwb_file_name}:\n{query}"
+            )
+
+        return ret
 
     @staticmethod
     def add_to_lock(nwb_file_name: str) -> None:
