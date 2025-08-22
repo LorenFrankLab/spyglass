@@ -736,6 +736,8 @@ class SpyglassMixin(ExportMixin):
         Additional keys can be added to access data from other nwb objects that are attributes of the object (e.g. device.model).
 
         Second level keys are the table keys to map to the nwb object attributes.
+        If the values of this dictionary are strings, they are interpreted as attribute names of the nwb object.
+        If the values are callables, they are called with the nwb object as the only argument.
         """
         raise NotImplementedError(
             "Please implement table_key_to_obj_attr in the table class."
@@ -750,6 +752,10 @@ class SpyglassMixin(ExportMixin):
         """
         return None
 
+    def generate_entries_from_config(self, config: dict):
+        """Generates a list of table entries from a config dictionary."""
+        return config.get(dj.utils.to_camel_case(self.table_name), [])
+
     def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
         """Generates a list of table entries from an NWB object."""
         for object_name, mapping in self.table_key_to_obj_attr.items():
@@ -761,7 +767,12 @@ class SpyglassMixin(ExportMixin):
                     )
             else:
                 obj_ = nwb_obj
-            key.update({k: getattr(obj_, v) for k, v in mapping.items()})
+            key.update(
+                {
+                    k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
+                    for k, v in mapping.items()
+                }
+            )
         return [key]
 
     def get_nwb_objects(
@@ -784,9 +795,10 @@ class SpyglassMixin(ExportMixin):
             if isinstance(obj, self._source_nwb_object_type)
         ]
 
-    def insert_from_nwb(
+    def insert_from_nwbfile(
         self,
         nwb_file_name: str,
+        config: dict = None,
     ):
         """Insert entries into the table from an NWB file.
 
@@ -806,6 +818,8 @@ class SpyglassMixin(ExportMixin):
                 self.generate_entries_from_nwb_object(nwb_obj),
                 base_entry.copy(),
             )
+        if config:
+            entries.extend(self.generate_entries_from_config(config))
         self.insert(entries, skip_duplicates=True)
 
     # ------------------------------ Restrict by ------------------------------
