@@ -267,6 +267,8 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
     camera_id = -1: int
     """
 
+    _expected_duplicates = True
+
     @property
     def _source_nwb_object_type(self):
         return ndx_franklab_novela.CameraDevice

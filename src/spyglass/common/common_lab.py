@@ -1,8 +1,9 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
 import datajoint as dj
+import pynwb
 
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
 from .common_nwbfile import Nwbfile
@@ -11,7 +12,7 @@ schema = dj.schema("common_lab")
 
 
 @schema
-class LabMember(SpyglassMixin, dj.Manual):
+class LabMember(SpyglassIngestion, dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -40,64 +41,34 @@ class LabMember(SpyglassMixin, dj.Manual):
         # for existing instances.
 
     _admin = []
+    _expected_duplicates = True
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
-        """Insert lab member information from an NWB file.
+    @property
+    def _source_nwb_object_type(self):
+        """The NWB object type from which this table can ingest data."""
+        return pynwb.NWBFile
 
-        Parameters
-        ----------
-        nwbf: pynwb.NWBFile
-            The NWB file with experimenter information.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
-        """
-        config = config or dict()
-        if isinstance(nwbf, str):
-            nwb_file_abspath = Nwbfile.get_abs_path(nwbf, new_file=True)
-            nwbf = get_nwb_file(nwb_file_abspath)
-
-        if "LabMember" in config:
-            experimenter_list = [
-                member_dict["lab_member_name"]
-                for member_dict in config["LabMember"]
-            ]
-        elif nwbf.experimenter is not None:
-            experimenter_list = nwbf.experimenter
-        else:
+    def generate_entries_from_nwb_object(
+        self, nwb_obj: pynwb.NWBFile, base_key=dict()
+    ):
+        """Override SpyglassIngestion method to make entry for each experimenter."""
+        experimenter_list = nwb_obj.experimenter
+        if not experimenter_list:
             logger.info("No experimenter metadata found.\n")
-            return
+            return list()
 
+        entries = []
         for experimenter in experimenter_list:
-            cls.insert_from_name(experimenter)
-
-            # each person is by default the member of their own LabTeam
-            # (same as their name)
-
-            full_name, first, last = decompose_name(experimenter)
-            LabTeam.create_new_team(
-                team_name=full_name, team_members=[f"{last}, {first}"]
+            _, first, last = decompose_name(experimenter)
+            entries.append(
+                {
+                    "lab_member_name": f"{first} {last}",
+                    "first_name": first,
+                    "last_name": last,
+                    **base_key,
+                }
             )
-
-    @classmethod
-    def insert_from_name(cls, full_name):
-        """Insert a lab member by name.
-
-        Parameters
-        ----------
-        full_name : str
-            The name to be added.
-        """
-        _, first, last = decompose_name(full_name)
-        cls.insert1(
-            dict(
-                lab_member_name=f"{first} {last}",
-                first_name=first,
-                last_name=last,
-            ),
-            skip_duplicates=True,
-        )
+        return entries
 
     def _load_admin(self):
         """Load admin list."""
@@ -163,12 +134,14 @@ class LabMember(SpyglassMixin, dj.Manual):
 
 
 @schema
-class LabTeam(SpyglassMixin, dj.Manual):
+class LabTeam(SpyglassIngestion, dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
     team_description = "": varchar(2000)
     """
+
+    _expected_duplicates = True
 
     class LabTeamMember(SpyglassMixin, dj.Part):
         definition = """
@@ -177,6 +150,30 @@ class LabTeam(SpyglassMixin, dj.Manual):
         """
 
     _shared_teams = {}
+
+    @property
+    def _source_nwb_object_type(self):
+        """The NWB object type from which this table can ingest data."""
+        return pynwb.NWBFile
+
+    @classmethod
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=dict()):
+        experimenter_list = nwb_obj.experimenter
+        team_entries = []
+        team_member_entries = []
+        for experimenter in experimenter_list:
+            full_name, first, last = decompose_name(experimenter)
+            # each person is by default the member of their own LabTeam
+            # (same as their name)
+            team_i, entry_i = self.create_new_team(
+                team_name=full_name,
+                team_members=[f"{last}, {first}"],
+                team_description="personal team",
+                execute_inserts=False,
+            )
+            team_entries.append(team_i)
+            team_member_entries.extend(entry_i)
+        return {self: team_entries, self.LabTeamMember: team_member_entries}
 
     def get_team_members(cls, member, reload=False):
         """Return the set of lab members that share a team with member.
@@ -202,7 +199,11 @@ class LabTeam(SpyglassMixin, dj.Manual):
 
     @classmethod
     def create_new_team(
-        cls, team_name: str, team_members: list, team_description: str = ""
+        cls,
+        team_name: str,
+        team_members: list,
+        team_description: str = "",
+        execute_inserts=True,
     ):
         """Create a new team with a list of team members.
 
@@ -216,6 +217,9 @@ class LabTeam(SpyglassMixin, dj.Manual):
             The full names of the lab members that are part of the team.
         team_description: str
             The description of the team.
+        execute_inserts: bool
+            If True, execute the inserts. If False, return the dicts to be
+            inserted.
         """
         labteam_dict = {
             "team_name": team_name,
@@ -224,7 +228,8 @@ class LabTeam(SpyglassMixin, dj.Manual):
 
         member_list = []
         for team_member in team_members:
-            LabMember.insert_from_name(team_member)
+            if execute_inserts:
+                LabMember.insert_from_name(team_member)
             member_dict = {"lab_member_name": decompose_name(team_member)[0]}
             query = (LabMember.LabMemberInfo() & member_dict).fetch(
                 "google_user_name"
@@ -242,66 +247,50 @@ class LabTeam(SpyglassMixin, dj.Manual):
             # clear cache for this member
             _ = cls._shared_teams.pop(team_member, None)
 
+        if not execute_inserts:
+            return labteam_dict, member_list
         cls.insert1(labteam_dict, skip_duplicates=True)
         cls.LabTeamMember.insert(member_list, skip_duplicates=True)
 
 
 @schema
-class Institution(SpyglassMixin, dj.Manual):
+class Institution(SpyglassIngestion, dj.Manual):
     definition = """
     institution_name: varchar(80)
     """
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
-        """Insert institution information from an NWB file.
+    _expected_duplicates = True
 
-        Parameters
-        ----------
-        nwbf : pynwb.NWBFile
-            The NWB file with institution information.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"institution_name": "institution"}}
 
-        Returns
-        -------
-        institution_name : string
-            The name of the institution found in the NWB or config file,
-            or None.
-        """
-        config = config or dict()
-        inst_list = config.get("Institution", [{}])
-        if len(inst_list) > 1:
-            logger.info(
-                "Multiple institution entries not allowed. "
-                + "Using the first entry only.\n"
-            )
-        inst_name = inst_list[0].get("institution_name") or getattr(
-            nwbf, "institution", None
-        )
-        if not inst_name:
-            logger.info("No institution metadata found.\n")
-            return None
-
-        cls.insert1(dict(institution_name=inst_name), skip_duplicates=True)
-        return inst_name
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.NWBFile
 
 
 @schema
-class Lab(SpyglassMixin, dj.Manual):
+class Lab(SpyglassIngestion, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"lab_name": "lab"}}
+
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.NWBFile
+
+    def insert_from_nwbfile(self, nwb_file_name: str, config: dict = None):
         """Insert lab name information from an NWB file.
 
         Parameters
         ----------
-        nwbf : pynwb.NWBFile
-            The NWB file with lab name information.
+        nwb_file_name : str
+            The name of the NWB file with lab name information.
         config : dict
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
@@ -311,19 +300,18 @@ class Lab(SpyglassMixin, dj.Manual):
         lab_name : string
             The name of the lab found in the NWB or config file, or None.
         """
-        config = config or dict()
-        lab_list = config.get("Lab", [{}])
-        if len(lab_list) > 1:
+        insert_entries = super().insert_from_nwbfile(
+            nwb_file_name, config, execute_inserts=False
+        )
+        if not insert_entries:
+            logger.info("No lab metadata found.\n")
+        if len(insert_entries) > 1:
             logger.info(
                 "Multiple lab entries not allowed. Using the first entry only."
             )
-        lab_name = lab_list[0].get("lab_name") or getattr(nwbf, "lab", None)
-        if not lab_name:
-            logger.info("No lab metadata found.\n")
-            return None
-
-        cls.insert1(dict(lab_name=lab_name), skip_duplicates=True)
-        return lab_name
+            insert_entries = insert_entries[:1]
+        self.insert(insert_entries, skip_duplicates=True)
+        return insert_entries
 
 
 def decompose_name(full_name: str) -> tuple:
