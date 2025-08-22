@@ -9,6 +9,7 @@ from spyglass.common.common_lab import (
     Institution,
     Lab,
     LabMember,
+    LabTeam,
     decompose_name,
 )
 from spyglass.common.common_nwbfile import Nwbfile
@@ -92,13 +93,17 @@ class Session(SpyglassMixin, dj.Imported):
         # tables (e.g., Experimenter, DataAcquisitionDevice).
 
         logger.info("Session populates Institution...")
-        institution_name = Institution().insert_from_nwbfile(nwbf, config)
+        institution_name = Institution().insert_from_nwbfile(
+            nwb_file_name, config
+        )[0]["institution_name"]
 
         logger.info("Session populates Lab...")
-        lab_name = Lab().insert_from_nwbfile(nwbf, config)
+        lab_inserts = Lab().insert_from_nwbfile(nwb_file_name, config)
+        lab_name = lab_inserts[0]["lab_name"] if lab_inserts else None
 
         logger.info("Session populates LabMember...")
-        LabMember().insert_from_nwbfile(nwbf, config)
+        LabMember().insert_from_nwbfile(nwb_file_name, config)
+        LabTeam().insert_from_nwbfile(nwb_file_name, config)
 
         logger.info("Session populates Subject...")
         subject_id = Subject().insert_from_nwbfile(nwbf, config)
@@ -108,7 +113,8 @@ class Session(SpyglassMixin, dj.Imported):
             DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
 
         logger.info("Session populates Populate CameraDevice...")
-        CameraDevice.insert_from_nwbfile(nwbf, config)
+        logger.info("Testing CameraDevice insert...")
+        CameraDevice().insert_from_nwbfile(nwb_file_name, config)
 
         logger.info("Session populates Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
