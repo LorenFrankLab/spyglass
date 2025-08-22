@@ -247,10 +247,7 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
-            AnalysisNwbfile,
-            Nwbfile,
-        )  # noqa F401
+        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile  # noqa F401
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -727,100 +724,117 @@ class SpyglassMixin(ExportMixin):
 
     # ---------------------------- NWB data import -----------------------------
 
-    @property
-    def table_key_to_obj_attr() -> dict:
-        """A dictionary of dictionaries mapping table keys to NWB object attributes for each table.
+    # @property
+    # def table_key_to_obj_attr() -> dict:
+    #     """A dictionary of dictionaries mapping table keys to NWB object attributes for each table.
 
-        First level keys are the nwb object.
-        The reserved key "self" refers to the original object.
-        Additional keys can be added to access data from other nwb objects that are attributes of the object (e.g. device.model).
+    #     First level keys are the nwb object.
+    #     The reserved key "self" refers to the original object.
+    #     Additional keys can be added to access data from other nwb objects that are attributes of the object (e.g. device.model).
 
-        Second level keys are the table keys to map to the nwb object attributes.
-        If the values of this dictionary are strings, they are interpreted as attribute names of the nwb object.
-        If the values are callables, they are called with the nwb object as the only argument.
-        """
-        raise NotImplementedError(
-            "Please implement table_key_to_obj_attr in the table class."
-        )
+    #     Second level keys are the table keys to map to the nwb object attributes.
+    #     If the values of this dictionary are strings, they are interpreted as attribute names of the nwb object.
+    #     If the values are callables, they are called with the nwb object as the only argument.
+    #     """
+    #     raise NotImplementedError(
+    #         "Please implement table_key_to_obj_attr in the table class."
+    #     )
 
-    @property
-    def _source_nwb_object_type(self):
-        """The type of NWB object to import from the NWB file.
+    # @property
+    # def _source_nwb_object_type(self):
+    #     """The type of NWB object to import from the NWB file.
 
-        If None, the table is either incompatible with NWB ingestion or must implement
-        get_nwb_objects to return a list of NWB objects to import.
-        """
-        return None
+    #     If None, the table is either incompatible with NWB ingestion or must implement
+    #     get_nwb_objects to return a list of NWB objects to import.
+    #     """
+    #     return None
 
-    def generate_entries_from_config(self, config: dict):
-        """Generates a list of table entries from a config dictionary."""
-        return config.get(dj.utils.to_camel_case(self.table_name), [])
+    # def generate_entries_from_config(self, config: dict, base_key=dict()):
+    #     """Generates a list of table entries from a config dictionary."""
+    #     config_entries = config.get(dj.utils.to_camel_case(self.table_name), [])
+    #     return [{**base_key, **entry} for entry in config_entries]
 
-    def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
-        """Generates a list of table entries from an NWB object."""
-        for object_name, mapping in self.table_key_to_obj_attr.items():
-            if object_name != "self":
-                obj_ = getattr(nwb_obj, object_name)
-                if nwb_obj is None:
-                    raise ValueError(
-                        f"NWB object {object_name} not found in {nwb_obj}."
-                    )
-            else:
-                obj_ = nwb_obj
-            key.update(
-                {
-                    k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
-                    for k, v in mapping.items()
-                }
-            )
-        return [key]
+    # def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
+    #     """Generates a list of table entries from an NWB object."""
+    #     entries = []
+    #     for object_name, mapping in self.table_key_to_obj_attr.items():
+    #         if object_name != "self":
+    #             obj_ = getattr(nwb_obj, object_name)
+    #             if nwb_obj is None:
+    #                 raise ValueError(
+    #                     f"NWB object {object_name} not found in {nwb_obj}."
+    #                 )
+    #         else:
+    #             obj_ = nwb_obj
+    #         entries.append(
+    #             {
+    #                 **key,
+    #                 **{
+    #                     k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
+    #                     for k, v in mapping.items()
+    #                 },
+    #             }
+    #         )
+    #     return entries
 
-    def get_nwb_objects(
-        self,
-        nwb_file: NWBFile,
-    ) -> List:
-        """Returns a list of NWB objects to be imported.
+    # def get_nwb_objects(
+    #     self,
+    #     nwb_file: NWBFile,
+    # ) -> List:
+    #     """Returns a list of NWB objects to be imported.
 
-        By default, returns a list with the root nwb_file object.
-        Can be overridden to return a list of other nwb objects (e.g. all devices).
-        """
-        if self._source_nwb_object_type is None:
-            raise ValueError(
-                "get_nwb_objects requires _source_nwb_object_type to be specified "
-                + "or be overidden for the class."
-            )
-        return [
-            obj
-            for obj in nwb_file.objects
-            if isinstance(obj, self._source_nwb_object_type)
-        ]
+    #     By default, returns a list with the root nwb_file object.
+    #     Can be overridden to return a list of other nwb objects (e.g. all devices).
+    #     """
+    #     logger.info(
+    #         f"Getting NWB objects from {nwb_file} for {self.camel_name}."
+    #     )
+    #     if self._source_nwb_object_type is None:
+    #         raise ValueError(
+    #             "get_nwb_objects requires _source_nwb_object_type to be specified "
+    #             + "or be overidden for the class."
+    #         )
+    #     matching_objects = [
+    #         obj
+    #         for obj in nwb_file.objects.values()
+    #         if isinstance(obj, self._source_nwb_object_type)
+    #     ]
+    #     logger.info(
+    #         f"Found {len(matching_objects)} "
+    #         + f"{self._source_nwb_object_type.__name__} objects in NWB file."
+    #     )
+    #     return matching_objects
 
-    def insert_from_nwbfile(
-        self,
-        nwb_file_name: str,
-        config: dict = None,
-    ):
-        """Insert entries into the table from an NWB file.
+    # def insert_from_nwbfile(
+    #     self,
+    #     nwb_file_name: str,
+    #     config: dict = None,
+    # ):
+    #     """Insert entries into the table from an NWB file.
 
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the NWB file to import from.
-        """
-        from spyglass.common.common_nwbfile import Nwbfile
+    #     Parameters
+    #     ----------
+    #     nwb_file_name : str
+    #         The name of the NWB file to import from.
+    #     """
+    #     from spyglass.common.common_nwbfile import Nwbfile
 
-        nwb_key = {"nwb_file_name": nwb_file_name}
-        nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
-        base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
-        entries = []
-        for nwb_obj in self.get_nwb_objects(nwb_file):
-            entries.extend(
-                self.generate_entries_from_nwb_object(nwb_obj),
-                base_entry.copy(),
-            )
-        if config:
-            entries.extend(self.generate_entries_from_config(config))
-        self.insert(entries, skip_duplicates=True)
+    #     logger.info(f"Inserting {self.camel_name} from {nwb_file_name}.")
+    #     nwb_key = {"nwb_file_name": nwb_file_name}
+    #     nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
+    #     base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
+    #     entries = []
+    #     for nwb_obj in self.get_nwb_objects(nwb_file):
+    #         entries.extend(
+    #             self.generate_entries_from_nwb_object(
+    #                 nwb_obj,
+    #                 base_entry.copy(),
+    #             )
+    #         )
+    #     if config:
+    #         entries.extend(self.generate_entries_from_config(config))
+    #     self.insert(entries, skip_duplicates=True)
+    #     return entries
 
     # ------------------------------ Restrict by ------------------------------
 
@@ -1107,3 +1121,132 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
             restricted = self & restriction
 
         restricted.delete(*args, **kwargs)
+
+
+class SpyglassIngestion(SpyglassMixin):
+    """A mixin for Spyglass tables that ingest data from NWB files."""
+
+    @property
+    def table_key_to_obj_attr() -> dict:
+        """A dictionary of dictionaries mapping table keys to NWB object attributes
+        for each table.
+
+        First level keys are the nwb object.
+        The reserved key "self" refers to the original object.
+        Additional keys can be added to access data from other nwb objects that are
+        attributes of the object (e.g. device.model).
+
+        Second level keys are the table keys to map to the nwb object attributes.
+        If the values of this dictionary are strings, they are interpreted as attribute
+        names of the nwb object.
+        If the values are callables, they are called with the nwb object as the
+        only argument.
+        """
+        raise NotImplementedError(
+            "Please implement table_key_to_obj_attr in the table class."
+        )
+
+    @property
+    def _source_nwb_object_type(self):
+        """The type of NWB object to import from the NWB file.
+
+        If None, the table is either incompatible with NWB ingestion or must implement
+        get_nwb_objects to return a list of NWB objects to import.
+        """
+        raise NotImplementedError(
+            "Please define _source_nwb_object_type in the table class."
+        )
+
+    def generate_entries_from_config(self, config: dict, base_key=dict()):
+        """Generates a list of table entries from a config dictionary."""
+        config_entries = config.get(self.camel_name, [])
+        return [{**base_key, **entry} for entry in config_entries]
+
+    def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
+        """Generates a list of table entries from an NWB object."""
+        entries = []
+        for object_name, mapping in self.table_key_to_obj_attr.items():
+            if object_name != "self":
+                obj_ = getattr(nwb_obj, object_name)
+                if nwb_obj is None:
+                    raise ValueError(
+                        f"NWB object {object_name} not found in {nwb_obj}."
+                    )
+            else:
+                obj_ = nwb_obj
+            entries.append(
+                {
+                    **key,
+                    **{
+                        k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
+                        for k, v in mapping.items()
+                    },
+                }
+            )
+        return entries
+
+    def get_nwb_objects(
+        self,
+        nwb_file: NWBFile,
+    ) -> List:
+        """Returns a list of NWB objects to be imported.
+
+        By default, returns a list with the root nwb_file object.
+        Can be overridden to return a list of other nwb objects (e.g. all devices).
+        """
+        logger.info(
+            f"Getting NWB objects from {nwb_file} for {self.camel_name}."
+        )
+        if self._source_nwb_object_type is None:
+            raise ValueError(
+                "get_nwb_objects requires _source_nwb_object_type to be specified "
+                + "or be overidden for the class."
+            )
+        matching_objects = [
+            obj
+            for obj in nwb_file.objects.values()
+            if isinstance(obj, self._source_nwb_object_type)
+        ]
+        logger.info(
+            f"Found {len(matching_objects)} "
+            + f"{self._source_nwb_object_type.__name__} objects in NWB file."
+        )
+        return matching_objects
+
+    def insert_from_nwbfile(
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        execute_inserts: bool = True,
+    ):
+        """Insert entries into the table from an NWB file.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file to import from.
+        config : dict, optional
+            A configuration dictionary to supplement NWB data. Default None.
+        execute_inserts : bool, optional
+            If False, do not execute the insert, just return the entries that
+            would be inserted. Default True.
+        """
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        logger.info(f"Inserting {self.camel_name} from {nwb_file_name}.")
+        nwb_key = {"nwb_file_name": nwb_file_name}
+        nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
+        base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
+        entries = []
+        for nwb_obj in self.get_nwb_objects(nwb_file):
+            entries.extend(
+                self.generate_entries_from_nwb_object(
+                    nwb_obj,
+                    base_entry.copy(),
+                )
+            )
+        if config:
+            entries.extend(self.generate_entries_from_config(config))
+        if execute_inserts:
+            self.insert(entries, skip_duplicates=True)
+        return entries
