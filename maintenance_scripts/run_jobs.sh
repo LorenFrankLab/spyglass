@@ -45,7 +45,7 @@ on_fail() { # $1: error message. Echo message and send as email
     local content
     content=$(printf "$EMAIL_TEMPLATE" "$error_msg")
 
-    curl -o /dev/null --ssl-reqd \
+    curl -sS -o /dev/null --ssl-reqd \
       --url "smtps://smtp.gmail.com:465" \
       --user "${SPYGLASS_EMAIL_SRC}:${SPYGLASS_EMAIL_PASS}" \
       --mail-from "$SPYGLASS_EMAIL_SRC" \
@@ -82,7 +82,7 @@ CONN_TEST="import datajoint as dj; dj.logger.setLevel('ERROR'); dj.conn()"
 conda_run python -c "$CONN_TEST" > /dev/null || \
   { on_fail "Could not connect to the database"; exit 1; }
 
-# Chmod new files in past 2 days
+# Chmod new files in past 2 days, requires sudo
 if $SPYGLASS_CHMOD_FILES; then
   find $SPYGLASS_BASE_PATH -type f -mtime -2 -exec chmod 644 {} \; || \
     { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
