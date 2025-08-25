@@ -1,7 +1,6 @@
 # Change Log
 
-<!--
-## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
@@ -12,15 +11,32 @@ When altering tables, import all foreign key references.
 #
 ```
 
+### Documentation
+
+- Delete extra pyscripts that were renamed # 1363
+- Add note on fetching changes to setup notebook #1371
+
 ### Infrastructure
 
-- Thing
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
 
-### Pipelines
+### Behavior
 
-- Common
-    - Thing
--->
+- Add methods for calling moseq visualization functions #1374
+
+### Decoding
+
+- Ensure results directory is created if it doesn't exist #1362
+
+### Position
+
+- Ensure video files are properly added to `DLCProject` #1367
+- DLC parameter handling improvements and default value corrections #1379
+
+### Spikesorting
+
+- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 

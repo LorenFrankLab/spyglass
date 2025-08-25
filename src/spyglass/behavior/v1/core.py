@@ -82,12 +82,11 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         dict
             dictionary of video name to pose dataset
         """
-        if key is None:
-            key = {}
-
-        bodyparts = (self & key).fetch1("bodyparts")
+        self.ensure_single_entry(key)
+        query = self & key
+        bodyparts = query.fetch1("bodyparts")
         datasets = {}
-        for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id"):
+        for merge_key in (self.Pose & query).proj(merge_id="pose_merge_id"):
             video_name = Path(
                 (PositionOutput & merge_key).fetch_video_path()
             ).name
@@ -115,8 +114,8 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         List[Path]
             list of video paths
         """
-        if key is None:
-            key = {}
+        self.ensure_single_entry(key)
+        key = (self & key).fetch1("KEY")
         return [
             Path((PositionOutput & merge_key).fetch_video_path())
             for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id")
