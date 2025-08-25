@@ -4,9 +4,9 @@ from numpy import array_equal
 from ..conftest import TEARDOWN
 
 
-def test_create_from_config(mini_insert, common_ephys, mini_path):
+def test_create_from_config(mini_insert, common_ephys, mini_copy_name):
     before = common_ephys.Electrode().fetch()
-    common_ephys.Electrode.create_from_config(mini_path.stem)
+    common_ephys.Electrode.create_from_config(mini_copy_name)
     after = common_ephys.Electrode().fetch()
     # Because already inserted, expect no change
     assert array_equal(

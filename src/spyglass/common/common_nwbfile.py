@@ -111,17 +111,17 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
-        ret = raw_dir + "/" + nwb_file_name
+        file_path = raw_dir + "/" + nwb_file_name
         if new_file:
-            return ret
+            return file_path
 
         query = cls & cls.get_file_key(nwb_file_name)
         if len(query) != 1:
-            raise FileNotFoundError(
+            raise ValueError(
                 f"Could not find 1 entry for {nwb_file_name}:\n{query}"
             )
 
-        return ret
+        return file_path
 
     @staticmethod
     def add_to_lock(nwb_file_name: str) -> None:

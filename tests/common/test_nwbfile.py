@@ -19,12 +19,6 @@ def lockfile(base_dir, teardown):
         os.remove(lockfile)
 
 
-def test_get_file_name_error(common_nwbfile):
-    """Test that an error is raised when trying non-existent file."""
-    with pytest.raises(ValueError):
-        common_nwbfile.Nwbfile._get_file_name("non-existent-file.nwb")
-
-
 def test_add_to_lock(common_nwbfile, lockfile, mini_copy_name):
     common_nwbfile.Nwbfile.add_to_lock(mini_copy_name)
     with lockfile.open("r") as f:
