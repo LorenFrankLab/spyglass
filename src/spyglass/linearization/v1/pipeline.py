@@ -2,14 +2,14 @@
 
 import datajoint as dj
 
-# --- Spyglass Imports ---
-from spyglass.common import IntervalList, TrackGraph
-from spyglass.linearization.merge import LinearizedPositionOutput
 from spyglass.linearization.v1 import (
     LinearizationParameters,
     LinearizationSelection,
     LinearizedPositionV1,
 )
+
+# --- Spyglass Imports ---
+from spyglass.linearization.v1.main import TrackGraph
 from spyglass.position import PositionOutput
 from spyglass.utils import logger
 
@@ -19,8 +19,7 @@ from spyglass.utils import logger
 def populate_spyglass_linearization_v1(
     pos_merge_id: str,
     track_graph_name: str,
-    linearization_param_name: str,
-    target_interval_list_name: str,
+    linearization_param_name: str = "default",
     skip_duplicates: bool = True,
     **kwargs,
 ) -> None:
@@ -36,11 +35,8 @@ def populate_spyglass_linearization_v1(
         data to be linearized.
     track_graph_name : str
         The name of the track graph defined in `TrackGraph`.
-    linearization_param_name : str
+    linearization_param_name : str, optional
         The name of the parameters in `LinearizationParameters`.
-    target_interval_list_name : str
-        The name of the interval defined in `IntervalList` over which to
-        linearize the position data.
     skip_duplicates : bool, optional
         If True, skips insertion if a matching selection entry exists.
         Defaults to True.
@@ -60,51 +56,33 @@ def populate_spyglass_linearization_v1(
     ```python
     # --- Example Prerequisites (Ensure these are populated) ---
     # Assume 'my_pos_output_id' exists in PositionOutput
-    # Assume 'my_track_graph' exists in TrackGraph
+    # Assume 'my_track_graph' exists in TrackGraph (v1)
     # Assume 'default' params exist in LinearizationParameters
-    # Assume 'run_interval' exists in IntervalList for the session
 
     pos_id = 'replace_with_actual_position_merge_id' # Placeholder
     track_name = 'my_track_graph'
     lin_params = 'default'
-    interval = 'run_interval'
-    nwb_file = 'my_session_.nwb' # Needed to check interval exists
-
-    # Check interval exists (optional, function does basic check)
-    # assert len(IntervalList & {'nwb_file_name': nwb_file, 'interval_list_name': interval}) == 1
 
     # --- Run Linearization ---
     populate_spyglass_linearization_v1(
         pos_merge_id=pos_id,
         track_graph_name=track_name,
         linearization_param_name=lin_params,
-        target_interval_list_name=interval,
         display_progress=True
     )
     ```
     """
 
     # --- Input Validation ---
-    pos_key = {"merge_id": pos_merge_id}
+    pos_key = {"merge_id": str(pos_merge_id)}
     if not (PositionOutput & pos_key):
         raise ValueError(f"PositionOutput entry not found: {pos_merge_id}")
-    # Need nwb_file_name from position source to check track graph and interval
-    pos_entry = (PositionOutput & pos_key).fetch("nwb_file_name")
-    if not pos_entry:
-        raise ValueError(
-            f"Could not retrieve source NWB file for PositionOutput {pos_merge_id}"
-        )
-    nwb_file_name = pos_entry[0][
-        "nwb_file_name"
-    ]  # Assuming fetch returns list of dicts
 
     track_key = {"track_graph_name": track_graph_name}
     if not (TrackGraph & track_key):
-        raise ValueError(f"TrackGraph not found: {track_graph_name}")
-    # Check if track graph is associated with this NWB file (optional but good practice)
-    if not (TrackGraph & track_key & {"nwb_file_name": nwb_file_name}):
-        logger.warning(
-            f"TrackGraph '{track_graph_name}' is not directly associated with NWB file '{nwb_file_name}'. Ensure it is applicable."
+        raise ValueError(
+            f"TrackGraph not found: {track_graph_name}."
+            " Make sure you have populated TrackGraph v1"
         )
 
     params_key = {"linearization_param_name": linearization_param_name}
@@ -113,26 +91,16 @@ def populate_spyglass_linearization_v1(
             f"LinearizationParameters not found: {linearization_param_name}"
         )
 
-    interval_key = {
-        "nwb_file_name": nwb_file_name,
-        "interval_list_name": target_interval_list_name,
-    }
-    if not (IntervalList & interval_key):
-        raise ValueError(
-            f"IntervalList not found: {nwb_file_name}, {target_interval_list_name}"
-        )
-
     # --- Construct Selection Key ---
     selection_key = {
         "pos_merge_id": pos_merge_id,
         "track_graph_name": track_graph_name,
         "linearization_param_name": linearization_param_name,
-        "target_interval_list_name": target_interval_list_name,
     }
 
     pipeline_description = (
         f"Pos {pos_merge_id} | Track {track_graph_name} | "
-        f"Params {linearization_param_name} | Interval {target_interval_list_name}"
+        f"Params {linearization_param_name}"
     )
 
     final_key = None
@@ -151,7 +119,7 @@ def populate_spyglass_linearization_v1(
                 f"Linearization Selection already exists for {pipeline_description}"
             )
             if not skip_duplicates:
-                raise dj.errors.DataJointError(
+                raise dj.errors.DuplicateError(
                     "Duplicate selection entry exists."
                 )
 
@@ -178,29 +146,6 @@ def populate_spyglass_linearization_v1(
         if not (LinearizedPositionV1 & selection_key):
             raise dj.errors.DataJointError(
                 f"LinearizedPositionV1 population failed for {pipeline_description}"
-            )
-        final_key = (LinearizedPositionV1 & selection_key).fetch1("KEY")
-
-        # --- 3. Insert into Merge Table ---
-        if final_key:
-            logger.info(
-                f"---- Step 3: Merge Table Insert | {pipeline_description} ----"
-            )
-            if not (
-                LinearizedPositionOutput.LinearizedPositionV1() & final_key
-            ):
-                LinearizedPositionOutput._merge_insert(
-                    [final_key],
-                    part_name="LinearizedPositionV1",
-                    skip_duplicates=skip_duplicates,
-                )
-            else:
-                logger.warning(
-                    f"Final linearized position {final_key} already in merge table for {pipeline_description}."
-                )
-        else:
-            logger.error(
-                f"Final key not generated, cannot insert into merge table for {pipeline_description}"
             )
 
         logger.info(
