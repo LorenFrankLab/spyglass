@@ -21,6 +21,11 @@ When altering tables, import all foreign key references.
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 
+### Pipelines
+
+- Common
+  - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+
 ### Behavior
 
 - Add methods for calling moseq visualization functions #1374
