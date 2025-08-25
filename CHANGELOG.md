@@ -21,17 +21,18 @@ import all foreign key references.
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 
 ### Pipelines
 
 - Behavior
-    - Add methods for calling moseq visualization functions #1374 
+    - Add methods for calling moseq visualization functions #1374
 - Common
     - Add tables for storing optogenetic experiment information #1312
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
-    - Ensure video files are properly added to `DLCProject` # 1367 
+    - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
 - Spikesorting
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338

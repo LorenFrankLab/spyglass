@@ -55,7 +55,7 @@ dependencies = [
     "probeinterface<0.3.0", # Bc some probes fail space checks
     "pubnub<6.4.0",  # TODO: remove this when sortingview is updated
     "pydotplus",
-    "pynwb>=2.2.0,<3",
+    "pynwb>=2.5.0,<3",
     "ripple_detection",
     "seaborn",
     "sortingview>=0.11",
