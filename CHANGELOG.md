@@ -23,6 +23,10 @@ import all foreign key references.
 - Allow email send on space check success, clean up maintenance logging #1381
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 
+### Infrastructure
+
+- Auto-load within-Spyglass tables for graph operations #1368
+
 ### Pipelines
 
 - Behavior
