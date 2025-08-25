@@ -406,30 +406,38 @@ class DLCProject(SpyglassMixin, dj.Manual):
             vid_path_obj = Path(video)
             video_name = vid_path_obj.stem
             training_files.extend((label_dir / video_name).glob("*Collected*"))
-            key.update(
+            video_inserts.append(
                 {
+                    **key,
                     "file_name": video_name,
                     "file_ext": vid_path_obj.suffix[1:],  # remove leading '.'
                     "file_path": video,
                 }
             )
-        cls().File.insert(video_inserts, **kwargs)
+        cls().File().insert(
+            video_inserts,
+            **kwargs,
+        )
 
         if len(training_files) == 0:
             logger.warning("No training files to add")
             return
 
+        training_file_inserts = []
         for file in training_files:
             path_obj = Path(file)
-            cls().File.insert1(
+            training_file_inserts.append(
                 {
                     **key,
                     "file_name": f"{path_obj.name}_labeled_data",
                     "file_ext": path_obj.suffix[1:],
                     "file_path": file,
                 },
-                **kwargs,
             )
+        cls().File().insert(
+            training_file_inserts,
+            **kwargs,
+        )
 
     @classmethod
     def run_extract_frames(cls, key, **kwargs):
