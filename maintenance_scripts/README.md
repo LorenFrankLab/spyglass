@@ -68,6 +68,8 @@ regularly as cron jobs.
         - `SPACE_LOG`: the path to the log file.
         - `SPACE_EMAIL_SRC`/`SPACE_EMAIL_PASS`: email sender settings for disk
             space notifications.
+        - `SPACE_EMAIL_ON_PASS`: if `true`, send an email summary even if all
+            drives are above the limit. If `false`, only send emails on failure.
         - `SPACE_EMAIL_RECIPENTS`: a space-separated list of email addresses to
             receive disk space notifications.
     - Items for posting to slack:
