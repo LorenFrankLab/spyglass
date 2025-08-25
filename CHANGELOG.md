@@ -4,8 +4,8 @@
 
 ### Release Notes
 
-Running draft to be removed immediately prior to release.
-When altering tables, import all foreign key references.
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
 #
@@ -18,8 +18,9 @@ When altering tables, import all foreign key references.
 
 ### Infrastructure
 
-- Set default codecov threshold for test fail #1370
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
 
 ### Infrastructure
 
@@ -27,8 +28,15 @@ When altering tables, import all foreign key references.
 
 ### Pipelines
 
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
+- Common
+    - Add tables for storing optogenetic experiment information #1312
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
 - Spikesorting
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
@@ -527,3 +535,4 @@ When altering tables, import all foreign key references.
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6

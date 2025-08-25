@@ -16,7 +16,8 @@ if [[ -z "${SPACE_CHECK_DRIVES}" \
   || -z "${SPACE_EMAIL_RECIPIENTS}" \
   || -z "${SPACE_DRIVE_LIMITS}" \
   || -z "${SPACE_LOG}" \
-  || -z "${SPACE_ROOT_NAME}" ]] ; then
+  || -z "${SPACE_ROOT_NAME}" \
+  || -z "${SPACE_EMAIL_ON_PASS}" ]] ; then
   echo "Error: Missing one or more variables required for check_disk_space.sh"
   exit 1
 fi
@@ -36,7 +37,7 @@ echo "SPACE CHECK: $(date)" >> "$SPACE_LOG"
 EMAIL_TEMPLATE=$(cat <<-EOF
 From: "Spyglass" <$SPACE_EMAIL_SRC>
 To: %s
-Subject: Drive almost full: %s
+Subject: %s
 
 %s
 EOF
@@ -48,7 +49,7 @@ send_email_message() {
   local SUBJECT="$2"
   local BODY="$3"
   EMAIL=$(printf "$EMAIL_TEMPLATE" "$RECIPIENT" "$SUBJECT" "$BODY")
-  curl -s --url "smtps://smtp.gmail.com:465" \
+  curl -sS --url "smtps://smtp.gmail.com:465" \
       --ssl-reqd \
       --user "$SPACE_EMAIL_SRC:$SPACE_EMAIL_PASS" \
       --mail-from "$SPACE_EMAIL_SRC" \
@@ -76,6 +77,9 @@ for DRIVE in $SPACE_CHECK_DRIVES; do
     [[ $LEN -gt $MAX_DRIVE_LEN ]] && MAX_DRIVE_LEN=$LEN
 done
 
+OUTPUT=""
+FOUND_ISSUE=0
+
 # Check each drive
 for i in "${!DRIVE_LIST[@]}"; do
     DRIVE="${DRIVE_LIST[$i]}"
@@ -102,13 +106,18 @@ for i in "${!DRIVE_LIST[@]}"; do
     else
         NAME="${DRIVE:1}" # Assumes first char is `/`
     fi
-    printf "%-*s: %s/%s\n" "$MAX_DRIVE_LEN" "$NAME" \
-        "$FREE_HUMAN" "$TOTAL_HUMAN" >> "$SPACE_LOG"
+    line=$(\
+      printf "%-*s: %s/%s\n" \
+      "$MAX_DRIVE_LEN" "$NAME" "$FREE_HUMAN" "$TOTAL_HUMAN"\
+    )
+    OUTPUT+="$line\n"
 
     # Do nothing if under capacity
     if [[ "$FREE_BYTES" -gt "$SPACE_LIMIT_BYTES" ]]; then
         continue
     fi
+
+    FOUND_ISSUE=1
 
     # Send email alert
     BODY="Low space warning: ${NAME} has ${FREE_HUMAN}/${TOTAL_HUMAN} free"
@@ -119,7 +128,15 @@ for i in "${!DRIVE_LIST[@]}"; do
     send_slack_message "$BODY"
 
     for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do
-        send_email_message "$RECIPIENT" "$SUBJ" "$BODY"
+        send_email_message "$RECIPIENT" "ALMOST FULL: $SUBJ" "$BODY"
     done
 
 done
+
+echo -e "$OUTPUT" >> "$SPACE_LOG"
+
+if [[ "$SPACE_EMAIL_ON_PASS" == "true" ]] && [[ "$FOUND_ISSUE" == "0" ]]; then
+  for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do
+      send_email_message "$RECIPIENT" "Disk Space OK" "$OUTPUT"
+  done
+fi
