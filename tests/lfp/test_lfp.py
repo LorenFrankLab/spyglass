@@ -102,7 +102,7 @@ def test_artifact_detection(lfp, pop_art_detection):
     pass
 
 
-def test_pop_imported_lfp(lfp, common):
+def test_pop_imported_lfp(lfp, common, mini_dict):
     # check that populated from populate_all_common
     assert len(lfp.lfp_imported.ImportedLFP()) == 1
     assert (
@@ -113,6 +113,5 @@ def test_pop_imported_lfp(lfp, common):
         == 1
     )
     # check that rerunning doesn't add duplicates
-    key = common.common_nwbfile.Nwbfile().fetch1("KEY")
-    lfp.lfp_imported.ImportedLFP().make(key)
+    lfp.lfp_imported.ImportedLFP().make(mini_dict)
     assert len(lfp.lfp_imported.ImportedLFP()) == 1
