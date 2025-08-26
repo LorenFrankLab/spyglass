@@ -70,6 +70,25 @@ class LabMember(SpyglassIngestion, dj.Manual):
             )
         return entries
 
+    @classmethod
+    def insert_from_name(cls, full_name):
+        """Insert a lab member by name.
+
+        Parameters
+        ----------
+        full_name : str
+            The name to be added.
+        """
+        _, first, last = decompose_name(full_name)
+        cls.insert1(
+            dict(
+                lab_member_name=f"{first} {last}",
+                first_name=first,
+                last_name=last,
+            ),
+            skip_duplicates=True,
+        )
+
     def _load_admin(self):
         """Load admin list."""
         self._admin = list(

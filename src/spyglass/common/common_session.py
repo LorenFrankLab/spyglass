@@ -3,6 +3,8 @@ import datajoint as dj
 from spyglass.common.common_device import (
     CameraDevice,
     DataAcquisitionDevice,
+    DataAcquisitionDeviceAmplifier,
+    DataAcquisitionDeviceSystem,
     Probe,
 )
 from spyglass.common.common_lab import (
@@ -106,11 +108,19 @@ class Session(SpyglassMixin, dj.Imported):
         LabTeam().insert_from_nwbfile(nwb_file_name, config)
 
         logger.info("Session populates Subject...")
-        subject_id = Subject().insert_from_nwbfile(nwbf, config)
+        subject_id = Subject().insert_from_nwbfile(nwb_file_name, config)[0][
+            "subject_id"
+        ]
 
         if not debug_mode:  # TODO: remove when demo files agree on device
             logger.info("Session populates Populate DataAcquisitionDevice...")
-            DataAcquisitionDevice.insert_from_nwbfile(nwbf, config)
+            DataAcquisitionDeviceAmplifier().insert_from_nwbfile(
+                nwb_file_name, config
+            )
+            DataAcquisitionDeviceSystem().insert_from_nwbfile(
+                nwb_file_name, config
+            )
+            DataAcquisitionDevice().insert_from_nwbfile(nwb_file_name, config)
 
         logger.info("Session populates Populate CameraDevice...")
         logger.info("Testing CameraDevice insert...")

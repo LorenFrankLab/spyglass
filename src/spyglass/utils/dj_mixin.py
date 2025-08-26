@@ -1020,6 +1020,8 @@ class SpyglassIngestion(SpyglassMixin):
     # duplicate primary keys.
     _expected_duplicates = False
 
+    _prompt_insert = False  # If true, prompts user before inserting new table entries from NWB file.
+
     @property
     def table_key_to_obj_attr() -> dict:
         """A dictionary of dictionaries mapping table keys to NWB object attributes
@@ -1167,3 +1169,57 @@ class SpyglassIngestion(SpyglassMixin):
             else:
                 self.insert(entries, skip_duplicates=self._expected_duplicates)
         return entries
+
+    # def prompt_insert(
+    #     name: str,
+    #     all_values: list,
+    #     table: str = "Data Acquisition Device",
+    #     table_type: str = None,
+    # ) -> bool:
+    #     """Prompt user to add an item to the database. Return True if yes.
+
+    #     Assume insert during test mode.
+
+    #     Parameters
+    #     ----------
+    #     name : str
+    #         The name of the item to add.
+    #     all_values : list
+    #         List of all values in the database.
+    #     table : str, optional
+    #         The name of the table to add to, by default Data Acquisition Device
+    #     table_type : str, optional
+    #         The type of item to add, by default None. Data Acquisition Device X
+    #     """
+    # from spyglass.common.errors import PopulateException
+    # from spyglass.settings import test_mode
+
+    #     if name in all_values:
+    #         return False
+
+    #     if test_mode:
+    #         return True
+
+    #     if table_type:
+    #         table_type += " "
+    #     else:
+    #         table_type = ""
+
+    #     logger.info(
+    #         f"{table}{table_type} '{name}' was not found in the"
+    #         f"database. The current values are: {all_values}.\n"
+    #         "Please ensure that the device you want to add does not already"
+    #         "exist in the database under a different name or spelling. If you"
+    #         "want to use an existing device in the database, please change the"
+    #         "corresponding Device object in the NWB file.\nEntering 'N' will "
+    #         "raise an exception."
+    #     )
+    #     msg = (
+    #         f"Do you want to add {table}{table_type} '{name}' to the database?"
+    #     )
+    #     if dj.utils.user_choice(msg).lower() in ["y", "yes"]:
+    #         return True
+
+    #     raise PopulateException(
+    #         f"User chose not to add {table}{table_type} '{name}' to the database."
+    #     )

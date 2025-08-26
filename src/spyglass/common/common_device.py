@@ -14,23 +14,45 @@ schema = dj.schema("common_device")
 
 
 @schema
-class DataAcquisitionDeviceSystem(SpyglassMixin, dj.Manual):
+class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
     definition = """
     # Known data acquisition device system names.
     data_acquisition_device_system: varchar(80)
     """
 
+    _expected_duplicates = True
+    _prompt_insert = True
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"data_acquisition_device_system": "system"}}
+
+    @property
+    def _source_nwb_object_type(self):
+        return ndx_franklab_novela.DataAcqDevice
+
 
 @schema
-class DataAcquisitionDeviceAmplifier(SpyglassMixin, dj.Manual):
+class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
     definition = """
     # Known data acquisition device amplifier names.
     data_acquisition_device_amplifier: varchar(80)
     """
 
+    _expected_duplicates = True
+    _prompt_insert = True
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"data_acquisition_device_amplifier": "amplifier"}}
+
+    @property
+    def _source_nwb_object_type(self):
+        return ndx_franklab_novela.DataAcqDevice
+
 
 @schema
-class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
+class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
     definition = """
     data_acquisition_device_name: varchar(80)
     ---
@@ -39,8 +61,55 @@ class DataAcquisitionDevice(SpyglassMixin, dj.Manual):
     adc_circuit = NULL: varchar(2000)
     """
 
+    _expected_duplicates = True
+
+    @property
+    def _source_nwb_object_type(self):
+        return ndx_franklab_novela.DataAcqDevice
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "data_acquisition_device_name": "name",
+                "data_acquisition_device_system": "system",
+                "data_acquisition_device_amplifier": "amplifier",
+                "adc_circuit": "adc_circuit",
+            }
+        }
+
+    def insert_from_nwbfile(
+        self, nwb_file_name, config=dict(), execute_inserts=True
+    ):
+        """Insert data acquisition devices from an NWB file.
+
+        Note that this does not link the DataAcquisitionDevices with a Session.
+        For that, see DataAcquisitionDeviceList.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The path to the source NWB file.
+        config : dict
+            Dictionary read from a user-defined YAML file containing values to
+            replace in the NWB file.
+        """
+        entries = super().insert_from_nwbfile(
+            nwb_file_name, config, execute_inserts
+        )
+        if entries:
+            logger.info(
+                "Inserted or referenced data acquisition device(s): "
+                + f"{[entry['data_acquisition_device_name'] for entry in entries]}"
+            )
+        else:
+            logger.warning(
+                "No conforming data acquisition device metadata found."
+            )
+        return entries
+
     @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
+    def old_insert_from_nwbfile(cls, nwbf, config=None):
         """Insert data acquisition devices from an NWB file.
 
         Note that this does not link the DataAcquisitionDevices with a Session.
