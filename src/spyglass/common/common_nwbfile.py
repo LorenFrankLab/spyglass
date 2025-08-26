@@ -85,11 +85,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         ]
 
     @classmethod
-    def get_file_key(cls, nwb_file_name: str) -> dict:
-        """Return primary key using nwb_file_name substring."""
-        return {"nwb_file_name": nwb_file_name}
-
-    @classmethod
     def get_abs_path(
         cls, nwb_file_name: str, new_file: bool = False, **kwargs
     ) -> str:
@@ -115,7 +110,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         if new_file:
             return file_path
 
-        query = cls & cls.get_file_key(nwb_file_name)
+        query = cls & {"nwb_file_name": nwb_file_name}
         if len(query) != 1:
             raise ValueError(
                 f"Could not find 1 entry for {nwb_file_name}:\n{query}"
