@@ -167,7 +167,7 @@ class ExportMixin:
         ret = {i.function for i in inspect_stack()} - ignore
         return ret
 
-    def _log_fetch(self, restriction=None, *args, **kwargs):
+    def _log_fetch(self, restriction=None, chunk_size=None, *args, **kwargs):
         """Log fetch for export."""
         if (
             not self.export_id
@@ -203,20 +203,47 @@ class ExportMixin:
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
 
-        if isinstance(restr_str, str) and "SELECT" in restr_str:
-            raise RuntimeError(
-                "Export cannot handle subquery restrictions. Please submit a "
-                + "bug report on GitHub with the code you ran and this"
-                + f"restriction:\n\t{restr_str}"
+        if not (
+            (
+                isinstance(restr_str, str)
+                and (len(restr_str) > 2048)
+                or "SELECT" in restr_str
+            )
+        ):
+            self._insert_log(restr_str)
+            return
+
+        if "SELECT" in restr_str:
+            logger.debug(
+                "Restriction contains subquery. Exporting entry restrictions instead"
             )
 
-        if isinstance(restr_str, str) and len(restr_str) > 2048:
-            raise RuntimeError(
-                "Export cannot handle restrictions > 2048.\n\t"
-                + "If required, please open an issue on GitHub.\n\t"
-                + f"Restriction: {restr_str}"
+        # handle excessive restrictions caused by long OR list of dicts
+        logger.debug(
+            f"Restriction too long ({len(restr_str)} > 2048)."
+            + "Attempting to chunk restriction by subsets of entry keys."
+        )
+        # get list of entry keys
+        restricted_table = (
+            self.restrict(restriction, log_export=False)
+            if restriction
+            else self
+        )
+        restricted_entries = restricted_table.fetch("KEY", log_export=False)
+        if chunk_size is None:
+            # estimate appropriate chunk size
+            chunk_size = max(
+                int(2048 // (len(restr_str) / len(restricted_entries))), 1
             )
+        for i in range(len(restricted_entries) // chunk_size + 1):
+            chunk_entries = restricted_entries[
+                i * chunk_size : (i + 1) * chunk_size
+            ]
+            chunk_restr_str = make_condition(self, chunk_entries, set())
+            self._insert_log(chunk_restr_str)
+        return
 
+    def _insert_log(self, restr_str):
         if isinstance(restr_str, str):
             restr_str = bash_escape_sql(restr_str, add_newline=False)
 
@@ -292,10 +319,10 @@ class ExportMixin:
                 self._run_join(**kwargs)
             else:
                 restr = kwargs.get("restriction")
-                if isinstance(restr, QueryExpression) and getattr(
-                    restr, "restriction"  # if table, try to get restriction
-                ):
-                    restr = restr.restriction
+                # if isinstance(restr, QueryExpression) and getattr(
+                #     restr, "restriction"  # if table, try to get restriction
+                # ):
+                #     restr = restr.fetch()
                 self._log_fetch(restriction=restr)
             logger.debug(f"Export: {self._called_funcs()}")
 
@@ -323,12 +350,33 @@ class ExportMixin:
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, chunk_size=10):
         """Log restrict for export."""
         if not self.export_id:
             return super().restrict(restriction)
 
+        # # avoid compounding restriction by fetching if table
+        # if isinstance(restriction, Table) and restriction.restriction:
+        #     restriction = restriction.fetch(as_dict=True)
+
         log_export = "fetch_nwb" not in self._called_funcs()
+
+        # # handle excessive restrictions caused by OR list of dicts
+        # if (
+        #     isinstance(restriction, list)
+        #     and len(restriction) > chunk_size
+        #     and all(isinstance(r, dict) for r in restriction)
+        #     and (log_this_call := FETCH_LOG_FLAG.get())
+        # ):
+        #     # log restrictions in chunks to avoid 2048 char limit
+        #     for i in range(len(restriction) // chunk_size + 1):
+        #         # reset the flag to allow logging of all chunks
+        #         FETCH_LOG_FLAG.set(log_this_call)
+        #         # log restriction chunk
+        #         self & restriction[i * chunk_size : (i + 1) * chunk_size]
+        #     # Return the full restriction set. No need to log again
+        #     return super().restrict(restriction)
+
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
         else:  # Only combine if both are restricting
