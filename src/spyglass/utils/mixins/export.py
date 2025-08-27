@@ -319,10 +319,6 @@ class ExportMixin:
                 self._run_join(**kwargs)
             else:
                 restr = kwargs.get("restriction")
-                # if isinstance(restr, QueryExpression) and getattr(
-                #     restr, "restriction"  # if table, try to get restriction
-                # ):
-                #     restr = restr.fetch()
                 self._log_fetch(restriction=restr)
             logger.debug(f"Export: {self._called_funcs()}")
 
@@ -355,28 +351,7 @@ class ExportMixin:
         if not self.export_id:
             return super().restrict(restriction)
 
-        # # avoid compounding restriction by fetching if table
-        # if isinstance(restriction, Table) and restriction.restriction:
-        #     restriction = restriction.fetch(as_dict=True)
-
         log_export = "fetch_nwb" not in self._called_funcs()
-
-        # # handle excessive restrictions caused by OR list of dicts
-        # if (
-        #     isinstance(restriction, list)
-        #     and len(restriction) > chunk_size
-        #     and all(isinstance(r, dict) for r in restriction)
-        #     and (log_this_call := FETCH_LOG_FLAG.get())
-        # ):
-        #     # log restrictions in chunks to avoid 2048 char limit
-        #     for i in range(len(restriction) // chunk_size + 1):
-        #         # reset the flag to allow logging of all chunks
-        #         FETCH_LOG_FLAG.set(log_this_call)
-        #         # log restriction chunk
-        #         self & restriction[i * chunk_size : (i + 1) * chunk_size]
-        #     # Return the full restriction set. No need to log again
-        #     return super().restrict(restriction)
-
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
         else:  # Only combine if both are restricting
