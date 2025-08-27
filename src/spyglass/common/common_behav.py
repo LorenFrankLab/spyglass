@@ -78,7 +78,7 @@ class PositionSource(SpyglassMixin, dj.Manual):
         """
         nwbf = get_nwb_file(nwb_file_name)
         all_pos = get_all_spatial_series(nwbf, verbose=True)
-        sess_key = Nwbfile.get_file_key(nwb_file_name)
+        sess_key = {"nwb_file_name": nwb_file_name}
         src_key = dict(**sess_key, source="imported", import_file_name="")
 
         if all_pos is None:
