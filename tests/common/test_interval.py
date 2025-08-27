@@ -8,8 +8,11 @@ def interval_list(common):
     yield common.IntervalList()
 
 
-def test_plot_intervals(interval_list, start_time=0):
-    fig = (interval_list).plot_intervals(return_fig=True, start_time=start_time)
+def test_plot_intervals(interval_list, mini_dict, start_time=0):
+    interval_query = interval_list & mini_dict
+    fig = (interval_query).plot_intervals(
+        return_fig=True, start_time=start_time
+    )
 
     ax = fig.axes[0]
 
@@ -20,7 +23,7 @@ def test_plot_intervals(interval_list, start_time=0):
 
     # extract interval list names from the IntervalList table
     fetch_interval_list_names = np.array(
-        interval_list.fetch("interval_list_name")
+        interval_query.fetch("interval_list_name")
     )
 
     # check that the interval list names match between the two methods

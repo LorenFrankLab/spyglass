@@ -4,8 +4,8 @@
 
 ### Release Notes
 
-Running draft to be removed immediately prior to release.
-When altering tables, import all foreign key references.
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
 #
@@ -20,23 +20,27 @@ When altering tables, import all foreign key references.
 
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 
-### Behavior
+### Infrastructure
 
-- Add methods for calling moseq visualization functions #1374
+- Auto-load within-Spyglass tables for graph operations #1368
 
-### Decoding
+### Pipelines
 
-- Ensure results directory is created if it doesn't exist #1362
-
-### Position
-
-- Ensure video files are properly added to `DLCProject` #1367
-- DLC parameter handling improvements and default value corrections #1379
-
-### Spikesorting
-
-- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
+- Common
+    - Add tables for storing optogenetic experiment information #1312
+    - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -533,3 +537,4 @@ When altering tables, import all foreign key references.
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
