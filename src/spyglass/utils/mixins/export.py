@@ -230,20 +230,34 @@ class ExportMixin:
             else self
         )
         restricted_entries = restricted_table.fetch("KEY", log_export=False)
+        all_entries_restr_str = make_condition(self, restricted_entries, set())
         if chunk_size is None:
             # estimate appropriate chunk size
             chunk_size = max(
-                int(2048 // (len(restr_str) / len(restricted_entries))), 1
+                int(
+                    2048
+                    // (len(all_entries_restr_str) / len(restricted_entries))
+                    - 1
+                ),
+                1,
             )
         for i in range(len(restricted_entries) // chunk_size + 1):
             chunk_entries = restricted_entries[
                 i * chunk_size : (i + 1) * chunk_size
             ]
+            if not chunk_entries:
+                break
             chunk_restr_str = make_condition(self, chunk_entries, set())
             self._insert_log(chunk_restr_str)
         return
 
     def _insert_log(self, restr_str):
+        if len(restr_str) > 2048:
+            raise RuntimeError(
+                "Export cannot handle restrictions > 2048.\n\t"
+                + "If required, please open an issue on GitHub.\n\t"
+                + f"Restriction: {restr_str}"
+            )
         if isinstance(restr_str, str):
             restr_str = bash_escape_sql(restr_str, add_newline=False)
 
@@ -346,12 +360,13 @@ class ExportMixin:
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction, chunk_size=10):
+    def restrict(self, restriction, log_export=None):
         """Log restrict for export."""
         if not self.export_id:
             return super().restrict(restriction)
 
-        log_export = "fetch_nwb" not in self._called_funcs()
+        if log_export is None:
+            log_export = "fetch_nwb" not in self._called_funcs()
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
         else:  # Only combine if both are restricting
