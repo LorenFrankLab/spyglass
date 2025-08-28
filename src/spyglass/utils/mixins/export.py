@@ -218,11 +218,12 @@ class ExportMixin:
                 "Restriction contains subquery. Exporting entry restrictions instead"
             )
 
-        # handle excessive restrictions caused by long OR list of dicts
-        logger.debug(
-            f"Restriction too long ({len(restr_str)} > 2048)."
-            + "Attempting to chunk restriction by subsets of entry keys."
-        )
+        else:
+            # handle excessive restrictions caused by long OR list of dicts
+            logger.debug(
+                f"Restriction too long ({len(restr_str)} > 2048)."
+                + "Attempting to chunk restriction by subsets of entry keys."
+            )
         # get list of entry keys
         restricted_table = (
             self.restrict(restriction, log_export=False)
