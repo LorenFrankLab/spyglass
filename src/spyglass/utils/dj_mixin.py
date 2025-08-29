@@ -20,6 +20,7 @@ from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
     _quick_get_analysis_path,
+    accept_divergence,
     bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
@@ -1070,15 +1071,7 @@ class SpyglassIngestion(SpyglassMixin):
                     )
             else:
                 obj_ = nwb_obj
-            # entries.append(
-            #     {
-            #         **key,
-            #         **{
-            #             k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
-            #             for k, v in mapping.items()
-            #         },
-            #     }
-            # )
+
             key.update(
                 {
                     k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
@@ -1140,6 +1133,8 @@ class SpyglassIngestion(SpyglassMixin):
         nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
         entries = None
+
+        # compile list of table entries from all objects in this file
         for nwb_obj in self.get_nwb_objects(nwb_file):
             obj_entries = self.generate_entries_from_nwb_object(
                 nwb_obj,
@@ -1160,6 +1155,18 @@ class SpyglassIngestion(SpyglassMixin):
         if entries is None or len(entries) == 0:
             logger.info(f"No entries found for {self.camel_name}.")
             return []
+
+        # validate that new entries  are consistent with existing entries
+        if self._expected_duplicates:
+            if isinstance(entries, list):
+                for entry in entries:
+                    self.validate_duplicates(entry)
+            else:
+                for table, table_entries in entries.items():
+                    for entry in table_entries:
+                        table().validate_duplicates(entry)
+
+        # run insertions
         if execute_inserts:
             if isinstance(entries, dict):
                 for table, table_entries in entries.items():
@@ -1168,7 +1175,48 @@ class SpyglassIngestion(SpyglassMixin):
                     )
             else:
                 self.insert(entries, skip_duplicates=self._expected_duplicates)
+
         return entries
+
+    def validate_duplicates(self, new_key):
+        """
+        If matching entry in database, check for consistency in secondary keys.
+        If divergence, prompt user  whether to accept existing value
+
+        Parameters
+        ----------
+        new_key : dict
+            The new key to validate against existing entries in the database.
+        """
+
+        # If novel entry, nothing to validate
+        if not (query := self & new_key):
+            return
+
+        existing = query.fetch1()
+
+        for key in set(new_key).union(existing):
+            if not self.unequal_vals(key, new_key, existing):
+                continue  # skip if values are equal
+            if not accept_divergence(
+                key,
+                new_key.get(key),
+                existing.get(key),
+                self._test_mode,
+                self.camel_name,
+            ):
+                # If the user does not accept the divergence,
+                # raise an error to prevent data inconsistency
+                raise ValueError(
+                    f"Attempted entry in {self.camel_name} already exists "
+                    + f"with different values for {key}: "
+                    + f"{new_key.get(key)} != {existing.get(key)}"
+                )
+
+    @staticmethod
+    def unequal_vals(key, a, b):
+        a, b = a.get(key) or "", b.get(key, "") or ""
+        return a != b  # prevent false positive on None != ""
 
     # def prompt_insert(
     #     name: str,
