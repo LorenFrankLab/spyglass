@@ -1,31 +1,21 @@
 import datajoint as dj
+import ndx_franklab_novela
+import pynwb
 
-from spyglass.common.common_device import (
-    CameraDevice,
-    DataAcquisitionDevice,
-    DataAcquisitionDeviceAmplifier,
-    DataAcquisitionDeviceSystem,
-    Probe,
-    ProbeType,
-)
+from spyglass.common.common_device import DataAcquisitionDevice
 from spyglass.common.common_lab import (
     Institution,
     Lab,
     LabMember,
-    LabTeam,
     decompose_name,
 )
-from spyglass.common.common_nwbfile import Nwbfile
-from spyglass.common.common_subject import Subject
-from spyglass.settings import debug_mode
-from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
+from spyglass.utils import SpyglassIngestion, logger
 
 schema = dj.schema("common_session")
 
 
 @schema
-class Session(SpyglassMixin, dj.Imported):
+class Session(SpyglassIngestion, dj.Imported):
     definition = """
     # Table for holding experimental sessions.
     # Note that each session can have multiple experimenters and data acquisition
@@ -42,138 +32,72 @@ class Session(SpyglassMixin, dj.Imported):
     experiment_description = NULL: varchar(2000)
     """
 
-    class DataAcquisitionDevice(SpyglassMixin, dj.Part):
+    @property
+    def _source_nwb_object_type(self):
+        """The NWB object type from which this table can ingest data."""
+        return pynwb.NWBFile
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "institution_name": "institution",
+                "lab_name": "lab",
+                "session_id": "session_id",
+                "session_description": "session_description",
+                "session_start_time": "session_start_time",
+                "timestamps_reference_time": "timestamps_reference_time",
+                "experiment_description": "experiment_description",
+            },
+            "subject": {"subject_id": "subject_id"},
+        }
+
+    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):
         definition = """
         # Part table linking Session to multiple DataAcquisitionDevice entries.
         -> Session
         -> DataAcquisitionDevice
         """
 
-        # NOTE: as a Part table, it is ill advised to delete entries directly
-        # (https://docs.datajoint.org/python/computation/03-master-part.html),
-        # but you can use `delete(force=True)`.
+        @property
+        def _source_nwb_object_type(self):
+            return ndx_franklab_novela.DataAcqDevice
 
-    class Experimenter(SpyglassMixin, dj.Part):
+        @property
+        def table_key_to_obj_attr(self):
+            return {
+                "self": {
+                    "data_acquisition_device_name": "name",
+                }
+            }
+
+    class Experimenter(SpyglassIngestion, dj.Part):
         definition = """
         # Part table linking Session to multiple LabMember entries.
         -> Session
         -> LabMember
         """
 
-    def make(self, key):
-        """Populate the Session table and others from an nwb file.
+        @property
+        def _source_nwb_object_type(self):
+            return pynwb.NWBFile
 
-        Calls the insert_from_nwbfile method for each of the following tables:
-            - Institution
-            - Lab
-            - LabMember
-            - Subject
-            - DataAcquisitionDevice
-            - CameraDevice
-            - Probe
-            - IntervalList
-        """
-        # These imports must go here to avoid cyclic dependencies
+        def generate_entries_from_nwb_object(
+            self, nwb_obj: pynwb.NWBFile, base_key=dict()
+        ):
+            """Override to handle multiple experimenters."""
+            experimenter_list = nwb_obj.experimenter
+            if not experimenter_list:
+                logger.info("No experimenter metadata found.\n")
+                return list()
 
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        config = get_config(nwb_file_abspath, calling_table=self.camel_name)
-
-        # certain data are not associated with a single NWB file / session
-        # because they may apply to multiple sessions. these data go into
-        # dj.Manual tables. e.g., a lab member may be associated with multiple
-        # experiments, so the lab member table should not be dependent on
-        # (contain a primary key for) a session.
-
-        # here, we create new entries in these dj.Manual tables based on the
-        # values read from the NWB file then, they are linked to the session
-        # via fields of Session (e.g., Subject, Institution, Lab) or part
-        # tables (e.g., Experimenter, DataAcquisitionDevice).
-
-        logger.info("Session populates Institution...")
-        institution_name = Institution().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts=False
-        )[0]["institution_name"]
-
-        logger.info("Session populates Lab...")
-        lab_inserts = Lab().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts=False
-        )
-        lab_name = lab_inserts[0]["lab_name"] if lab_inserts else None
-
-        logger.info("Session populates Subject...")
-        subject_id = Subject().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts=False
-        )[0]["subject_id"]
-
-        Session().insert1(
-            {
-                "nwb_file_name": nwb_file_name,
-                "subject_id": subject_id,
-                "institution_name": institution_name,
-                "lab_name": lab_name,
-                "session_id": nwbf.session_id,
-                "session_description": nwbf.session_description,
-                "session_start_time": nwbf.session_start_time,
-                "timestamps_reference_time": nwbf.timestamps_reference_time,
-                "experiment_description": nwbf.experiment_description,
-            },
-            skip_duplicates=True,
-            allow_direct_insert=True,  # for populate_all_common
-        )
-
-        self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
-        self._add_experimenter_part(nwb_file_name, nwbf, config)
-
-    def _add_data_acquisition_device_part(self, nwb_file_name, nwbf, config={}):
-        # get device names from both the NWB file and the associated config file
-        device_names, _, _ = DataAcquisitionDevice.get_all_device_names(
-            nwbf, config
-        )
-
-        for device_name in device_names:
-            # ensure that the foreign key exists and do nothing if not
-            query = DataAcquisitionDevice & {
-                "data_acquisition_device_name": device_name
-            }
-            if len(query) == 0:
-                logger.warning(
-                    "Cannot link Session with DataAcquisitionDevice.\n"
-                    + f"DataAcquisitionDevice does not exist: {device_name}"
+            entries = []
+            for experimenter in experimenter_list:
+                _, first, last = decompose_name(experimenter)
+                entries.append(
+                    {
+                        "lab_member_name": f"{first} {last}",
+                        **base_key,
+                    }
                 )
-                continue
-            key = dict()
-            key["nwb_file_name"] = nwb_file_name
-            key["data_acquisition_device_name"] = device_name
-            Session.DataAcquisitionDevice.insert1(key)
-
-    def _add_experimenter_part(
-        self, nwb_file_name: str, nwbf, config: dict = None
-    ):
-        # Use config file over nwb file
-        config = config or dict()
-        if members := config.get("LabMember"):
-            experimenter_list = [
-                member["lab_member_name"] for member in members
-            ]
-        elif nwbf.experimenter is not None:
-            experimenter_list = nwbf.experimenter
-        else:
-            return
-
-        for name in experimenter_list:
-            # ensure that the foreign key exists and do nothing if not
-            name = decompose_name(name)[0]
-            query = LabMember & {"lab_member_name": name}
-            if len(query) == 0:
-                logger.warning(
-                    "Cannot link Session with LabMember. "
-                    + f"LabMember does not exist: {name}"
-                )
-                continue
-
-            key = dict()
-            key["nwb_file_name"] = nwb_file_name
-            key["lab_member_name"] = name
-            Session.Experimenter.insert1(key)
+            return entries

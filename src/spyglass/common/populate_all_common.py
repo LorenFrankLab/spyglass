@@ -176,6 +176,8 @@ def populate_all_common(
         ],
         [  # Tables that can be inserted in a single transaction
             Session,
+            Session.Experimenter,
+            Session.DataAcquisitionDevice,
             ElectrodeGroup,  # Depends on Session
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session

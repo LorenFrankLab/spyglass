@@ -1182,10 +1182,16 @@ class SpyglassIngestion(SpyglassMixin):
             if isinstance(entries, dict):
                 for table, table_entries in entries.items():
                     table().insert(
-                        table_entries, skip_duplicates=self._expected_duplicates
+                        table_entries,
+                        skip_duplicates=self._expected_duplicates,
+                        allow_direct_insert=True,
                     )
             else:
-                self.insert(entries, skip_duplicates=self._expected_duplicates)
+                self.insert(
+                    entries,
+                    skip_duplicates=self._expected_duplicates,
+                    allow_direct_insert=True,
+                )
 
         return entries
 
