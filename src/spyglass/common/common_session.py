@@ -157,7 +157,7 @@ class Session(SpyglassMixin, dj.Imported):
         # populated from NWB files
 
         logger.info("Session populates IntervalList...")
-        IntervalList().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
+        IntervalList().insert_from_nwbfile(nwb_file_name, config)
 
         # logger.info('Unit...')
         # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
