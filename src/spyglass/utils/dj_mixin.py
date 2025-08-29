@@ -1061,6 +1061,17 @@ class SpyglassIngestion(SpyglassMixin):
 
     def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
         """Generates a list of table entries from an NWB object."""
+        # For table objects, generate entry(s) for each row
+        if hasattr(nwb_obj, "to_dataframe"):
+            obj_df = nwb_obj.to_dataframe()
+            return sum(
+                [
+                    self.generate_entries_from_nwb_object(row, key)
+                    for row in obj_df.itertuples()
+                ],
+                [],
+            )
+
         key = key.copy()  # avoid modifying original
         for object_name, mapping in self.table_key_to_obj_attr.items():
             if object_name != "self":
