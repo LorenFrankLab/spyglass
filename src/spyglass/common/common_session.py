@@ -6,6 +6,7 @@ from spyglass.common.common_device import (
     DataAcquisitionDeviceAmplifier,
     DataAcquisitionDeviceSystem,
     Probe,
+    ProbeType,
 )
 from spyglass.common.common_lab import (
     Institution,
@@ -127,7 +128,10 @@ class Session(SpyglassMixin, dj.Imported):
         CameraDevice().insert_from_nwbfile(nwb_file_name, config)
 
         logger.info("Session populates Populate Probe...")
-        Probe.insert_from_nwbfile(nwbf, config)
+        ProbeType().insert_from_nwbfile(nwb_file_name, config)
+        Probe().insert_from_nwbfile(nwb_file_name, config)
+        Probe.Shank().insert_from_nwbfile(nwb_file_name, config)
+        Probe.Electrode().insert_from_nwbfile(nwb_file_name, config)
 
         Session().insert1(
             {

@@ -367,7 +367,7 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class ProbeType(SpyglassMixin, dj.Manual):
+class ProbeType(SpyglassIngestion, dj.Manual):
     definition = """
     # Type/category of probe regardless of configuration. Controlled vocabulary
     # of probe type names. e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, etc.
@@ -380,10 +380,34 @@ class ProbeType(SpyglassMixin, dj.Manual):
     manufacturer = "": varchar(200)  # manufacturer of this probe
     num_shanks: int                  # number of shanks on this probe
     """
+    _expected_duplicates = True
+
+    @property
+    def _source_nwb_object_type(self):
+        return ndx_franklab_novela.Probe
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "probe_type": "probe_type",
+                "probe_description": "probe_description",
+                "manufacturer": "manufacturer",
+                "num_shanks": self.get_num_shanks,
+            }
+        }
+
+    @staticmethod
+    def manufacturer_default_empty(probe_nwb_obj: ndx_franklab_novela.Probe):
+        return getattr(probe_nwb_obj, "manufacturer", "")
+
+    @staticmethod
+    def get_num_shanks(probe_nwb_obj: ndx_franklab_novela.Probe):
+        return len(probe_nwb_obj.shanks)
 
 
 @schema
-class Probe(SpyglassMixin, dj.Manual):
+class Probe(SpyglassIngestion, dj.Manual):
     definition = """
     # A configuration of a ProbeType. For most probe types, there is only one,
     # which should always be used. For Neuropixels, the channel map (which
@@ -396,13 +420,36 @@ class Probe(SpyglassMixin, dj.Manual):
     contact_side_numbering: enum("True", "False")  # Facing you when numbering
     """
 
-    class Shank(SpyglassMixin, dj.Part):
+    class Shank(SpyglassIngestion, dj.Part):
         definition = """
         -> Probe
         probe_shank: int              # unique shank number within probe.
         """
+        _expected_duplicates = True
 
-    class Electrode(SpyglassMixin, dj.Part):
+        @property
+        def _source_nwb_object_type(self):
+            return ndx_franklab_novela.Shank
+
+        @property
+        def table_key_to_obj_attr(self):
+            # for use with autodoc only
+            return {
+                "self": {
+                    "probe_id": self.parent_probe_type,
+                    "probe_shank": "name",
+                }
+            }
+
+        @staticmethod
+        def parent_probe_type(shank_nwb_obj: ndx_franklab_novela.Shank):
+            return shank_nwb_obj.parent.probe_type
+
+        @staticmethod
+        def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank):
+            return int(shank_nwb_obj.name)
+
+    class Electrode(SpyglassIngestion, dj.Part):
         definition = """
         # Electrode configuration, with ID, contact size, X/Y/Z coordinates
         -> Probe.Shank
@@ -414,447 +461,72 @@ class Probe(SpyglassMixin, dj.Manual):
         rel_y = NULL: float           # (um) y coordinate of electrode
         rel_z = NULL: float           # (um) z coordinate of electrode
         """
+        _expected_duplicates = True
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf, config=None):
-        """Insert probe devices from an NWB file.
+        @property
+        def _source_nwb_object_type(self):
+            return ndx_franklab_novela.ShanksElectrode
 
-        Parameters
-        ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
+        @property
+        def table_key_to_obj_attr(self):
+            return {
+                "self": {
+                    "probe_id": self.parent_parent_probe_type,
+                    "probe_shank": self.parent_shank_name_to_int,
+                    "probe_electrode": self.electrode_name_to_int,
+                    "contact_size": self.parent_probe_contact_size,
+                    "rel_x": "rel_x",
+                    "rel_y": "rel_y",
+                    "rel_z": "rel_z",
+                }
+            }
 
-        Returns
-        -------
-        device_name_list : list
-            List of probe device types found in the NWB file.
-        """
-        config = config or dict()
-        all_probes_types, ndx_probes, config_probes = cls.get_all_probe_names(
-            nwbf, config
-        )
+        @staticmethod
+        def parent_parent_probe_type(
+            electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
+        ):
+            return electrode_nwb_obj.parent.parent.probe_type
 
-        for probe_id in all_probes_types:
-            new_probe_type_dict = dict()
-            new_probe_dict = dict()
-            shank_dict = dict()
-            elect_dict = dict()
-            num_shanks = 0
+        @staticmethod
+        def parent_shank_name_to_int(
+            electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
+        ):
+            return int(electrode_nwb_obj.parent.name)
 
-            if probe_id in ndx_probes:
-                # read probe properties into new_probe_dict from PyNWB extension
-                # probe object
-                nwb_probe_obj = ndx_probes[probe_id]
-                cls.__read_ndx_probe_data(
-                    nwb_probe_obj,
-                    new_probe_type_dict,
-                    new_probe_dict,
-                    shank_dict,
-                    elect_dict,
-                )
-            elif probe_id in config_probes:
-                cls._read_config_probe_data(
-                    config,
-                    config_probes,
-                    probe_id,
-                    new_probe_type_dict,
-                    new_probe_dict,
-                    shank_dict,
-                    elect_dict,
-                )
+        @staticmethod
+        def electrode_name_to_int(
+            electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
+        ):
+            return int(electrode_nwb_obj.name)
 
-            # check that number of shanks is consistent
-            num_shanks = new_probe_type_dict["num_shanks"]
-            assert num_shanks == 0 or num_shanks == len(
-                shank_dict
-            ), "`num_shanks` is not equal to the number of shanks."
+        @staticmethod
+        def parent_probe_contact_size(
+            electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
+        ):
+            return electrode_nwb_obj.parent.parent.contact_size
 
-            # if probe id already exists, do not overwrite anything or create
-            # new Shanks and Electrodes
-            query = Probe & {"probe_id": new_probe_dict["probe_id"]}
-            if len(query) > 0:
-                logger.info(
-                    f"Probe ID '{new_probe_dict['probe_id']}' already exists in"
-                    " the database. Spyglass will use that and not create a new"
-                    " Probe, Shanks, or Electrodes."
-                )
-                # Test whether the Shanks and Electrodes in the NWB file match
-                # the existing database entries
-                existing_shanks = query * cls.Shank()
-                bad_shanks = [
-                    shank
-                    for shank in shank_dict.values()
-                    if len(existing_shanks & shank) != 1
-                ]
-                if bad_shanks:
-                    raise ValueError(
-                        "Mismatch between nwb file and existing database "
-                        + f"entry for shanks: {bad_shanks}"
-                    )
+    # ------ Probe Ingestion Methods ------
+    _expected_duplicates = True
 
-                existing_electrodes = query * cls.Electrode()
-                bad_electrodes = [
-                    electrode
-                    for electrode in elect_dict.values()
-                    if len(existing_electrodes & electrode) != 1
-                ]
-                if bad_electrodes:
-                    raise ValueError(
-                        f"Mismatch between nwb file and existing database "
-                        f"entry for electrodes: {bad_electrodes}"
-                    )
-                continue
+    @property
+    def _source_nwb_object_type(self):
+        return ndx_franklab_novela.Probe
 
-            cls.insert1(new_probe_dict, skip_duplicates=True)
-
-            for shank in shank_dict.values():
-                cls.Shank.insert1(shank, skip_duplicates=True)
-            for electrode in elect_dict.values():
-                cls.Electrode.insert1(electrode, skip_duplicates=True)
-
-        if all_probes_types:
-            logger.info(f"Inserted probes {all_probes_types}")
-        else:
-            logger.warning("No conforming probe metadata found.")
-
-        return all_probes_types
-
-    @classmethod
-    def get_all_probe_names(cls, nwbf, config):
-        """Get a list of all device names in the NWB.
-
-        Includes all devices, after appending/overwriting by the config file.
-
-        Parameters
-        ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
-
-        Returns
-        -------
-        device_name_list : list
-            List of data acquisition object names found in the NWB file.
-        ndx_probes : dict
-            Dictionary of ndx_franklab_novela.Probe objects in the NWB file.
-        config_probes : list
-            List of probe descriptions from the config file.
-
-        """
-
-        # make a dict mapping probe type to PyNWB object for all devices in the
-        # NWB file that are of type ndx_franklab_novela.Probe and thus have the
-        # required metadata
-        ndx_probes = {
-            device_obj.probe_type: device_obj
-            for device_obj in nwbf.devices.values()
-            if isinstance(device_obj, ndx_franklab_novela.Probe)
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "probe_id": "probe_type",
+                "probe_type": "probe_type",
+                "contact_side_numbering": self.contact_side_numbering_as_string,
+            }
         }
 
-        # make a dict mapping probe type to dict of device metadata from the
-        # config YAML if exists
-        config_probes = (
-            [probe_dict["probe_type"] for probe_dict in config["Probe"]]
-            if "Probe" in config
-            else list()
-        )
-
-        # get all the probe types from the NWB file plus the config YAML
-        all_probes_types = set(ndx_probes.keys()).union(set(config_probes))
-
-        return all_probes_types, ndx_probes, config_probes
-
-    @classmethod
-    def __read_ndx_probe_data(
-        cls,
-        nwb_probe_obj: ndx_franklab_novela.Probe,
-        new_probe_type_dict: dict,
-        new_probe_dict: dict,
-        shank_dict: dict,
-        elect_dict: dict,
+    @staticmethod
+    def contact_side_numbering_as_string(
+        probe_nwb_obj: ndx_franklab_novela.Probe,
     ):
-        # construct dictionary of values to add to ProbeType
-        new_probe_type_dict.update(
-            {
-                "manufacturer": getattr(nwb_probe_obj, "manufacturer") or "",
-                "probe_type": nwb_probe_obj.probe_type,
-                "probe_description": nwb_probe_obj.probe_description,
-                "num_shanks": len(nwb_probe_obj.shanks),
-            }
-        )
-
-        cls._add_probe_type(new_probe_type_dict)
-
-        new_probe_dict.update(
-            {
-                "probe_id": nwb_probe_obj.probe_type,
-                "probe_type": nwb_probe_obj.probe_type,
-                "contact_side_numbering": (
-                    "True" if nwb_probe_obj.contact_side_numbering else "False"
-                ),
-            }
-        )
-        # go through the shanks and add each one to the Shank table
-        for shank in nwb_probe_obj.shanks.values():
-            shank_dict[shank.name] = {
-                "probe_id": new_probe_dict["probe_id"],
-                "probe_shank": int(shank.name),
-            }
-
-            # go through the electrodes and add each one to the Electrode table
-            for electrode in shank.shanks_electrodes.values():
-                # the next line will need to be fixed if we have different sized
-                # contacts on a shank
-                elect_dict[electrode.name] = _replace_nan_with_default(
-                    {
-                        "probe_id": new_probe_dict["probe_id"],
-                        "probe_shank": shank_dict[shank.name]["probe_shank"],
-                        "contact_size": nwb_probe_obj.contact_size,
-                        "probe_electrode": int(electrode.name),
-                        "rel_x": electrode.rel_x,
-                        "rel_y": electrode.rel_y,
-                        "rel_z": electrode.rel_z,
-                    }
-                )
-
-    @classmethod
-    def _read_config_probe_data(
-        cls,
-        config,
-        config_probes,
-        probe_id,
-        new_probe_type_dict,
-        new_probe_dict,
-        shank_dict,
-        elect_dict,
-    ):
-
-        # get the list of shank keys for the probe
-        shank_list = config["Probe"][config_probes.index(probe_id)].get(
-            "Shank", []
-        )
-        for i in shank_list:
-            shank_dict[str(i)] = {"probe_id": probe_id, "probe_shank": int(i)}
-
-        # get the list of electrode keys for the probe
-        elect_dict_list = config["Probe"][config_probes.index(probe_id)].get(
-            "Electrode", []
-        )
-        for i, e in enumerate(elect_dict_list):
-            elect_dict[str(i)] = _replace_nan_with_default(
-                {
-                    "probe_id": probe_id,
-                    "probe_shank": e["probe_shank"],
-                    "probe_electrode": e["probe_electrode"],
-                    "contact_size": e.get("contact_size"),
-                    "rel_x": e.get("rel_x"),
-                    "rel_y": e.get("rel_y"),
-                    "rel_z": e.get("rel_z"),
-                }
-            )
-
-        # make the probe type if not in database
-        new_probe_type_dict.update(
-            {
-                "manufacturer": config["Probe"][
-                    config_probes.index(probe_id)
-                ].get("manufacturer"),
-                "probe_type": config["Probe"][
-                    config_probes.index(probe_id)
-                ].get("probe_type"),
-                "probe_description": config["Probe"][
-                    config_probes.index(probe_id)
-                ].get("probe_description"),
-                "num_shanks": len(shank_list),
-            }
-        )
-
-        cls._add_probe_type(new_probe_type_dict)
-
-        # make the probe dictionary
-        new_probe_dict.update(
-            {
-                "probe_type": config["Probe"][
-                    config_probes.index(probe_id)
-                ].get("probe_type"),
-                "probe_id": probe_id,
-                "contact_side_numbering": config["Probe"][
-                    config_probes.index(probe_id)
-                ].get("contact_side_numbering"),
-            }
-        )
-
-    @classmethod
-    def _add_probe_type(cls, new_probe_type_dict):
-        """Check the probe type value against the values in the database.
-
-        Parameters
-        ----------
-        new_probe_type_dict : dict
-            Dictionary of probe type properties. See ProbeType for keys.
-
-        Raises
-        ------
-        PopulateException
-            If user chooses not to add a probe type to the database when
-            prompted.
-
-        Returns
-        -------
-        probe_type : str
-            The probe type value that was added to the database.
-        """
-        probe_type = new_probe_type_dict["probe_type"]
-        all_values = ProbeType.fetch("probe_type").tolist()
-        if prompt_insert(probe_type, all_values, table="probe type"):
-            ProbeType.insert1(new_probe_type_dict, skip_duplicates=True)
-            return
-
-        # else / entry exists: check whether the values provided match the
-        # values stored in the database
-        db_dict = (ProbeType & {"probe_type": probe_type}).fetch1()
-        if db_dict != new_probe_type_dict:
-            raise PopulateException(
-                "\nProbe type properties of PyNWB Probe object with name "
-                f"'{probe_type}': {new_probe_type_dict} do not match properties"
-                f" of the corresponding database entry: {db_dict}."
-            )
-        return probe_type
-
-    @classmethod
-    def create_from_nwbfile(
-        cls,
-        nwb_file_name: str,
-        nwb_device_name: str,
-        probe_id: str,
-        probe_type: str,
-        contact_side_numbering: bool,
-    ):
-        """Create master/part Probe entry from the NWB file.
-
-        This method will parse the electrodes in the electrodes table, electrode
-        groups (as shanks), and devices (as probes) in the NWB file, but only
-        ones that are associated with the device that matches the given
-        `nwb_device_name`.
-
-        Note that this code assumes the relatively standard convention where the
-        NWB device corresponds to a Probe, the NWB electrode group corresponds
-        to a Shank, and the NWB electrode corresponds to an Electrode.
-
-        Example usage: ``` sgc.Probe.create_from_nwbfile(
-            nwbfile=nwb_file_name, nwb_device_name="Device",
-            probe_id="Neuropixels 1.0 Giocomo Lab Configuration",
-            probe_type="Neuropixels 1.0", contact_side_numbering=True
-        )
-        ```
-
-        Parameters
-        ----------
-        nwb_file_name : str
-            The name of the NWB file.
-        nwb_device_name : str
-            The name of the PyNWB Device object that represents the probe to
-            read in the NWB file.
-        probe_id : str
-            A unique ID for the probe and its configuration, to be used as the
-            primary key for the new Probe entry.
-        probe_type : str
-            The existing ProbeType entry that represents the type of probe being
-            created. It must exist.
-        contact_side_numbering : bool
-            Whether the electrode contacts are facing you when numbering them.
-            Stored in the new Probe entry.
-        """
-
-        from .common_nwbfile import Nwbfile
-
-        nwb_file_path = Nwbfile.get_abs_path(nwb_file_name)
-        nwbfile = get_nwb_file(nwb_file_path)
-
-        query = ProbeType & {"probe_type": probe_type}
-        if len(query) == 0:
-            logger.warning(
-                f"No ProbeType found with probe_type '{probe_type}'. Aborting."
-            )
-            return
-
-        new_probe_dict = {
-            "probe_id": probe_id,
-            "probe_type": probe_type,
-            "contact_side_numbering": (
-                "True" if contact_side_numbering else "False"
-            ),
-        }
-        shank_dict = {}
-        elect_dict = {}
-
-        # iterate through the electrodes table in the NWB file
-        # and use the group column (ElectrodeGroup) to create shanks
-        # and use the device attribute of each ElectrodeGroup to create a probe
-        created_shanks = {}  # map device name to shank_index (int)
-        device_found = False
-        for elec_index in range(len(nwbfile.electrodes)):
-            electrode_group = nwbfile.electrodes[elec_index, "group"]
-            eg_device_name = electrode_group.device.name
-
-            # only look at electrodes where the associated device is the one
-            # specified
-            if eg_device_name != nwb_device_name:
-                continue
-
-            device_found = True
-
-            # if a Shank has not yet been created from the electrode group,
-            # then create it
-            if electrode_group.name not in created_shanks:
-                shank_index = len(created_shanks)
-                created_shanks[electrode_group.name] = shank_index
-
-                # build the dictionary of Probe.Shank data
-                shank_dict[shank_index] = {
-                    "probe_id": new_probe_dict["probe_id"],
-                    "probe_shank": shank_index,
-                }
-
-            # get the probe shank index associated with this Electrode
-            probe_shank = created_shanks[electrode_group.name]
-
-            # build the dictionary of Probe.Electrode data
-            elect_dict[elec_index] = {
-                "probe_id": new_probe_dict["probe_id"],
-                "probe_shank": probe_shank,
-                "probe_electrode": elec_index,
-            }
-
-            for dim in ["rel_x", "rel_y", "rel_z", "contact_size"]:
-                if dim in nwbfile.electrodes[elec_index]:
-                    value = nwbfile.electrodes[elec_index, dim]
-                    elect_dict[elec_index][dim] = value
-
-            # Apply NaN replacement to the entire electrode dictionary
-            elect_dict[elec_index] = _replace_nan_with_default(
-                elect_dict[elec_index]
-            )
-
-        if not device_found:
-            logger.warning(
-                "No electrodes in the NWB file were associated with a device "
-                + f"named '{nwb_device_name}'."
-            )
-            return
-
-        # insert the Probe, then the Shank parts, and then the Electrode parts
-        cls.insert1(new_probe_dict, skip_duplicates=True)
-
-        for shank in shank_dict.values():
-            cls.Shank.insert1(shank, skip_duplicates=True)
-        for electrode in elect_dict.values():
-            cls.Electrode.insert1(electrode, skip_duplicates=True)
+        return "True" if probe_nwb_obj.contact_side_numbering else "False"
 
 
 # ---------------------------- Helper functions ----------------------------

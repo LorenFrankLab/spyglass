@@ -1216,6 +1216,8 @@ class SpyglassIngestion(SpyglassMixin):
     @staticmethod
     def unequal_vals(key, a, b):
         a, b = a.get(key) or "", b.get(key, "") or ""
+        if isinstance(a, str) and isinstance(b, str):
+            return a.lower() != b.lower()
         return a != b  # prevent false positive on None != ""
 
     # def prompt_insert(
