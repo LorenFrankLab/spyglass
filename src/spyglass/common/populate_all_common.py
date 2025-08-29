@@ -9,6 +9,14 @@ from spyglass.common.common_behav import (
     StateScriptFile,
     VideoFile,
 )
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    DataAcquisitionDeviceAmplifier,
+    DataAcquisitionDeviceSystem,
+    Probe,
+    ProbeType,
+)
 from spyglass.common.common_dio import DIOEvents
 from spyglass.common.common_ephys import (
     Electrode,
@@ -16,13 +24,17 @@ from spyglass.common.common_ephys import (
     Raw,
     SampleCount,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
+from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
+from spyglass.utils.dj_mixin import SpyglassIngestion
 
 
 def log_insert_error(
@@ -73,6 +85,19 @@ def single_transaction_make(
     with Nwbfile.connection.transaction:
         for table in tables:
             logger.info(f"Populating {table.__name__}...")
+            # TODO 1377:Temporary during migration
+            if isinstance(table(), SpyglassIngestion):
+                try:
+                    table().insert_from_nwbfile(
+                        nwb_file_name, config={}
+                    )  # TODO 1377: load config to pass here
+                except Exception as err:
+                    if raise_err:
+                        raise err
+                    log_insert_error(
+                        table=table, err=err, error_constants=error_constants
+                    )
+                continue
 
             # If imported/computed table, get key from key_source
             key_source = getattr(table, "key_source", None)
@@ -134,6 +159,21 @@ def populate_all_common(
     )
 
     table_lists = [
+        [
+            Institution,
+            Lab,
+            LabMember,
+            LabTeam,
+            Subject,
+            DataAcquisitionDeviceAmplifier,
+            DataAcquisitionDeviceSystem,
+            DataAcquisitionDevice,
+            CameraDevice,
+            ProbeType,
+            Probe,
+            Probe.Shank,
+            Probe.Electrode,
+        ],
         [  # Tables that can be inserted in a single transaction
             Session,
             ElectrodeGroup,  # Depends on Session
@@ -143,6 +183,7 @@ def populate_all_common(
             TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
             SensorData,  # Depends on Session
+            IntervalList,  # Depends on Session
             # NwbfileKachery, # Not used by default
         ],
         [  # Tables that depend on above transaction

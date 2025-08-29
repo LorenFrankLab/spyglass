@@ -74,10 +74,6 @@ class Session(SpyglassMixin, dj.Imported):
             - IntervalList
         """
         # These imports must go here to avoid cyclic dependencies
-        # from .common_task import Task, TaskEpoch
-        from .common_interval import IntervalList
-
-        # from .common_ephys import Unit
 
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
@@ -97,41 +93,19 @@ class Session(SpyglassMixin, dj.Imported):
 
         logger.info("Session populates Institution...")
         institution_name = Institution().insert_from_nwbfile(
-            nwb_file_name, config
+            nwb_file_name, config, execute_inserts=False
         )[0]["institution_name"]
 
         logger.info("Session populates Lab...")
-        lab_inserts = Lab().insert_from_nwbfile(nwb_file_name, config)
+        lab_inserts = Lab().insert_from_nwbfile(
+            nwb_file_name, config, execute_inserts=False
+        )
         lab_name = lab_inserts[0]["lab_name"] if lab_inserts else None
 
-        logger.info("Session populates LabMember...")
-        LabMember().insert_from_nwbfile(nwb_file_name, config)
-        LabTeam().insert_from_nwbfile(nwb_file_name, config)
-
         logger.info("Session populates Subject...")
-        subject_id = Subject().insert_from_nwbfile(nwb_file_name, config)[0][
-            "subject_id"
-        ]
-
-        if not debug_mode:  # TODO: remove when demo files agree on device
-            logger.info("Session populates Populate DataAcquisitionDevice...")
-            DataAcquisitionDeviceAmplifier().insert_from_nwbfile(
-                nwb_file_name, config
-            )
-            DataAcquisitionDeviceSystem().insert_from_nwbfile(
-                nwb_file_name, config
-            )
-            DataAcquisitionDevice().insert_from_nwbfile(nwb_file_name, config)
-
-        logger.info("Session populates Populate CameraDevice...")
-        logger.info("Testing CameraDevice insert...")
-        CameraDevice().insert_from_nwbfile(nwb_file_name, config)
-
-        logger.info("Session populates Populate Probe...")
-        ProbeType().insert_from_nwbfile(nwb_file_name, config)
-        Probe().insert_from_nwbfile(nwb_file_name, config)
-        Probe.Shank().insert_from_nwbfile(nwb_file_name, config)
-        Probe.Electrode().insert_from_nwbfile(nwb_file_name, config)
+        subject_id = Subject().insert_from_nwbfile(
+            nwb_file_name, config, execute_inserts=False
+        )[0]["subject_id"]
 
         Session().insert1(
             {
@@ -148,19 +122,6 @@ class Session(SpyglassMixin, dj.Imported):
             skip_duplicates=True,
             allow_direct_insert=True,  # for populate_all_common
         )
-
-        logger.info("Skipping Apparatus for now...")
-        # Apparatus().insert_from_nwbfile(nwbf)
-
-        # interval lists depend on Session (as a primary key) but users may
-        # want to add these manually so this is a manual table that is also
-        # populated from NWB files
-
-        logger.info("Session populates IntervalList...")
-        IntervalList().insert_from_nwbfile(nwb_file_name, config)
-
-        # logger.info('Unit...')
-        # Unit().insert_from_nwbfile(nwbf, nwb_file_name=nwb_file_name)
 
         self._add_data_acquisition_device_part(nwb_file_name, nwbf, config)
         self._add_experimenter_part(nwb_file_name, nwbf, config)

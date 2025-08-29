@@ -162,7 +162,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
 
-    class LabTeamMember(SpyglassMixin, dj.Part):
+    class LabTeamMember(SpyglassIngestion, dj.Part):
         definition = """
         -> LabTeam
         -> LabMember
@@ -303,7 +303,9 @@ class Lab(SpyglassIngestion, dj.Manual):
     def _source_nwb_object_type(self):
         return pynwb.NWBFile
 
-    def insert_from_nwbfile(self, nwb_file_name: str, config: dict = None):
+    def insert_from_nwbfile(
+        self, nwb_file_name: str, config: dict = None, execute_inserts=True
+    ):
         """Insert lab name information from an NWB file.
 
         Parameters
@@ -329,7 +331,8 @@ class Lab(SpyglassIngestion, dj.Manual):
                 "Multiple lab entries not allowed. Using the first entry only."
             )
             insert_entries = insert_entries[:1]
-        self.insert(insert_entries, skip_duplicates=True)
+        if execute_inserts:
+            self.insert(insert_entries, skip_duplicates=True)
         return insert_entries
 
 
