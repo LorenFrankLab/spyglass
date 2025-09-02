@@ -1106,7 +1106,7 @@ class SpyglassIngestion(SpyglassMixin):
         if self._source_nwb_object_type is None:
             raise ValueError(
                 "get_nwb_objects requires _source_nwb_object_type to be specified "
-                + "or be overidden for the class."
+                + "or be overridden for the class."
             )
         matching_objects = [
             obj
