@@ -5,7 +5,7 @@ import pytest
 from pynwb import NWBHDF5IO
 from pynwb.behavior import BehavioralEvents
 from pynwb.testing.mock.behavior import mock_TimeSeries
-from pynwb.testing.mock.file import mock_NWBFile
+from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 
 @pytest.fixture(scope="session")
@@ -74,8 +74,13 @@ def pop_common_electrode_group(common_ephys):
 @pytest.fixture(scope="function")
 def dio_only_nwb(raw_dir, common):
     nwbfile = mock_NWBFile(
-        identifier="my_identifier", session_description="my_session_description"
+        identifier="my_identifier",
+        session_description="my_session_description",
+        lab="My Lab",
+        institution="My Institution",
+        experimenter=["Dr. A", "Dr. B"],
     )
+    nwbfile.subject = mock_Subject()
     time_series = mock_TimeSeries(
         name="my_time_series", timestamps=np.arange(20), data=np.ones((20, 1))
     )
