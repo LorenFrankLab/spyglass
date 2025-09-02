@@ -9,6 +9,8 @@ from spyglass.common.common_lab import (
     LabMember,
     decompose_name,
 )
+from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_subject import Subject
 from spyglass.utils import SpyglassIngestion, logger
 
 schema = dj.schema("common_session")
