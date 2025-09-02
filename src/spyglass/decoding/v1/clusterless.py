@@ -25,7 +25,7 @@ from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
-from spyglass.decoding.v1.utils import _get_interval_range
+from spyglass.decoding.v1.utils import _get_interval_range, load_model_with_networkx_compatibility
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
@@ -319,8 +319,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 
     def fetch_model(self):
-        """Retrieve the decoding model"""
-        return ClusterlessDetector.load_model(self.fetch1("classifier_path"))
+        """Retrieve the decoding model with NetworkX compatibility handling"""
+        return load_model_with_networkx_compatibility(
+            ClusterlessDetector, self.fetch1("classifier_path")
+        )
 
     @classmethod
     def fetch_environments(cls, key):
