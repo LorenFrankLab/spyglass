@@ -7,12 +7,11 @@ from pathlib import Path
 from pprint import pprint
 from subprocess import run as sub_run
 from typing import Dict, List, Optional, Tuple, Union
-from spyglass.utils import SpyglassMixin
 
 import datajoint as dj
 import yaml
 
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_user")
 
@@ -151,7 +150,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
             pprint(pip_custom_no_spy, indent=4)
 
         if self._conda_conflicts:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 "Conda/pip conflicts in the environment.\n"
                 + "\tRecompute feature may not work as expected.\n"
                 + "\tUse `pip uninstall pkg` to defer to conda.\n"

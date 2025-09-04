@@ -994,7 +994,7 @@ class SpyglassMixin(ExportMixin):
         return human_size
 
     def delete_orphans(
-        self, dry_run: bool = True
+        self, dry_run: bool = True, **kwargs
     ) -> Union[QueryExpression, None]:
         """Get entries in the table without any child table entries.
 
@@ -1003,6 +1003,8 @@ class SpyglassMixin(ExportMixin):
         dry_run : bool, optional
             If True, return the orphaned entries without deleting them.
             Default True.
+        **kwargs : dict
+            Passed to datajoint.table.Table.delete if dry_run is False.
 
         Returns
         -------
@@ -1012,7 +1014,7 @@ class SpyglassMixin(ExportMixin):
         orphans = self - get_child_tables(self)
         if dry_run:
             return orphans
-        orphans.super_delete(warn=False)
+        orphans.super_delete(warn=False, **kwargs)
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):

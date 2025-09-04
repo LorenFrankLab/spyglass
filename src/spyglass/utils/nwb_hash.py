@@ -193,8 +193,8 @@ class NwbfileHasher:
 
         if precision_lookup is None:
             precision_lookup = PRECISION_LOOKUP
-        if isinstance(precision_lookup, int):
-            precision_lookup = dict(ProcessedElectricalSeries=precision_lookup)
+        if isinstance(precision_lookup, int):  # same precision for all datasets
+            precision_lookup = {k: precision_lookup for k in PRECISION_LOOKUP}
 
         self.precision = precision_lookup
         self.batch_size = batch_size
@@ -310,8 +310,6 @@ class NwbfileHasher:
 
     def compute_hash(self) -> str:
         """Hashes the NWB file contents."""
-        # Dev note: fallbacks if slow: 1) read_direct_chunk, 2) read from offset
-
         self.hashed.update(self.namespaces_str)
 
         self.add_to_cache("namespaces", self.namespaces, None)

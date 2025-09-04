@@ -15,7 +15,7 @@ def sort_dict(d) -> dict:
     return dict(sorted(d.items()))
 
 
-class H5pyComparator:
+class H5pyComparator:  # pragma: no cover # informational, not functional
     """Compare two objects by treating them as dictionaries.
 
     Designed to compare two h5py objects, but can be used with any objects.

@@ -83,13 +83,13 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     def _has_matching_env(self, key: dict, show_err=False) -> bool:
         """Check current env for matching pynwb versions."""
         if not self._has_key(key):
-            return False
+            return False  # # pragma: no cover
 
         need = sort_dict(self.key_env(key))
         ret = self.nwb_deps == need
 
         if not ret and show_err:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
                 + f"\n\tHave: {self.nwb_deps}"
                 + f"\n\tNeed: {need}"
@@ -528,7 +528,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher, new_hasher = self._hash_both(key)
 
         new_path = (
-            new_hasher.dir_path.name if new_hasher else self._get_paths(key)[1]
+            new_hasher.path.name if new_hasher else self._get_paths(key)[1]
         )
         if new_hasher is None:  # Error occurred during recompute_file_name
             logger.error(f"V1 Recheck failed: {new_path}")

@@ -402,12 +402,12 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                     key, base_dir=self._get_temp_dir(key), return_hasher=True
                 )["hash"]
             )
-        except ValueError as err:
+        except ValueError as err:  # pragma: no cover
             # Some spikeinterface version can't handle small batches
-            e_info = err.args[0]  # pragma: no cov
+            e_info = err.args[0]  # pragma: no cover
             if not strict and "greater than padlen" in e_info:
                 logger.error(f"Failed to recompute {new.name}: {e_info}")
-                return None, e_info[:255]
+                return None, e_info[:255]  # pragma: no cover
             raise  # pragma: no cover
 
         if not new_hasher.hash:
