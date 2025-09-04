@@ -4,8 +4,8 @@
 
 ### Release Notes
 
-Running draft to be removed immediately prior to release.
-When altering tables, import all foreign key references.
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
 #
@@ -20,6 +20,7 @@ When altering tables, import all foreign key references.
 
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
+- Sort `UserEnvironment` dict objects by key for consistency #1380
 
 ### Decoding
 
@@ -528,3 +529,4 @@ When altering tables, import all foreign key references.
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6
