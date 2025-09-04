@@ -20,19 +20,28 @@ import all foreign key references.
 
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 
-### Decoding
+### Infrastructure
 
-- Ensure results directory is created if it doesn't exist #1362
+- Auto-load within-Spyglass tables for graph operations #1368
 
-### Position
+### Pipelines
 
-- Ensure video files are properly added to `DLCProject` # 1367
-
-### Spikesorting
-
-- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
+- Common
+    - Add tables for storing optogenetic experiment information #1312
+    - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
