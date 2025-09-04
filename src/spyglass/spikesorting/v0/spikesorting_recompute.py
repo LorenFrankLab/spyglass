@@ -387,6 +387,62 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         return (str(old), str(new)) if as_str else (old, new)
 
+    def _hash_both(
+        self, key: dict, strict: bool = False
+    ) -> Union[Tuple[DirectoryHasher, DirectoryHasher], Tuple[None, str]]:
+        """Return the old and new file hashers."""
+        self._parent_key(key)
+        old, new = self._get_paths(key)
+
+        try:
+            new_hasher = (
+                self._hash_one(new)
+                if new.exists()
+                else SpikeSortingRecording()._make_file(
+                    key, base_dir=self._get_temp_dir(key), return_hasher=True
+                )["hash"]
+            )
+        except ValueError as err:
+            # Some spikeinterface version can't handle small batches
+            e_info = err.args[0]  # pragma: no cov
+            if not strict and "greater than padlen" in e_info:
+                logger.error(f"Failed to recompute {new.name}: {e_info}")
+                return None, e_info[:255]
+            raise  # pragma: no cover
+
+        if not new_hasher.hash:
+            return None, None
+
+        old_hasher = self._hash_one(old)
+
+        if (
+            old_hasher.hash == new_hasher.hash
+            and "tmp" in str(new)
+            and new.exists()
+        ):
+            shutil_rmtree(new, ignore_errors=True)
+
+        return old_hasher, new_hasher
+
+    def recheck(self, key: dict) -> bool:
+        """Recheck if a given key matches without recomputing."""
+        old_hasher, new_hasher = self._hash_both(key, strict=True)
+
+        new_path = self._get_paths(key, as_str=True)[1]
+
+        if not new_hasher.hash:
+            logger.error(f"V0 Recheck failed: {new_path}")
+            return None
+
+        if old_hasher.hash == new_hasher.hash:
+            new_path = new_hasher.dir_path
+            if "tmp" in str(new_path) and new_path.exists():
+                shutil_rmtree(new_path, ignore_errors=True)
+            return True
+
+        logger.error(f"V0 Recheck mismat: {new_path}")
+        return False
+
     def make(self, key: dict) -> None:
         rec_key = {k: v for k, v in key.items() if k != "env_id"}
         if self & rec_key & "matched=1":
@@ -402,38 +458,19 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             self.insert1({**key, "matched": True})
             return
 
-        old, new = self._get_paths(key)
+        old_hasher, new_hasher = self._hash_both(key, strict=True)
 
-        try:
-            new_hasher = (
-                self._hash_one(new)
-                if new.exists()
-                else SpikeSortingRecording()._make_file(
-                    key, base_dir=self._get_temp_dir(key), return_hasher=True
-                )["hash"]
-            )
-        except ValueError as err:
-            e_info = err.args[0]  # pragma: no cover
-            # Some spikeinterface versions can't handle small batches
-            if "greater than padlen" in e_info:
-                logger.error(f"Failed to recompute {log_key}: {e_info}")
-                self.insert1({**key, "matched": False, "err_msg": e_info[:255]})
-                return  # pragma: no cover
-            raise  # pragma: no cover
+        if isinstance(new_hasher, str):  # pragma: no cover
+            self.insert1({**key, "matched": False, "err_msg": new_hasher})
+            return  # pragma: no cover
 
-        # hack pending table alter
-        old_hash = parent.get("hash") or self._hash_one(old).hash
-
-        if old_hash == new_hasher.hash:
-            if "tmp" in str(new) and new.exists():
-                shutil_rmtree(new, ignore_errors=True)
+        if old_hasher.hash == new_hasher.hash:
             self.insert1({**key, "matched": True})
             return
 
         # only show file name if available
         logger.info(f"Failed to match {log_key}")
 
-        old_hasher = self._hash_one(old)
         names, hashes = [], []
         for file in set(new_hasher.cache) | set(old_hasher.cache):
             if file not in old_hasher.cache:

@@ -36,7 +36,8 @@ class H5pyComparator:
         self.line_limit = line_limit
 
         if run:
-            print(f"Compare: {old.stem}")
+            label = getattr(old, "stem", type(old))
+            print(f"Compare: {label}")
             self.run()
 
         self.cleanup()
@@ -103,6 +104,9 @@ class H5pyComparator:
                 )
                 for i, x in enumerate(obj)
             }
+        cache_attr = getattr(obj, "cache", None)  # Handle DirectoryHasher
+        if isinstance(cache_attr, dict) and cache_attr:
+            return cache_attr
         return json_loads(obj)
 
     def open_file(self, path):

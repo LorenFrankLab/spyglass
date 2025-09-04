@@ -505,6 +505,41 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return new_vals
         return dict(hash=None)  # pragma: no cover
 
+    def _hash_both(self, key) -> Tuple[NwbfileHasher, NwbfileHasher]:
+        """Compare old and new files for a given key."""
+        self.get_parent_key(key)
+        old, new = self._get_paths(key)
+        new_hasher = (
+            self._hash_one(new, key.get("rounding"))
+            if new.exists()
+            else self._recompute(key)["hash"]
+        )
+        if new_hasher is None:  # Error occurred during recompute_file_name
+            return None, None
+        old_hasher = self._hash_one(old, key.get("rounding"))
+        if new_hasher.hash == old_hasher.hash and not self._other_roundings(
+            key, operator="!="
+        ):
+            new.unlink(missing_ok=True)
+        return old_hasher, new_hasher
+
+    def recheck(self, key) -> None:
+        """Recheck a previous recompute attempt."""
+        old_hasher, new_hasher = self._hash_both(key)
+
+        new_path = (
+            new_hasher.dir_path.name if new_hasher else self._get_paths(key)[1]
+        )
+        if new_hasher is None:  # Error occurred during recompute_file_name
+            logger.error(f"V1 Recheck failed: {new_path}")
+            return None
+
+        if new_hasher.hash == old_hasher.hash:
+            return True
+
+        logger.error(f"V1 Recheck mismatch: {new_path}")
+        return False
+
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
         rec_dict = dict(recording_id=key["recording_id"])
@@ -512,7 +547,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         parent = self.get_parent_key(key)
-        rounding = key.get("rounding")
+        key.get("rounding")
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
@@ -525,24 +560,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 + "Run with force_check=True to recompute."
             )
 
-        old, new = self._get_paths(parent)
-
-        new_hasher = (
-            self._hash_one(new, rounding)
-            if new.exists()
-            else self._recompute(key)["hash"]
-        )
+        old_hasher, new_hasher = self._hash_both(key)
 
         if new_hasher is None:  # Error occurred during recompute
             return
 
-        old_hasher = self._hash_one(old, rounding)
-
         if new_hasher.hash == old_hasher.hash:
             self.insert1(dict(key, matched=True))
-            if not self._other_roundings(key, operator="!="):
-                # if no other recompute attempts
-                new.unlink(missing_ok=True)
             return
 
         names, hashes = [], []

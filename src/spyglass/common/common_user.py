@@ -7,6 +7,7 @@ from pathlib import Path
 from pprint import pprint
 from subprocess import run as sub_run
 from typing import Dict, List, Optional, Tuple, Union
+from spyglass.utils import SpyglassMixin
 
 import datajoint as dj
 import yaml
@@ -25,7 +26,7 @@ SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
 
 
 @schema
-class UserEnvironment(dj.Manual):
+class UserEnvironment(SpyglassMixin, dj.Manual):
     definition = """ # User conda env. Default ID is User_CondaEnv_00
     env_id: varchar(127)  # Unique environment identifier
     ---

@@ -4,7 +4,7 @@ from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
 from time import time
-from typing import List
+from typing import List, Union
 
 import datajoint as dj
 from datajoint.errors import DataJointError
@@ -22,6 +22,7 @@ from spyglass.utils.dj_helper_fn import (
     bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
+    get_child_tables,
     get_nwb_table,
     populate_pass_function,
 )
@@ -991,6 +992,27 @@ class SpyglassMixin(ExportMixin):
             return total_size
         human_size = bytes_to_human_readable(total_size)
         return human_size
+
+    def delete_orphans(
+        self, dry_run: bool = True
+    ) -> Union[QueryExpression, None]:
+        """Get entries in the table without any child table entries.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If True, return the orphaned entries without deleting them.
+            Default True.
+
+        Returns
+        -------
+        QueryExpression, optional
+            If dry_run, a query expression containing the orphaned entries.
+        """
+        orphans = self - get_child_tables(self)
+        if dry_run:
+            return orphans
+        orphans.super_delete(warn=False)
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
