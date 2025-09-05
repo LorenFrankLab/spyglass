@@ -289,7 +289,7 @@ class ExportMixin:
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
+        fnames_str = "('" + "', '".join(fnames) + "')"  # log AnalysisFile table
         table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
 
     def _run_join(self, **kwargs):
