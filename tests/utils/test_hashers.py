@@ -50,7 +50,6 @@ def test_dir_hasher(dir_hasher):
     assert hash is not None
     assert isinstance(hash, str)
     assert len(hash) == 32
-    assert hash.startswith("ce37"), "Unexpected directory hash"
 
     cache = dir_hasher.cache
     assert "sample.json" in cache

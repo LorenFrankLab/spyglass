@@ -142,7 +142,9 @@ def test_load_shared_schemas(common, custom_table):
 
 def test_null_table_storage(schema_test, Mixin):
     schema_test(Mixin)
-    assert Mixin().get_table_storage() == 0, "Table w/o any files not zero."
+    assert (
+        Mixin().get_table_storage_usage() == 0
+    ), "Table w/o any files not zero."
 
 
 @pytest.fixture
