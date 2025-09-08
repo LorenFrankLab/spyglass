@@ -279,6 +279,10 @@ class ExportMixin:
             if restriction
             else self
         )
+        if len(restricted_table) == 0:
+            # No export entry needed if no selected entries
+            return
+
         restricted_entries = self._get_restricted_entries(restricted_table)
         all_entries_restr_str = make_condition(
             self.undo_projection(), restricted_entries, set()
