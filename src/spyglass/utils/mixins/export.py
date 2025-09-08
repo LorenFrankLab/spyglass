@@ -130,6 +130,54 @@ class ExportMixin:
             logger.warning("Export not in progress.")
         del self.export_id
 
+    # --------------------------- Utility Functions ---------------------------
+
+    def _is_projected(self):
+        """Check if name projection has occured in table"""
+        for attr in self.heading.attributes.values():
+            if attr.attribute_expression is not None:
+                return True
+        return False
+
+    def undo_projection(self, table_to_undo=None):
+        if table_to_undo is None:
+            table_to_undo = self
+        assert set(
+            [attr.name for attr in table_to_undo.heading.attributes.values()]
+        ) <= set(
+            [attr.name for attr in self.heading.attributes.values()]
+        ), "table_to_undo must be a projection of table"
+
+        anti_alias_dict = {
+            attr.attribute_expression.strip("`"): attr.name
+            for attr in self.heading.attributes.values()
+            if attr.attribute_expression is not None
+        }
+        if len(anti_alias_dict) == 0:
+            return table_to_undo
+        return table_to_undo.proj(**anti_alias_dict)
+
+    def _get_restricted_entries(self, restricted_table):
+        """Get set of keys for restricted table entries
+
+        Keys apply to original table definition
+
+        Parameters
+        ----------
+        restricted_table : Table
+            Table restricted to the entries to log
+
+        Returns
+        -------
+        List[dict]
+            List of keys for restricted table entries
+        """
+        if not self._is_projected():
+            return restricted_table.fetch("KEY", log_export=False)
+
+        # The restricted, projected table is a FreeTable, log_export keyword not relevant
+        return (self.undo_projection(restricted_table)).fetch("KEY")
+
     # ------------------------------- Log Fetch -------------------------------
 
     def _called_funcs(self):
@@ -204,10 +252,11 @@ class ExportMixin:
             restr_str = "True"  # otherwise stored in table as '1'
 
         if not (
-            (
-                isinstance(restr_str, str)
-                and (len(restr_str) > 2048)
+            isinstance(restr_str, str)
+            and (
+                (len(restr_str) > 2048)
                 or "SELECT" in restr_str
+                or self._is_projected()
             )
         ):
             self._insert_log(restr_str)
@@ -230,8 +279,10 @@ class ExportMixin:
             if restriction
             else self
         )
-        restricted_entries = restricted_table.fetch("KEY", log_export=False)
-        all_entries_restr_str = make_condition(self, restricted_entries, set())
+        restricted_entries = self._get_restricted_entries(restricted_table)
+        all_entries_restr_str = make_condition(
+            self.undo_projection(), restricted_entries, set()
+        )
         if chunk_size is None:
             # estimate appropriate chunk size
             chunk_size = max(
@@ -248,7 +299,9 @@ class ExportMixin:
             ]
             if not chunk_entries:
                 break
-            chunk_restr_str = make_condition(self, chunk_entries, set())
+            chunk_restr_str = make_condition(
+                self.undo_projection(), chunk_entries, set()
+            )
             self._insert_log(chunk_restr_str)
         return
 
