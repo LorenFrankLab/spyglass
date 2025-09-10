@@ -12,6 +12,8 @@ from itertools import chain as iter_chain
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
+import datajoint as dj
+import pandas as pd
 from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
@@ -878,6 +880,69 @@ class RestrGraph(AbstractGraph):
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
         self.cascade_files()  # Otherwise attempts to re-cascade, recursively
+
+    # ---------------------------- Graph Intersection ---------------------------
+    def _graph_intersect(self, other: "RestrGraph") -> "RestrGraph":
+        """Returns intersection of two RestrGraphs.
+
+        Only tables present in both graphs are retained, with restrictions
+        combined with AND logic.
+
+        Parameters
+        ----------
+        other : RestrGraph
+            Another RestrGraph to intersect with self.
+
+        Returns
+        -------
+        RestrGraph
+
+            New un-cascaded RestrGraph representing the intersection of self and other.
+        """
+        graph1_df = pd.DataFrame(self.as_dict)
+        graph2_df = pd.DataFrame(other.as_dict)
+        table_dicts = []
+
+        for table in graph1_df.table_name:
+            if table not in graph2_df.table_name.values:
+                continue
+            ft = FreeTable(dj.conn(), table)
+            intersect_restriction = dj.AndList(
+                [
+                    graph1_df[graph1_df.table_name == table][
+                        "restriction"
+                    ].values[0],
+                    graph2_df[graph2_df.table_name == table][
+                        "restriction"
+                    ].values[0],
+                ]
+            )
+
+            table_dicts.append(
+                {
+                    "table_name": table,
+                    "restriction": make_condition(
+                        ft, intersect_restriction, set()
+                    ),
+                }
+            )
+        return RestrGraph(
+            seed_table=self.seed_table,
+            leaves=table_dicts,
+            include_files=self.include_files,
+            cascade=False,
+            verbose=self.verbose,
+        )
+
+    def __and__(self, other: "RestrGraph") -> "RestrGraph":
+        """Return intersection of two RestrGraphs."""
+        if not isinstance(other, RestrGraph):
+            raise TypeError(f"Cannot AND RestrGraph with {type(other)}")
+        return self._graph_intersect(other)
+
+    def whitelist(self, other: "RestrGraph") -> "RestrGraph":
+        self = self & other
+        return self
 
     # ----------------------------- File Handling -----------------------------
 
