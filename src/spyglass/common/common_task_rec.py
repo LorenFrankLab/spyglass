@@ -1,41 +1,49 @@
 """Schema to ingest ndx_structured_behavior data into Spyglass.
 
-The goal with this first draft was to create a schema that can ingest
-ndx_structured_behavior data. Elsewhere, Spyglass's design pattern is to ingest
-metadata, but keep larger datasets on disk. I've followed that pattern here by
-creating tables for the various task recording types (actions, events, states,
-arguments), but the actual data is fetched using
-TaskRecording.fetch1_dataframe({type}).
+Tables:
+- TaskRecordingTypes: Stores metadata about the types of task recordings
+    (actions, events, states, arguments).
+- TaskRecording: Stores metadata about specific task recordings, including
+    references to the actual data stored in the NWB file.
 
-See example use in the `__name__ == __main__` block at the end of this file.
+Example use:
+```python
+if __name__ == "__main__":
+    from pathlib import Path
 
-TODO: Potential changes/discussion points:
-  - Move these tables to spyglass.common.common_task.py or common_behav?
-    - pro: keep all task-related tables in one place
-    - con: mixes use of existing schemas
-  - Convert Manual -> Imported tables?
-    - pro: allow Table.populate to run automatically for ease of ingestion of
-          pre-existing data
-    - con: departure from existing `insert_from_nwbfile` pattern in Spyglass
-  - IntervalLists...
-    - Ingest interval lists from each type? As fk-refs to IntervalList?
-      - pro: more explicit injestion
-      - con:
-        - ingests a lot of data that may not be needed to a crowded table
-        - might require part tables for each type
-    - Alternatively, tables downstream of this schema would fk-ref IntervalList
-      - pro: selectively ingest data as needed
-      - con: partial ingestion of task data from files
+    from spyglass.settings import raw_dir
 
-TODO: chores before merge:
-  - rename schema to remove dev prefix
-  - add docstrings
-  - add `insert_from_nwbfile` methods to Session.make
-  - add ingested objest to UsingNWB.md documentation
-  - check that ndx_structured_behavior is published on PyPI
-  - remove example code from __main__ block
+    nwb_file_name = "beadl_light_chasing_task.nwb"
+    nwb_dict = dict(nwb_file_name=nwb_file_name)
 
+    data_path = Path(raw_dir) / nwb_file_name
+    if not data_path.exists():
+        raise FileNotFoundError(
+            f"Example NWB file not found at {data_path}. "
+            + "Please run ndx-structured-behavior/src/pynwb/tests/example.py"
+            + " to generate, and move it to the raw_dir."
+        )
+
+    # Example usage
+    nwbf = get_nwb_file(nwb_file_name)
+    if not Nwbfile() & nwb_dict:
+        _ = Nwbfile().insert_from_relative_file_name(nwb_file_name)
+
+    rec_types = TaskRecordingTypes()
+    if not rec_types & nwb_dict:
+        rec_types.insert_from_nwbfile(nwbf)
+
+    task_rec = TaskRecording()
+    if not task_rec & nwb_dict:
+        task_rec.insert_from_nwbfile(nwbf)
+
+    # Fetch actions DataFrame
+    actions_df = task_rec.fetch1_dataframe("actions")
+    print(actions_df.head())
+```
 """
+
+from pathlib import Path
 
 import datajoint as dj
 import pynwb
@@ -44,7 +52,7 @@ from spyglass.common import IntervalList, Nwbfile  # noqa: F401
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
-schema = dj.schema("cbroz_common_task_rec")  # TODO: RENAME BEFORE MERGE
+schema = dj.schema("common_task_rec")
 
 
 @schema
@@ -59,6 +67,8 @@ class TaskRecordingTypes(SpyglassMixin, dj.Manual):
     event_description=NULL  : varchar(255)  # Description of event types
     state_description=NULL  : varchar(255)  # Description of state types
     """
+
+    # TODO: Convert to SpyglassIngestion pending #1377
 
     class ActionTypes(SpyglassMixinPart):
         """Table to store action types for task recording."""
@@ -116,7 +126,7 @@ class TaskRecordingTypes(SpyglassMixin, dj.Manual):
 
         return [{**master_key, **row} for row in df.to_dict("records")]
 
-    def insert_from_nwbfile(self, nwb_file_name: str, nwbf: pynwb.NWBFile):
+    def insert_from_nwbfile(self, nwbf: pynwb.NWBFile):
         """Insert task recording types from an NWB file.
 
         Parameters
@@ -132,6 +142,7 @@ class TaskRecordingTypes(SpyglassMixin, dj.Manual):
             )
             return
 
+        nwb_file_name = Path(nwbf.get_read_io().source).name
         master_key = dict(nwb_file_name=nwb_file_name)
         self_insert = master_key.copy()
 
@@ -178,7 +189,9 @@ class TaskRecording(SpyglassMixin, dj.Manual):
 
     _nwb_table = Nwbfile
 
-    def insert_from_nwbfile(self, nwb_file_name: str, nwbf: pynwb.NWBFile):
+    # TODO: Convert to SpyglassIngestion pending #1377
+
+    def insert_from_nwbfile(self, nwbf: pynwb.NWBFile):
         """Insert task recording from an NWB file.
 
         Parameters
@@ -186,6 +199,7 @@ class TaskRecording(SpyglassMixin, dj.Manual):
         nwbf : pynwb.NWBFile
             The source NWB file object.
         """
+        nwb_file_name = Path(nwbf.get_read_io().source).name
         nwb_dict = dict(nwb_file_name=nwb_file_name)
 
         # Check if TaskRecordingTypes entry exists. Attempt insert or return.
@@ -219,37 +233,3 @@ class TaskRecording(SpyglassMixin, dj.Manual):
 
         _ = self.ensure_single_entry()
         return self.fetch_nwb()[0][table_name]
-
-
-if __name__ == "__main__":
-    from pathlib import Path
-
-    from spyglass.settings import raw_dir
-
-    nwb_file_name = "beadl_light_chasing_task.nwb"
-    nwb_dict = dict(nwb_file_name=nwb_file_name)
-
-    data_path = Path(raw_dir) / nwb_file_name
-    if not data_path.exists():
-        raise FileNotFoundError(
-            f"Example NWB file not found at {data_path}. "
-            + "Please run ndx-structured-behavior/src/pynwb/tests/example.py"
-            + " to generate, and move it to the raw_dir."
-        )
-
-    # Example usage
-    nwbf = get_nwb_file(nwb_file_name)
-    if not Nwbfile() & nwb_dict:
-        _ = Nwbfile().insert_from_relative_file_name(nwb_file_name)
-
-    rec_types = TaskRecordingTypes()
-    if not rec_types & nwb_dict:
-        rec_types.insert_from_nwbfile(nwb_file_name, nwbf)
-
-    task_rec = TaskRecording()
-    if not task_rec & nwb_dict:
-        task_rec.insert_from_nwbfile(nwb_file_name, nwbf)
-
-    # Fetch actions DataFrame
-    actions_df = task_rec.fetch1_dataframe("actions")
-    print(actions_df.head())
