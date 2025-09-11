@@ -1,0 +1,30 @@
+# Copied from tests/.coveragerc to .coveragerc on github actions
+
+[run]
+omit =
+    */__init__.py
+    */_version.py
+    # */behavior/*
+    */cli/*
+    # */common/*
+    */data_import/*
+    */decoding/v0/*
+    # */decoding/*
+    # */lfp/*
+    # */linearization/*
+    */lock/*
+    */mua/*
+    */position/* # gh-action differs from local run
+    */ripple/*
+    */sharing/*
+    # */spikesorting/*
+    # */utils/*
+    settings.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if.*test_mode
+    if __name__ == .__main__.:
+    raise NotImplementedError
+    pass

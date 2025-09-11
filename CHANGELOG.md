@@ -1,73 +1,48 @@
 # Change Log
 
-## [0.5.5] (Unreleased)
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
-<!-- Running draft to be removed immediately prior to release. -->
-
-<!-- When altering tables, import all foreign key references. -->
-
-Table update script
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
-# -- For TrackGraph --
-from spyglass.linearization.v1.main import TrackGraph  # noqa
-
-TrackGraph.alter()  # Add edge map parameter
-
-# -- For dropping deprecated tables --
-import datajoint as dj
-
-dj.FreeTable(dj.conn(), "common_nwbfile.analysis_nwbfile_log").drop()
-dj.FreeTable(dj.conn(), "common_session.session_group").drop()
-
-# -- For v0 recompute --
-from spyglass.spikesorting.v0.spikesorting_recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    IntervalList,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For v1 recompute --
-from spyglass.spikesorting.v1.recording import (
-    SpikeSortingRecording,
-    SpikeSortingRecordingSelection,
-    AnalysisNwbfile,
-)
-
-SpikeSortingRecording().alter()
-SpikeSortingRecording().update_ids()
-
-# -- For LFP pipeline --
-from spyglass.lfp.lfp_imported import ImportedLFP
-from spyglass.lfp.lfp_merge import LFPOutput
-
-if len(ImportedLFP()) or len(LFPOutput.ImportedLFP()):
-    raise ValueError(
-        "Existing entries found and would be dropped in update. Please delete "
-        + "entries or start a GitHub discussion for migration assistance."
-        + f"\nImportedLFP: {len(ImportedLFP())}"
-        + f"\nLFPOutput.ImportedLFP: {len(LFPOutput.ImportedLFP())}"
-    )
-
-table = LFPOutput().ImportedLFP()
-table_name = table.full_table_name
-
-if len(drop_list := table.connection.dependencies.descendants(table_name)) > 1:
-    drop_list = [x for x in drop_list if x != table_name]
-    raise ValueError(
-        "Downstream tables exist and would be dropped in update."
-        + "Please drop the following tables first: \n"
-        + "\n ".join([str(t) for t in drop_list])
-    )
-
-LFPOutput().ImportedLFP().drop_quick()
-ImportedLFP().drop()
+#
 ```
+
+### Documentation
+
+- Delete extra pyscripts that were renamed # 1363
+- Add note on fetching changes to setup notebook #1371
+
+### Infrastructure
+
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+
+### Infrastructure
+
+- Auto-load within-Spyglass tables for graph operations #1368
+
+### Pipelines
+
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
+- Common
+    - Add tables for storing optogenetic experiment information #1312
+    - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+
+## [0.5.5] (Aug 6, 2025)
 
 ### Infrastructure
 
@@ -82,16 +57,18 @@ ImportedLFP().drop()
 - Export python env and store in newly created analysis files #1270
 - Enforce single table entry in `fetch1_dataframe` calls #1270
 - Add recompute ability for `SpikeSortingRecording` for both v0 and v1 #1093,
-    #1311
+    #1311, #1340
 - Track Spyglass version in dedicated table for enforcing updates #1281
 - Pin to `datajoint>=0.14.4` for `dj.Top` and long make call fix #1281
 - Remove outdated code comments #1304
-- Add code coverage badge #1305
+- Add code coverage badge, and increase position coverage #1305, #1315
+- Force `TableChain` to follow shortest path #1356
 
 ### Documentation
 
 - Add documentation for custom pipeline #1281
 - Add developer note on initializing `hatch` #1281
+- Add concrete example for long-distance restrictions #1361
 
 ### Pipelines
 
@@ -105,11 +82,11 @@ ImportedLFP().drop()
     - Add `SensorData` to `populate_all_common` #1281
     - Add `fetch1_dataframe` to `SensorData` #1291
     - Allow storage of numpy arrays using `AnalysisNwbfile.add_nwb_object` #1298
-    - `IntervalList.fetch_interval` now returns `Interval` object #1293
+    - `IntervalList.fetch_interval` now returns `Interval` object #1293, #1357
     - Correct name parsing in Session.Experimenter insertion #1306
     - Allow insert with dio events but no e-series data #1318
     - Prompt user to verify compatibility between new insert and existing table
-        entries # 1318
+        entries # 1318, #1350
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
@@ -122,6 +99,7 @@ ImportedLFP().drop()
     - Add arg to return percent below threshold in `get_subthresh_inds` #1304,
         #1305
     - Accept imported timestamps defined by `rate` and `start_time` #1322
+    - Fix bug preventing DLC config updates #1352
 - Spikesorting
     - Fix compatibility bug between v1 pipeline and `SortedSpikesGroup` unit
         filtering #1238, #1249
@@ -559,3 +537,4 @@ ImportedLFP().drop()
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6

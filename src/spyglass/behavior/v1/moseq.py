@@ -212,7 +212,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         config: dict,
         model_params: dict,
     ):
-        """Method to initialize a model. Creates model and runs initional ARHMM fit
+        """Method to initialize a model. Creates model and runs initial ARHMM fit
 
         Parameters
         ----------
@@ -252,20 +252,20 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model_name=model_name + "_ar",
         )
 
-    def analyze_pca(self, key: dict = dict(), explained_variace: float = 0.9):
+    def analyze_pca(self, key: dict = dict(), explained_variance: float = 0.9):
         """Method to analyze the PCA of a model
 
         Parameters
         ----------
         key : dict
             key to a single MoseqModel table entry
-        explained_variace : float, optional
+        explained_variance : float, optional
             minimum explained variance to print, by default 0.9
         """
         project_dir = (self & key).fetch1("project_dir")
         pca = kpms.load_pca(project_dir)
         config = kpms.load_config(project_dir)
-        kpms.print_dims_to_explain_variance(pca, explained_variace)
+        kpms.print_dims_to_explain_variance(pca, explained_variance)
         kpms.plot_scree(pca, project_dir=project_dir)
         kpms.plot_pcs(pca, project_dir=project_dir, **config)
 
@@ -307,6 +307,82 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             "project_dir", "model_name"
         )
         return f"{project_dir}/{model_name}/fitting_progress.pdf"
+
+    def generate_trajectory_plots(
+        self, key: dict = True, output_dir: Path = None, **kwargs
+    ):
+        """calls the moseq function to generate the pose trajectory of each syllable
+
+        Parameters
+        ----------
+        key : dict, optional
+            restriction to the moseq model table, by default True
+        output_dir : Path, optional
+            where to save the figure to, default of None saves to project_dir
+
+        Returns
+        -------
+        None
+        """
+        self.ensure_single_entry(key)
+        query = self & key
+        project_dir, model_name = (query).fetch1("project_dir", "model_name")
+        results = kpms.load_results(project_dir, model_name)
+        config = kpms.load_config(project_dir)
+        coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
+            key, format_for_moseq=True
+        )
+        kpms.generate_trajectory_plots(
+            coordinates,
+            results,
+            project_dir,
+            model_name,
+            output_dir=output_dir,
+            **config,
+            **kwargs,
+        )
+
+    def generate_grid_movies(
+        self,
+        key: dict = True,
+        output_dir: Path = None,
+        keypoints_only: bool = True,
+        **kwargs,
+    ):
+        """calls the moseq function to create video examples of each identified syllable
+
+        Parameters
+        ----------
+        key : dict, optional
+            restriction to the moseq model table, by default True
+        output_dir : Path, optional
+            where to save the resulting videos, default of None saves to project_dir
+        keypoints_only : bool, optional
+            displays keypoints without the original video, by default True
+
+        Returns
+        -------
+        None
+        """
+
+        self.ensure_single_entry(key)
+        query = self & key
+        project_dir, model_name = (query).fetch1("project_dir", "model_name")
+        results = kpms.load_results(project_dir, model_name)
+        config = kpms.load_config(project_dir)
+        coordinates, confidences = (PoseGroup & query).fetch_pose_datasets(
+            key, format_for_moseq=True
+        )
+        kpms.generate_grid_movies(
+            results,
+            project_dir,
+            model_name,
+            coordinates=coordinates,
+            keypoints_only=keypoints_only,
+            output_dir=output_dir,
+            **config,
+            **kwargs,
+        )
 
 
 @schema
@@ -403,7 +479,7 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         self.insert1(key)
 
     def fetch1_dataframe(self):
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         dataframe = self.fetch_nwb()[0]["moseq"]
         dataframe.set_index("time", inplace=True)
         return dataframe

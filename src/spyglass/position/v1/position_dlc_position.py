@@ -209,16 +209,18 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
         logger.info("Identifying indices to NaN")
+        likelihood_thresh = params.pop("likelihood_thresh")
         df_w_nans, bad_inds = nan_inds(
             dlc_df.copy(),
             max_dist_between=params["max_cm_between_pts"],
-            likelihood_thresh=params.pop("likelihood_thresh"),
+            likelihood_thresh=likelihood_thresh,
             inds_to_span=params["num_inds_to_span"],
         )
 
         nan_spans = get_span_start_stop(np.where(bad_inds)[0])
 
-        if interp_params := params.get("interpolate"):
+        if params.get("interpolate"):
+            interp_params = params.get("interp_params", dict())
             logger.info("interpolating across low likelihood times")
             interp_df = interp_pos(df_w_nans.copy(), nan_spans, **interp_params)
         else:
@@ -230,13 +232,15 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             smooth_method = smooth_params.get("smooth_method")
             smooth_func = _key_to_smooth_func_dict[smooth_method]
 
+            # Handle duplicate smoothing_duration key
+            smooth_dur = smooth_params.get("smoothing_duration") or params[
+                "smoothing_params"
+            ].pop("smoothing_duration", None)
+
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
             logger.info(f"Smoothing using method: {smooth_method}")
             smooth_df = smooth_func(
-                interp_df,
-                smoothing_duration=smooth_params.get("smoothing_duration"),
-                sampling_rate=1 / dt,
-                **params["smoothing_params"],
+                interp_df, smoothing_duration=smooth_dur, sampling_rate=1 / dt
             )
         else:
             smooth_df = interp_df.copy()
@@ -295,7 +299,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
     def fetch1_dataframe(self) -> pd.DataFrame:
         """Fetch a single dataframe."""
-        self.ensure_single_entry()
+        _ = self.ensure_single_entry()
         nwb_data = self.fetch_nwb()[0]
         index = pd.Index(
             np.asarray(
@@ -377,7 +381,7 @@ def nan_inds(
 
         for ind in range(start_point, span[0], -1):
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[ind + 1 : start_point].x),
@@ -403,7 +407,7 @@ def nan_inds(
                 jump_inds_mask[ind] = True
         for ind in range(start_point, span[-1], 1):
             if subthresh_inds_mask[ind]:
-                continue
+                continue  # pragma: no cover
             previous_good_inds = np.where(
                 np.logical_and(
                     ~np.isnan(dlc_df.iloc[start_point:ind].x),

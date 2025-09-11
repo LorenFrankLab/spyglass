@@ -3,15 +3,16 @@
 #   jupytext:
 #     text_representation:
 #       extension: .py
-#       format_name: light
-#       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       format_name: percent
+#       format_version: '1.3'
+#       jupytext_version: 1.17.2
 #   kernelspec:
-#     display_name: spyglass-moseq-1
+#     display_name: spyglass2025-moseq-gpu
 #     language: python
 #     name: python3
 # ---
 
+# %% [markdown]
 # # MoSeq Pipeline Tutorial
 #
 # This notebook provides a tutorial on how to use the MoSeq pipeline to analyze behavioral data. The pipeline is a tool for taking keypoint pose estimations and extracting behavioral syllables.
@@ -34,6 +35,7 @@
 # ![moseq_outline.png|2000x900](./../notebook-images/moseq_outline.png)
 #
 
+# %% [markdown]
 #  # Accessing the keypoint (pose) data
 #
 # In the spyglass architecture, keypoint tracking is performed in the `Position` module,
@@ -43,7 +45,7 @@
 #
 # We can access an example set of keypoint pose data here:
 
-# +
+# %%
 # %load_ext autoreload
 # %autoreload 2
 from spyglass.position.position_merge import PositionOutput
@@ -63,8 +65,8 @@ pose_key = {
 merge_key = (PositionOutput.DLCPosV1 & pose_key).fetch1("KEY")
 pose_df = (PositionOutput & merge_key).fetch_pose_dataframe()
 pose_df
-# -
 
+# %% [markdown]
 # To train a moseq model, we first need to define the epochs of pose data we will train on
 # as well as the bodyparts to use within the model. We define this in the `PoseGroup`
 # table below.
@@ -72,7 +74,7 @@ pose_df
 # Note that training can be run using data from multiple epochs by passing a list of
 # merge ids to `create_group`
 
-# +
+# %%
 from spyglass.behavior.v1.core import PoseGroup
 
 # Define the group name and bodyparts to include in the Moseq model
@@ -98,8 +100,8 @@ PoseGroup().create_group(
 # Look at the group in the database
 group_key = {"pose_group_name": group_name}
 PoseGroup() & group_key
-# -
 
+# %% [markdown]
 # ## Defining the Moseq Model
 #
 # Next, we make an entry intpo the `MoseqModelParams` table.  The information in this
@@ -110,7 +112,7 @@ PoseGroup() & group_key
 #
 # ** Note: All bodyparts in the `PoseGroup` entry will be used in the model
 
-# +
+# %%
 from spyglass.behavior.v1.moseq import (
     MoseqModel,
     MoseqModelParams,
@@ -143,13 +145,13 @@ MoseqModelParams().insert1(
     skip_duplicates=True,
 )
 
-MoseqModelParams()
-# -
+MoseqModelParams() & {"model_params_name": model_params_name}
 
+# %% [markdown]
 # To train the model, we link a set of model params with training data in `PoseGroup`
 # using the `MoseqModelSelection` table.
 
-# +
+# %%
 MoseqModelSelection().insert1(
     {
         "model_params_name": model_params_name,
@@ -158,37 +160,56 @@ MoseqModelSelection().insert1(
     skip_duplicates=True,
 )
 
-MoseqModelSelection()
-# -
+MoseqModelSelection() & group_key
 
+# %% [markdown]
 # We can then train the model by populating the corresponding `MoseqModel` entry.  This
 # will load the keypoint data, format it for moseq, and then train according to the
 # setting in the `MoseqModelParams` entry
 
+# %%
 model_key = {
     "model_params_name": model_params_name,
     "pose_group_name": group_name,
 }
 MoseqModel().populate(model_key)
 
+# %% [markdown]
 # The model is now trained and accessible through the the `MoseqModel` table.
 
+# %%
 trained_model = MoseqModel().fetch_model(model_key)
 trained_model
 
+# %% [markdown]
 # We can also analyze components of the trained model;
 # ie. the pca breakdown of the pose skeleton
 
+# %%
 table = MoseqModel() & model_key
 table.analyze_pca()
 
+# %% [markdown]
+# as well as average trajectories for each syllable
+
+# %%
+table.generate_trajectory_plots()
+
+# %% [markdown]
+# And example videos of each syllable. These are saved as mp4 files in the passed `output_dir`
+
+# %%
+output_dir = "/path/to/save/videos/"
+table.generate_grid_movies(output_dir=output_dir)
+
+# %% [markdown]
 # ## Run data through the trained model
 #
 # Now that we have a trained model, we can use it to convert pose data into behavioral
 # syllables. We do so by combining a trained model with an epoch of pose data, and then
 # applying the populate command
 
-# +
+# %%
 # %load_ext autoreload
 # %autoreload 2
 from spyglass.behavior.v1.moseq import MoseqSyllableSelection, MoseqSyllable
@@ -204,7 +225,7 @@ MoseqSyllableSelection().insert1(key, skip_duplicates=True)
 MoseqSyllable().populate(key)
 MoseqSyllable()
 
-# +
+# %%
 import matplotlib.pyplot as plt
 
 moseq_df = (MoseqSyllable() & key).fetch1_dataframe()
@@ -225,12 +246,13 @@ ax[1].scatter(
 ax[0].set_ylabel("centroid")
 ax[1].set_ylabel("syllable")
 ax[1].set_xlabel("time (s)")
-# -
 
+# %% [markdown]
 # This concludes the tutorial for basic usage of the Moseq pipeline. Next, we will
 # look at usage for extending training from a base model and leveraging spyglass's
 # relational database to easily sweep through model hyperparameters
 
+# %% [markdown]
 # # Extend model training
 #
 # There are many cases where you may want to begin trining from an existing model
@@ -243,6 +265,7 @@ ax[1].set_xlabel("time (s)")
 # method. This entry will have the same params as those used in model_key, except it
 # will point to the model_key entry for the `initial_model`
 
+# %%
 # Insert a training extension model entry
 extension_params = MoseqModelParams().make_training_extension_params(
     model_key, num_epochs=100, skip_duplicates=True
@@ -253,8 +276,10 @@ new_params_key = {
 }
 MoseqModelParams() & "model_params_name LIKE '%tutorial_kappa4%'"
 
+# %% [markdown]
 # This extension model can then be trained following the same steps as before
 
+# %%
 new_model_key = {
     **new_params_key,
     "pose_group_name": model_key["pose_group_name"],
@@ -262,6 +287,7 @@ new_model_key = {
 MoseqModelSelection().insert1(new_model_key, skip_duplicates=True)
 MoseqModel().populate(new_model_key)
 
+# %% [markdown]
 # # Hyperparameter search (kappa)
 #
 # The relational database structure makes it relatively easy to train and organize
@@ -280,7 +306,7 @@ MoseqModel().populate(new_model_key)
 #
 #
 
-# +
+# %%
 original_params = (MoseqModelParams() & model_key).fetch1("model_params")
 
 new_params_key_list = []
@@ -297,11 +323,12 @@ for i in [5, 6, 7, 8]:
     MoseqModelParams().insert1(new_params_key, skip_duplicates=True)
 
 MoseqModelParams() & "model_params_name LIKE '%tutorial_kappa%'"
-# -
 
+# %% [markdown]
 # We can now train a model for each of these entries. We are training several different
 # models here, so depending on your hardware, now may be a good time for a coffee break.
 
+# %%
 for new_params_key in new_params_key_list:
     new_model_key = {
         "model_params_name": new_params_key["model_params_name"],
@@ -310,9 +337,11 @@ for new_params_key in new_params_key_list:
     MoseqModelSelection().insert1(new_model_key, skip_duplicates=True)
 MoseqModel().populate()
 
+# %% [markdown]
 # You can then choose the model that best matches your syllable duration of interest and
 # continue training it using the training extension described above
 
+# %%
 # print out link to the pdf of training results (includes syllable durations)
 for new_params_key in new_params_key_list:
     new_model_key = {
@@ -325,3 +354,5 @@ for new_params_key in new_params_key_list:
     print(
         f"{new_model_key['model_params_name']} training results: {training_results_path}"
     )
+
+# %%

@@ -154,7 +154,7 @@ class NwbfileHasher:
         precision_lookup: Dict[str, int] = PRECISION_LOOKUP,
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
-        verbose: bool = True,
+        verbose: bool = False,
     ):
         """Hashes the contents of an NWB file.
 

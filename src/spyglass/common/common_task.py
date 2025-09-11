@@ -77,20 +77,22 @@ class Task(SpyglassMixin, dj.Manual):
                 continue
             existing = query.fetch1()
             for key in set(task_dict).union(existing):
-                if unequal_vals(key, task_dict, existing):
-                    if not accept_divergence(
-                        key,
-                        task_dict.get(key),
-                        existing.get(key),
-                        self._test_mode,
-                    ):
-                        # If the user does not accept the divergence,
-                        # raise an error to prevent data inconsistency
-                        raise ValueError(
-                            f"Task {task_dict['task_name']} already exists "
-                            + f"with different values for {key}: "
-                            + f"{task_dict.get(key)} != {existing.get(key)}"
-                        )
+                if not unequal_vals(key, task_dict, existing):
+                    continue  # skip if values are equal
+                if not accept_divergence(
+                    key,
+                    task_dict.get(key),
+                    existing.get(key),
+                    self._test_mode,
+                    self.camel_name,
+                ):
+                    # If the user does not accept the divergence,
+                    # raise an error to prevent data inconsistency
+                    raise ValueError(
+                        f"Task {task_dict['task_name']} already exists "
+                        + f"with different values for {key}: "
+                        + f"{task_dict.get(key)} != {existing.get(key)}"
+                    )
         # Insert the tasks into the table
         self.insert(inserts)
 

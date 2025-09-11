@@ -1,5 +1,6 @@
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
+from typing import List, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -312,7 +313,6 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class SpikeSortingRecording(SpyglassMixin, dj.Computed):
-
     definition = """
     -> SpikeSortingRecordingSelection
     ---
@@ -322,34 +322,68 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
-    _use_transaction, _allow_insert = False, True
 
-    def make(self, key):
-        """Populates the SpikeSortingRecording table with the recording data.
+    def make_fetch(self, key: dict) -> List[Interval]:
+        """Fetch times for compute.
 
-        1. Fetches ...
-            - Sort interval and parameters from SpikeSortingRecordingSelection
-                and SpikeSortingPreprocessingParameters
-            - Channel IDs and reference electrode from SortGroup, filtered by
-                filtereing parameters
-        2. Saves the recording data to the recording directory
-        3. Inserts the path to the recording data into SpikeSortingRecording
+        Parameters
+        ----------
+        key: dict
+            Key of SpikeSortingRecordingSelection table
+
+        Returns
+        -------
+        List[Interval]
+            Sort Interval object, as a list of length 1
+        """
+        # make decomposes passed obj, so make it a list if only one item
+        return [self._get_sort_interval_valid_times(key)]
+
+    def make_compute(
+        self, key: dict, sort_interval_valid_times: Interval
+    ) -> Tuple[dict, Interval]:
+        """Run computation. Generate the file, set Interval key, prep insert.
+
+        Parameters
+        ----------
+        key: dict
+            Key of SpikeSortingRecordingSelection table
+        sort_interval_valid_times, sort
+            Interval object of the sort
+
+        Returns
+        -------
+        Tuple[dict, Interval]
+            Dictionary of self-insert, and updated Interval object
         """
         rec_info = self._make_file(key)
-
-        sort_interval_valid_times = self._get_sort_interval_valid_times(key)
         sort_interval_valid_times.set_key(
             nwb_file_name=key["nwb_file_name"],
             interval_list_name=rec_info["name"],
             pipeline="spikesorting_recording_v0",
         )
-        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
-
         self_insert = dict(
             key,
             sort_interval_list_name=rec_info["name"],
             recording_path=rec_info["path"],
         )
+        return self_insert, sort_interval_valid_times
+
+    def make_insert(
+        self, key: dict, self_insert: dict, sort_interval_valid_times: Interval
+    ) -> None:
+        """Insert into self and IntervalList, document environment.
+
+        Parameters
+        ----------
+        key: dict
+            Key of SpikeSortingRecordingSelection table
+        self_insert: dict
+            Dict of keys for this table
+        sort_interval_valid_times: sort
+            Interval object of the sort
+        """
+        IntervalList.insert1(sort_interval_valid_times.as_dict, replace=True)
         self.insert1(self_insert)
         self._record_environment(self_insert)
 
@@ -374,7 +408,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 shutil_rmtree(rec_path)
 
         recording = self._get_filtered_recording(key)
-        recording.save(folder=rec_path, chunk_duration="10000ms", n_jobs=8)
+        recording.save(
+            folder=rec_path, chunk_duration="10000ms", n_jobs=8, verbose=False
+        )
 
         if has_entry and base_dir == recording_dir:  # if recompute, check hash
             _ = self._hash_check(key, rec_path)
@@ -446,6 +482,10 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Only used for transitioning to recompute NWB files, see #1093."""
         for key in tqdm(self & "hash is NULL", desc="Updating hashes"):
+            path = key["recording_path"]
+            if not Path(path).exists():
+                logger.warning(f"Recording path {path} does not exist")
+                continue  # pragma: no cover
             key["hash"] = self._dir_hash(key["recording_path"])
             self.update1(key)
 
