@@ -34,6 +34,7 @@ import all foreign key references.
 - Common
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Add support for `ndx_structured_behavior` via `TaskRecording` #1349
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
