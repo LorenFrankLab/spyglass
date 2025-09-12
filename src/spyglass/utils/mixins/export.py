@@ -215,8 +215,8 @@ class ExportMixin:
         ret = {i.function for i in inspect_stack()} - ignore
         return ret
 
-    def _log_fetch(self, restriction=None, chunk_size=None, *args, **kwargs):
-        """Log fetch for export."""
+    def _log_fetch(self, restriction=None, *args, **kwargs):
+        """Logs the fetch for export."""
         if (
             not self.export_id
             or self.database == "common_usage"
@@ -284,32 +284,48 @@ class ExportMixin:
             return
 
         restricted_entries = self._get_restricted_entries(restricted_table)
+        self._insert_entries_log(restricted_entries)
+        return
+
+    def _insert_entries_log(self, entries):
+        """Inserts table access log given list of entry keys.
+
+        If the restriction string exceeds 2048 characters, the entries
+        are chunked into smaller groups to fit within the limit.
+        Parameters
+        ----------
+        entries : List[dict]
+            List of keys for restricted table entries
+        Returns
+        -------
+        None
+        """
         all_entries_restr_str = make_condition(
-            self.undo_projection(), restricted_entries, set()
+            self.undo_projection(), entries, set()
         )
-        if chunk_size is None:
-            # estimate appropriate chunk size
-            chunk_size = max(
-                int(
-                    2048
-                    // (len(all_entries_restr_str) / len(restricted_entries))
-                    - 1
-                ),
-                1,
+        if len(all_entries_restr_str) <= 2048:
+            self._insert_log(all_entries_restr_str)
+            return
+
+        if len(entries) == 1:
+            raise RuntimeError(
+                "Single entry restriction exceeds 2048 characters.\n\t"
+                + f"Restriction: {all_entries_restr_str}"
             )
-        for i in range(len(restricted_entries) // chunk_size + 1):
-            chunk_entries = restricted_entries[
-                i * chunk_size : (i + 1) * chunk_size
-            ]
+        chunk_size = max(
+            int(2048 // (len(all_entries_restr_str) / len(entries)) - 1),
+            1,
+        )
+        for i in range(len(entries) // chunk_size + 1):
+            chunk_entries = entries[i * chunk_size : (i + 1) * chunk_size]
             if not chunk_entries:
                 break
-            chunk_restr_str = make_condition(
-                self.undo_projection(), chunk_entries, set()
-            )
-            self._insert_log(chunk_restr_str)
+            self._insert_log(chunk_entries)
         return
 
     def _insert_log(self, restr_str):
+        """Executes insert log entry for export table and restriction."""
+
         if len(restr_str) > 2048:
             raise RuntimeError(
                 "Export cannot handle restrictions > 2048.\n\t"
