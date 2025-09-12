@@ -6,6 +6,7 @@ determine which features are used, how often, and by whom. This will help
 plan future development of Spyglass.
 """
 
+from multiprocessing import Pool, cpu_count
 from typing import List, Union
 
 import datajoint as dj
@@ -314,6 +315,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         # Restrict the graph to only include entries stemming from the
         # included nwb files
+        logger.info("Generating restriction graph of included nwb files")
         nwb_restr = make_condition(
             Nwbfile(),
             [f"nwb_file_name = '{f}'" for f in included_nwb_files],
@@ -330,6 +332,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             include_files=True,
             direction="down",
         )
+        logger.info("Intersecting with export restriction graph")
         restr_graph = restr_graph & whitelist_graph
         raw_files_to_add = [
             f
@@ -424,7 +427,10 @@ class Export(SpyglassMixin, dj.Computed):
         """
 
     def populate_paper(
-        self, paper_id: Union[str, dict], included_nwb_files=None
+        self,
+        paper_id: Union[str, dict],
+        included_nwb_files=None,
+        n_processes=1,
     ):
         """Populate Export for a given paper_id."""
         self.load_shared_schemas()
@@ -432,6 +438,12 @@ class Export(SpyglassMixin, dj.Computed):
             paper_id = paper_id.get("paper_id")
         global INCLUDED_NWB_FILES
         INCLUDED_NWB_FILES = included_nwb_files  # store in global variable
+        global N_PROCESSES
+        if n_processes < 1:
+            n_processes = 1
+        elif n_processes > cpu_count():
+            n_processes = cpu_count()
+        N_PROCESSES = n_processes
         self.populate(
             {
                 **ExportSelection().paper_export_id(paper_id),
@@ -490,18 +502,21 @@ class Export(SpyglassMixin, dj.Computed):
                 )
             }
 
-        # Check for linked nwb objects and add them to the export
         unlinked_files = set()
-        for file in tqdm(file_paths, desc="Checking linked nwb files"):
-            if not (links := get_linked_nwbs(file)):
-                unlinked_files.add(file)
-                continue
-            logger.warning(
-                "Dandi not yet supported for linked nwb objects "
-                + f"excluding {file} from export "
-                + f" and including {links} instead"
-            )
-            unlinked_files.update(links)
+        if N_PROCESSES == 1:
+            for file in tqdm(file_paths, desc="Checking linked nwb files"):
+                unlinked_files.update(get_unlinked_files(file))
+        else:
+            with Pool(processes=N_PROCESSES) as pool:
+                results = list(
+                    tqdm(
+                        pool.map(get_unlinked_files, file_paths),
+                        total=len(file_paths),
+                        desc="Checking linked nwb files",
+                    )
+                )
+            for files in results:
+                unlinked_files.update(files)
         file_paths = unlinked_files
 
         table_inserts = [
@@ -560,3 +575,14 @@ class Export(SpyglassMixin, dj.Computed):
             else:
                 new_id = make_file_obj_id_unique(file_path)
                 unique_object_ids.append(new_id)
+
+
+def get_unlinked_files(file_path):
+    if not (links := get_linked_nwbs(file_path)):
+        return {file_path}
+    logger.warning(
+        "Dandi not yet supported for linked nwb objects "
+        + f"excluding {file_path} from export "
+        + f" and including {links} instead"
+    )
+    return set(links)
