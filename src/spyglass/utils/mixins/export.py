@@ -133,7 +133,7 @@ class ExportMixin:
     # --------------------------- Utility Functions ---------------------------
 
     def _is_projected(self):
-        """Check if name projection has occured in table"""
+        """Check if name projection has occurred in table"""
         for attr in self.heading.attributes.values():
             if attr.attribute_expression is not None:
                 return True
@@ -367,8 +367,8 @@ class ExportMixin:
         for table in table_list:  # log separate for unique pks
             if isinstance(table, type) and issubclass(table, Table):
                 table = table()  # adapted from dj.declare.compile_foreign_key
-            for r in joined.fetch(*table.primary_key, as_dict=True):
-                table._log_fetch(restriction=r)
+            restr = joined.fetch(*table.primary_key, as_dict=True)
+            table._log_fetch(restriction=restr)
 
     def _run_with_log(self, method, *args, log_export=True, **kwargs):
         """Run method, log fetch, and return result.
