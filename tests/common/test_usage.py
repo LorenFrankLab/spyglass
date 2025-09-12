@@ -137,7 +137,32 @@ def test_export_selection_proj(
 
     assert "proj_interval_list_name" not in restr.fetch1(
         "restriction"
-    ), "Export projection restriction not captured correctly"
+    ), "Export projection restriction not remapped correctly"
+
+
+def test_export_selection_compound(
+    gen_export_selection, export_tbls, trodes_pos_v1, common
+):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    paper = ExportSelection * ExportSelection.Table & paper_key
+    restr = paper & dict(analysis_id=6)
+
+    assert trodes_pos_v1.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export compound did not capture outer table correctly"
+
+    assert common.IntervalList.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export compound did not capture inner table correctly"
+
+    trodes_restriction = (
+        restr & dict(table_name=trodes_pos_v1.full_table_name)
+    ).fetch1("restriction")
+    assert (
+        len(trodes_pos_v1 & trodes_restriction) == 2
+    ), "Export compound did not capture outer restriction correctly"
 
 
 def tests_export_selection_max_id(gen_export_selection, export_tbls):
