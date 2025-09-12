@@ -293,11 +293,21 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             A whitelist of nwb files to include in the export. Default None applies
             no whitelist restriction.
         """
-        leaves = unique_dicts(
-            (self * self.Table & key).fetch(
-                "table_name", "restriction", as_dict=True
+        selection_tables = self * self.Table & key
+        tracked_tables = set(selection_tables.fetch("table_name"))
+        leaves = []
+        # Condense to single restriction per table (OR of all restrictions).
+        # Large performance boost for large exports with many logged entries
+        for table_name in tracked_tables:
+            restr_list = (selection_tables & dict(table_name=table_name)).fetch(
+                "restriction"
             )
-        )
+            restriction = make_condition(
+                dj.FreeTable(dj.conn(), table_name), restr_list, set()
+            )
+            leaves.append(
+                {"table_name": table_name, "restriction": restriction}
+            )
 
         restr_graph = RestrGraph(
             seed_table=self,
@@ -452,6 +462,7 @@ class Export(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate Export table with the latest export for a given paper."""
+        logger.info(f"Populating Export for {key}")
         paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
         query = ExportSelection & paper_key
 
@@ -481,6 +492,7 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
                 (self.Table & id_dict).delete_quick()
 
+        logger.info(f"Generating export_id {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
             paper_key, included_nwb_files=included_nwb_files
         )
