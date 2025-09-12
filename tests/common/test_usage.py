@@ -27,32 +27,37 @@ def gen_export_selection(
     ExportSelection.start_export(paper_id=1, analysis_id=1)
     lfp.v1.LFPV1().fetch_nwb()
     trodes_pos_v1.fetch()
+
     ExportSelection.start_export(paper_id=1, analysis_id=2)
     track_graph.fetch()
-    ExportSelection.start_export(paper_id=1, analysis_id=3)
 
+    ExportSelection.start_export(paper_id=1, analysis_id=3)
     _ = pop_common_electrode_group & "electrode_group_name = 1"
     _ = trodes_pos_v1 * (
         common.IntervalList & "interval_list_name = 'pos 0 valid times'"
     )  # Note for PR: table and restriction change because join no longer logs empty results
 
     ExportSelection.start_export(paper_id=1, analysis_id=4)
-
     merge_key = (
         pos_merge.TrodesPosV1 & "trodes_pos_params_name LIKE '%ups%'"
     ).fetch1("KEY")
     (pos_merge & merge_key).fetch_nwb()
 
-    # ExportSelection.start_export(paper_id=1, analysis_id=5)
-    # projected_table = common.IntervalPositionInfoSelection.proj(
-    #     proj_interval_list_name="interval_list_name"
-    # )
-    # _ = projected_table & "proj_interval_list_name = 'pos 1 valid times'"
+    ExportSelection.start_export(paper_id=1, analysis_id=5)
+    trodes_pos_v1._export_cache.clear()  # Clear cache to ensure proj table is captured
+    projected_table = trodes_pos_v1.proj(
+        proj_interval_list_name="interval_list_name"
+    )
+    proj_restr = (
+        projected_table & "proj_interval_list_name = 'pos 0 valid times'"
+    )
+    assert len(proj_restr) > 0, "No entries found for projected table"
 
-    # ExportSelection.start_export(paper_id=1, analysis_id=6)
-    # _ = common.IntervalPositionInfoSelection & (
-    #     common.IntervalList & "interval_list_name = 'pos 1 valid times'"
-    # )
+    ExportSelection.start_export(paper_id=1, analysis_id=6)
+    trodes_pos_v1._export_cache.clear()  # Clear cache to ensure proj table is captured
+    _ = trodes_pos_v1 & (
+        common.IntervalList & "interval_list_name = 'pos 0 valid times'"
+    )
 
     ExportSelection.stop_export()
 
@@ -115,6 +120,24 @@ def test_export_selection_merge_fetch(
     assert trodes_pos_v1.full_table_name in restr.fetch(
         "table_name"
     ), "Export merge not captured correctly"
+
+
+def test_export_selection_proj(
+    gen_export_selection, export_tbls, trodes_pos_v1
+):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    paper = ExportSelection * ExportSelection.Table & paper_key
+    restr = paper & dict(analysis_id=5)
+
+    assert trodes_pos_v1.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export projection not captured correctly"
+
+    assert "proj_interval_list_name" not in restr.fetch1(
+        "restriction"
+    ), "Export projection restriction not captured correctly"
 
 
 def tests_export_selection_max_id(gen_export_selection, export_tbls):
