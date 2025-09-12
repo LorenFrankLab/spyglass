@@ -9,6 +9,22 @@ def export_tbls(common):
 
 
 @pytest.fixture(scope="session")
+def intersect_export_selection(trodes_pos_v1, export_tbls, teardown):
+    ExportSelection, _ = export_tbls
+    trodes_pos_v1.fetch_nwb()
+
+    ExportSelection.start_export(paper_id="intersect_selection", analysis_id=1)
+    _ = trodes_pos_v1 & "interval_list_name = 'pos 0 valid times'"
+    ExportSelection.stop_export()
+
+    yield dict(paper_id="intersect_selection")
+
+    if teardown:
+        ExportSelection.stop_export()
+        ExportSelection.super_delete(warn=False, safemode=False)
+
+
+@pytest.fixture(scope="session")
 def gen_export_selection(
     lfp,
     trodes_pos_v1,
@@ -186,6 +202,25 @@ def populate_export(export_tbls, gen_export_selection, teardown):
         Export.super_delete(warn=False, safemode=False)
 
 
+@pytest.fixture(scope="session")
+def populate_intersect_export(
+    intersect_export_selection, export_tbls, teardown
+):
+    _, Export = export_tbls
+    included_nwb_files = ["null_.nwb"]
+    Export.populate_paper(
+        **intersect_export_selection,
+        included_nwb_files=included_nwb_files,
+        n_processes=4,
+    )
+    key = (Export & intersect_export_selection).fetch("export_id", as_dict=True)
+
+    yield (Export.Table & key), (Export.File & key)
+
+    if teardown:
+        Export.super_delete(warn=False, safemode=False)
+
+
 def test_export_populate(populate_export):
     table, file = populate_export
 
@@ -193,6 +228,19 @@ def test_export_populate(populate_export):
     assert (
         len(table) == 37
     ), "Export tables not captured correctly"  # Note for PR: Update because not using common.IntervalPositionInfoSelection (and param table)
+
+
+def test_intersect_export_populate(populate_intersect_export, common):
+    table, file = populate_intersect_export
+
+    assert len(file) == 0, "Intersection failed to censor files"
+
+    nwb_restriction = (
+        table & {"table_name": common.Nwbfile.full_table_name}
+    ).fetch1("restriction")
+    assert (
+        len(common.Nwbfile & nwb_restriction) == 0
+    ), "Intersection failed to censor entries"
 
 
 def test_invalid_export_id(export_tbls):
