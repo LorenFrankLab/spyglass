@@ -899,7 +899,19 @@ class RestrGraph(AbstractGraph):
 
             New un-cascaded RestrGraph representing the intersection of self and other.
         """
-        graph1_df = pd.DataFrame(self.as_dict)
+        if self.cascaded:
+            graph1_df = pd.DataFrame(self.as_dict)
+        else:
+            # If not cascaded, apply intersection to leaves only
+            graph1_df = pd.DataFrame(
+                [
+                    {
+                        "table_name": leaf,
+                        "restriction": self._get_restr(leaf),
+                    }
+                    for leaf in self.leaves
+                ]
+            )
         graph2_df = pd.DataFrame(other.as_dict)
         table_dicts = []
 

@@ -234,12 +234,8 @@ def test_intersect_export_populate(populate_intersect_export, common):
     table, file = populate_intersect_export
 
     assert len(file) == 0, "Intersection failed to censor files"
-
-    nwb_restriction = (
-        table & {"table_name": common.Nwbfile.full_table_name}
-    ).fetch1("restriction")
     assert (
-        len(common.Nwbfile & nwb_restriction) == 0
+        len(table & {"table_name": common.Nwbfile.full_table_name}) == 0
     ), "Intersection failed to censor entries"
 
 
