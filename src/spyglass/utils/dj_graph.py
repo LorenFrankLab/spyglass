@@ -6,7 +6,7 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
 from pathlib import Path
@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (
+from spyglass.utils.dj_helper_fn import (  # is_nonempty,
     PERIPHERAL_TABLES,
     ensure_names,
     fuzzy_get,
@@ -247,28 +247,45 @@ class AbstractGraph(ABC):
         """Get restriction from graph node."""
         return self._get_node(ensure_names(table)).get("restr")
 
+    @staticmethod
+    def _coerce_to_condition(ft, r):
+        from datajoint.expression import QueryExpression
+
+        if isinstance(r, QueryExpression):
+            print("conditional")
+            return r.proj(*ft.primary_key)  # keep relational
+        if isinstance(r, str):
+            return r
+        # dict/list → condition (fallback)
+        from datajoint.condition import make_condition
+
+        return make_condition(ft, r, set())
+
     def _set_restr(self, table, restriction, replace=False):
         """Add restriction to graph node. If one exists, merge with new."""
         ft = self._get_ft(table)
-        restriction = (  # Convert to condition if list or dict
-            make_condition(ft, restriction, set())
-            if not isinstance(restriction, str)
-            else restriction
-        )
+        # restriction = (  # Convert to condition if list or dict
+        #     make_condition(ft, restriction, set())
+        #     if not isinstance(restriction, str)
+        #     else restriction
+        # )
+        restriction = self._coerce_to_condition(ft, restriction)
         existing = self._get_restr(table)
 
         if not replace and existing:
             if restriction == existing:
-                return
+                return restriction
             join = ft & [existing, restriction]
             if len(join) == len(ft & existing):
-                return  # restriction is a subset of existing
+                return existing  # restriction is a subset of existing
             restriction = make_condition(
                 ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
             )
 
         self._set_node(table, "restr", restriction)
+        return restriction
 
+    @lru_cache(maxsize=128)
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
         table = ensure_names(table)
@@ -300,6 +317,7 @@ class AbstractGraph(ABC):
         self.graph.add_nodes_from(v_graph.nodes(data=True))
         self.graph.add_edges_from(v_graph.edges(data=True))
 
+    @lru_cache(maxsize=1024)
     def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
@@ -330,6 +348,19 @@ class AbstractGraph(ABC):
         if warn and ret:  # Log warning if outside
             logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return ret
+
+    def enforce_restr_strings(self):
+        """Ensure all restrictions are strings.
+
+        Converts any non-string restrictions to string conditions.
+        """
+        for table in self.visited:
+            restr = self._get_restr(table)
+            if not restr or isinstance(restr, str):
+                continue
+            ft = self._get_ft(table)
+            new_restr = make_condition(ft, (ft & restr).fetch("KEY"), set())
+            self._set_node(table, "restr", new_restr)
 
     # ---------------------------- Graph Traversal -----------------------------
 
@@ -384,22 +415,22 @@ class AbstractGraph(ABC):
 
         path = f"{self._camel(table1)} -> {self._camel(table2)}"
 
-        if len(ft1) == 0 or len(ft2) == 0:
+        if not (bool(ft1) and bool(ft2)):
             self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
-        join = ft1.proj(**attr_map) * ft2
-        ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
+        ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            is_empty = len(ret) == 0
-            is_full = len(ft2) == len(ret)
-            result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
-            self._log_truncate(f"Bridge Link: {path}: result {result}")
-            logger.debug(join)
+            pass
+            # is_empty = len(ret) == 0
+            # is_full = len(ft2) == len(ret)
+            # result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
+            # self._log_truncate(f"Bridge Link: {path}: result {result}")
+            # logger.debug(join)
 
         return ret
 
@@ -527,7 +558,7 @@ class AbstractGraph(ABC):
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
 
-        self._set_restr(table, restriction, replace=replace)
+        restriction = self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
         if getattr(self, "found_path", None):  # * Avoid refactor #1356
@@ -623,9 +654,21 @@ class AbstractGraph(ABC):
         ]
 
     @property
+    def restr_analysis_file_linked_ft(self):
+        self.cascade(warn=False)
+        valid_tables = self.analysis_file_tbl.children()
+        nodes = [
+            n for n in self.visited if not n.isnumeric() and n in valid_tables
+        ]
+        return [
+            self._get_ft(table, with_restr=True, warn=False)
+            for table in self._topo_sort(nodes, subgraph=True, reverse=False)
+        ]
+
+    @property
     def restr_ft(self):
         """Get non-empty restricted FreeTables from all visited nodes."""
-        return [ft for ft in self.all_ft if len(ft) > 0]
+        return [ft for ft in self.all_ft if bool(ft)]
 
     def ft_from_list(
         self,
@@ -655,7 +698,7 @@ class AbstractGraph(ABC):
             )
         ]
 
-        return fts if return_empty else [ft for ft in fts if len(ft) > 0]
+        return fts if return_empty else [ft for ft in fts if bool(ft)]
 
     @property
     def as_dict(self) -> List[Dict[str, str]]:
@@ -983,11 +1026,12 @@ class RestrGraph(AbstractGraph):
             return  # if _hash_upstream, may cause 'missing node' error
 
         analysis_pk = self.analysis_file_tbl.primary_key
-        for ft in self.restr_ft:
+        for ft in self.restr_analysis_file_linked_ft:
             if not set(analysis_pk).issubset(ft.heading.names):
                 continue
             files = list(ft.fetch(*analysis_pk))
-            self._set_node(ft, "files", files)
+            if len(files):
+                self._set_node(ft, "files", files)
 
         raw_ext = self.file_externals["raw"].full_table_name
         analysis_ext = self.file_externals["analysis"].full_table_name

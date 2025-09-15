@@ -494,7 +494,7 @@ class Export(SpyglassMixin, dj.Computed):
 
         logger.info(f"Generating export_id {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
-            paper_key, included_nwb_files=included_nwb_files
+            paper_key, included_nwb_files=included_nwb_files, verbose=True
         )
         # Original plus upstream files
         file_paths = {
@@ -530,6 +530,8 @@ class Export(SpyglassMixin, dj.Computed):
             for files in results:
                 unlinked_files.update(files)
         file_paths = unlinked_files
+
+        restr_graph.enforce_restr_strings()  # ensure all restr are strings
 
         table_inserts = [
             {**key, **rd, "table_id": i}
