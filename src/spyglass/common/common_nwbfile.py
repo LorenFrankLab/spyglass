@@ -213,7 +213,11 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                             nwb_object.pop(module)
 
             # pop off optogenetic_epochs if it exists
-            nwbf.intervals.pop("optogenetic_epochs")
+            if (
+                "intervals" in nwb_fields
+                and "optogenetic_epochs" in nwbf.intervals
+            ):
+                nwbf.intervals.pop("optogenetic_epochs")
 
             # add the version of spyglass that created this file
             if nwbf.source_script is None:
