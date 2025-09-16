@@ -955,6 +955,7 @@ class RestrGraph(AbstractGraph):
                     for leaf in self.leaves
                 ]
             )
+        other.enforce_restr_strings()
         graph2_df = pd.DataFrame(other.as_dict)
         table_dicts = []
 
@@ -962,7 +963,7 @@ class RestrGraph(AbstractGraph):
             if table not in graph2_df.table_name.values:
                 continue
             ft = FreeTable(dj.conn(), table)
-            intersect_restriction = dj.AndList(
+            intersect_restriction = ft & dj.AndList(
                 [
                     graph1_df[graph1_df.table_name == table][
                         "restriction"
@@ -977,7 +978,7 @@ class RestrGraph(AbstractGraph):
                 {
                     "table_name": table,
                     "restriction": make_condition(
-                        ft, intersect_restriction, set()
+                        ft, intersect_restriction.fetch("KEY"), set()
                     ),
                 }
             )
