@@ -78,7 +78,7 @@ def test_nwb_hasher(nwb_hasher):
     assert "acquisition" in cache
     assert "processing" in cache
 
-    precision = nwb_hasher.get_precision("ProcessedElectricalSeries")
+    precision = nwb_hasher.precision.get("ProcessedElectricalSeries")
     assert precision == 5
 
     roundable = nwb_hasher.is_roundable(5)
