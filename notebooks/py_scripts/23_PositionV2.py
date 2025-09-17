@@ -3,20 +3,48 @@
 
 import os
 import sys
+import warnings
+from pathlib import Path
 
 import datajoint as dj
 import deeplabcut as dlc
 import numpy as np
 import pandas as pd
 import pynwb
+from datajoint_utilities.dj_search.lists import drop_schemas  # TODO: REMOVE
 
 import spyglass.common as sgc
-import spyglass.position.v1 as sgp
-import spyglass.position.v2 as v2
 from spyglass.position import PositionOutput
+from spyglass.position import v1 as sgp
+from spyglass.position import v2
+from spyglass.position.v2 import *  # TODO: REMOVE
+
+# -- DEV HELPERS -- TODO: REMOVE
+# Check for IPython environment and enable autoreload extension if present
+try:
+    get_ipython().run_line_magic("load_ext", "autoreload")
+    # Add exception for 'deeplabcut'
+    get_ipython().run_line_magic("aimport", "spyglass")
+    get_ipython().run_line_magic("autoreload", "1")
+except NameError:
+    pass
+
+
+def drop_skeleton(dry_run=True):
+    if (host := dj.conn().conn_info["host"]) != "localhost":
+        print(f"ATTEMPTED DROP ON {host}")
+        return
+    drop_all_schemas(prefix="position_l", dry_run=dry_run)
+    drop_all_schemas(prefix="linear", dry_run=dry_run)
+    PositionOutput().drop()
+    v2.Skeleton().drop()
+
+
+# -- END DEV HELPERS
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
+
 
 # Path 1: Just Start Estimating
 
@@ -36,6 +64,7 @@ v2.Model()
 # > python ./deeplabcut/examples/testscript.py
 
 dlc_path = Path("/your/desired/path/DeepLabCut/")
+dlc_path = Path("/home/cb/wrk/alt/DeepLabCut/")  # TODO: REMOVE
 model_path = dlc_path / "examples" / "TEST-Alex-2025-09-08" / "config.yaml"
 if not model_path.exists():
     raise FileNotFoundError(f"Check model path: {model_path}")

@@ -3,9 +3,8 @@ from pathlib import Path
 import datajoint as dj
 import ruamel.yaml as yaml
 
+from spyglass.position import utils_dlc
 from spyglass.position.utils import get_most_recent_file
-from spyglass.position.utils_dlc import get_dlc_model_eval
-from spyglass.position.v1 import dlc_reader
 from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
 from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
@@ -298,7 +297,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         part_key = key.copy()
         key.update(model_dict)
         # ---- Save DJ-managed config ----
-        _ = dlc_reader.save_yaml(project_path, dlc_config)
+        _ = utils_dlc.save_yaml(project_path, dlc_config)
 
         # --- Insert into table ----
         self.insert1(key)
@@ -337,8 +336,8 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
             "trainingsetindex",
         )
 
-        results = get_dlc_model_eval(
-            yml_path=dlc_reader.read_yaml(project_path)[0],
+        results = utils_dlc.get_dlc_model_eval(
+            yml_path=utils_dlc.read_yaml(project_path)[0],
             model_prefix=model_prefix,
             shuffle=shuffle,
             trainingsetindex=trainingsetindex,
