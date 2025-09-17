@@ -138,3 +138,38 @@ def test_load_shared_schemas(common, custom_table):
     common.Nwbfile().load_shared_schemas(additional_prefixes=["test"])
     nodes = common.Nwbfile().connection.dependencies.nodes
     assert custom_table in nodes, "Custom table not loaded."
+
+
+def test_null_table_storage(schema_test, Mixin):
+    schema_test(Mixin)
+    assert (
+        Mixin().get_table_storage_usage() == 0
+    ), "Table w/o any files not zero."
+
+
+@pytest.fixture
+def MixinChild(Mixin):
+    from spyglass.utils import SpyglassMixin
+
+    class MixinChild(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> Mixin
+        ---
+        child_attr : int
+        """
+        contents = [(0, 10)]
+
+    yield MixinChild
+
+
+def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
+    schema_orph = dj.Schema("orph_prefix", {}, connection=dj_conn)
+    schema_orph(Mixin)
+    schema_orph(MixinChild)
+
+    dry = Mixin().delete_orphans(dry_run=True).fetch1("id")
+    assert dry == 1, "Dry run delete orphans not working."
+
+    Mixin().delete_orphans(dry_run=False, safemode=False)
+    post_del = Mixin().fetch1("id")
+    assert post_del == 0, "Delete orphans not working."

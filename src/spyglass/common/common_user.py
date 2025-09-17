@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple, Union
 import datajoint as dj
 import yaml
 
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("common_user")
 
@@ -25,7 +25,7 @@ SUBPROCESS_KWARGS = dict(capture_output=True, text=True, timeout=60)
 
 
 @schema
-class UserEnvironment(dj.Manual):
+class UserEnvironment(SpyglassMixin, dj.Manual):
     definition = """ # User conda env. Default ID is User_CondaEnv_00
     env_id: varchar(127)  # Unique environment identifier
     ---
@@ -147,10 +147,10 @@ class UserEnvironment(dj.Manual):
                 "Custom pip installs found. "
                 + "Recompute feature may not work as expected."
             )
-            pprint(self._pip_custom, indent=4)
+            pprint(pip_custom_no_spy, indent=4)
 
         if self._conda_conflicts:
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 "Conda/pip conflicts in the environment.\n"
                 + "\tRecompute feature may not work as expected.\n"
                 + "\tUse `pip uninstall pkg` to defer to conda.\n"

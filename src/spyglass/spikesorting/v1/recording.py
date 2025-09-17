@@ -310,7 +310,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         hash = AnalysisNwbfile().get_hash(
             recording_nwb_file_name,
             from_schema=True,
-            precision_lookup=rounding,
+            precision_lookup=dict(ProcessedElectricalSeries=rounding),
             return_hasher=bool(save_to),
         )
 

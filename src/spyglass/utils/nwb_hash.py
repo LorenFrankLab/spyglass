@@ -151,7 +151,7 @@ class NwbfileHasher:
         self,
         path: Union[str, Path],
         batch_size: int = DEFAULT_BATCH_SIZE,
-        precision_lookup: Dict[str, int] = PRECISION_LOOKUP,
+        precision_lookup: Union[int, Dict[str, int]] = PRECISION_LOOKUP,
         keep_obj_hash: bool = False,
         keep_file_open: bool = False,
         verbose: bool = False,
@@ -177,11 +177,11 @@ class NwbfileHasher:
             Path to the NWB file.
         batch_size  : int, optional
             Limit of data to hash for large datasets, by default 4095.
-        precision_lookup : Dict[str, int], optional
-            Round data to n decimal places for specific datasets (i.e.,
-            {dataset_name: n}). Default is to round ProcessedElectricalSeries
-            to 4 significant digits via np.round(chunk, n). An integer value
-            will be applied to the ProcessedElectricalSeries dataset.
+        precision_lookup : Union[int, Dict[str, int]], optional
+            For dict, round data to n decimal places for specific datasets
+            ({dataset_name: n}). If int, round all datasets to this precision.
+            Default is to round ProcessedElectricalSeries to 4 significant
+            digits via np.round(chunk, n).
         keep_obj_hash : bool, optional
             Keep the hash of each object in the NWB file, by default False.
         verbose : bool, optional
@@ -193,8 +193,8 @@ class NwbfileHasher:
 
         if precision_lookup is None:
             precision_lookup = PRECISION_LOOKUP
-        if isinstance(precision_lookup, int):
-            precision_lookup = dict(ProcessedElectricalSeries=precision_lookup)
+        if isinstance(precision_lookup, int):  # same precision for all datasets
+            precision_lookup = {k: precision_lookup for k in PRECISION_LOOKUP}
 
         self.precision = precision_lookup
         self.batch_size = batch_size
@@ -246,6 +246,12 @@ class NwbfileHasher:
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
 
+    def is_roundable(self, data) -> bool:
+        """Check if data is roundable."""
+        if isinstance(data, np.ndarray):
+            return np.issubdtype(data.dtype, np.number)
+        return isinstance(data, (float, int, np.number))
+
     def hash_dataset(self, dataset: h5py.Dataset):
         if dataset.name in IGNORED_KEYS:
             return  # Ignore source script
@@ -266,7 +272,7 @@ class NwbfileHasher:
         while start < size:
             end = min(start + self.batch_size, size)
             data = dataset[start:end]
-            if precision:
+            if precision and self.is_roundable(data):
                 data = np.round(data, precision)
             this_hash.update(self.serialize_attr_value(data))
             start = end
@@ -298,8 +304,6 @@ class NwbfileHasher:
 
     def compute_hash(self) -> str:
         """Hashes the NWB file contents."""
-        # Dev note: fallbacks if slow: 1) read_direct_chunk, 2) read from offset
-
         self.hashed.update(self.namespaces_str)
 
         self.add_to_cache("namespaces", self.namespaces, None)
