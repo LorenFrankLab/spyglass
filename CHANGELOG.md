@@ -22,6 +22,7 @@ import all foreign key references.
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 
 ### Infrastructure
