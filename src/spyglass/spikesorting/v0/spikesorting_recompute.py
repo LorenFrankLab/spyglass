@@ -391,7 +391,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self, key: dict, strict: bool = False
     ) -> Union[Tuple[DirectoryHasher, DirectoryHasher], Tuple[None, str]]:
         """Return the old and new file hashers."""
-        self._parent_key(key)
         old, new = self._get_paths(key)
 
         try:

@@ -507,7 +507,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
     def _hash_both(self, key) -> Tuple[NwbfileHasher, NwbfileHasher]:
         """Compare old and new files for a given key."""
-        self.get_parent_key(key)
         old, new = self._get_paths(key)
         new_hasher = (
             self._hash_one(new, key.get("rounding"))
@@ -547,7 +546,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         parent = self.get_parent_key(key)
-        key.get("rounding")
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
