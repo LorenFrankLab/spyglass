@@ -8,7 +8,7 @@ documentation of their NWB ingestion mappings.
 Outputs Markdown by default; can also emit JSON or CSV.
 
 Example:
-    python spyglass_ingestion_autodoc.py --package your_root_pkg --out docs/ingestion_map.md
+    python spyglass_ingestion_autodoc.py
 """
 
 from __future__ import annotations
@@ -21,7 +21,10 @@ import json
 import pkgutil
 import sys
 import types
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+import datajoint as dj
 
 # ---------- Helpers to safely access @property without running __init__ ----------
 
@@ -109,6 +112,14 @@ def iter_modules(package_name: str) -> Iterable[types.ModuleType]:
     if not hasattr(pkg, "__path__"):
         yield pkg
         return
+
+    # Monkeypatch the `datajoint.schema` to skip activation during crawl
+    def no_op_activate(*args, **kwargs):
+        pass
+
+    dj.schema.activate = no_op_activate
+    dj.Table.is_declared = property(lambda self: True)
+    dj.Table.user_is_admin = property(lambda self: True)
 
     for modinfo in pkgutil.walk_packages(
         pkg.__path__, prefix=pkg.__name__ + "."
@@ -254,10 +265,9 @@ def main():
         all_warnings.extend(warns)
 
     content = as_markdown(all_rows)
-    out_path = "src/ForDevelopers/ingestion_mapping.md"
+    out_path = Path("./docs/src/ForDevelopers/ingestion_mapping.md").resolve()
     with open(out_path, "w") as f:
         f.write(content)
 
 
-if __name__ == "__main__":
-    main()
+main()
