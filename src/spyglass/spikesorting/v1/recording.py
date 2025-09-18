@@ -194,7 +194,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     hash=null: varchar(32) # Hash of the NWB file
     """
 
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populate SpikeSortingRecording.
