@@ -860,7 +860,9 @@ class SpyglassMixin(ExportMixin):
 
     def exec_sql_fetchall(self, query):
         """
-        Execute the given query and fetch the results.    Parameters
+        Execute the given query and fetch the results.
+
+        Parameters
         ----------
         query : str
             The SQL query to execute.    Returns
@@ -1129,7 +1131,7 @@ class SpyglassIngestion(SpyglassMixin, ABC):
         self,
         nwb_file_name: str,
         config: dict = None,
-        execute_inserts: bool = True,
+        dry_run: bool = False,
     ):
         """Insert entries into the table from an NWB file.
 
@@ -1139,9 +1141,9 @@ class SpyglassIngestion(SpyglassMixin, ABC):
             The name of the NWB file to import from.
         config : dict, optional
             A configuration dictionary to supplement NWB data. Default None.
-        execute_inserts : bool, optional
-            If False, do not execute the insert, just return the entries that
-            would be inserted. Default True.
+        dry_run : bool, optional
+            If True, do not insert into the database, just return the entries
+            that would be inserted. Default False.
         """
         from spyglass.common.common_nwbfile import Nwbfile
 
@@ -1189,7 +1191,7 @@ class SpyglassIngestion(SpyglassMixin, ABC):
                         table().validate_duplicates(entry)
 
         # run insertions
-        if execute_inserts:
+        if not dry_run:
             if isinstance(entries, dict):
                 for table, table_entries in entries.items():
                     table().insert(

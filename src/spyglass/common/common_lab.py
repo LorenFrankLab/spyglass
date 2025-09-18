@@ -188,7 +188,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
                 team_name=full_name,
                 team_members=[f"{last}, {first}"],
                 team_description="personal team",
-                execute_inserts=False,
+                dry_run=True,
             )
             team_entries.append(team_i)
             team_member_entries.extend(entry_i)
@@ -222,7 +222,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         team_name: str,
         team_members: list,
         team_description: str = "",
-        execute_inserts=True,
+        dry_run: bool = False,
     ):
         """Create a new team with a list of team members.
 
@@ -236,9 +236,9 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             The full names of the lab members that are part of the team.
         team_description: str
             The description of the team.
-        execute_inserts: bool
-            If True, execute the inserts. If False, return the dicts to be
-            inserted.
+        dry_run : bool
+            If True, do not insert into the database, just return the
+            dictionaries that would be inserted.
         """
         labteam_dict = {
             "team_name": team_name,
@@ -247,7 +247,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
         member_list = []
         for team_member in team_members:
-            if execute_inserts:
+            if not dry_run:
                 LabMember.insert_from_name(team_member)
             member_dict = {"lab_member_name": decompose_name(team_member)[0]}
             query = (LabMember.LabMemberInfo() & member_dict).fetch(
@@ -266,7 +266,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             # clear cache for this member
             _ = cls._shared_teams.pop(team_member, None)
 
-        if not execute_inserts:
+        if dry_run:
             return labteam_dict, member_list
         cls.insert1(labteam_dict, skip_duplicates=True)
         cls.LabTeamMember.insert(member_list, skip_duplicates=True)
@@ -304,7 +304,10 @@ class Lab(SpyglassIngestion, dj.Manual):
         return pynwb.NWBFile
 
     def insert_from_nwbfile(
-        self, nwb_file_name: str, config: dict = None, execute_inserts=True
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        dry_run=False,
     ):
         """Insert lab name information from an NWB file.
 
@@ -315,6 +318,9 @@ class Lab(SpyglassIngestion, dj.Manual):
         config : dict
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
+        dry_run : bool
+            If True, do not insert into the database, just return the
+            dictionaries that would be inserted.
 
         Returns
         -------
@@ -322,7 +328,7 @@ class Lab(SpyglassIngestion, dj.Manual):
             The name of the lab found in the NWB or config file, or None.
         """
         insert_entries = super().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts=False
+            nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
         )
         if not insert_entries:
             logger.info("No lab metadata found.\n")
@@ -331,7 +337,7 @@ class Lab(SpyglassIngestion, dj.Manual):
                 "Multiple lab entries not allowed. Using the first entry only."
             )
             insert_entries = insert_entries[:1]
-        if execute_inserts:
+        if not dry_run:
             self.insert(insert_entries, skip_duplicates=True)
         return insert_entries
 

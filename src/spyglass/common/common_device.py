@@ -79,7 +79,10 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         }
 
     def insert_from_nwbfile(
-        self, nwb_file_name, config=dict(), execute_inserts=True
+        self,
+        nwb_file_name: str,
+        config=None,
+        dry_run=False,
     ):
         """Insert data acquisition devices from an NWB file.
 
@@ -94,13 +97,14 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
         """
+        config = config or dict()
         entries = super().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts
+            nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
         )
         if entries:
+            vals = [e["data_acquisition_device_name"] for e in entries]
             logger.info(
-                "Inserted or referenced data acquisition device(s): "
-                + f"{[entry['data_acquisition_device_name'] for entry in entries]}"
+                f"Inserted or referenced data acquisition device(s): {vals}"
             )
         else:
             logger.warning(
