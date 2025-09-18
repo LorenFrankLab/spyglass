@@ -27,7 +27,7 @@ schema = dj.schema("spikesorting_v1_artifact")
 class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
     """Parameters for detecting artifacts (non-neural high amplitude events).
 
-    Parameters
+    Attributes
     ----------
     artifact_param_name : str
         Name of the artifact detection parameters.

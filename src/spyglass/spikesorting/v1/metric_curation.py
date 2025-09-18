@@ -51,7 +51,7 @@ _comparison_to_function = {
 class WaveformParameters(SpyglassMixin, dj.Lookup):
     """Parameters for extracting waveforms from the recording based on sorting.
 
-    Parameters
+    Attributes
     ----------
     waveform_param_name : str
         Name of the waveform extraction parameters.
@@ -161,7 +161,7 @@ class MetricParameters(SpyglassMixin, dj.Lookup):
 class MetricCurationParameters(SpyglassMixin, dj.Lookup):
     """Parameters for automatic curation of spike sorting
 
-    Parameters
+    Attributes
     ----------
     metric_curation_params_name : str
         Name of the automatic curation parameters

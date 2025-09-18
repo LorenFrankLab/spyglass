@@ -332,7 +332,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     """Parameters for the video generation.
 
-    Parameters
+    Attributes
     ----------
     dlc_pos_video_params_name : str
         Name of the parameter set.

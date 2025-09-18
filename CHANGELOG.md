@@ -15,6 +15,7 @@ import all foreign key references.
 
 - Delete extra pyscripts that were renamed # 1363
 - Add note on fetching changes to setup notebook #1371
+- Revise table field docstring heading and `mermaid` diagram generation #1402
 
 ### Infrastructure
 

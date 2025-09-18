@@ -99,7 +99,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Lookup):
     """Parameters for preprocessing a recording prior to spike sorting.
 
-    Parameters
+    Attributes
     ----------
     preproc_param_name : str
         Name of the preprocessing parameters

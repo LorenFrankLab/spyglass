@@ -26,7 +26,7 @@ ARTIFACT_DETECTION_ALGORITHMS = {
 class LFPArtifactDetectionParameters(SpyglassMixin, dj.Manual):
     """Parameters for detecting LFP artifacts.
 
-    Parameters
+    Attributes
     ----------
     artifact_params_name : str
         Name of the artifact detection parameters.

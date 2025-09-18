@@ -55,7 +55,7 @@ def plot_burst_xcorrel(
     ----------
     pairs : list of tuples of int
         pairs of units to investigate
-    ccgs : np.array
+    ccgs_e : np.array
         Correlograms with shape (num_units, num_units, num_bins)
         The diagonal of ccgs is the auto correlogram.
         ccgs[A, B, :] is the symetrie of ccgs[B, A, :]

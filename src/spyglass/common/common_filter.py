@@ -32,7 +32,7 @@ def _import_ghostipy():
 class FirFilterParameters(SpyglassMixin, dj.Manual):
     """Filter parameters for filtering continuous time data.
 
-    Parameters
+    Attributes
     ----------
     filter_name: str
         The name of the filter.

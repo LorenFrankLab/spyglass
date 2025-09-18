@@ -55,7 +55,7 @@ nav:
           - Spike Sorting V0: notebooks/10_Spike_SortingV0.ipynb
           - Spike Sorting V1: notebooks/10_Spike_SortingV1.ipynb
           - Spike Sorting Analysis: notebooks/11_Spike_Sorting_Analysis.ipynb
-          - Spike Burst Merge: notebooks/12_Spike_Burst.ipynb
+          - Spike Burst Merge: notebooks/12_Burst_Merge_Curation.ipynb
       - Position:
           - Position Trodes: notebooks/20_Position_Trodes.ipynb
           - DLC Models: notebooks/21_DLC.ipynb
@@ -70,6 +70,7 @@ nav:
           - Decoding Clusterless: notebooks/41_Decoding_Clusterless.ipynb
           - Decoding Sorted Spikes: notebooks/42_Decoding_SortedSpikes.ipynb
       - MUA Detection: notebooks/50_MUA_Detection.ipynb
+      - Behavior Syllables: notebooks/60_MoSeq.ipynb
   - Features:
     - Overview: Features/index.md
     - FigURL: Features/FigURL.md
@@ -95,7 +96,8 @@ extra_css:
 
 plugins:
   - search
-  - mermaid2 # for graphs
+  - mermaid2: # for graphs
+      version: 10.0.2
   - exclude:
       glob:
         - "temp*"
@@ -140,7 +142,11 @@ markdown_extensions:
       pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:mermaid2.fence_mermaid_custom
   - pymdownx.tabbed:
       alternate_style: true
 

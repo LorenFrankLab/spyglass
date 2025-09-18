@@ -17,7 +17,7 @@ schema = dj.schema("position_v1_dlc_training")
 class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
     """Parameters for training a DLC model.
 
-    Parameters
+    Attributes
     ----------
     dlc_training_params_name : str
         Descriptive name of parameter set

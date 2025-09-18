@@ -40,7 +40,7 @@ class PositionInfoParameters(SpyglassMixin, dj.Lookup):
     """
     Parameters for extracting the smoothed position, orientation and velocity.
 
-    Parameters
+    Attributes
     ----------
     position_info_param_name : str
         Name for this set of parameters

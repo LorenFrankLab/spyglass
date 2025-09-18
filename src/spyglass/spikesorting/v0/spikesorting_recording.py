@@ -255,7 +255,7 @@ class SortInterval(SpyglassMixin, dj.Manual):
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
     """Preprocessing parameters for spike sorting.
 
-    Parameters
+    Attributes
     ----------
     preproc_params_name : str
         Name of the preprocessing parameters.
@@ -348,7 +348,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         ----------
         key: dict
             Key of SpikeSortingRecordingSelection table
-        sort_interval_valid_times, sort
+        sort_interval_valid_times: Interval
             Interval object of the sort
 
         Returns

@@ -286,7 +286,7 @@ class Curation(SpyglassMixin, dj.Manual):
 class WaveformParameters(SpyglassMixin, dj.Manual):
     """Parameters for extracting waveforms from a sorting extractor
 
-    Parameters
+    Attributes
     ----------
     waveform_params_name : str
         Name of the waveform extraction parameters
@@ -734,7 +734,7 @@ _metric_name_to_func = {
 class AutomaticCurationParameters(SpyglassMixin, dj.Manual):
     """Parameters for automatic curation of spike sorting
 
-    Parameters
+    Attributes
     ----------
     auto_curation_params_name : str
         Name of the automatic curation parameters

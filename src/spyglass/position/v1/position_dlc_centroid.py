@@ -30,7 +30,7 @@ schema = dj.schema("position_v1_dlc_centroid")
 class DLCCentroidParams(SpyglassMixin, dj.Manual):
     """Parameters for calculating the centroid
 
-    Parameters
+    Attributes
     ----------
     dlc_centroid_params_name : str
         Name for this set of parameters

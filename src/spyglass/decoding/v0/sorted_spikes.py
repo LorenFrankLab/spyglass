@@ -182,7 +182,7 @@ class SortedSpikesIndicator(SpyglassMixin, dj.Computed):
 class SortedSpikesClassifierParameters(SpyglassMixin, dj.Manual):
     """Stores parameters for decoding with sorted spikes
 
-    Parameters
+    Attributes
     ----------
     classifier_param_name: str
         A name for this set of parameters

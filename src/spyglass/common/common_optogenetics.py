@@ -432,7 +432,7 @@ class OpticalFiberImplant(SpyglassMixin, dj.Manual):
         ----------
         nwb_file_name : str
             The name of the NWB file containing the implant data.
-        implant_object : OpticalFiberLocationsTable
+        implant_table_object : OpticalFiberLocationsTable
             An instance of the OpticalFiberLocationsTable class containing the
             implant data.
         """

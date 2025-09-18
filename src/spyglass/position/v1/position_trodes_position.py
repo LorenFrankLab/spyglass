@@ -25,7 +25,7 @@ class TrodesPosParams(SpyglassMixin, dj.Manual):
     """
     Parameters for calculating the position (centroid, velocity, orientation)
 
-    Parameters
+    Attributes
     ----------
     trodes_pos_params_name: str
         Name for this set of parameters

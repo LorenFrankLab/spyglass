@@ -18,7 +18,7 @@ schema = dj.schema("spikesorting_group_v1")
 class UnitSelectionParams(SpyglassMixin, dj.Manual):
     """Unit selection parameters for sorted spikes
 
-    Parameters
+    Attributes
     ----------
     unit_filter_params_name : str
         name of the unit selection parameters

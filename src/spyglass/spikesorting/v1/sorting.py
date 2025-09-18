@@ -31,7 +31,7 @@ schema = dj.schema("spikesorting_v1_sorting")
 class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
     """Parameters for spike sorting algorithms.
 
-    Parameters
+    Attributes
     ----------
     sorter: str
         Name of the spike sorting algorithm.

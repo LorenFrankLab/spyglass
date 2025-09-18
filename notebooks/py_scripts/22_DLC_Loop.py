@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.0
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -38,8 +38,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-position Conda environment (instructions for install are in the environment_position.yml)**
-#
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environment_dlc.yml)**
 
 # Here is a schematic showing the tables used in this pipeline.
 #
@@ -113,6 +112,8 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 # ### Body Parts
 #
 
+# ### Body Parts
+
 # We'll begin by looking at the `BodyPart` table, which stores standard names of body parts used in DLC models throughout the lab with a concise description.
 #
 
@@ -136,7 +137,7 @@ sgp.BodyPart()
 
 # To train a model, we'll need to extract frames, which we can label as training data. We can construct a list of videos from which we'll extract frames.
 #
-# The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos you want to use.
+# The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos (in .h264 format) you want to use.
 #
 # For this tutorial, we'll use two videos for which we already have frames labeled.
 #
@@ -404,30 +405,21 @@ sgp.DLCModel() & model_key
 # ## Loop Begins
 #
 
-# We can view all `VideoFile` entries with the specidied `camera_ name` for this project to ensure the rat whose position you wish to model is in this table `matching_rows`
+# We can view all `VideoFile` entries with the specidied `camera_name` for this project to ensure the rat whose position you wish to model is in this table `matching_rows`
 #
 
 camera_name = "SleepBox_camera"
 matching_rows = sgc.VideoFile() & {"camera_name": camera_name}
 matching_rows
 
-# The `DLCPoseEstimationSelection` insertion step will convert your .h264 video to an .mp4 first and save it in `/nimbus/deeplabcut/video`. If this video already exists here, the insertion will never complete.
-#
-# We first delete any .mp4 that exists for this video from the nimbus folder:
-#
-
-# ! find /nimbus/deeplabcut/video -type f -name '*20230606_SC38*' -delete # change based on date and rat with which you are training the model
-
 # If the first insertion step (for pose estimation task) fails in either trigger or load mode for an epoch, run the following lines:
 #
 # ```
-# (pose_estimation_key = sgp.DLCPoseEstimationSelection.insert_estimation_task(
-#     {
-#         "nwb_file_name": nwb_file_name,
-#         "epoch": epoch,
-#         "video_file_num": video_file_num,
-#         **model_key,
-#     }).delete()
+# (pose_estimation_key = dlc_pose_estimation.insert_estimation_task(
+#     key,
+#     task_mode="trigger", #trigger or load
+#     params={"gputouse": gputouse, "videotype": "mp4"},
+#     )).delete()
 # ```
 #
 
@@ -436,7 +428,7 @@ matching_rows
 #
 # - It defines `col1val` as each `nwb_file_name` entry in the table, one at a time.
 # - Next, it sees if the trial on which you are testing this model is in the string for the current `col1val`; if not, it re-defines `col1val` as the next `nwb_file_name` entry and re-tries this step.
-# - If the previous step works, it then saves `col2val` and `col3val` as the `epoch` and the `video_file_num`, respectively, based on the nwb_file_name. From there, it iterates through the insertion and population steps required to extract position data, which we see laid out in notebook 05_DLC.ipynb.
+# - If the previous step works, it then saves `col2val` and `col3val` as the `epoch` and the `video_file_num`, respectively, based on the nwb_file_name. From there, it iterates through the insertion and population steps required to extract position data, which we see laid out in the non-Loop DLC notebook.
 #
 
 for row in matching_rows:
@@ -446,17 +438,21 @@ for row in matching_rows:
         col3val = row["video_file_num"]
 
         ##insert pose estimation task
-        pose_estimation_key = (
-            sgp.DLCPoseEstimationSelection.insert_estimation_task(
-                {
-                    "nwb_file_name": col1val,
-                    "epoch": col2val,
-                    "video_file_num": col3val,
-                    **model_key,
-                },
-                task_mode="trigger",  # load or trigger
-                params={"gputouse": gputouse, "videotype": "mp4"},
-            )
+        key = {
+            "nwb_file_name": nwb_file_name,
+            "epoch": epoch,
+            "video_file_num": video_file_num,
+            **model_key,
+        }
+
+        dlc_pose_estimation = (
+            sgp.DLCPoseEstimationSelection()
+        )  # Create an instance
+
+        pose_estimation_key = dlc_pose_estimation.insert_estimation_task(
+            key,
+            task_mode="trigger",  # trigger or load
+            params={"gputouse": gputouse, "videotype": "mp4"},
         )
 
         ##populate DLC Pose Estimation
