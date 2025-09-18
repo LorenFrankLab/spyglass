@@ -28,7 +28,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
-    Parameters
+    Attributes
     ----------
     dlc_si_params_name : str
         Name for this set of parameters

@@ -24,7 +24,7 @@ schema = dj.schema("decoding_core_v1")
 class DecodingParameters(SpyglassMixin, dj.Lookup):
     """Params for decoding mental position and some category of interest
 
-    Parameters
+    Attributes
     ----------
     decoding_param_name : str
         name of the decoding parameters
