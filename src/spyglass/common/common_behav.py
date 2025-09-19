@@ -501,6 +501,34 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 f"does not exist in {video_path_obj}/"
             )
 
+    def fetch_key_from_path(
+        self, video_file_path: str, insert: bool = False
+    ) -> Dict:
+        """Return the primary key for a given video file path.
+
+        Parameters
+        ----------
+        video_file_path : str
+            The path to the video file.
+        insert : bool
+            Whether to insert the key if not found. Defaults to False.
+
+        Returns
+        -------
+        key : dict
+            The primary key for the given video file path.
+        """
+        video_path = pathlib.Path(video_file_path).resolve()
+        if not video_path.exists():
+            raise FileNotFoundError(f"File {video_path} does not exist.")
+
+        raise NotImplementedError
+
+        # TODO: Ideally, we could find a path in the DLC config and readily map
+        # it to a TaskEpoch. Is it worth the fuzzy find here of pulling the date
+        # and subject info from the path? Code already exists in my 'find rec
+        # file' project
+
 
 @schema
 class PositionIntervalMap(SpyglassMixin, dj.Computed):

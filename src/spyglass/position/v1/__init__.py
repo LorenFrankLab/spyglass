@@ -1,4 +1,3 @@
-from .dlc_reader import do_pose_estimation, read_yaml, save_yaml
 from .dlc_utils import (
     _convert_mp4,
     find_full_path,
