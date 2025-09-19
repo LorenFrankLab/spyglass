@@ -102,4 +102,4 @@ class Session(SpyglassIngestion, dj.Imported):
                         **base_key,
                     }
                 )
-            return entries
+            return {self: entries}

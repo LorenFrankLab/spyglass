@@ -271,8 +271,7 @@ class Electrode(SpyglassMixin, dj.Imported):
 
 @schema
 class Raw(SpyglassMixin, dj.Imported):
-    definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+    definition = """ # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
     ---
     -> IntervalList
@@ -315,7 +314,6 @@ class Raw(SpyglassMixin, dj.Imported):
         if rawdata.rate is not None:
             key["sampling_rate"] = rawdata.rate
         else:
-            logger.info("Estimating sampling rate...")
             # NOTE: Only use first 1e6 timepoints to save time
             key["sampling_rate"] = estimate_sampling_rate(
                 np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
@@ -345,8 +343,7 @@ class Raw(SpyglassMixin, dj.Imported):
         # same nwb_object_id
 
         logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
-            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
+            f'Importing raw data: {len(interval_dict["valid_times"])} intervals at {key["sampling_rate"]} Hz'
         )
 
         key.update(

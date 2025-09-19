@@ -16,9 +16,9 @@ def insert_sessions(
     nwb_file_names: Union[str, List[str]],
     rollback_on_fail: bool = False,
     raise_err: bool = False,
+    reinsert: bool = False,
 ):
-    """
-    Populate the dj database with new sessions.
+    """Populate the database with new sessions.
 
     Parameters
     ----------
@@ -31,6 +31,9 @@ def insert_sessions(
         If True, undo all inserts if an error occurs. Default is False.
     raise_err : bool, optional
         If True, raise an error if an error occurs. Default is False.
+    reinsert : bool, optional
+        If True and the nwb file already exists in the Nwbfile table,
+        reinsert the data. Default is False.
     """
 
     if not isinstance(nwb_file_names, list):
@@ -62,12 +65,19 @@ def insert_sessions(
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
-        if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
+        query = Nwbfile() & {"nwb_file_name": nwb_file_name}
+        file_exists = bool(query)
+        if file_exists and not reinsert:
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
             )
             continue
+        elif file_exists and reinsert:
+            logger.info(
+                f"Reinserting data from {nwb_file_name}: {out_nwb_file_name}"
+            )
+            query.delete()
 
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to

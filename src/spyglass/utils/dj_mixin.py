@@ -1,10 +1,11 @@
 import os
 import sys
+from abc import abstractmethod
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
 from time import time
-from typing import List
+from typing import Any, Callable, Dict, List, Type, Union
 
 import datajoint as dj
 from datajoint.errors import DataJointError
@@ -248,10 +249,10 @@ class SpyglassMixin(ExportMixin):
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (
+        from spyglass.common.common_nwbfile import (  # noqa F401
             AnalysisNwbfile,
             Nwbfile,
-        )  # noqa F401
+        )
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -859,7 +860,9 @@ class SpyglassMixin(ExportMixin):
 
     def exec_sql_fetchall(self, query):
         """
-        Execute the given query and fetch the results.    Parameters
+        Execute the given query and fetch the results.
+
+        Parameters
         ----------
         query : str
             The SQL query to execute.    Returns
@@ -1014,116 +1017,141 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
 
 
 class SpyglassIngestion(SpyglassMixin):
-    """A mixin for Spyglass tables that ingest data from NWB files."""
+    """A mixin for Spyglass tables that ingest data from NWB files.
 
-    # If true, checks that pre-existing entries are consistent in secondary keys with inserted,
-    # entries and allows for skipping duplicates on insert. If false, raises an error on
-    # duplicate primary keys.
+    Attributes
+    ----------
+    _expected_duplicates : bool
+        If true, checks that pre-existing entries are consistent in secondary
+        keys with inserted, entries and allows for skipping duplicates on insert
+    _prompt_insert : bool
+        If true, prompts user before inserting new table entries from NWB file.
+    table_key_to_obj_attr : Dict[str, Dict[str, Union[str, Callable]]]
+        A dict of dicts mapping table keys to NWB object attributes.
+    _source_nwb_object_type : Type
+        The type of NWB object to import from the NWB file. If None, the table
+        must implement get_nwb_objects.
+
+    """
+
     _expected_duplicates = False
-
-    _prompt_insert = False  # If true, prompts user before inserting new table entries from NWB file.
+    _prompt_insert = False
 
     @property
-    def table_key_to_obj_attr() -> dict:
-        """A dictionary of dictionaries mapping table keys to NWB object attributes
-        for each table.
+    def table_key_to_obj_attr(
+        self,
+    ) -> Dict[str, Dict[str, Union[str, Callable]]]:
+        """A dict of dicts mapping table keys to NWB object attributes.
 
-        First level keys are the nwb object.
-        The reserved key "self" refers to the original object.
-        Additional keys can be added to access data from other nwb objects that are
-        attributes of the object (e.g. device.model).
+        First level keys are the nwb object. The reserved key "self" refers to
+        the original object. Additional keys can be added to access data from
+        other nwb objects that are attributes of the object (e.g.
+        device.model).
 
-        Second level keys are the table keys to map to the nwb object attributes.
-        If the values of this dictionary are strings, they are interpreted as attribute
-        names of the nwb object.
-        If the values are callables, they are called with the nwb object as the
-        only argument.
+        Second level keys are the table keys to map to the nwb object
+        attributes. If the values of this dictionary are strings, they are
+        interpreted as attribute names of the nwb object. If the values are
+        callables, they are called with the nwb object as the only argument.
         """
+        # Dev note: cannot use abstractmethod because DataJoint creates an
+        # instance with @schema decorator, yielding errors even when the
+        # method is implemented in the subclass.
         raise NotImplementedError(
-            "Please implement table_key_to_obj_attr in the table class."
+            "SpyglassIngestion tables need to implement table_key_to_obj_attr."
         )
 
     @property
-    def _source_nwb_object_type(self):
-        """The type of NWB object to import from the NWB file.
-
-        If None, the table is either incompatible with NWB ingestion or must implement
-        get_nwb_objects to return a list of NWB objects to import.
-        """
+    def _source_nwb_object_type(self) -> Type:
+        """The type of NWB object to import from the NWB file."""
         raise NotImplementedError(
-            "Please define _source_nwb_object_type in the table class."
+            "SpyglassIngestion tables need to implement _source_nwb_object_type."
         )
 
-    def generate_entries_from_config(self, config: dict, base_key=dict()):
+    def _config_entries(self, tbl, base_key, entries) -> List[dict]:
+        """Generate entries for a given table and base key."""
+        return {tbl: [dict(base_key, **entry) for entry in entries]}
+
+    def generate_entries_from_config(
+        self, config: dict, base_key=None
+    ) -> List[dict]:
         """Generates a list of table entries from a config dictionary."""
-        config_entries = config.get(self.camel_name, [])
-        return [{**base_key, **entry} for entry in config_entries]
 
-    def generate_entries_from_nwb_object(self, nwb_obj, key=dict()):
+        base_key = base_key or dict()
+        self_entries = config.get(self.camel_name, [])
+        ret = self._config_entries(self, base_key, self_entries)
+
+        for part in self.parts(as_objects=True):
+            # TODO: verify that returning the FreeTable works
+            camel_part = to_camel_case(part.full_table_name.split("__")[-1])
+            part_entries = config.get(camel_part, [])
+            if len(part_entries) == 0:
+                continue
+            ret.update(self._config_entries(part, base_key, part_entries))
+        return ret
+
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None
+    ) -> Dict["SpyglassIngestion", List[dict]]:
         """Generates a list of table entries from an NWB object."""
+        base_key = base_key or dict()
+        base_key = base_key.copy()  # avoid modifying original
+
         # For table objects, generate entry(s) for each row
         if hasattr(nwb_obj, "to_dataframe"):
             obj_df = nwb_obj.to_dataframe()
-            return sum(
+            entries = sum(
                 [
-                    self.generate_entries_from_nwb_object(row, key)
+                    self.generate_entries_from_nwb_object(row, base_key)[self]
                     for row in obj_df.itertuples()
                 ],
                 [],
             )
+            return {self: entries}
 
-        key = key.copy()  # avoid modifying original
+        obj_ = None
         for object_name, mapping in self.table_key_to_obj_attr.items():
-            if object_name != "self":
-                obj_ = getattr(nwb_obj, object_name)
-                if nwb_obj is None:
-                    raise ValueError(
-                        f"NWB object {object_name} not found in {nwb_obj}."
-                    )
-            else:
-                obj_ = nwb_obj
+            obj_ = (
+                nwb_obj
+                if object_name == "self"
+                else getattr(nwb_obj, object_name)
+            )
 
-            key.update(
+            if obj_ is None:  # CB modified nwb_obj -> obj
+                raise ValueError(
+                    f"NWB object {object_name} not found in {nwb_obj}."
+                )
+
+            base_key.update(
                 {
                     k: (getattr(obj_, v) if isinstance(v, str) else v(obj_))
                     for k, v in mapping.items()
                 }
             )
-        return [key]
+        return {self: [base_key]}
 
     def get_nwb_objects(
         self,
         nwb_file: NWBFile,
+        nwb_file_name: str = None,
     ) -> List:
         """Returns a list of NWB objects to be imported.
 
         By default, returns a list with the root nwb_file object.
         Can be overridden to return a list of other nwb objects (e.g. all devices).
         """
-        logger.info(
-            f"Getting NWB objects from {nwb_file} for {self.camel_name}."
-        )
-        if self._source_nwb_object_type is None:
-            raise ValueError(
-                "get_nwb_objects requires _source_nwb_object_type to be specified "
-                + "or be overridden for the class."
-            )
         matching_objects = [
             obj
             for obj in nwb_file.objects.values()
             if isinstance(obj, self._source_nwb_object_type)
         ]
-        logger.info(
-            f"Found {len(matching_objects)} "
-            + f"{self._source_nwb_object_type.__name__} objects in NWB file."
-        )
+
         return matching_objects
 
     def insert_from_nwbfile(
         self,
         nwb_file_name: str,
         config: dict = None,
-        execute_inserts: bool = True,
+        dry_run: bool = False,
     ):
         """Insert entries into the table from an NWB file.
 
@@ -1133,160 +1161,129 @@ class SpyglassIngestion(SpyglassMixin):
             The name of the NWB file to import from.
         config : dict, optional
             A configuration dictionary to supplement NWB data. Default None.
-        execute_inserts : bool, optional
-            If False, do not execute the insert, just return the entries that
-            would be inserted. Default True.
+        dry_run : bool, optional
+            If True, do not insert into the database, just return the entries
+            that would be inserted. Default False.
         """
         from spyglass.common.common_nwbfile import Nwbfile
 
-        logger.info(f"Inserting {self.camel_name} from {nwb_file_name}.")
         nwb_key = {"nwb_file_name": nwb_file_name}
         nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
-        entries = None
 
         # compile list of table entries from all objects in this file
-        for nwb_obj in self.get_nwb_objects(nwb_file):
+        fetched_objs = self.get_nwb_objects(nwb_file, nwb_file_name)
+        entries = (
+            self.generate_entries_from_nwb_object(
+                nwb_obj=fetched_objs[0],
+                base_key=base_entry.copy(),
+            )
+            if len(fetched_objs) > 0
+            else dict()
+        )
+        next_objs = fetched_objs[1:] if len(fetched_objs) > 1 else []
+        for nwb_obj in fetched_objs[1:]:
             obj_entries = self.generate_entries_from_nwb_object(
                 nwb_obj,
                 base_entry.copy(),
             )
-            if entries is None:
-                entries = obj_entries
-                continue
             if isinstance(entries, list):
-                entries.extend(obj_entries)
-            else:
-                for table, table_entries in obj_entries.items():
-                    entries[table].extend(table_entries)
+                raise RuntimeError("TODO: this is no longer the case, right?")
+                # entries.extend(obj_entries)
+            for table, table_entries in obj_entries.items():
+                entries[table].extend(table_entries)
+
         if config:
-            entries.extend(self.generate_entries_from_config(config))
+            entries.update(self.generate_entries_from_config(config))
             # TODO handle for part tables
 
-        if entries is None or len(entries) == 0:
-            logger.info(f"No entries found for {self.camel_name}.")
-            return []
+        for table, table_entries in entries.items():
+            tbl_name = to_camel_case(
+                table.full_table_name.split(".")[-1]
+            ).strip("`")
+            n_entries = len(table_entries)
+            logger.info(f"{nwb_file_name} inserts {n_entries} into {tbl_name}")
 
-        # validate that new entries  are consistent with existing entries
+        if entries is None or len(entries) == 0:
+            return dict()
+
+        # validate that new entries are consistent with existing entries
         if self._expected_duplicates:
             if isinstance(entries, list):
-                for entry in entries:
-                    self.validate_duplicates(entry)
-            else:
-                for table, table_entries in entries.items():
-                    for entry in table_entries:
-                        table().validate_duplicates(entry)
+                raise RuntimeError("TODO: this is no longer the case, right?")
+            #     for entry in entries:
+            #         self.validate_duplicates(entry)
+            # else:
+            self.validate_duplicates(entries)
 
         # run insertions
-        if execute_inserts:
-            if isinstance(entries, dict):
-                for table, table_entries in entries.items():
-                    table().insert(
-                        table_entries,
-                        skip_duplicates=self._expected_duplicates,
-                        allow_direct_insert=True,
-                    )
-            else:
-                self.insert(
-                    entries,
+        if not dry_run:
+            if not isinstance(entries, dict):
+                raise RuntimeError("TODO: this is no longer the case, right?")
+            for table, table_entries in entries.items():
+                table.insert(
+                    table_entries,
                     skip_duplicates=self._expected_duplicates,
                     allow_direct_insert=True,
                 )
 
         return entries
 
-    def validate_duplicates(self, new_key):
-        """
-        If matching entry in database, check for consistency in secondary keys.
-        If divergence, prompt user  whether to accept existing value
+    def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
+        """Validate new entries against existing entries in the database.
 
         Parameters
         ----------
+        entry_dict : dict or Dict[dj.Table, List[dict]]
+            The new entry or dict of table entries to validate against existing
+            entries in the database.
+        """
+        for table, table_entries in entry_dict.items():
+            for entry in table_entries:
+                self.validate1_duplicate(table, entry)
+
+    def validate1_duplicate(self, tbl, new_key):
+        """If matching primary key, check for consistency in secondary keys.
+
+        If divergence, prompt user whether to accept existing value
+
+        Parameters
+        ----------
+        tbl : dj.Table
+            The table to validate against.
         new_key : dict
             The new key to validate against existing entries in the database.
         """
+        # NOTE: switching from `self` to `tbl` to allow validation from
+        # FreeTable instances captured with `parts(as_objects=True)`
 
         # If novel entry, nothing to validate
-        if not (query := self & new_key):
+        if not (query := tbl & new_key):
             return
 
         existing = query.fetch1()
 
         for key in set(new_key).union(existing):
-            if not self.unequal_vals(key, new_key, existing):
+            if not self._unequal_vals(key, new_key, existing):
                 continue  # skip if values are equal
             if not accept_divergence(
                 key,
                 new_key.get(key),
                 existing.get(key),
                 self._test_mode,
-                self.camel_name,
+                to_camel_case(tbl.full_table_name.split(".")[-1]).strip("`"),
             ):
                 # If the user does not accept the divergence,
                 # raise an error to prevent data inconsistency
-                raise ValueError(
+                raise dj.errors.DuplicateError(
                     f"Attempted entry in {self.camel_name} already exists "
                     + f"with different values for {key}: "
                     + f"{new_key.get(key)} != {existing.get(key)}"
                 )
 
     @staticmethod
-    def unequal_vals(key, a, b):
+    def _unequal_vals(key, a, b):
         a, b = a.get(key) or "", b.get(key, "") or ""
         if isinstance(a, str) and isinstance(b, str):
             return a.lower() != b.lower()
         return a != b  # prevent false positive on None != ""
-
-    # def prompt_insert(
-    #     name: str,
-    #     all_values: list,
-    #     table: str = "Data Acquisition Device",
-    #     table_type: str = None,
-    # ) -> bool:
-    #     """Prompt user to add an item to the database. Return True if yes.
-
-    #     Assume insert during test mode.
-
-    #     Parameters
-    #     ----------
-    #     name : str
-    #         The name of the item to add.
-    #     all_values : list
-    #         List of all values in the database.
-    #     table : str, optional
-    #         The name of the table to add to, by default Data Acquisition Device
-    #     table_type : str, optional
-    #         The type of item to add, by default None. Data Acquisition Device X
-    #     """
-    # from spyglass.common.errors import PopulateException
-    # from spyglass.settings import test_mode
-
-    #     if name in all_values:
-    #         return False
-
-    #     if test_mode:
-    #         return True
-
-    #     if table_type:
-    #         table_type += " "
-    #     else:
-    #         table_type = ""
-
-    #     logger.info(
-    #         f"{table}{table_type} '{name}' was not found in the"
-    #         f"database. The current values are: {all_values}.\n"
-    #         "Please ensure that the device you want to add does not already"
-    #         "exist in the database under a different name or spelling. If you"
-    #         "want to use an existing device in the database, please change the"
-    #         "corresponding Device object in the NWB file.\nEntering 'N' will "
-    #         "raise an exception."
-    #     )
-    #     msg = (
-    #         f"Do you want to add {table}{table_type} '{name}' to the database?"
-    #     )
-    #     if dj.utils.user_choice(msg).lower() in ["y", "yes"]:
-    #         return True
-
-    #     raise PopulateException(
-    #         f"User chose not to add {table}{table_type} '{name}' to the database."
-    #     )

@@ -84,7 +84,7 @@ def single_transaction_make(
     file_restr = {"nwb_file_name": nwb_file_name}
     with Nwbfile.connection.transaction:
         for table in tables:
-            logger.info(f"Populating {table.__name__}...")
+
             # TODO 1377:Temporary during migration
             if isinstance(table(), SpyglassIngestion):
                 try:
@@ -100,6 +100,7 @@ def single_transaction_make(
                 continue
 
             # If imported/computed table, get key from key_source
+            logger.info(f"Populating {table.__name__}...")
             key_source = getattr(table, "key_source", None)
             if key_source is None:  # Generate key from parents
                 parents = table.parents(as_objects=True)
