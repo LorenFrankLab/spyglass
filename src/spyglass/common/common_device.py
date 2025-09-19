@@ -100,74 +100,8 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         config = config or dict()
         entries = super().insert_from_nwbfile(
             nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
-        )
-        if entries:
-            vals = [e["data_acquisition_device_name"] for e in entries]
-            logger.info(
-                f"Inserted or referenced data acquisition device(s): {vals}"
-            )
-        else:
-            logger.warning(
-                "No conforming data acquisition device metadata found."
-            )
+        )[self]
         return entries
-
-    @classmethod
-    def old_insert_from_nwbfile(cls, nwbf, config=None):
-        """Insert data acquisition devices from an NWB file.
-
-        Note that this does not link the DataAcquisitionDevices with a Session.
-        For that, see DataAcquisitionDeviceList.
-
-        Parameters
-        ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        config : dict
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
-        """
-        config = config or dict()
-        _, ndx_devices, _ = cls.get_all_device_names(nwbf, config)
-
-        for device_name in ndx_devices:
-            # read device properties into new_device_dict from PyNWB extension
-            # device object
-            nwb_device_obj = ndx_devices[device_name]
-
-            name = nwb_device_obj.name
-            adc_circuit = nwb_device_obj.adc_circuit
-
-            # transform system value. check if value is in DB. if not, prompt
-            # user to add an entry or cancel.
-            system = cls._add_system(nwb_device_obj.system)
-
-            # transform amplifier value. check if value is in DB. if not, prompt
-            # user to add an entry or cancel.
-            amplifier = cls._add_amplifier(nwb_device_obj.amplifier)
-
-            # standardize how Intan is represented in the database
-            if adc_circuit.title() == "Intan":
-                adc_circuit = "Intan"
-
-            cls._add_device(
-                dict(
-                    data_acquisition_device_name=name,
-                    data_acquisition_device_system=system,
-                    data_acquisition_device_amplifier=amplifier,
-                    adc_circuit=adc_circuit,
-                )
-            )
-
-        if ndx_devices:
-            logger.info(
-                "Inserted or referenced data acquisition device(s): "
-                + f"{ndx_devices.keys()}"
-            )
-        else:
-            logger.warning(
-                "No conforming data acquisition device metadata found."
-            )
 
     @classmethod
     def get_all_device_names(cls, nwbf, config) -> tuple:

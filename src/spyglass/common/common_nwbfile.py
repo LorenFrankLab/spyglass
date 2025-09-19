@@ -69,14 +69,15 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         """
         nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
 
-        assert os.path.exists(
-            nwb_file_abs_path
-        ), f"File does not exist: {nwb_file_abs_path}"
+        if not Path(nwb_file_abs_path).exists():
+            raise FileNotFoundError(f"File not found: {nwb_file_abs_path}")
 
-        key = dict()
-        key["nwb_file_name"] = nwb_file_name
-        key["nwb_file_abs_path"] = nwb_file_abs_path
-        cls.insert1(key, skip_duplicates=True)
+        cls.insert1(
+            dict(
+                nwb_file_name=nwb_file_name, nwb_file_abs_path=nwb_file_abs_path
+            ),
+            skip_duplicates=True,
+        )
 
     def fetch_nwb(self):
         return [

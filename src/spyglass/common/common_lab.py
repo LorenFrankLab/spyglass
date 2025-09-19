@@ -1,5 +1,7 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
+from typing import Dict
+
 import datajoint as dj
 import pynwb
 
@@ -49,9 +51,10 @@ class LabMember(SpyglassIngestion, dj.Manual):
         return pynwb.NWBFile
 
     def generate_entries_from_nwb_object(
-        self, nwb_obj: pynwb.NWBFile, base_key=dict()
-    ):
-        """Override SpyglassIngestion method to make entry for each experimenter."""
+        self, nwb_obj: pynwb.NWBFile, base_key=None
+    ) -> Dict["SpyglassIngestion", list]:
+        """Override SpyglassIngestion to make entry for each experimenter."""
+        base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
             logger.info("No experimenter metadata found.\n")
@@ -68,7 +71,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
                     **base_key,
                 }
             )
-        return entries
+        return {self: entries}
 
     @classmethod
     def insert_from_name(cls, full_name):
@@ -254,7 +257,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
                 "google_user_name"
             )
             if not query:
-                logger.info(
+                logger.warning(
                     "To help manage permissions in LabMemberInfo, please add "
                     + f"Google user ID for {team_member}"
                 )
@@ -295,6 +298,8 @@ class Lab(SpyglassIngestion, dj.Manual):
     lab_name: varchar(80)
     """
 
+    _expected_duplicates = True
+
     @property
     def table_key_to_obj_attr(self):
         return {"self": {"lab_name": "lab"}}
@@ -329,7 +334,7 @@ class Lab(SpyglassIngestion, dj.Manual):
         """
         insert_entries = super().insert_from_nwbfile(
             nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
-        )
+        )[self]
         if not insert_entries:
             logger.info("No lab metadata found.\n")
         if len(insert_entries) > 1:
