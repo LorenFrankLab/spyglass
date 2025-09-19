@@ -560,7 +560,7 @@ class Export(SpyglassMixin, dj.Computed):
         self.Table().insert(table_inserts)
         self.File().insert(file_inserts)
 
-    def prepare_files_for_export(self, key, **kwargs):
+    def prepare_files_for_export(self, key, n_processes=1, **kwargs):
         """Resolve common known errors to make a set of analysis
         files dandi compliant
 
@@ -570,12 +570,19 @@ class Export(SpyglassMixin, dj.Computed):
             restriction for a single entry of the Export table
         """
         key = (self & key).fetch1("KEY")
-        self._make_fileset_ids_unique(key)
         file_list = (self.File() & key).fetch("file_path")
-        for file in file_list:
-            update_analysis_for_dandi_standard(file, **kwargs)
 
-    def _make_fileset_ids_unique(self, key):
+        if n_processes == 1:
+            self._make_fileset_ids_unique(key)
+            for file in file_list:
+                update_analysis_for_dandi_standard(file, **kwargs)
+            return
+        with Pool(processes=n_processes) as pool:
+            # pool.map(make_file_obj_id_unique, file_list)
+            print("SKIPPING make_file_obj_id_unique in parallel")
+            pool.map(update_analysis_for_dandi_standard, file_list)
+
+    def _make_fileset_ids_unique(self, key, n_processes=1):
         """Make the object_id of each nwb in a dataset unique"""
         key = (self & key).fetch1("KEY")
         file_list = (self.File() & key).fetch("file_path")
