@@ -20,7 +20,7 @@ schema = dj.schema("mua_v1")
 class MuaEventsParameters(SpyglassMixin, dj.Manual):
     """Params to extract times of high multiunit activity during immobility.
 
-    Parameters
+    Attributes
     ----------
     mua_param_name : str
         A name for this set of parameters
