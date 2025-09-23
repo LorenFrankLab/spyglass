@@ -15,6 +15,12 @@ import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
 
+from spyglass.utils.h5py_helper_fn import (
+    add_id_column_to_table,
+    convert_dataset_type,
+    find_dynamic_tables_missing_id,
+    find_float16_datasets,
+)
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -106,9 +112,9 @@ def declare_all_merge_tables():
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
         SpikeSortingOutput,
-    )  # noqa: F401
+    )
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -441,59 +447,104 @@ def update_analysis_for_dandi_standard(
     )
     file_name = filepath.split("/")[-1]
     # edit the file
-    with h5py.File(filepath, "a") as file:
-        sex_value = file["/general/subject/sex"][()].decode("utf-8")
-        if sex_value not in ["Female", "Male", "F", "M", "O", "U"]:
-            raise ValueError(f"Unexpected value for sex: {sex_value}")
+    try:
+        float16_datasets = find_float16_datasets(
+            filepath
+        )  # check for invalid float16 datasets
+        tables_missing_id = find_dynamic_tables_missing_id(filepath)
+        with h5py.File(filepath, "a") as file:
+            # add file_name attribute to general/source_script if missing
+            if ("general/source_script" in file) and (
+                "file_name" not in (grp := file["general/source_script"]).attrs
+            ):
+                logger.info(
+                    "Adding file_name attribute to general/source_script"
+                )
+                grp.attrs["file_name"] = "src/spyglass/common/common_nwbfile.py"
 
-        if len(sex_value) > 1:
-            new_sex_value = sex_value[0].upper()
-            logger.info(
-                f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'"
-            )
-            file["/general/subject/sex"][()] = new_sex_value
+            # Adjust to single letter sex identifier
+            sex_value = file["/general/subject/sex"][()].decode("utf-8")
+            if sex_value not in ["Female", "Male", "F", "M", "O", "U"]:
+                raise ValueError(f"Unexpected value for sex: {sex_value}")
+            if len(sex_value) > 1:
+                new_sex_value = sex_value[0].upper()
+                logger.info(
+                    f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'"
+                )
+                file["/general/subject/sex"][()] = new_sex_value
 
-        # replace subject species value "Rat" with "Rattus norvegicus"
-        species_value = file["/general/subject/species"][()].decode("utf-8")
-        if species_value == "Rat":
-            new_species_value = "Rattus norvegicus"
-            logger.info(
-                f"Adjusting subject species from '{species_value}' to "
-                + f"'{new_species_value}'."
-            )
-            file["/general/subject/species"][()] = new_species_value
+            # replace subject species value "Rat" with "Rattus norvegicus"
+            species_value = file["/general/subject/species"][()].decode("utf-8")
+            if species_value == "Rat":
+                new_species_value = "Rattus norvegicus"
+                logger.info(
+                    f"Adjusting subject species from '{species_value}' to "
+                    + f"'{new_species_value}'."
+                )
+                file["/general/subject/species"][()] = new_species_value
 
-        elif not (
-            len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
-        ):
-            raise ValueError(
-                "Dandi upload requires species either be in Latin binomial form"
-                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
-                + "taxonomy link (e.g., "
-                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
-                + f"Please update species value of: {species_value}"
-            )
+            elif not (
+                len(species_value.split(" ")) == 2
+                or "NCBITaxon" in species_value
+            ):
+                raise ValueError(
+                    "Dandi upload requires species either be in Latin binomial form"
+                    + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
+                    + "taxonomy link (e.g., "
+                    + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
+                    + f"Please update species value of: {species_value}"
+                )
 
-        # add subject age dataset "P4M/P8M"
-        if "age" not in file["/general/subject"]:
-            new_age_value = age
-            logger.info(
-                f"Adding missing subject age, set to '{new_age_value}'."
-            )
-            file["/general/subject"].create_dataset(
-                name="age", data=new_age_value, dtype=STR_DTYPE
-            )
+            # add subject age dataset "P4M/P8M"
+            if "age" not in file["/general/subject"]:
+                new_age_value = age
+                logger.info(
+                    f"Adding missing subject age, set to '{new_age_value}'."
+                )
+                file["/general/subject"].create_dataset(
+                    name="age", data=new_age_value, dtype=STR_DTYPE
+                )
 
-        # format name to "Last, First"
-        experimenter_value = file["/general/experimenter"][:].astype(str)
-        new_experimenter_value = dandi_format_names(experimenter_value)
-        if experimenter_value != new_experimenter_value:
-            new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
-            logger.info(
-                f"Adjusting experimenter from {experimenter_value} to "
-                + f"{new_experimenter_value}."
-            )
-            file["/general/experimenter"][:] = new_experimenter_value
+            # format name to "Last, First"
+            experimenter_value = file["/general/experimenter"][:].astype(str)
+            new_experimenter_value = dandi_format_names(experimenter_value)
+            if experimenter_value != new_experimenter_value:
+                new_experimenter_value = new_experimenter_value.astype(
+                    STR_DTYPE
+                )
+                logger.info(
+                    f"Adjusting experimenter from {experimenter_value} to "
+                    + f"{new_experimenter_value}."
+                )
+                file["/general/experimenter"][:] = new_experimenter_value
+
+            # convert any float16 datasets to float32
+            if float16_datasets:
+                logger.info(
+                    f"Converting {len(float16_datasets)} float16 datasets to float32"
+                )
+                for dset_path in float16_datasets:
+                    convert_dataset_type(
+                        file, dset_path, target_dtype="float32"
+                    )
+            # add id column to dynamic tables if missing
+            if tables_missing_id:
+                logger.info(
+                    f"Adding missing id columns to {len(tables_missing_id)} "
+                    + "dynamic tables"
+                )
+                for table_path in tables_missing_id:
+                    add_id_column_to_table(file, table_path)
+    except BlockingIOError as e:
+        ExportErrorLog().insert1(
+            {
+                "file": filepath,
+                "source": "update_analysis_for_dandi_standard",
+            },
+            skip_duplicates=True,
+        )
+        logger.error(f"Could not open {filepath} for editing: {e}")
+        return
 
     # update the datajoint external store table to reflect the changes
     if resolve_external_table:
@@ -549,7 +600,11 @@ def _resolve_external_table(
         error_message="Please contact database admin to edit database checksums"
     )
     external_table = common_schema.external[location]
-    external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
+    if not (
+        external_query := (external_table & f"filepath LIKE '%{file_name}'")
+    ):
+        return
+    external_key = external_query.fetch1()
     external_key.update(
         {
             "size": Path(filepath).stat().st_size,
@@ -574,12 +629,23 @@ def make_file_obj_id_unique(nwb_path: str):
     """
     from spyglass.common.common_lab import LabMember  # noqa: F401
 
+    print(f"Making unique object_id for {nwb_path}")
     LabMember().check_admin_privilege(
         error_message="Admin permissions required to edit existing analysis files"
     )
     new_id = str(uuid4())
-    with h5py.File(nwb_path, "a") as f:
-        f.attrs["object_id"] = new_id
+    try:
+        with h5py.File(nwb_path, "a") as f:
+            f.attrs["object_id"] = new_id
+    except (BlockingIOError, OSError) as e:
+        ExportErrorLog().insert1(
+            {
+                "file": nwb_path,
+                "source": "make_file_obj_id_unique",
+            },
+            skip_duplicates=True,
+        )
+        return
     location = "raw" if nwb_path.endswith("_.nwb") else "analysis"
     _resolve_external_table(
         nwb_path, nwb_path.split("/")[-1], location=location
@@ -750,3 +816,16 @@ def _replace_nan_with_default(data_dict, default_value=-1.0):
             result[key] = default_value
 
     return result
+
+
+# Temporary log table for errors encountered during file edits, remove before merge (?)
+schema = dj.schema("sambray_export_error_log")
+
+
+@schema
+class ExportErrorLog(dj.Manual):
+    definition = """
+    file: varchar(255)  # file being processed
+    source: varchar(255)  # source of the error (e.g., table name or function)
+    ---
+    """

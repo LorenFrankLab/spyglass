@@ -1,4 +1,8 @@
-from typing import List
+from __future__ import annotations
+
+import uuid
+from pathlib import Path
+from typing import List, Optional
 
 import h5py
 import numpy as np
@@ -136,4 +140,108 @@ def convert_dataset_type(file: h5py.File, dataset_path: str, target_dtype: str):
     )
     for k, v in attrs.items():
         new_dset.attrs[k] = v
-        new_dset.attrs[k] = v
+
+
+def find_dynamic_tables_missing_id(nwb_path: str | Path) -> List[str]:
+    """Return DynamicTable paths that do not contain an 'id' dataset.
+
+    The check is intentionally minimal:
+    a DynamicTable group is considered GOOD if and only if the key 'id'
+    exists directly under that group. Otherwise, it's BAD and included
+    in the returned list.
+
+    Parameters
+    ----------
+    nwb_path : str | Path
+        Path to the NWB (HDF5) file.
+
+    Returns
+    -------
+    List[str]
+        Sorted list of absolute HDF5 paths to DynamicTable groups that
+        are missing the 'id' key.
+
+    Notes
+    -----
+    A group is detected as a DynamicTable if its attribute
+    ``neurodata_type`` equals ``"DynamicTable"`` (bytes or str).
+    """
+    nwb_path = Path(nwb_path)
+
+    def _attr_str(obj: h5py.Group, key: str) -> Optional[str]:
+        if key not in obj.attrs:
+            return None
+        val = obj.attrs[key]
+        if isinstance(val, bytes):
+            return val.decode("utf-8", errors="ignore")
+        return str(val)
+
+    bad_paths: List[str] = []
+
+    with h5py.File(nwb_path, "r") as f:
+
+        def _visitor(name: str, obj) -> None:
+            if isinstance(obj, h5py.Group):
+                ndt = _attr_str(obj, "neurodata_type")
+                if ndt == "DynamicTable":
+                    # Minimal check: only presence of 'id' key
+                    if "id" not in obj.keys():
+                        bad_paths.append(f"/{name}")
+
+        f.visititems(_visitor)
+
+    bad_paths.sort()
+    return bad_paths
+
+
+def add_id_column_to_table(file: h5py.File, dataset_path: str):
+    """Add an 'id' column to a DynamicTable dataset if it doesn't exist.
+
+    The 'id' column will be populated with sequential integers starting from 0.
+
+    Parameters
+    ----------
+    file : h5py.File
+        An open HDF5 file object.
+    dataset_path : str
+        The path to the DynamicTable dataset within the HDF5 file.
+
+    Raises
+    ------
+    ValueError
+        If the specified dataset_path does not exist or is not a DynamicTable.
+    """
+    if dataset_path not in file:
+        raise ValueError(
+            f"Dataset path '{dataset_path}' does not exist in the file."
+        )
+
+    obj = file[dataset_path]
+    if (
+        "neurodata_type" not in obj.attrs
+        or obj.attrs["neurodata_type"] != "DynamicTable"
+    ):
+        raise ValueError(
+            f"The group at '{dataset_path}' is not a DynamicTable."
+        )
+
+    if "id" in obj.keys():
+        print(
+            f"'id' column already exists in '{dataset_path}'. No action taken."
+        )
+        return
+
+    # Determine the number of rows from an existing column
+    sample_column = obj[list(obj.keys())[0]]
+    n_rows = sample_column.shape[0]
+    # Create the 'id' dataset
+    data = np.arange(n_rows, dtype=np.int64)
+    id_ds = obj.create_dataset(
+        "id", data=data, compression="gzip", compression_opts=4
+    )
+    id_ds.attrs["neurodata_type"] = "ElementIdentifiers"
+    id_ds.attrs["namespace"] = "core"
+
+    # Good practice to include object_id if missing
+    if "object_id" not in id_ds.attrs:
+        id_ds.attrs["object_id"] = str(uuid.uuid4())
