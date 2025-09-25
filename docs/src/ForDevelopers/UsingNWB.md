@@ -289,3 +289,23 @@ ndx_franklab_novela.AssociatedFiles </b>
 | Spyglass Table  |  Key  |                                       NWBfile Location | Config option |                                                                                   Notes |
 | :-------------- | :---: | -----------------------------------------------------: | ------------: | --------------------------------------------------------------------------------------: |
 | StateScriptFile | epoch | nwbf.processing.associated_files.\[index\].task_epochs |               | type(nwbf.processing.associated_files.\[index\]) == ndx_franklab_novela.AssociatedFiles |
+
+<b> NWBfile Location: nwbf.lab_meta_data <br/> Object type:
+ndx_structured_behavior.[Item]TypesTable </b>
+
+| Spyglass Table                 |      Key      |                       NWBfile Location | Config option | Notes |
+| :----------------------------- | :-----------: | -------------------------------------: | ------------: | ----: |
+| TaskRecordingTypes.ActionTypes |  action_name  |   nwbf.lab_meta_data.task.action_types |               |       |
+| TaskRecordingTypes.EventTypes  |  event_name   |    nwbf.lab_meta_data.task.event_types |               |       |
+| TaskRecordingTypes.StateTypes  |  state_name   |    nwbf.lab_meta_data.task.state_types |               |       |
+| TaskRecordingTypes.Arguments   | argument_name | nwbf.lab_meta_data.task.argument_types |               |       |
+
+<b> NWBfile Location: nwbf.lab_meta_data <br/> Object type:
+ndx_structured_behavior.[Item]TypesTable </b>
+
+| Spyglass Table |       Key        |                        NWBfile Location | Config option | Notes |
+| :------------- | :--------------: | --------------------------------------: | ------------: | ----: |
+| TaskRecording  | action_object_id | nwbf.acquisition.task_recording.actions |               |       |
+| TaskRecording  | event_object_id  |  nwbf.acquisition.task_recording.events |               |       |
+| TaskRecording  | state_object_id  |  nwbf.acquisition.task_recording.states |               |       |
+| TaskRecording  | trials_object_id |                             nwbf.trials |               |       |
