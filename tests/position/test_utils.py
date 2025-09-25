@@ -231,7 +231,7 @@ def test_suppress_print(sgp, monkeypatch, capsys):
 
 @pytest.fixture(scope="module")
 def estim_class(sgp, centroid_key):
-    estim_class = sgp.v1.dlc_reader.PoseEstimation
+    estim_class = sgp.utils_dlc.DLCProjectReader
     infer_dir = sgp.v1.dlc_utils.infer_output_dir
 
     yield estim_class(infer_dir(centroid_key))
