@@ -80,7 +80,7 @@ Spyglass directory
 
 ```bash
 pip install jupytext
-jupytext --to py notebooks/*ipynb
+jupytext --to py:light notebooks/*ipynb
 mv notebooks/*py notebooks/py_scripts
 black .
 ```

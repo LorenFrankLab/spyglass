@@ -99,7 +99,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
 class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Lookup):
     """Parameters for preprocessing a recording prior to spike sorting.
 
-    Parameters
+    Attributes
     ----------
     preproc_param_name : str
         Name of the preprocessing parameters
@@ -194,7 +194,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     hash=null: varchar(32) # Hash of the NWB file
     """
 
-    use_transaction, _allow_insert = False, True
+    _use_transaction, _allow_insert = False, True
 
     def make(self, key):
         """Populate SpikeSortingRecording.

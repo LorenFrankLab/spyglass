@@ -15,6 +15,7 @@ import all foreign key references.
 
 - Delete extra pyscripts that were renamed # 1363
 - Add note on fetching changes to setup notebook #1371
+- Revise table field docstring heading and `mermaid` diagram generation #1402
 
 ### Infrastructure
 
@@ -22,12 +23,13 @@ import all foreign key references.
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 
 ### Infrastructure
 
 - Auto-load within-Spyglass tables for graph operations #1368
-- Allow rechecking of recomputes #1380
+- Allow rechecking of recomputes #1380, #1XXX
 
 ### Pipelines
 
@@ -41,6 +43,7 @@ import all foreign key references.
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
+    - Fix ingestion nwb files with position objects but no spatial series #1405
 - Spikesorting
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 

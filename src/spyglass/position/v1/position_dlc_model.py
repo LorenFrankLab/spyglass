@@ -131,7 +131,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 class DLCModelParams(SpyglassMixin, dj.Manual):
     """Parameters for model training.
 
-    Parameters
+    Attributes
     ----------
     dlc_model_params_name : str
         Name of the parameter set

@@ -246,12 +246,6 @@ class NwbfileHasher:
             return str(value).encode()
         return repr(value).encode()  # For other, use repr
 
-    def get_precision(self, dataset_name: str) -> int:
-        """Get the precision for a given dataset name."""
-        if isinstance(self.precision, (int, np.integer)):
-            return int(self.precision)
-        return self.precision.get(dataset_name, None)
-
     def is_roundable(self, data) -> bool:
         """Check if data is roundable."""
         if isinstance(data, np.ndarray):

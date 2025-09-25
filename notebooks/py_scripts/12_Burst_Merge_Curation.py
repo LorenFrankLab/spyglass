@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.0
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -19,6 +19,7 @@
 
 # +
 import datajoint as dj
+import os
 
 dj.config.load("your_config_file.json")
 dj.conn()
@@ -30,7 +31,6 @@ warnings.filterwarnings("ignore", category=UserWarning, module="hdmf")
 warnings.filterwarnings("ignore", category=UserWarning, module="spikeinterface")
 warnings.simplefilter("ignore", category=ResourceWarning)
 warnings.simplefilter("ignore", category=DeprecationWarning)
-
 # -
 
 # # V0
@@ -82,7 +82,6 @@ v1.BurstPairSelection().insert_by_curation_id(**v1_key)
 v1.BurstPair().populate()
 
 v1_key = v1.BurstPair().fetch("KEY", limit=1)[0]
-
 # -
 
 v1.BurstPair().plot_by_sorting_ids(key=v1_key)
