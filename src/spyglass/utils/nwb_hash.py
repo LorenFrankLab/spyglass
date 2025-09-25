@@ -264,7 +264,7 @@ class NwbfileHasher:
             return
 
         dataset_name = dataset.parent.name.split("/")[-1]
-        precision = self.get_precision(dataset_name)
+        precision = self.precision.get(dataset_name, None)
 
         size = dataset.shape[0]
         start = 0
