@@ -85,9 +85,10 @@ class Session(SpyglassIngestion, dj.Imported):
             return pynwb.NWBFile
 
         def generate_entries_from_nwb_object(
-            self, nwb_obj: pynwb.NWBFile, base_key=dict()
+            self, nwb_obj: pynwb.NWBFile, base_key=None
         ):
             """Override to handle multiple experimenters."""
+            base_key = base_key or dict()
             experimenter_list = nwb_obj.experimenter
             if not experimenter_list:
                 logger.info("No experimenter metadata found.\n")

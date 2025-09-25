@@ -283,6 +283,48 @@ class Raw(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
+    @property
+    def _source_nwb_object_type(self):
+        # how to specify 'ony first'?
+        return pynwb.ecephys.ElectricalSeries
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": self._raw_data_valid_times,
+                "raw_object_id": "object_id",
+                "sampling_rate": self._rate_fallback,
+                "comments": "comments",
+                "description": "description",
+            },
+            IntervalList: {  # this process undoes `cautious_insert` protections
+                "valid_times": self._valid_times_from_raw,
+            },
+        }
+
+    def _rate_fallback(self, nwb_object):
+        """Return the rate if available, otherwise None."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return rate
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+        return estimate_sampling_rate(
+            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=True
+        )
+
+    def _raw_data_valid_times(self, *args, **kwargs):
+        """Return the name of the interval list for the raw data."""
+        # Callable present for SpyglassIngestion insertion
+        return "raw data valid times"
+
+    # def generate_entries_from_nwb_object(
+    #     self, nwb_object: pynwb.NWBFile, base_key=None
+    # ):
+    #     pass
+
     def make(self, key):
         """Make without transaction
 
@@ -297,6 +339,7 @@ class Raw(SpyglassMixin, dj.Imported):
         for obj_name, obj in nwbf.acquisition.items():
             if isinstance(obj, pynwb.ecephys.ElectricalSeries):
                 eseries_aquisitions.append(obj)
+
         if len(eseries_aquisitions) == 0:
             warnings.warn(
                 f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
