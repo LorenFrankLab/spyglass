@@ -91,7 +91,9 @@ def insert_sessions(
         )
 
 
-def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
+def copy_nwb_link_raw_ephys(
+    nwb_file_name, out_nwb_file_name, keep_existing=False
+):
     """Copies an NWB file with a link to raw ephys data.
 
     Parameters
@@ -100,6 +102,8 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         The name of the NWB file to be copied.
     out_nwb_file_name : str
         The name of the new NWB file with the link to raw ephys data.
+    keep_existing : bool, optional
+        If True, will not overwrite an existing file. Default is False.
 
     Returns
     -------
@@ -121,7 +125,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     )
 
     if os.path.exists(out_nwb_file_abs_path):
-        if debug_mode:
+        if debug_mode or keep_existing:
             return out_nwb_file_abs_path
         logger.warning(
             f"Output file exists, will be overwritten: {out_nwb_file_abs_path}"

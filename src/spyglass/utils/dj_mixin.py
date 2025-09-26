@@ -1081,7 +1081,6 @@ class SpyglassIngestion(SpyglassMixin):
         ret = self._config_entries(self, base_key, self_entries)
 
         for part in self.parts(as_objects=True):
-            # TODO: verify that returning the FreeTable works
             camel_part = to_camel_case(part.full_table_name.split("__")[-1])
             part_entries = config.get(camel_part, [])
             if len(part_entries) == 0:
@@ -1211,15 +1210,10 @@ class SpyglassIngestion(SpyglassMixin):
         if self._expected_duplicates:
             if isinstance(entries, list):
                 raise RuntimeError("TODO: this is no longer the case, right?")
-            #     for entry in entries:
-            #         self.validate_duplicates(entry)
-            # else:
             self.validate_duplicates(entries)
 
         # run insertions
         if not dry_run:
-            if not isinstance(entries, dict):
-                raise RuntimeError("TODO: this is no longer the case, right?")
             for table, table_entries in entries.items():
                 table.insert(
                     table_entries,

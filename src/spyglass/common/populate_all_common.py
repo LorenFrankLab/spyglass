@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import List, Union
 
 import datajoint as dj
+import yaml
 from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
@@ -32,6 +34,7 @@ from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
+from spyglass.settings import base_dir
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 from spyglass.utils.dj_mixin import SpyglassIngestion
@@ -69,11 +72,22 @@ def log_insert_error(
     )
 
 
+def _get_config_name(table_obj):
+    """Given a table object, return its config name for entries.yaml
+
+    Returns Master.Part for part tables, otherwise just the table name.
+    """
+    if hasattr(table_obj, "_master"):
+        return f"{table_obj._master.__name__}.{table_obj.__class__.__name__}"
+    return table_obj.__class__.__name__
+
+
 def single_transaction_make(
     tables: List[dj.Table],
     nwb_file_name: str,
     raise_err: bool = False,
     error_constants: dict = None,
+    config: dict = None,
 ):
     """For each table, run the `make` method directly instead of `populate`.
 
@@ -81,16 +95,19 @@ def single_transaction_make(
     nwb_file_name search table key_source for relevant key. Currently assumes
     all tables will have exactly one key_source entry per nwb file.
     """
-    file_restr = {"nwb_file_name": nwb_file_name}
-    with Nwbfile.connection.transaction:
-        for table in tables:
 
-            # TODO 1377:Temporary during migration
+    file_restr = {"nwb_file_name": nwb_file_name}
+    with Nwbfile._safe_context():
+        for table in tables:
+            config_name = _get_config_name(table())
+            table_config = config.get(config_name, dict())
+
             if isinstance(table(), SpyglassIngestion):
+                print(f"ING {config_name}")
                 try:
                     table().insert_from_nwbfile(
-                        nwb_file_name, config={}
-                    )  # TODO 1377: load config to pass here
+                        nwb_file_name, config=table_config
+                    )
                 except Exception as err:
                     if raise_err:
                         raise err
@@ -107,6 +124,7 @@ def single_transaction_make(
                 key_source = parents[0].proj()
                 for parent in parents[1:]:
                     key_source *= parent.proj()
+                print(f"KS {key_source}")
 
             table_name = to_camel_case(table.table_name)
             if table_name == "PositionSource":
@@ -117,13 +135,17 @@ def single_transaction_make(
 
             for pop_key in (key_source & file_restr).fetch("KEY"):
                 try:
+                    print(f"Making {table.__name__} for {pop_key}...")
                     table().make(pop_key)
                 except Exception as err:
+                    print(f"Error in {table.__name__} for {pop_key}: {err}")
                     if raise_err:
                         raise err
                     log_insert_error(
                         table=table, err=err, error_constants=error_constants
                     )
+            if table.__name__ in ["VideoFile", "TaskEpoch"]:
+                __import__("pdb").set_trace()
 
 
 def populate_all_common(
@@ -196,11 +218,18 @@ def populate_all_common(
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
+            ImportedSpikeSorting,  # Depends on Session
         ],
         [
             RawPosition,  # Depends on PositionSource
         ],
     ]
+
+    config = dict()
+    entries_path = Path(base_dir) / "entries.yaml"
+    if entries_path.exists():
+        with open(f"{base_dir}/entries.yaml", "r") as stream:
+            config = yaml.safe_load(stream)
 
     for tables in table_lists:
         single_transaction_make(
@@ -208,6 +237,7 @@ def populate_all_common(
             nwb_file_name=nwb_file_name,
             raise_err=raise_err,
             error_constants=error_constants,
+            config=config,
         )
 
     err_query = InsertError & error_constants
