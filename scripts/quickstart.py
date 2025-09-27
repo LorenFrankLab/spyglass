@@ -289,6 +289,9 @@ class SpyglassQuickstart:
         if not self._installation_type_specified():
             self.select_installation_type()
 
+        # Let user choose environment name for pipeline-specific installations
+        self._confirm_environment_name()
+
         env_file = self.select_environment()
         self.create_environment(env_file)
         self.install_additional_deps()
@@ -506,6 +509,72 @@ class SpyglassQuickstart:
                 break
             else:
                 self.print_error("Invalid choice. Please enter 1-5")
+
+    def _confirm_environment_name(self):
+        """Let user confirm or customize environment name"""
+        # Get suggested name based on installation type
+        if self.config.pipeline and self.config.pipeline in self.PIPELINE_ENVIRONMENTS:
+            # Pipeline-specific installations have descriptive suggestions
+            suggested_name = {
+                Pipeline.DLC: "spyglass-dlc",
+                Pipeline.MOSEQ_CPU: "spyglass-moseq-cpu",
+                Pipeline.MOSEQ_GPU: "spyglass-moseq-gpu"
+            }.get(self.config.pipeline, "spyglass")
+
+            print(f"\nYou selected {self.config.pipeline.value} pipeline.")
+            print(f"Environment name options:")
+            print(f"1) spyglass (default, works with all Spyglass documentation)")
+            print(f"2) {suggested_name} (descriptive, matches pipeline choice)")
+            print(f"3) Custom name")
+
+            while True:
+                choice = input(f"\nEnter choice (1-3) [default: 1]: ").strip() or "1"
+                if choice == "1":
+                    # Keep default name
+                    break
+                elif choice == "2":
+                    self.config.env_name = suggested_name
+                    self.print_info(f"Environment will be named: {suggested_name}")
+                    break
+                elif choice == "3":
+                    custom_name = input("Enter custom environment name: ").strip()
+                    if custom_name:
+                        self.config.env_name = custom_name
+                        self.print_info(f"Environment will be named: {custom_name}")
+                        break
+                    else:
+                        self.print_error("Environment name cannot be empty")
+                else:
+                    self.print_error("Invalid choice. Please enter 1, 2, or 3")
+
+        else:
+            # Standard installations (minimal, full, or LFP/decoding pipelines)
+            install_type_name = "minimal"
+            if self.config.install_type == InstallType.FULL:
+                install_type_name = "full"
+            elif self.config.pipeline:
+                install_type_name = self.config.pipeline.value
+
+            print(f"\nYou selected {install_type_name} installation.")
+            print(f"Environment name options:")
+            print(f"1) spyglass (default)")
+            print(f"2) Custom name")
+
+            while True:
+                choice = input(f"\nEnter choice (1-2) [default: 1]: ").strip() or "1"
+                if choice == "1":
+                    # Keep default name
+                    break
+                elif choice == "2":
+                    custom_name = input("Enter custom environment name: ").strip()
+                    if custom_name:
+                        self.config.env_name = custom_name
+                        self.print_info(f"Environment will be named: {custom_name}")
+                        break
+                    else:
+                        self.print_error("Environment name cannot be empty")
+                else:
+                    self.print_error("Invalid choice. Please enter 1 or 2")
 
     def select_environment(self) -> str:
         """Select appropriate environment file"""
