@@ -35,12 +35,40 @@ from typing import Optional, List, Iterator, Tuple
 from dataclasses import dataclass, replace
 from enum import Enum
 from collections import namedtuple
-from functools import lru_cache
 # Removed ABC import - not needed for a simple script
 import getpass
 
 # Named constants
 DEFAULT_CHECKSUM_SIZE_LIMIT = 1024**3  # 1 GB
+
+# User choice constants
+CHOICE_1 = "1"
+CHOICE_2 = "2"
+CHOICE_3 = "3"
+CHOICE_4 = "4"
+CHOICE_5 = "5"
+
+# Installation type choices
+MINIMAL_CHOICE = CHOICE_1
+FULL_CHOICE = CHOICE_2
+PIPELINE_CHOICE = CHOICE_3
+
+# Database setup choices
+DOCKER_DB_CHOICE = CHOICE_1
+EXISTING_DB_CHOICE = CHOICE_2
+SKIP_DB_CHOICE = CHOICE_3
+
+# Config location choices
+REPO_ROOT_CHOICE = CHOICE_1
+CURRENT_DIR_CHOICE = CHOICE_2
+CUSTOM_PATH_CHOICE = CHOICE_3
+
+# Pipeline choices
+DLC_CHOICE = CHOICE_1
+MOSEQ_CPU_CHOICE = CHOICE_2
+MOSEQ_GPU_CHOICE = CHOICE_3
+LFP_CHOICE = CHOICE_4
+DECODING_CHOICE = CHOICE_5
 
 
 # Exception hierarchy for clear error handling
@@ -139,101 +167,106 @@ def validate_base_dir(path: Path) -> Path:
 class SpyglassConfigManager:
     """Manages SpyglassConfig for quickstart setup"""
 
-    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str):
+    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path):
         """Create complete SpyglassConfig setup using official methods"""
         from spyglass.settings import SpyglassConfig
+        import os
 
-        # Create SpyglassConfig instance with base directory
-        config = SpyglassConfig(base_dir=str(base_dir), test_mode=True)
+        # Temporarily change to config directory so dj_local_conf.json gets created there
+        original_cwd = Path.cwd()
+        try:
+            os.chdir(config_dir)
 
-        # Use SpyglassConfig's official save_dj_config method with local config
-        config.save_dj_config(
-            save_method="local",  # Creates dj_local_conf.json in current directory
-            base_dir=str(base_dir),
-            database_host=host,
-            database_port=port,
-            database_user=user,
-            database_password=password,
-            database_use_tls=False if host.startswith("127.0.0.1") or host == "localhost" else True,
-            set_password=False  # Skip password prompt during setup
-        )
+            # Create SpyglassConfig instance with base directory
+            config = SpyglassConfig(base_dir=str(base_dir), test_mode=True)
 
-        return config
+            # Use SpyglassConfig's official save_dj_config method with local config
+            config.save_dj_config(
+                save_method="local",  # Creates dj_local_conf.json in current directory (config_dir)
+                base_dir=str(base_dir),
+                database_host=host,
+                database_port=port,
+                database_user=user,
+                database_password=password,
+                database_use_tls=False if host.startswith("127.0.0.1") or host == "localhost" else True,
+                set_password=False  # Skip password prompt during setup
+            )
 
-
-class DatabaseSetupStrategy:
-    """Base class for database setup strategies."""
-
-    def setup(self, installer: 'SpyglassQuickstart') -> None:
-        """Setup the database."""
-        raise NotImplementedError("Subclasses must implement setup()")
-
-
-class DockerDatabaseStrategy(DatabaseSetupStrategy):
-    """Docker database setup strategy."""
-
-    def setup(self, installer: 'SpyglassQuickstart') -> None:
-        installer.print_info("Setting up local Docker database...")
-
-        # Check Docker availability
-        if not shutil.which("docker"):
-            installer.print_error("Docker is not installed")
-            installer.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
-            raise SystemRequirementError("Docker is not installed")
-
-        # Check Docker daemon
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True
-        )
-        if result.returncode != 0:
-            installer.print_error("Docker daemon is not running")
-            installer.print_info("Please start Docker Desktop and try again")
-            installer.print_info("On macOS: Open Docker Desktop application")
-            installer.print_info("On Linux: sudo systemctl start docker")
-            raise SystemRequirementError("Docker daemon is not running")
-
-        # Pull and run container
-        installer.print_info("Pulling MySQL image...")
-        subprocess.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
-
-        # Check existing container
-        result = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}"],
-            capture_output=True,
-            text=True
-        )
-
-        if "spyglass-db" in result.stdout:
-            installer.print_warning("Container 'spyglass-db' already exists")
-            subprocess.run(["docker", "start", "spyglass-db"], check=True)
-        else:
-            subprocess.run([
-                "docker", "run", "-d",
-                "--name", "spyglass-db",
-                "-p", "3306:3306",
-                "-e", "MYSQL_ROOT_PASSWORD=tutorial",
-                "datajoint/mysql:8.0"
-            ], check=True)
-
-        installer.print_success("Docker database started")
-        installer.create_config("localhost", "root", "tutorial", 3306)
+            return config
+        finally:
+            # Always restore original working directory
+            os.chdir(original_cwd)
 
 
-class ExistingDatabaseStrategy(DatabaseSetupStrategy):
-    """Existing database setup strategy."""
+def setup_docker_database(installer: 'SpyglassQuickstart') -> None:
+    """Setup Docker database - simple function."""
+    installer.print_info("Setting up local Docker database...")
 
-    def setup(self, installer: 'SpyglassQuickstart') -> None:
-        installer.print_info("Configuring connection to existing database...")
+    # Check Docker availability
+    if not shutil.which("docker"):
+        installer.print_error("Docker is not installed")
+        installer.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
+        raise SystemRequirementError("Docker is not installed")
 
-        host = input("Database host: ").strip()
-        port_str = input("Database port (3306): ").strip() or "3306"
-        port = int(port_str)
-        user = input("Database user: ").strip()
-        password = getpass.getpass("Database password: ")
+    # Check Docker daemon
+    result = subprocess.run(
+        ["docker", "info"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        installer.print_error("Docker daemon is not running")
+        installer.print_info("Please start Docker Desktop and try again")
+        installer.print_info("On macOS: Open Docker Desktop application")
+        installer.print_info("On Linux: sudo systemctl start docker")
+        raise SystemRequirementError("Docker daemon is not running")
 
-        installer.create_config(host, user, password, port)
+    # Pull and run container
+    installer.print_info("Pulling MySQL image...")
+    subprocess.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
+
+    # Check existing container
+    result = subprocess.run(
+        ["docker", "ps", "-a", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True
+    )
+
+    if "spyglass-db" in result.stdout:
+        installer.print_warning("Container 'spyglass-db' already exists")
+        subprocess.run(["docker", "start", "spyglass-db"], check=True)
+    else:
+        subprocess.run([
+            "docker", "run", "-d",
+            "--name", "spyglass-db",
+            "-p", "3306:3306",
+            "-e", "MYSQL_ROOT_PASSWORD=tutorial",
+            "datajoint/mysql:8.0"
+        ], check=True)
+
+    installer.print_success("Docker database started")
+    installer.create_config("localhost", "root", "tutorial", 3306)
+
+
+def setup_existing_database(installer: 'SpyglassQuickstart') -> None:
+    """Setup existing database connection."""
+    installer.print_info("Configuring connection to existing database...")
+
+    host = input("Database host: ").strip()
+    port_str = input("Database port (3306): ").strip() or "3306"
+    port = int(port_str)
+    user = input("Database user: ").strip()
+    password = getpass.getpass("Database password: ")
+
+    installer.create_config(host, user, password, port)
+
+
+# Database setup function mapping - simple dictionary approach
+DATABASE_SETUP_METHODS = {
+    DOCKER_DB_CHOICE: setup_docker_database,
+    EXISTING_DB_CHOICE: setup_existing_database,
+    SKIP_DB_CHOICE: lambda installer: None  # Skip setup
+}
 
 
 class SpyglassQuickstart:
@@ -460,11 +493,6 @@ class SpyglassQuickstart:
             # In production, you'd want: logger.debug(f"Command failed: {cmd}")
             return default
 
-    @lru_cache(maxsize=8)  # 8 is plenty for a setup script
-    def cached_command(self, *cmd: str) -> str:
-        """Cache frequently used command outputs."""
-        return self.get_command_output(list(cmd), "")
-
     def _installation_type_specified(self) -> bool:
         """Check if installation type was specified via command line arguments."""
         # Installation type is considered specified if user used --full or --pipeline flags
@@ -494,15 +522,15 @@ class SpyglassQuickstart:
 
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
-            if choice == "1":
+            if choice == MINIMAL_CHOICE:
                 # Keep current minimal setup
                 self.print_info("Selected: Minimal installation")
                 break
-            elif choice == "2":
+            elif choice == MOSEQ_CPU_CHOICE:
                 self.config.install_type = InstallType.FULL
                 self.print_info("Selected: Full installation")
                 break
-            elif choice == "3":
+            elif choice == MOSEQ_GPU_CHOICE:
                 self._select_pipeline()
                 break
             else:
@@ -519,23 +547,23 @@ class SpyglassQuickstart:
 
         while True:
             choice = input("\nEnter choice (1-5): ").strip()
-            if choice == "1":
+            if choice == DLC_CHOICE:
                 self.config.pipeline = Pipeline.DLC
                 self.print_info("Selected: DeepLabCut pipeline")
                 break
-            elif choice == "2":
+            elif choice == MOSEQ_CPU_CHOICE:
                 self.config.pipeline = Pipeline.MOSEQ_CPU
                 self.print_info("Selected: Keypoint-Moseq (CPU) pipeline")
                 break
-            elif choice == "3":
+            elif choice == MOSEQ_GPU_CHOICE:
                 self.config.pipeline = Pipeline.MOSEQ_GPU
                 self.print_info("Selected: Keypoint-Moseq (GPU) pipeline")
                 break
-            elif choice == "4":
+            elif choice == LFP_CHOICE:
                 self.config.pipeline = Pipeline.LFP
                 self.print_info("Selected: LFP Analysis pipeline")
                 break
-            elif choice == "5":
+            elif choice == DECODING_CHOICE:
                 self.config.pipeline = Pipeline.DECODING
                 self.print_info("Selected: Neural Decoding pipeline")
                 break
@@ -561,14 +589,14 @@ class SpyglassQuickstart:
 
             while True:
                 choice = input(f"\nEnter choice (1-3) [default: 1]: ").strip() or "1"
-                if choice == "1":
+                if choice == MINIMAL_CHOICE:
                     # Keep default name
                     break
-                elif choice == "2":
+                elif choice == MOSEQ_CPU_CHOICE:
                     self.config.env_name = suggested_name
                     self.print_info(f"Environment will be named: {suggested_name}")
                     break
-                elif choice == "3":
+                elif choice == MOSEQ_GPU_CHOICE:
                     custom_name = input("Enter custom environment name: ").strip()
                     if custom_name:
                         self.config.env_name = custom_name
@@ -594,10 +622,10 @@ class SpyglassQuickstart:
 
             while True:
                 choice = input(f"\nEnter choice (1-2) [default: 1]: ").strip() or "1"
-                if choice == "1":
+                if choice == MINIMAL_CHOICE:
                     # Keep default name
                     break
-                elif choice == "2":
+                elif choice == MOSEQ_CPU_CHOICE:
                     custom_name = input("Enter custom environment name: ").strip()
                     if custom_name:
                         self.config.env_name = custom_name
@@ -819,12 +847,14 @@ class SpyglassQuickstart:
         """Setup database configuration"""
         self.print_header("Database Setup")
 
-        strategy = self._select_database_strategy()
-        if strategy is not None:
-            strategy.setup(self)
+        choice = self._select_database_choice()
+        if choice is not None:
+            setup_func = DATABASE_SETUP_METHODS.get(choice)
+            if setup_func:
+                setup_func(self)
 
-    def _select_database_strategy(self) -> Optional[DatabaseSetupStrategy]:
-        """Select database setup strategy"""
+    def _select_database_choice(self) -> Optional[str]:
+        """Select database setup choice - simple function approach"""
         print("\nChoose database setup option:")
         print("1) Local Docker database (recommended for beginners)")
         print("2) Connect to existing database")
@@ -832,20 +862,64 @@ class SpyglassQuickstart:
 
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
-            if choice == "1":
-                return DockerDatabaseStrategy()
-            elif choice == "2":
-                return ExistingDatabaseStrategy()
-            elif choice == "3":
+            if choice == DOCKER_DB_CHOICE:
+                return choice
+            elif choice == EXISTING_DB_CHOICE:
+                return choice
+            elif choice == SKIP_DB_CHOICE:
                 self.print_info("Skipping database setup")
                 self.print_warning("You'll need to configure the database manually later")
-                return None
+                return choice
+            else:
+                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+
+    def _select_config_location(self) -> Path:
+        """Select where to save the DataJoint configuration file"""
+        default_location = self.config.repo_dir
+
+        print("\nChoose configuration file location:")
+        print(f"1) Repository root (recommended): {default_location}")
+        print("2) Current directory")
+        print("3) Custom location")
+
+        while True:
+            choice = input("\nEnter choice (1-3): ").strip()
+            if choice == REPO_ROOT_CHOICE:
+                return default_location
+            elif choice == CURRENT_DIR_CHOICE:
+                return Path.cwd()
+            elif choice == CUSTOM_PATH_CHOICE:
+                while True:
+                    custom_path = input("Enter custom directory path: ").strip()
+                    if not custom_path:
+                        self.print_error("Path cannot be empty")
+                        continue
+
+                    try:
+                        path = Path(custom_path).expanduser().resolve()
+                        if not path.exists():
+                            create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
+                            if create == 'y':
+                                path.mkdir(parents=True, exist_ok=True)
+                            else:
+                                continue
+                        if not path.is_dir():
+                            self.print_error("Path must be a directory")
+                            continue
+                        return path
+                    except Exception as e:
+                        self.print_error(f"Invalid path: {e}")
+                        continue
             else:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def create_config(self, host: str, user: str, password: str, port: int):
         """Create DataJoint configuration file using SpyglassConfig directly"""
-        self.print_info("Creating configuration file...")
+        # Select where to save the configuration file
+        config_dir = self._select_config_location()
+        config_file_path = config_dir / "dj_local_conf.json"
+
+        self.print_info(f"Creating configuration file at: {config_file_path}")
 
         # Create base directory structure
         self._create_directory_structure()
@@ -872,12 +946,11 @@ class SpyglassQuickstart:
                     host=host,
                     port=port,
                     user=user,
-                    password=password
+                    password=password,
+                    config_dir=config_dir
                 )
 
-                # Config file is created in current working directory as dj_local_conf.json
-                local_config_path = Path.cwd() / "dj_local_conf.json"
-                self.print_success(f"Configuration file created at: {local_config_path}")
+                self.print_success(f"Configuration file created at: {config_file_path}")
                 self.print_success(f"Data directories created at: {self.config.base_dir}")
 
                 # Validate the configuration
