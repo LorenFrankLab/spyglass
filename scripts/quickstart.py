@@ -144,6 +144,8 @@ class SetupConfig:
     base_dir: Path = Path.home() / "spyglass_data"
     repo_dir: Path = Path(__file__).parent.parent
     env_name: str = "spyglass"
+    db_port: int = 3306
+    auto_yes: bool = False
 
 
 # Using standard library functions directly - no unnecessary wrappers
@@ -232,10 +234,11 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         orchestrator.ui.print_warning("Container 'spyglass-db' already exists")
         subprocess.run(["docker", "start", "spyglass-db"], check=True)
     else:
+        port_mapping = f"{orchestrator.config.db_port}:3306"
         subprocess.run([
             "docker", "run", "-d",
             "--name", "spyglass-db",
-            "-p", "3306:3306",
+            "-p", port_mapping,
             "-e", "MYSQL_ROOT_PASSWORD=tutorial",
             "datajoint/mysql:8.0"
         ], check=True)
@@ -263,7 +266,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
     else:
         orchestrator.ui.print_warning("MySQL readiness check timed out, but proceeding anyway")
 
-    orchestrator.create_config("localhost", "root", "tutorial", 3306)
+    orchestrator.create_config("localhost", "root", "tutorial", orchestrator.config.db_port)
 
 
 def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
@@ -303,8 +306,19 @@ DATABASE_SETUP_METHODS = {
 class UserInterface:
     """Handles all user interactions and display formatting."""
 
-    def __init__(self, colors):
+    def __init__(self, colors, auto_yes=False):
         self.colors = colors
+        self.auto_yes = auto_yes
+
+    def get_input(self, prompt: str, default: str = None) -> str:
+        """Get user input with auto-yes support"""
+        if self.auto_yes:
+            if default is not None:
+                self.print_info(f"Auto-accepting: {prompt} -> {default}")
+                return default
+            else:
+                raise ValueError(f"Cannot auto-accept prompt without default: {prompt}")
+        return input(prompt).strip()
 
     def print_header_banner(self):
         """Print the main application banner"""
@@ -712,7 +726,7 @@ class QuickstartOrchestrator:
 
     def __init__(self, config: SetupConfig, colors):
         self.config = config
-        self.ui = UserInterface(colors)
+        self.ui = UserInterface(colors, auto_yes=config.auto_yes)
         self.system_detector = SystemDetector(self.ui)
         self.env_manager = EnvironmentManager(self.ui, config)
         self.system_info = None
@@ -1119,6 +1133,26 @@ Examples:
         help="Disable colored output"
     )
 
+    parser.add_argument(
+        "--env-name",
+        type=str,
+        default="spyglass",
+        help="Name of conda environment to create (default: spyglass)"
+    )
+
+    parser.add_argument(
+        "--yes", "-y",
+        action="store_true",
+        help="Auto-accept all prompts (non-interactive mode)"
+    )
+
+    parser.add_argument(
+        "--db-port",
+        type=int,
+        default=3306,
+        help="Host port for MySQL database (default: 3306)"
+    )
+
     return parser.parse_args()
 
 
@@ -1141,7 +1175,10 @@ def main():
         pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
         setup_database=not args.no_database,
         run_validation=not args.no_validate,
-        base_dir=validated_base_dir
+        base_dir=validated_base_dir,
+        env_name=args.env_name,
+        db_port=args.db_port,
+        auto_yes=args.yes
     )
 
     # Run installer with new architecture
