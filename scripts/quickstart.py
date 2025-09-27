@@ -271,14 +271,32 @@ def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
     orchestrator.ui.print_info("Configuring connection to existing database...")
 
     host, port, user, password = orchestrator.ui.get_database_credentials()
+    _test_database_connection(orchestrator.ui, host, port, user, password)
     orchestrator.create_config(host, user, password, port)
+
+
+def _test_database_connection(ui, host: str, port: int, user: str, password: str):
+    """Test database connection before proceeding."""
+    ui.print_info("Testing database connection...")
+
+    try:
+        import pymysql
+        connection = pymysql.connect(host=host, port=port, user=user, password=password)
+        connection.close()
+        ui.print_success("Database connection successful")
+    except ImportError:
+        ui.print_warning("PyMySQL not available for connection test")
+        ui.print_info("Connection will be tested when DataJoint loads")
+    except Exception as e:
+        ui.print_error(f"Database connection failed: {e}")
+        raise DatabaseSetupError(f"Cannot connect to database: {e}")
 
 
 # Database setup function mapping - simple dictionary approach
 DATABASE_SETUP_METHODS = {
     DOCKER_DB_CHOICE: setup_docker_database,
     EXISTING_DB_CHOICE: setup_existing_database,
-    SKIP_DB_CHOICE: lambda orchestrator: None  # Skip setup
+    SKIP_DB_CHOICE: lambda _: None  # Skip setup
 }
 
 
@@ -441,12 +459,56 @@ class UserInterface:
 
     def get_database_credentials(self) -> Tuple[str, int, str, str]:
         """Get database connection credentials from user"""
-        host = input("Database host: ").strip()
-        port_str = input("Database port (3306): ").strip() or "3306"
-        port = int(port_str)
-        user = input("Database user: ").strip()
-        password = getpass.getpass("Database password: ")
+        print("\nEnter database connection details:")
+
+        host = self._get_host_input()
+        port = self._get_port_input()
+        user = self._get_user_input()
+        password = self._get_password_input()
+
         return host, port, user, password
+
+    def _get_host_input(self) -> str:
+        """Get and validate host input."""
+        while True:
+            host = input("Host (default: localhost): ").strip() or "localhost"
+            if host:  # Basic validation - not empty after stripping
+                return host
+            self.print_error("Host cannot be empty")
+
+    def _get_port_input(self) -> int:
+        """Get and validate port input."""
+        while True:
+            try:
+                port_input = input("Port (default: 3306): ").strip()
+                port = int(port_input) if port_input else 3306
+                if 1 <= port <= 65535:
+                    return port
+                else:
+                    self.print_error("Port must be between 1 and 65535")
+            except ValueError:
+                self.print_error("Port must be a number")
+
+    def _get_user_input(self) -> str:
+        """Get and validate user input."""
+        while True:
+            user = input("Username (default: root): ").strip() or "root"
+            if user:  # Basic validation - not empty after stripping
+                return user
+            self.print_error("Username cannot be empty")
+
+    def _get_password_input(self) -> str:
+        """Get password input securely."""
+        while True:
+            password = getpass.getpass("Password: ")
+            if password:  # Allow empty passwords for local development
+                return password
+
+            # Confirm if user wants empty password
+            confirm = input("Use empty password? (y/N): ").strip().lower()
+            if confirm == 'y':
+                return password
+            self.print_info("Please enter a password or confirm empty password")
 
 
 class EnvironmentManager:
@@ -737,12 +799,43 @@ class QuickstartOrchestrator:
         self.ui.print_info("Running comprehensive validation checks...")
 
         try:
-            result = subprocess.run(
-                [conda_cmd, "run", "-n", self.config.env_name, "python", str(validation_script), "-v"],
-                capture_output=True,
-                text=True,
-                check=False
+            # Try to find the environment's python directly instead of using conda run
+            self.ui.print_info("Finding environment python executable...")
+
+            # Get conda environment info
+            env_info_result = subprocess.run(
+                [conda_cmd, "info", "--envs"],
+                capture_output=True, text=True, check=False
             )
+
+            python_path = None
+            if env_info_result.returncode == 0:
+                # Parse environment path
+                for line in env_info_result.stdout.split('\n'):
+                    if self.config.env_name in line and not line.strip().startswith('#'):
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            env_path = parts[-1]
+                            # Try both bin/python (Linux/macOS) and python.exe (Windows)
+                            for python_name in ["bin/python", "python.exe"]:
+                                potential_path = Path(env_path) / python_name
+                                if potential_path.exists():
+                                    python_path = str(potential_path)
+                                    break
+                            if python_path:
+                                break
+
+            if python_path:
+                # Use direct python execution
+                cmd = [python_path, str(validation_script), "-v"]
+                self.ui.print_info(f"Running: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            else:
+                # Fallback: try conda run anyway
+                self.ui.print_warning(f"Could not find python in environment '{self.config.env_name}', trying conda run...")
+                cmd = [conda_cmd, "run", "-n", self.config.env_name, "python", str(validation_script), "-v"]
+                self.ui.print_info(f"Running: {' '.join(cmd)}")
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 
             # Print validation output
             if result.stdout:
@@ -756,13 +849,18 @@ class QuickstartOrchestrator:
                 self.ui.print_warning("Validation passed with warnings")
                 self.ui.print_info("Review the warnings above if you need specific features")
             else:
-                self.ui.print_error("Validation failed")
+                self.ui.print_error(f"Validation failed with return code {result.returncode}")
+                if result.stderr:
+                    self.ui.print_error("Error details:")
+                    print(result.stderr)
                 self.ui.print_info("Please review the errors above and fix any issues")
 
             return result.returncode
 
         except Exception as e:
-            self.ui.print_error(f"Validation failed: {e}")
+            self.ui.print_error(f"Failed to run validation script: {e}")
+            self.ui.print_info(f"Attempted command: {conda_cmd} run -n {self.config.env_name} python {validation_script} -v")
+            self.ui.print_info("This might indicate an issue with conda environment or the validation script")
             return 1
 
     def create_config(self, host: str, user: str, password: str, port: int):
