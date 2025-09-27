@@ -121,6 +121,21 @@ class SetupConfig:
 # Using standard library functions directly - no unnecessary wrappers
 
 
+def validate_base_dir(path: Path) -> Path:
+    """Validate and resolve base directory path."""
+    resolved = path.resolve()
+
+    # Check if parent directory exists (we'll create the base_dir itself if needed)
+    if not resolved.parent.exists():
+        raise ValueError(f"Parent directory does not exist: {resolved.parent}")
+
+    # Check for potential security issues (directory traversal)
+    if str(resolved).startswith((".", "..")):
+        raise ValueError(f"Relative paths not allowed: {path}")
+
+    return resolved
+
+
 class SpyglassConfigManager:
     """Manages SpyglassConfig for quickstart setup"""
 
@@ -322,21 +337,25 @@ class SpyglassQuickstart:
         print(f"{self.colors.CYAN}{'=' * 42}{self.colors.ENDC}")
         print()
 
+    def _format_message(self, text: str, symbol: str, color: str) -> str:
+        """Format a message with color and symbol."""
+        return f"{color}{symbol} {text}{self.colors.ENDC}"
+
     def print_success(self, text: str):
         """Print success message"""
-        print(f"{self.colors.GREEN}✓ {text}{self.colors.ENDC}")
+        print(self._format_message(text, "✓", self.colors.GREEN))
 
     def print_warning(self, text: str):
         """Print warning message"""
-        print(f"{self.colors.YELLOW}⚠ {text}{self.colors.ENDC}")
+        print(self._format_message(text, "⚠", self.colors.YELLOW))
 
     def print_error(self, text: str):
         """Print error message"""
-        print(f"{self.colors.RED}✗ {text}{self.colors.ENDC}")
+        print(self._format_message(text, "✗", self.colors.RED))
 
     def print_info(self, text: str):
         """Print info message"""
-        print(f"{self.colors.BLUE}ℹ {text}{self.colors.ENDC}")
+        print(self._format_message(text, "ℹ", self.colors.BLUE))
 
     def detect_system(self):
         """Detect operating system and architecture"""
@@ -526,7 +545,7 @@ class SpyglassQuickstart:
     def _confirm_environment_name(self):
         """Let user confirm or customize environment name"""
         # Get suggested name based on installation type
-        if self.config.pipeline and self.config.pipeline in self.PIPELINE_ENVIRONMENTS:
+        if self.config.pipeline in self.PIPELINE_ENVIRONMENTS:
             # Pipeline-specific installations have descriptive suggestions
             suggested_name = {
                 Pipeline.DLC: "spyglass-dlc",
@@ -599,15 +618,18 @@ class SpyglassQuickstart:
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
         if not env_path.exists():
-            raise EnvironmentCreationError(f"Environment file not found: {env_path}")
+            raise EnvironmentCreationError(
+                f"Environment file not found: {env_path}\n"
+                f"Please ensure you're running from the Spyglass repository root"
+            )
 
         return env_file
 
     def _select_environment_file(self) -> Tuple[str, str]:
         """Select environment file and description"""
         # Check pipeline-specific environments first
-        if self.config.pipeline and self.config.pipeline in self.PIPELINE_ENVIRONMENTS:
-            return self.PIPELINE_ENVIRONMENTS[self.config.pipeline]
+        if env_info := self.PIPELINE_ENVIRONMENTS.get(self.config.pipeline):
+            return env_info
 
         # Standard environment with different descriptions
         if self.config.install_type == InstallType.FULL:
@@ -930,6 +952,8 @@ class SpyglassQuickstart:
 
         if not validation_script.exists():
             self.print_error("Validation script not found")
+            self.print_info("Expected location: scripts/validate_spyglass.py")
+            self.print_info("Please ensure you're running from the Spyglass repository root")
             return 1
 
         self.print_info("Running comprehensive validation checks...")
@@ -1072,13 +1096,19 @@ def main():
     # Select colors based on arguments and terminal
     colors = DisabledColors if args.no_color or not sys.stdout.isatty() else Colors
 
-    # Create configuration
+    # Create configuration with validated base directory
+    try:
+        validated_base_dir = validate_base_dir(Path(args.base_dir))
+    except ValueError as e:
+        print(f"Error: Invalid base directory: {e}")
+        return 1
+
     config = SetupConfig(
         install_type=InstallType.FULL if args.full else InstallType.MINIMAL,
-        pipeline=Pipeline(args.pipeline) if args.pipeline else None,
+        pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
         setup_database=not args.no_database,
         run_validation=not args.no_validate,
-        base_dir=Path(args.base_dir)
+        base_dir=validated_base_dir
     )
 
     # Run installer
