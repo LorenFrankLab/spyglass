@@ -117,8 +117,9 @@ def import_module_safely(module_name: str):
 class SpyglassValidator:
     """Main validator class for Spyglass installation"""
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, config_file: Optional[str] = None):
         self.verbose = verbose
+        self.config_file = Path(config_file) if config_file else None
         self.results: List[ValidationResult] = []
 
     def run_all_checks(self) -> int:
@@ -282,50 +283,67 @@ class SpyglassValidator:
 
             config_file = self._find_config_file()
             if config_file:
-                self.add_result("DataJoint Config", True, f"Found at {config_file}")
+                self.add_result("DataJoint Config", True, f"Using config file: {config_file}")
                 self._validate_config_file(config_file)
             else:
-                self.add_result(
-                    "DataJoint Config",
-                    False,
-                    "No config file found",
-                    Severity.WARNING
-                )
+                if self.config_file:
+                    # Explicitly specified config file not found
+                    self.add_result(
+                        "DataJoint Config",
+                        False,
+                        f"Specified config file not found: {self.config_file}",
+                        Severity.WARNING
+                    )
+                else:
+                    # Show where we looked for config files
+                    search_locations = [
+                        "DJ_CONFIG_FILE environment variable",
+                        "./dj_local_conf.json (current directory)",
+                        "~/.datajoint_config.json (home directory)"
+                    ]
+                    self.add_result(
+                        "DataJoint Config",
+                        False,
+                        f"No config file found. Searched: {', '.join(search_locations)}. Use --config-file to specify location.",
+                        Severity.WARNING
+                    )
 
     def _find_config_file(self) -> Optional[Path]:
-        """Find DataJoint config file with expanded search"""
+        """Find DataJoint config file and warn about multiple files"""
         import os
+
+        # If config file explicitly specified, use it
+        if self.config_file:
+            return self.config_file if self.config_file.exists() else None
 
         candidates = []
 
-        # Environment variable override (only if set and non-empty)
+        # Environment variable override (if set)
         dj_config_env = os.environ.get("DJ_CONFIG_FILE", "").strip()
         if dj_config_env:
             candidates.append(Path(dj_config_env))
 
-        # Standard search locations
+        # Standard locations
         candidates.extend([
-            # Current working directory
+            # Current working directory (quickstart default)
             Path.cwd() / "dj_local_conf.json",
             # Home directory default
             Path.home() / ".datajoint_config.json",
-            # Repo root fallback (for quickstart-generated configs)
-            Path(__file__).resolve().parent.parent / "dj_local_conf.json",
         ])
 
-        # Try to add SpyglassConfig base directory
-        try:
-            with import_module_safely("spyglass.settings") as settings_module:
-                if settings_module is not None:
-                    config = settings_module.SpyglassConfig()
-                    if config.base_dir:
-                        candidates.append(Path(config.base_dir) / "dj_local_conf.json")
-        except Exception:
-            # If SpyglassConfig fails, continue with other candidates
-            pass
+        # Find existing files
+        existing_files = [p for p in candidates if p.exists()]
 
-        # Find first existing file
-        return next((p for p in candidates if p.exists()), None)
+        if len(existing_files) > 1:
+            # Warn about multiple config files
+            self.add_result(
+                "Multiple Config Files",
+                False,
+                f"Found {len(existing_files)} config files: {', '.join(str(f) for f in existing_files)}. Using: {existing_files[0]}",
+                Severity.WARNING
+            )
+
+        return existing_files[0] if existing_files else None
 
     def _validate_config_file(self, config_path: Path):
         """Validate the contents of a config file"""
@@ -538,6 +556,11 @@ def main():
         action="store_true",
         help="Disable colored output"
     )
+    parser.add_argument(
+        "--config-file",
+        type=str,
+        help="Path to DataJoint config file (overrides default search)"
+    )
 
     args = parser.parse_args()
 
@@ -547,7 +570,7 @@ def main():
             if not attr.startswith('_'):
                 setattr(Colors, attr, '')
 
-    validator = SpyglassValidator(verbose=args.verbose)
+    validator = SpyglassValidator(verbose=args.verbose, config_file=args.config_file)
     exit_code = validator.run_all_checks()
     sys.exit(exit_code)
 
