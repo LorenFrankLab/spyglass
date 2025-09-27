@@ -31,8 +31,9 @@ import subprocess
 import shutil
 import argparse
 import time
+import json
 from pathlib import Path
-from typing import Optional, List, Iterator, Tuple
+from typing import Optional, List, Iterator, Tuple, Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -245,7 +246,7 @@ def _test_database_connection(ui, host: str, port: int, user: str, password: str
     except ImportError:
         ui.print_warning("PyMySQL not available for connection test")
         ui.print_info("Connection will be tested when DataJoint loads")
-    except Exception as e:
+    except (ConnectionError, OSError, TimeoutError) as e:
         ui.print_error(f"Database connection failed: {e}")
         raise DatabaseSetupError(f"Cannot connect to database: {e}")
 
@@ -274,6 +275,19 @@ class UserInterface:
             else:
                 raise ValueError(f"Cannot auto-accept prompt without default: {prompt}")
         return input(prompt).strip()
+
+    def get_validated_input(self, prompt: str, validator: Callable[[str], bool],
+                           error_msg: str, default: str = None) -> str:
+        """Generic validated input helper"""
+        if self.auto_yes and default is not None:
+            self.print_info(f"Auto-accepting: {prompt} -> {default}")
+            return default
+
+        while True:
+            value = input(prompt).strip() or default
+            if validator(value):
+                return value
+            self.print_error(error_msg)
 
     def print_header_banner(self):
         """Print the main application banner"""
@@ -428,7 +442,7 @@ class UserInterface:
                     self.print_error("Path must be a directory")
                     continue
                 return path
-            except Exception as e:
+            except (OSError, PermissionError, ValueError) as e:
                 self.print_error(f"Invalid path: {e}")
                 continue
 
@@ -444,33 +458,29 @@ class UserInterface:
         return host, port, user, password
 
     def _get_host_input(self) -> str:
-        """Get and validate host input."""
-        while True:
-            host = input("Host (default: localhost): ").strip() or "localhost"
-            if host:  # Basic validation - not empty after stripping
-                return host
-            self.print_error("Host cannot be empty")
+        """Get host input with default."""
+        return input("Host (default: localhost): ").strip() or "localhost"
 
     def _get_port_input(self) -> int:
         """Get and validate port input."""
-        while True:
+        def is_valid_port(port_str: str) -> bool:
             try:
-                port_input = input("Port (default: 3306): ").strip()
-                port = int(port_input) if port_input else 3306
-                if 1 <= port <= 65535:
-                    return port
-                else:
-                    self.print_error("Port must be between 1 and 65535")
+                port = int(port_str)
+                return 1 <= port <= 65535
             except ValueError:
-                self.print_error("Port must be a number")
+                return False
+
+        port_str = self.get_validated_input(
+            "Port (default: 3306): ",
+            is_valid_port,
+            "Port must be between 1 and 65535",
+            "3306"
+        )
+        return int(port_str)
 
     def _get_user_input(self) -> str:
-        """Get and validate user input."""
-        while True:
-            user = input("Username (default: root): ").strip() or "root"
-            if user:  # Basic validation - not empty after stripping
-                return user
-            self.print_error("Username cannot be empty")
+        """Get username input with default."""
+        return input("Username (default: root): ").strip() or "root"
 
     def _get_password_input(self) -> str:
         """Get password input securely."""
@@ -591,13 +601,13 @@ class EnvironmentManager:
                     for line in self._filter_progress_lines(process):
                         print(line)
                         output_buffer.append(line)
-                except Exception:
+                except (StopIteration, OSError):
                     pass
 
                 time.sleep(1)
         except subprocess.TimeoutExpired:
             raise EnvironmentCreationError("Environment creation timed out")
-        except Exception as e:
+        except (subprocess.CalledProcessError, OSError, FileNotFoundError) as e:
             raise EnvironmentCreationError(f"Environment creation/update failed: {str(e)}") from e
 
         return output_buffer
@@ -721,6 +731,11 @@ class QuickstartOrchestrator:
         except SpyglassSetupError as e:
             self.ui.print_error(f"\nSetup error: {e}")
             return 1
+        except KeyboardInterrupt:
+            self.ui.print_error("\nSetup interrupted by user")
+            return 1
+        except (SystemExit, KeyboardInterrupt):
+            raise
         except Exception as e:
             self.ui.print_error(f"\nUnexpected error: {e}")
             return 1
@@ -850,13 +865,12 @@ class QuickstartOrchestrator:
             else:
                 self.ui.print_error(f"Validation failed with return code {result.returncode}")
                 if result.stderr:
-                    self.ui.print_error("Error details:")
-                    print(result.stderr)
+                    self.ui.print_error(f"Error details:\\n{result.stderr}")
                 self.ui.print_info("Please review the errors above and fix any issues")
 
             return result.returncode
 
-        except Exception as e:
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
             self.ui.print_error(f"Failed to run validation script: {e}")
             self.ui.print_info(f"Attempted command: {conda_cmd} run -n {self.config.env_name} python {validation_script} -v")
             self.ui.print_info("This might indicate an issue with conda environment or the validation script")
@@ -890,7 +904,7 @@ class QuickstartOrchestrator:
             # Validate the configuration
             self._validate_spyglass_config(spyglass_config)
 
-        except Exception as e:
+        except (OSError, PermissionError, ValueError, json.JSONDecodeError) as e:
             self.ui.print_error(f"Failed to create configuration: {e}")
             raise
 
@@ -905,7 +919,7 @@ class QuickstartOrchestrator:
         except PermissionError as e:
             self.ui.print_error(f"Permission denied creating directories: {e}")
             raise
-        except Exception as e:
+        except (OSError, ValueError) as e:
             self.ui.print_error(f"Directory access failed: {e}")
             raise
 
@@ -919,7 +933,7 @@ class QuickstartOrchestrator:
                 self.ui.print_success(f"Base directory configured: {config.base_dir}")
             # Add more validation logic here as needed
             self.ui.print_success("Configuration validated successfully")
-        except Exception as e:
+        except (ValueError, AttributeError, TypeError) as e:
             self.ui.print_error(f"Configuration validation failed: {e}")
             raise
 

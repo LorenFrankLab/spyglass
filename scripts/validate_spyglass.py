@@ -18,7 +18,7 @@ import subprocess
 import importlib
 import json
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import List, NamedTuple, Optional, Dict
 from dataclasses import dataclass
 from collections import Counter
 from enum import Enum
@@ -101,7 +101,7 @@ def import_module_safely(module_name: str):
         yield module
     except ImportError:
         yield None
-    except Exception:
+    except (ImportError, AttributeError, TypeError):
         yield None
 
 
@@ -389,7 +389,7 @@ class SpyglassValidator:
                         "Not found or not configured",
                         Severity.WARNING
                     )
-            except Exception as e:
+            except (OSError, PermissionError, ValueError) as e:
                 self.add_result(
                     "Directory Check",
                     False,
@@ -448,7 +448,7 @@ class SpyglassValidator:
                         "Not connected",
                         Severity.WARNING
                     )
-            except Exception as e:
+            except (ConnectionError, OSError, TimeoutError) as e:
                 self.add_result(
                     "Database Connection",
                     False,
@@ -467,7 +467,7 @@ class SpyglassValidator:
                         True,
                         "Can access Session table"
                     )
-                except Exception as e:
+                except (AttributeError, ImportError, ConnectionError) as e:
                     self.add_result(
                         "Spyglass Tables",
                         False,
@@ -484,7 +484,7 @@ class SpyglassValidator:
         if self.verbose or not passed:
             print(result)
 
-    def get_summary_stats(self) -> dict:
+    def get_summary_stats(self) -> Dict[str, int]:
         """Get validation summary statistics"""
         stats = Counter(total=len(self.results))
 
