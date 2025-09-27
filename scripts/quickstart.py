@@ -32,7 +32,7 @@ import argparse
 import time
 import json
 from pathlib import Path
-from typing import Optional, List, Iterator, Tuple, Callable, Any
+from typing import Optional, List, Iterator, Tuple, Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -42,27 +42,41 @@ from common import (
     Colors, DisabledColors,
     SpyglassSetupError, SystemRequirementError,
     EnvironmentCreationError, DatabaseSetupError,
-    Config, MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
+    MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
 )
-
-# Named constants
-DEFAULT_CHECKSUM_SIZE_LIMIT = 1024**3  # 1 GB
-
-# Choice constants now replaced with enums from common.py
-
-
-# Color and exception definitions now imported from common.py
 
 
 class InstallType(Enum):
-    """Installation type options."""
+    """Installation type options.
+
+    Values
+    ------
+    MINIMAL : str
+        Core dependencies only, fastest installation
+    FULL : str
+        All optional dependencies included
+    """
 
     MINIMAL = "minimal"
     FULL = "full"
 
 
 class Pipeline(Enum):
-    """Available pipeline options."""
+    """Available pipeline options.
+
+    Values
+    ------
+    DLC : str
+        DeepLabCut pose estimation and behavior analysis
+    MOSEQ_CPU : str
+        Keypoint-Moseq behavioral sequence analysis (CPU)
+    MOSEQ_GPU : str
+        Keypoint-Moseq behavioral sequence analysis (GPU-accelerated)
+    LFP : str
+        Local field potential processing and analysis
+    DECODING : str
+        Neural population decoding algorithms
+    """
 
     DLC = "dlc"
     MOSEQ_CPU = "moseq-cpu"
@@ -73,7 +87,21 @@ class Pipeline(Enum):
 
 @dataclass
 class SystemInfo:
-    """System information."""
+    """System information.
+
+    Attributes
+    ----------
+    os_name : str
+        Operating system name (e.g., 'macOS', 'Linux', 'Windows')
+    arch : str
+        System architecture (e.g., 'x86_64', 'arm64')
+    is_m1 : bool
+        True if running on Apple M1/M2/M3 silicon
+    python_version : Tuple[int, int, int]
+        Python version as (major, minor, patch)
+    conda_cmd : Optional[str]
+        Command to use for conda ('mamba' or 'conda'), None if not found
+    """
 
     os_name: str
     arch: str
@@ -84,7 +112,31 @@ class SystemInfo:
 
 @dataclass
 class SetupConfig:
-    """Configuration for setup process."""
+    """Configuration for setup process.
+
+    Attributes
+    ----------
+    install_type : InstallType
+        Type of installation (MINIMAL or FULL)
+    pipeline : Optional[Pipeline]
+        Specific pipeline to install, None for general installation
+    setup_database : bool
+        Whether to set up database configuration
+    run_validation : bool
+        Whether to run validation checks after installation
+    base_dir : Path
+        Base directory for Spyglass data storage
+    repo_dir : Path
+        Repository root directory
+    env_name : str
+        Name of the conda environment to create/use
+    db_port : int
+        Database port number for connection
+    auto_yes : bool
+        Whether to auto-accept prompts without user input
+    install_type_specified : bool
+        Whether install_type was explicitly specified via CLI
+    """
 
     install_type: InstallType = InstallType.MINIMAL
     pipeline: Optional[Pipeline] = None
@@ -115,7 +167,7 @@ def validate_base_dir(path: Path) -> Path:
 class SpyglassConfigManager:
     """Manages SpyglassConfig for quickstart setup."""
 
-    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path) -> None:
+    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path):
         """Create complete SpyglassConfig setup using official methods."""
         from spyglass.settings import SpyglassConfig
         import os
@@ -1015,7 +1067,7 @@ class QuickstartOrchestrator:
         try:
             self.config.base_dir.mkdir(parents=True, exist_ok=True)
             for subdir in subdirs:
-                (self.config.base_dir / subdir).mkdir(exist_ok=True)
+                (self.config.base_dir / subdir).mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
             self.ui.print_error(f"Permission denied creating directories: {e}")
             raise
@@ -1023,7 +1075,7 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"Directory access failed: {e}")
             raise
 
-    def _validate_spyglass_config(self, config: None) -> None:
+    def _validate_spyglass_config(self, config) -> None:
         """Validate the created configuration using SpyglassConfig."""
         try:
             # Test basic functionality
