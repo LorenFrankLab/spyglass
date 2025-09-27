@@ -293,11 +293,38 @@ class SpyglassValidator:
                 )
 
     def _find_config_file(self) -> Optional[Path]:
-        """Find DataJoint config file"""
-        candidates = [
+        """Find DataJoint config file with expanded search"""
+        import os
+
+        candidates = []
+
+        # Environment variable override (only if set and non-empty)
+        dj_config_env = os.environ.get("DJ_CONFIG_FILE", "").strip()
+        if dj_config_env:
+            candidates.append(Path(dj_config_env))
+
+        # Standard search locations
+        candidates.extend([
+            # Current working directory
+            Path.cwd() / "dj_local_conf.json",
+            # Home directory default
             Path.home() / ".datajoint_config.json",
-            Path.cwd() / "dj_local_conf.json"
-        ]
+            # Repo root fallback (for quickstart-generated configs)
+            Path(__file__).resolve().parent.parent / "dj_local_conf.json",
+        ])
+
+        # Try to add SpyglassConfig base directory
+        try:
+            with import_module_safely("spyglass.settings") as settings_module:
+                if settings_module is not None:
+                    config = settings_module.SpyglassConfig()
+                    if config.base_dir:
+                        candidates.append(Path(config.base_dir) / "dj_local_conf.json")
+        except Exception:
+            # If SpyglassConfig fails, continue with other candidates
+            pass
+
+        # Find first existing file
         return next((p for p in candidates if p.exists()), None)
 
     def _validate_config_file(self, config_path: Path):
