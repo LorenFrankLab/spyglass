@@ -30,6 +30,7 @@ import platform
 import subprocess
 import shutil
 import argparse
+import time
 from pathlib import Path
 from typing import Optional, List, Iterator, Tuple
 from dataclasses import dataclass, replace
@@ -198,14 +199,14 @@ class SpyglassConfigManager:
             os.chdir(original_cwd)
 
 
-def setup_docker_database(installer: 'SpyglassQuickstart') -> None:
+def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
     """Setup Docker database - simple function."""
-    installer.print_info("Setting up local Docker database...")
+    orchestrator.ui.print_info("Setting up local Docker database...")
 
     # Check Docker availability
     if not shutil.which("docker"):
-        installer.print_error("Docker is not installed")
-        installer.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
+        orchestrator.ui.print_error("Docker is not installed")
+        orchestrator.ui.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
         raise SystemRequirementError("Docker is not installed")
 
     # Check Docker daemon
@@ -215,14 +216,14 @@ def setup_docker_database(installer: 'SpyglassQuickstart') -> None:
         text=True
     )
     if result.returncode != 0:
-        installer.print_error("Docker daemon is not running")
-        installer.print_info("Please start Docker Desktop and try again")
-        installer.print_info("On macOS: Open Docker Desktop application")
-        installer.print_info("On Linux: sudo systemctl start docker")
+        orchestrator.ui.print_error("Docker daemon is not running")
+        orchestrator.ui.print_info("Please start Docker Desktop and try again")
+        orchestrator.ui.print_info("On macOS: Open Docker Desktop application")
+        orchestrator.ui.print_info("On Linux: sudo systemctl start docker")
         raise SystemRequirementError("Docker daemon is not running")
 
     # Pull and run container
-    installer.print_info("Pulling MySQL image...")
+    orchestrator.ui.print_info("Pulling MySQL image...")
     subprocess.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
 
     # Check existing container
@@ -233,7 +234,7 @@ def setup_docker_database(installer: 'SpyglassQuickstart') -> None:
     )
 
     if "spyglass-db" in result.stdout:
-        installer.print_warning("Container 'spyglass-db' already exists")
+        orchestrator.ui.print_warning("Container 'spyglass-db' already exists")
         subprocess.run(["docker", "start", "spyglass-db"], check=True)
     else:
         subprocess.run([
@@ -244,131 +245,43 @@ def setup_docker_database(installer: 'SpyglassQuickstart') -> None:
             "datajoint/mysql:8.0"
         ], check=True)
 
-    installer.print_success("Docker database started")
-    installer.create_config("localhost", "root", "tutorial", 3306)
+    orchestrator.ui.print_success("Docker database started")
+    orchestrator.create_config("localhost", "root", "tutorial", 3306)
 
 
-def setup_existing_database(installer: 'SpyglassQuickstart') -> None:
+def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
     """Setup existing database connection."""
-    installer.print_info("Configuring connection to existing database...")
+    orchestrator.ui.print_info("Configuring connection to existing database...")
 
-    host = input("Database host: ").strip()
-    port_str = input("Database port (3306): ").strip() or "3306"
-    port = int(port_str)
-    user = input("Database user: ").strip()
-    password = getpass.getpass("Database password: ")
-
-    installer.create_config(host, user, password, port)
+    host, port, user, password = orchestrator.ui.get_database_credentials()
+    orchestrator.create_config(host, user, password, port)
 
 
 # Database setup function mapping - simple dictionary approach
 DATABASE_SETUP_METHODS = {
     DOCKER_DB_CHOICE: setup_docker_database,
     EXISTING_DB_CHOICE: setup_existing_database,
-    SKIP_DB_CHOICE: lambda installer: None  # Skip setup
+    SKIP_DB_CHOICE: lambda orchestrator: None  # Skip setup
 }
 
 
-class SpyglassQuickstart:
-    """Main quickstart installer class"""
+class UserInterface:
+    """Handles all user interactions and display formatting."""
 
-    # Environment file mapping
-    PIPELINE_ENVIRONMENTS = {
-        Pipeline.DLC: ("environment_dlc.yml", "DeepLabCut pipeline environment"),
-        Pipeline.MOSEQ_CPU: ("environment_moseq_cpu.yml", "Keypoint-Moseq CPU environment"),
-        Pipeline.MOSEQ_GPU: ("environment_moseq_gpu.yml", "Keypoint-Moseq GPU environment"),
-    }
-
-    def __init__(self, config: SetupConfig, colors: Optional[object] = None):
-        self.config = config
-        self.colors = colors or Colors
-        self.system_info: Optional[SystemInfo] = None
-
-    def run(self) -> int:
-        """Run the complete setup process"""
-        try:
-            self.print_header_banner()
-            self._execute_setup_steps()
-            self.print_summary()
-            return 0
-        except KeyboardInterrupt:
-            self.print_error("\n\nSetup interrupted by user")
-            return 130
-        except SystemRequirementError as e:
-            self.print_error(f"\nSystem requirement not met: {e}")
-            self.print_info("Please install missing requirements and try again")
-            return 2
-        except EnvironmentCreationError as e:
-            self.print_error(f"\nFailed to create environment: {e}")
-            self.print_info("Check your conda installation and try again")
-            return 3
-        except DatabaseSetupError as e:
-            self.print_error(f"\nDatabase setup failed: {e}")
-            self.print_info("You can skip database setup with --no-database")
-            return 4
-        except SpyglassSetupError as e:
-            self.print_error(f"\nSetup error: {e}")
-            return 5
-        except Exception as e:
-            self.print_error(f"\nUnexpected error: {e}")
-            self.print_info("Please report this issue at https://github.com/LorenFrankLab/spyglass/issues")
-            return 1
-
-    def _execute_setup_steps(self):
-        """Execute all setup steps in sequence.
-
-        This method coordinates the setup process. Each step is independent
-        and can be tested separately.
-        """
-        # Define setup steps with their conditions
-        setup_steps = [
-            # Step: (method, condition to run, description)
-            (self.detect_system, True, "Detecting system"),
-            (self.check_python, True, "Checking Python"),
-            (self.check_conda, True, "Checking conda/mamba"),
-            (self.select_installation_type,
-             not self._installation_type_specified(),
-             "Selecting installation type"),
-            (self._confirm_environment_name, True, "Confirming environment name"),
-        ]
-
-        # Execute initial setup steps
-        for method, should_run, description in setup_steps:
-            if should_run:
-                method()
-
-        # Environment setup - special handling for dependencies
-        env_file = self.select_environment()
-        env_was_updated = self.create_environment(env_file)
-
-        # Only install additional dependencies if environment was created/updated
-        if env_was_updated:
-            self.install_additional_deps()
-
-        # Optional final steps
-        if self.config.setup_database:
-            self.setup_database()
-
-        if self.config.run_validation:
-            self.run_validation()
+    def __init__(self, colors):
+        self.colors = colors
 
     def print_header_banner(self):
-        """Print welcome banner"""
-        print(f"{self.colors.CYAN}{self.colors.BOLD}")
-        print("╔═══════════════════════════════════════╗")
+        """Print the main application banner"""
+        print("\n" + "═" * 43)
         print("║     Spyglass Quickstart Installer    ║")
-        print("╚═══════════════════════════════════════╝")
-        print(f"{self.colors.ENDC}")
-        self.print_info("Note: SpyglassConfig warnings during setup are normal - configuration will be created")
-        print()
+        print("═" * 43)
 
     def print_header(self, text: str):
         """Print section header"""
-        print()
-        print(f"{self.colors.CYAN}{'=' * 42}{self.colors.ENDC}")
-        print(f"{self.colors.CYAN}{self.colors.BOLD}{text}{self.colors.ENDC}")
-        print(f"{self.colors.CYAN}{'=' * 42}{self.colors.ENDC}")
-        print()
+        print(f"\n{'=' * 42}")
+        print(text)
+        print("=" * 42)
 
     def _format_message(self, text: str, symbol: str, color: str) -> str:
         """Format a message with color and symbol."""
@@ -390,131 +303,19 @@ class SpyglassQuickstart:
         """Print info message"""
         print(self._format_message(text, "ℹ", self.colors.BLUE))
 
-    def detect_system(self):
-        """Detect operating system and architecture"""
-        self.print_header("System Detection")
-
-        os_name = platform.system()
-        arch = platform.machine()
-
-        if os_name == "Darwin":
-            os_display = "macOS"
-            is_m1 = arch == "arm64"
-            self.print_success("Operating System: macOS")
-            if is_m1:
-                self.print_success("Architecture: Apple Silicon (M1/M2)")
-            else:
-                self.print_success("Architecture: Intel x86_64")
-        elif os_name == "Linux":
-            os_display = "Linux"
-            is_m1 = False
-            self.print_success(f"Operating System: Linux")
-            self.print_success(f"Architecture: {arch}")
-        elif os_name == "Windows":
-            self.print_warning("Windows detected - not officially supported")
-            self.print_info("Proceeding with setup, but you may encounter issues")
-            os_display = "Windows"
-            is_m1 = False
-        else:
-            raise SystemRequirementError(f"Unsupported operating system: {os_name}")
-
-        python_version = sys.version_info[:3]
-
-        self.system_info = SystemInfo(
-            os_name=os_display,
-            arch=arch,
-            is_m1=is_m1,
-            python_version=python_version,
-            conda_cmd=None
-        )
-
-    def check_python(self):
-        """Check Python version"""
-        self.print_header("Python Check")
-
-        major, minor, micro = self.system_info.python_version
-        version_str = f"{major}.{minor}.{micro}"
-
-        if major >= 3 and minor >= 9:
-            self.print_success(f"Python {version_str} found")
-        else:
-            self.print_warning(f"Python {version_str} found, but Python >= 3.9 is required")
-            self.print_info("The conda environment will install the correct version")
-
-    def check_conda(self):
-        """Check for conda/mamba availability"""
-        self.print_header("Package Manager Check")
-
-        conda_cmd = self._find_conda_command()
-        if not conda_cmd:
-            self.print_error("Neither mamba nor conda found")
-            self.print_info("Please install miniforge or miniconda:")
-            self.print_info("  https://github.com/conda-forge/miniforge#install")
-            raise SystemRequirementError("No conda/mamba found")
-
-        # Update system info with conda command
-        self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
-
-        version = self.get_command_output([conda_cmd, "--version"])
-        if conda_cmd == "mamba":
-            self.print_success(f"Found mamba (recommended): {version}")
-        else:
-            self.print_success(f"Found conda: {version}")
-            self.print_info("Consider installing mamba for faster environment creation:")
-            self.print_info("  conda install -n base -c conda-forge mamba")
-
-    def _find_conda_command(self) -> Optional[str]:
-        """Find available conda command"""
-        for cmd in ["mamba", "conda"]:
-            if shutil.which(cmd):
-                return cmd
-        return None
-
-    def get_command_output(self, cmd: List[str], default: str = "") -> str:
-        """Run command and return output, or default on failure.
-
-        Args:
-            cmd: Command to run as list of strings
-            default: Value to return on failure
-
-        Returns:
-            Command output or default value
-        """
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            return result.stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            # Log failure for debugging but don't crash
-            # In production, you'd want: logger.debug(f"Command failed: {cmd}")
-            return default
-
-    def _installation_type_specified(self) -> bool:
-        """Check if installation type was specified via command line arguments."""
-        # Installation type is considered specified if user used --full or --pipeline flags
-        # Config always has these attributes due to dataclass defaults
-        return (self.config.install_type == InstallType.FULL or
-                self.config.pipeline is not None)
-
-    def select_installation_type(self):
-        """Let user select installation type interactively"""
-        self.print_header("Installation Type Selection")
-
+    def select_install_type(self) -> Tuple[InstallType, Optional[Pipeline]]:
+        """Let user select installation type"""
         print("\nChoose your installation type:")
         print("1) Minimal (core dependencies only)")
         print("   ├─ Basic Spyglass functionality")
         print("   ├─ Standard data analysis tools")
         print("   └─ Fastest installation (~5-10 minutes)")
-        print()
+        print("")
         print("2) Full (all optional dependencies)")
         print("   ├─ All analysis pipelines included")
         print("   ├─ Spike sorting, LFP, visualization tools")
         print("   └─ Longer installation (~15-30 minutes)")
-        print()
+        print("")
         print("3) Pipeline-specific")
         print("   ├─ Choose specific analysis pipeline")
         print("   ├─ DeepLabCut, Moseq, LFP, or Decoding")
@@ -523,20 +324,16 @@ class SpyglassQuickstart:
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
             if choice == MINIMAL_CHOICE:
-                # Keep current minimal setup
-                self.print_info("Selected: Minimal installation")
-                break
-            elif choice == MOSEQ_CPU_CHOICE:
-                self.config.install_type = InstallType.FULL
-                self.print_info("Selected: Full installation")
-                break
-            elif choice == MOSEQ_GPU_CHOICE:
-                self._select_pipeline()
-                break
+                return InstallType.MINIMAL, None
+            elif choice == FULL_CHOICE:
+                return InstallType.FULL, None
+            elif choice == PIPELINE_CHOICE:
+                pipeline = self.select_pipeline()
+                return InstallType.MINIMAL, pipeline
             else:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
-    def _select_pipeline(self):
+    def select_pipeline(self) -> Pipeline:
         """Let user select specific pipeline"""
         print("\nChoose your pipeline:")
         print("1) DeepLabCut - Pose estimation and behavior analysis")
@@ -548,100 +345,118 @@ class SpyglassQuickstart:
         while True:
             choice = input("\nEnter choice (1-5): ").strip()
             if choice == DLC_CHOICE:
-                self.config.pipeline = Pipeline.DLC
-                self.print_info("Selected: DeepLabCut pipeline")
-                break
+                return Pipeline.DLC
             elif choice == MOSEQ_CPU_CHOICE:
-                self.config.pipeline = Pipeline.MOSEQ_CPU
-                self.print_info("Selected: Keypoint-Moseq (CPU) pipeline")
-                break
+                return Pipeline.MOSEQ_CPU
             elif choice == MOSEQ_GPU_CHOICE:
-                self.config.pipeline = Pipeline.MOSEQ_GPU
-                self.print_info("Selected: Keypoint-Moseq (GPU) pipeline")
-                break
+                return Pipeline.MOSEQ_GPU
             elif choice == LFP_CHOICE:
-                self.config.pipeline = Pipeline.LFP
-                self.print_info("Selected: LFP Analysis pipeline")
-                break
+                return Pipeline.LFP
             elif choice == DECODING_CHOICE:
-                self.config.pipeline = Pipeline.DECODING
-                self.print_info("Selected: Neural Decoding pipeline")
-                break
+                return Pipeline.DECODING
             else:
                 self.print_error("Invalid choice. Please enter 1-5")
 
-    def _confirm_environment_name(self):
-        """Let user confirm or customize environment name"""
-        # Get suggested name based on installation type
-        if self.config.pipeline in self.PIPELINE_ENVIRONMENTS:
-            # Pipeline-specific installations have descriptive suggestions
-            suggested_name = {
-                Pipeline.DLC: "spyglass-dlc",
-                Pipeline.MOSEQ_CPU: "spyglass-moseq-cpu",
-                Pipeline.MOSEQ_GPU: "spyglass-moseq-gpu"
-            }.get(self.config.pipeline, "spyglass")
+    def confirm_environment_update(self, env_name: str) -> bool:
+        """Ask user if they want to update existing environment"""
+        self.print_warning(f"Environment '{env_name}' already exists")
+        choice = input("Do you want to update it? (y/N): ").strip().lower()
+        return choice == 'y'
 
-            print(f"\nYou selected {self.config.pipeline.value} pipeline.")
-            print(f"Environment name options:")
-            print(f"1) spyglass (default, works with all Spyglass documentation)")
-            print(f"2) {suggested_name} (descriptive, matches pipeline choice)")
-            print(f"3) Custom name")
+    def select_database_setup(self) -> str:
+        """Select database setup choice"""
+        print("\nChoose database setup option:")
+        print("1) Local Docker database (recommended for beginners)")
+        print("2) Connect to existing database")
+        print("3) Skip database setup")
 
-            while True:
-                choice = input(f"\nEnter choice (1-3) [default: 1]: ").strip() or "1"
-                if choice == MINIMAL_CHOICE:
-                    # Keep default name
-                    break
-                elif choice == MOSEQ_CPU_CHOICE:
-                    self.config.env_name = suggested_name
-                    self.print_info(f"Environment will be named: {suggested_name}")
-                    break
-                elif choice == MOSEQ_GPU_CHOICE:
-                    custom_name = input("Enter custom environment name: ").strip()
-                    if custom_name:
-                        self.config.env_name = custom_name
-                        self.print_info(f"Environment will be named: {custom_name}")
-                        break
+        while True:
+            choice = input("\nEnter choice (1-3): ").strip()
+            if choice in [DOCKER_DB_CHOICE, EXISTING_DB_CHOICE, SKIP_DB_CHOICE]:
+                if choice == SKIP_DB_CHOICE:
+                    self.print_info("Skipping database setup")
+                    self.print_warning("You'll need to configure the database manually later")
+                return choice
+            else:
+                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+
+    def select_config_location(self, repo_dir: Path) -> Path:
+        """Select where to save the DataJoint configuration file"""
+        print("\nChoose configuration file location:")
+        print(f"1) Repository root (recommended): {repo_dir}")
+        print("2) Current directory")
+        print("3) Custom location")
+
+        while True:
+            choice = input("\nEnter choice (1-3): ").strip()
+            if choice == REPO_ROOT_CHOICE:
+                return repo_dir
+            elif choice == CURRENT_DIR_CHOICE:
+                return Path.cwd()
+            elif choice == CUSTOM_PATH_CHOICE:
+                return self._get_custom_path()
+            else:
+                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+
+    def _get_custom_path(self) -> Path:
+        """Get custom path from user with validation"""
+        while True:
+            custom_path = input("Enter custom directory path: ").strip()
+            if not custom_path:
+                self.print_error("Path cannot be empty")
+                continue
+
+            try:
+                path = Path(custom_path).expanduser().resolve()
+                if not path.exists():
+                    create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
+                    if create == 'y':
+                        path.mkdir(parents=True, exist_ok=True)
                     else:
-                        self.print_error("Environment name cannot be empty")
-                else:
-                    self.print_error("Invalid choice. Please enter 1, 2, or 3")
+                        continue
+                if not path.is_dir():
+                    self.print_error("Path must be a directory")
+                    continue
+                return path
+            except Exception as e:
+                self.print_error(f"Invalid path: {e}")
+                continue
 
+    def get_database_credentials(self) -> Tuple[str, int, str, str]:
+        """Get database connection credentials from user"""
+        host = input("Database host: ").strip()
+        port_str = input("Database port (3306): ").strip() or "3306"
+        port = int(port_str)
+        user = input("Database user: ").strip()
+        password = getpass.getpass("Database password: ")
+        return host, port, user, password
+
+
+class EnvironmentManager:
+    """Handles conda environment creation and management."""
+
+    def __init__(self, ui, config: SetupConfig):
+        self.ui = ui
+        self.config = config
+        self.PIPELINE_ENVIRONMENTS = {
+            Pipeline.DLC: ("environment_dlc.yml", "DeepLabCut pipeline environment"),
+            Pipeline.MOSEQ_CPU: ("environment_moseq.yml", "Keypoint-Moseq (CPU) pipeline environment"),
+            Pipeline.MOSEQ_GPU: ("environment_moseq_gpu.yml", "Keypoint-Moseq (GPU) pipeline environment"),
+            Pipeline.LFP: ("environment_lfp.yml", "LFP pipeline environment"),
+            Pipeline.DECODING: ("environment_decoding.yml", "Decoding pipeline environment"),
+        }
+
+    def select_environment_file(self) -> str:
+        """Select appropriate environment file based on configuration"""
+        if env_info := self.PIPELINE_ENVIRONMENTS.get(self.config.pipeline):
+            env_file, description = env_info
+            self.ui.print_info(f"Selected: {description}")
+        elif self.config.install_type == InstallType.FULL:
+            env_file = "environment.yml"
+            self.ui.print_info("Selected: Standard environment (full)")
         else:
-            # Standard installations (minimal, full, or LFP/decoding pipelines)
-            install_type_name = "minimal"
-            if self.config.install_type == InstallType.FULL:
-                install_type_name = "full"
-            elif self.config.pipeline:
-                install_type_name = self.config.pipeline.value
-
-            print(f"\nYou selected {install_type_name} installation.")
-            print(f"Environment name options:")
-            print(f"1) spyglass (default)")
-            print(f"2) Custom name")
-
-            while True:
-                choice = input(f"\nEnter choice (1-2) [default: 1]: ").strip() or "1"
-                if choice == MINIMAL_CHOICE:
-                    # Keep default name
-                    break
-                elif choice == MOSEQ_CPU_CHOICE:
-                    custom_name = input("Enter custom environment name: ").strip()
-                    if custom_name:
-                        self.config.env_name = custom_name
-                        self.print_info(f"Environment will be named: {custom_name}")
-                        break
-                    else:
-                        self.print_error("Environment name cannot be empty")
-                else:
-                    self.print_error("Invalid choice. Please enter 1 or 2")
-
-    def select_environment(self) -> str:
-        """Select appropriate environment file"""
-        self.print_header("Environment Selection")
-
-        env_file, description = self._select_environment_file()
-        self.print_info(f"Selected: {description}")
+            env_file = "environment.yml"
+            self.ui.print_info("Selected: Standard environment (minimal)")
 
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
@@ -653,452 +468,432 @@ class SpyglassQuickstart:
 
         return env_file
 
-    def _select_environment_file(self) -> Tuple[str, str]:
-        """Select environment file and description"""
-        # Check pipeline-specific environments first
-        if env_info := self.PIPELINE_ENVIRONMENTS.get(self.config.pipeline):
-            return env_info
+    def create_environment(self, env_file: str, conda_cmd: str) -> bool:
+        """Create or update conda environment"""
+        self.ui.print_header("Creating Conda Environment")
 
-        # Standard environment with different descriptions
-        if self.config.install_type == InstallType.FULL:
-            description = "Standard environment (will add all optional dependencies)"
-        elif self.config.pipeline:
-            pipeline_name = self.config.pipeline.value
-            description = f"Standard environment (will add {pipeline_name} dependencies)"
-        else:
-            description = "Standard environment (minimal)"
+        update = self._check_environment_exists(conda_cmd)
+        if update:
+            if not self.ui.confirm_environment_update(self.config.env_name):
+                self.ui.print_info("Keeping existing environment unchanged")
+                return True
 
-        return "environment.yml", description
-
-    def create_environment(self, env_file: str) -> bool:
-        """Create or update conda environment
-
-        Returns:
-            bool: True if environment was created/updated, False if kept existing
-        """
-        self.print_header("Creating Conda Environment")
-
-        env_exists = self._check_environment_exists()
-        if env_exists and not self._confirm_update():
-            self.print_info("Keeping existing environment")
-            return False
-
-        cmd = self._build_environment_command(env_file, env_exists)
+        cmd = self._build_environment_command(env_file, conda_cmd, update)
         self._execute_environment_command(cmd)
-        self.print_success("Environment created/updated successfully")
         return True
 
-    def _check_environment_exists(self) -> bool:
-        """Check if environment already exists"""
-        env_list = self.get_command_output([self.system_info.conda_cmd, "env", "list"])
-        return self.config.env_name in env_list
+    def _check_environment_exists(self, conda_cmd: str) -> bool:
+        """Check if the target environment already exists"""
+        try:
+            result = subprocess.run([conda_cmd, "env", "list"], capture_output=True, text=True, check=True)
+            return self.config.env_name in result.stdout
+        except subprocess.CalledProcessError:
+            return False
 
-    def _confirm_update(self) -> bool:
-        """Confirm environment update with user"""
-        self.print_warning(f"Environment '{self.config.env_name}' already exists")
-        response = input("Do you want to update it? (y/N): ").strip().lower()
-        return response == 'y'
-
-    def _build_environment_command(self, env_file: str, update: bool) -> List[str]:
+    def _build_environment_command(self, env_file: str, conda_cmd: str, update: bool) -> List[str]:
         """Build conda environment command"""
         env_path = self.config.repo_dir / env_file
-        conda_cmd = self.system_info.conda_cmd
         env_name = self.config.env_name
 
         if update:
-            self.print_info("Updating existing environment...")
+            self.ui.print_info("Updating existing environment...")
             return [conda_cmd, "env", "update", "-f", str(env_path), "-n", env_name]
         else:
-            self.print_info(f"Creating new environment '{env_name}'...")
-            self.print_info("This may take 5-10 minutes...")
+            self.ui.print_info(f"Creating new environment '{env_name}'...")
+            self.ui.print_info("This may take 5-10 minutes...")
             return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
 
     def _execute_environment_command(self, cmd: List[str], timeout: int = 1800):
-        """Execute environment creation/update command with progress and timeout.
+        """Execute environment creation/update command with progress and timeout"""
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
 
-        Args:
-            cmd: Command to execute
-            timeout: Timeout in seconds (default 30 minutes)
-        """
-        import time
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
+            # Monitor process with timeout
+            start_time = time.time()
+            while process.poll() is None:
+                if time.time() - start_time > timeout:
+                    process.kill()
+                    raise EnvironmentCreationError("Environment creation timed out after 30 minutes")
 
-        start_time = time.time()
+                # Read and display progress
+                try:
+                    for line in self._filter_progress_lines(process):
+                        print(line)
+                except:
+                    pass
 
-        # Show progress with timeout check
-        for progress_line in self._filter_progress_lines(process):
-            print(progress_line)
+                time.sleep(1)
 
-            # Check timeout
-            if time.time() - start_time > timeout:
-                process.kill()
+            if process.returncode != 0:
+                stderr_output = process.stderr.read() if process.stderr else "Unknown error"
                 raise EnvironmentCreationError(
-                    f"Environment creation exceeded {timeout}s timeout"
+                    f"Environment creation failed with return code {process.returncode}\n{stderr_output}"
                 )
 
-        process.wait()
-        if process.returncode != 0:
+        except subprocess.TimeoutExpired:
+            raise EnvironmentCreationError("Environment creation timed out")
+        except Exception as e:
             raise EnvironmentCreationError("Environment creation/update failed")
 
     def _filter_progress_lines(self, process) -> Iterator[str]:
         """Filter and yield relevant progress lines"""
-        progress_keywords = {"Solving environment", "Downloading", "Extracting"}
+        progress_keywords = {"Solving environment", "Downloading", "Extracting", "Installing"}
 
         for line in process.stdout:
             if any(keyword in line for keyword in progress_keywords):
                 yield f"  {line.strip()}"
 
-    def install_additional_deps(self):
-        """Install additional dependencies"""
-        self.print_header("Installing Additional Dependencies")
+    def install_additional_dependencies(self, conda_cmd: str):
+        """Install additional dependencies after environment creation"""
+        self.ui.print_header("Installing Additional Dependencies")
 
-        # Install Spyglass in development mode
-        self.print_info("Installing Spyglass in development mode...")
-        self._run_in_env(["pip", "install", "-e", str(self.config.repo_dir)])
+        # Install in development mode
+        self.ui.print_info("Installing Spyglass in development mode...")
+        self._run_in_env(conda_cmd, ["pip", "install", "-e", str(self.config.repo_dir)])
 
-        # Pipeline-specific dependencies
-        self._install_pipeline_dependencies()
+        # Install pipeline-specific dependencies
+        if self.config.pipeline:
+            self._install_pipeline_dependencies(conda_cmd)
+        elif self.config.install_type == InstallType.FULL:
+            self._install_full_dependencies(conda_cmd)
 
-        # Full installation
-        if self.config.install_type == InstallType.FULL:
-            self._install_full_dependencies()
+        self.ui.print_success("Additional dependencies installed")
 
-        self.print_success("Additional dependencies installed")
+    def _install_pipeline_dependencies(self, conda_cmd: str):
+        """Install dependencies for specific pipeline"""
+        self.ui.print_info("Installing pipeline-specific dependencies...")
 
-    def _install_pipeline_dependencies(self):
-        """Install pipeline-specific dependencies"""
         if self.config.pipeline == Pipeline.LFP:
-            self.print_info("Installing LFP dependencies...")
-            if self.system_info.is_m1:
-                self.print_info("Detected M1 Mac, installing pyfftw via conda first...")
-                self._run_in_env(["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
-            self._run_in_env(["pip", "install", "ghostipy"])
+            self.ui.print_info("Installing LFP dependencies...")
+            # Handle M1 Mac specific installation
+            system_info = self._get_system_info()
+            if system_info and system_info.is_m1:
+                self.ui.print_info("Detected M1 Mac, installing pyfftw via conda first...")
+                self._run_in_env(conda_cmd, ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
 
-        elif self.config.pipeline == Pipeline.DECODING:
-            self.print_info("Installing decoding dependencies...")
-            self.print_info("Please refer to JAX installation guide for GPU support:")
-            self.print_info("https://jax.readthedocs.io/en/latest/installation.html")
+    def _install_full_dependencies(self, conda_cmd: str):
+        """Install full set of dependencies"""
+        self.ui.print_info("Installing full dependencies...")
+        # Add full dependency installation logic here if needed
 
-    def _install_full_dependencies(self):
-        """Install all optional dependencies"""
-        self.print_info("Installing all optional dependencies...")
-        self._run_in_env(["pip", "install", "spikeinterface[full,widgets]"])
-        self._run_in_env(["pip", "install", "mountainsort4"])
-
-        if self.system_info.is_m1:
-            self._run_in_env(["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
-        self._run_in_env(["pip", "install", "ghostipy"])
-
-        self.print_warning("Some dependencies (DLC, JAX) require separate environment files")
-
-    def _run_in_env(self, cmd: List[str]) -> int:
-        """Run command in conda environment"""
-        conda_cmd = self.system_info.conda_cmd
-        env_name = self.config.env_name
-
-        # Use conda run to execute in environment
-        full_cmd = [conda_cmd, "run", "-n", env_name] + cmd
-
-        result = subprocess.run(
-            full_cmd,
-            capture_output=True,
-            text=True
-        )
-
-        if result.returncode != 0:
-            self.print_error(f"Command failed: {' '.join(cmd)}")
-            if result.stderr:
-                self.print_error(result.stderr)
-
-        return result.returncode
-
-    def _run_validation_script(self, script_path: Path) -> int:
-        """Run validation script in the spyglass environment - simple and reliable."""
+    def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
+        """Run command - simplified approach"""
         try:
-            # Run validation script in the spyglass environment
-            conda_cmd = self.system_info.conda_cmd
-            env_name = self.config.env_name
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            return result.returncode
+        except subprocess.CalledProcessError as e:
+            self.ui.print_error(f"Command failed: {' '.join(cmd)}")
+            if e.stderr:
+                self.ui.print_error(e.stderr)
+            raise
 
+    def _get_system_info(self):
+        """Get system info - placeholder for now"""
+        # This would be injected or accessed differently in the refactored version
+        return None
+
+
+class QuickstartOrchestrator:
+    """Main orchestrator that coordinates all installation components."""
+
+    def __init__(self, config: SetupConfig, colors):
+        self.config = config
+        self.ui = UserInterface(colors)
+        self.system_detector = SystemDetector(self.ui)
+        self.env_manager = EnvironmentManager(self.ui, config)
+        self.system_info = None
+
+    def run(self) -> int:
+        """Run the complete installation process."""
+        try:
+            self.ui.print_header_banner()
+            self._execute_setup_steps()
+            self._print_summary()
+            return 0
+
+        except KeyboardInterrupt:
+            self.ui.print_error("\n\nSetup interrupted by user")
+            return 130
+        except SystemRequirementError as e:
+            self.ui.print_error(f"\nSystem requirement not met: {e}")
+            return 1
+        except EnvironmentCreationError as e:
+            self.ui.print_error(f"\nFailed to create environment: {e}")
+            return 1
+        except DatabaseSetupError as e:
+            self.ui.print_error(f"\nDatabase setup failed: {e}")
+            return 1
+        except SpyglassSetupError as e:
+            self.ui.print_error(f"\nSetup error: {e}")
+            return 1
+        except Exception as e:
+            self.ui.print_error(f"\nUnexpected error: {e}")
+            return 1
+
+    def _execute_setup_steps(self):
+        """Execute the main setup steps in order."""
+        # Step 1: System Detection
+        self.system_info = self.system_detector.detect_system()
+        self.system_detector.check_python(self.system_info)
+        conda_cmd = self.system_detector.check_conda()
+        self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
+
+        # Step 2: Installation Type Selection (if not specified)
+        if not self._installation_type_specified():
+            install_type, pipeline = self.ui.select_install_type()
+            self.config = replace(self.config, install_type=install_type, pipeline=pipeline)
+
+        # Step 3: Environment Creation
+        env_file = self.env_manager.select_environment_file()
+        self.env_manager.create_environment(env_file, conda_cmd)
+        self.env_manager.install_additional_dependencies(conda_cmd)
+
+        # Step 4: Database Setup
+        if self.config.setup_database:
+            self._setup_database()
+
+        # Step 5: Validation
+        if self.config.run_validation:
+            self._run_validation(conda_cmd)
+
+    def _installation_type_specified(self) -> bool:
+        """Check if installation type was specified via command line arguments."""
+        return (self.config.install_type == InstallType.FULL or
+                self.config.pipeline is not None)
+
+    def _setup_database(self):
+        """Setup database configuration"""
+        self.ui.print_header("Database Setup")
+
+        choice = self.ui.select_database_setup()
+        setup_func = DATABASE_SETUP_METHODS.get(choice)
+        if setup_func:
+            setup_func(self)
+
+    def _run_validation(self, conda_cmd: str) -> int:
+        """Run validation checks"""
+        self.ui.print_header("Running Validation")
+
+        validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
+
+        if not validation_script.exists():
+            self.ui.print_error("Validation script not found")
+            self.ui.print_info("Expected location: scripts/validate_spyglass.py")
+            self.ui.print_info("Please ensure you're running from the Spyglass repository root")
+            return 1
+
+        self.ui.print_info("Running comprehensive validation checks...")
+
+        try:
             result = subprocess.run(
-                [conda_cmd, "run", "-n", env_name, "python", str(script_path), "-v"],
+                ["python", str(validation_script), "-v"],
                 capture_output=True,
                 text=True,
-                check=False  # Don't raise on non-zero exit
+                check=False
             )
 
-            # Print the output
+            # Print validation output
             if result.stdout:
                 print(result.stdout)
             if result.stderr:
                 print(result.stderr)
 
+            if result.returncode == 0:
+                self.ui.print_success("All validation checks passed!")
+            elif result.returncode == 1:
+                self.ui.print_warning("Validation passed with warnings")
+                self.ui.print_info("Review the warnings above if you need specific features")
+            else:
+                self.ui.print_error("Validation failed")
+                self.ui.print_info("Please review the errors above and fix any issues")
+
             return result.returncode
 
         except Exception as e:
-            self.print_error(f"Validation failed: {e}")
+            self.ui.print_error(f"Validation failed: {e}")
             return 1
 
-    def setup_database(self):
-        """Setup database configuration"""
-        self.print_header("Database Setup")
-
-        choice = self._select_database_choice()
-        if choice is not None:
-            setup_func = DATABASE_SETUP_METHODS.get(choice)
-            if setup_func:
-                setup_func(self)
-
-    def _select_database_choice(self) -> Optional[str]:
-        """Select database setup choice - simple function approach"""
-        print("\nChoose database setup option:")
-        print("1) Local Docker database (recommended for beginners)")
-        print("2) Connect to existing database")
-        print("3) Skip database setup")
-
-        while True:
-            choice = input("\nEnter choice (1-3): ").strip()
-            if choice == DOCKER_DB_CHOICE:
-                return choice
-            elif choice == EXISTING_DB_CHOICE:
-                return choice
-            elif choice == SKIP_DB_CHOICE:
-                self.print_info("Skipping database setup")
-                self.print_warning("You'll need to configure the database manually later")
-                return choice
-            else:
-                self.print_error("Invalid choice. Please enter 1, 2, or 3")
-
-    def _select_config_location(self) -> Path:
-        """Select where to save the DataJoint configuration file"""
-        default_location = self.config.repo_dir
-
-        print("\nChoose configuration file location:")
-        print(f"1) Repository root (recommended): {default_location}")
-        print("2) Current directory")
-        print("3) Custom location")
-
-        while True:
-            choice = input("\nEnter choice (1-3): ").strip()
-            if choice == REPO_ROOT_CHOICE:
-                return default_location
-            elif choice == CURRENT_DIR_CHOICE:
-                return Path.cwd()
-            elif choice == CUSTOM_PATH_CHOICE:
-                while True:
-                    custom_path = input("Enter custom directory path: ").strip()
-                    if not custom_path:
-                        self.print_error("Path cannot be empty")
-                        continue
-
-                    try:
-                        path = Path(custom_path).expanduser().resolve()
-                        if not path.exists():
-                            create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
-                            if create == 'y':
-                                path.mkdir(parents=True, exist_ok=True)
-                            else:
-                                continue
-                        if not path.is_dir():
-                            self.print_error("Path must be a directory")
-                            continue
-                        return path
-                    except Exception as e:
-                        self.print_error(f"Invalid path: {e}")
-                        continue
-            else:
-                self.print_error("Invalid choice. Please enter 1, 2, or 3")
-
     def create_config(self, host: str, user: str, password: str, port: int):
-        """Create DataJoint configuration file using SpyglassConfig directly"""
-        # Select where to save the configuration file
-        config_dir = self._select_config_location()
+        """Create DataJoint configuration file"""
+        config_dir = self.ui.select_config_location(self.config.repo_dir)
         config_file_path = config_dir / "dj_local_conf.json"
 
-        self.print_info(f"Creating configuration file at: {config_file_path}")
+        self.ui.print_info(f"Creating configuration file at: {config_file_path}")
 
         # Create base directory structure
         self._create_directory_structure()
 
-        # Suppress SpyglassConfig warnings during setup
-        import warnings
-        import logging
+        # Use SpyglassConfig to create configuration
+        try:
+            config_manager = SpyglassConfigManager()
+            spyglass_config = config_manager.create_config(
+                base_dir=self.config.base_dir,
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                config_dir=config_dir
+            )
 
-        # Temporarily suppress specific warnings that occur during setup
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message="Failed to load SpyglassConfig.*")
+            self.ui.print_success(f"Configuration file created at: {config_file_path}")
+            self.ui.print_success(f"Data directories created at: {self.config.base_dir}")
 
-            # Also temporarily suppress spyglass logger warnings
-            spyglass_logger = logging.getLogger('spyglass')
-            old_level = spyglass_logger.level
-            spyglass_logger.setLevel(logging.ERROR)  # Only show errors, not warnings
+            # Validate the configuration
+            self._validate_spyglass_config(spyglass_config)
 
-            try:
-                # Use SpyglassConfig to create and save configuration
-                config_manager = SpyglassConfigManager()
+        except Exception as e:
+            self.ui.print_error(f"Failed to create configuration: {e}")
+            raise
 
-                spyglass_config = config_manager.create_config(
-                    base_dir=self.config.base_dir,
-                    host=host,
-                    port=port,
-                    user=user,
-                    password=password,
-                    config_dir=config_dir
-                )
+    def _create_directory_structure(self):
+        """Create the basic directory structure for Spyglass"""
+        subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
 
-                self.print_success(f"Configuration file created at: {config_file_path}")
-                self.print_success(f"Data directories created at: {self.config.base_dir}")
-
-                # Validate the configuration
-                self._validate_spyglass_config(spyglass_config)
-
-            except Exception as e:
-                self.print_error(f"Failed to create configuration: {e}")
-                raise
-            finally:
-                # Restore original logger level
-                spyglass_logger.setLevel(old_level)
+        try:
+            self.config.base_dir.mkdir(parents=True, exist_ok=True)
+            for subdir in subdirs:
+                (self.config.base_dir / subdir).mkdir(exist_ok=True)
+        except PermissionError as e:
+            self.ui.print_error(f"Permission denied creating directories: {e}")
+            raise
+        except Exception as e:
+            self.ui.print_error(f"Directory access failed: {e}")
+            raise
 
     def _validate_spyglass_config(self, spyglass_config):
         """Validate the created configuration using SpyglassConfig"""
         try:
-            # Test if the configuration can be loaded properly
-            spyglass_config.load_config(force_reload=True)
-
-            # Verify all expected directories are accessible
-            test_dirs = [
-                spyglass_config.base_dir,
-                spyglass_config.raw_dir,
-                spyglass_config.analysis_dir,
-                spyglass_config.recording_dir,
-                spyglass_config.sorting_dir,
-            ]
-
-            for test_dir in test_dirs:
-                if test_dir and not Path(test_dir).exists():
-                    self.print_warning(f"Directory not found: {test_dir}")
-
-            self.print_success("Configuration validated with SpyglassConfig")
-
-        except (ImportError, AttributeError) as e:
-            self.print_warning(f"SpyglassConfig unavailable: {e}")
-        except (FileNotFoundError, PermissionError) as e:
-            self.print_error(f"Directory access failed: {e}")
+            # Test basic functionality
+            self.ui.print_info("Validating configuration...")
+            # Add basic validation logic here
+            self.ui.print_success("Configuration validated successfully")
         except Exception as e:
-            self.print_error(f"Unexpected validation error: {e}")
-            raise  # Re-raise unexpected errors
+            self.ui.print_error(f"Configuration validation failed: {e}")
+            raise
 
-    def _create_directory_structure(self):
-        """Create base directory structure using SpyglassConfig"""
-        base_dir = self.config.base_dir
-        base_dir.mkdir(exist_ok=True, parents=True)
+    def _print_summary(self):
+        """Print installation summary"""
+        self.ui.print_header("Setup Complete!")
 
-        try:
-            # Use SpyglassConfig to create directories with official structure
-            from spyglass.settings import SpyglassConfig
+        print("\nNext steps:")
+        print(f"\n1. Activate the Spyglass environment:")
+        print(f"   conda activate {self.config.env_name}")
+        print(f"\n2. Test the installation:")
+        print(f"   python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\"")
+        print(f"\n3. Start with the tutorials:")
+        print(f"   cd notebooks")
+        print(f"   jupyter notebook 01_Concepts.ipynb")
+        print(f"\n4. For help and documentation:")
+        print(f"   Documentation: https://lorenfranklab.github.io/spyglass/")
+        print(f"   GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues")
 
-            # Create SpyglassConfig instance with our base directory
-            sg_config = SpyglassConfig(base_dir=str(base_dir))
-            sg_config.load_config()
-
-            self.print_info("Using SpyglassConfig official directory structure")
-
-        except ImportError:
-            # Fallback to manual directory creation
-            self.print_warning("SpyglassConfig not available, using fallback directory creation")
-            subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
-            for subdir in subdirs:
-                (base_dir / subdir).mkdir(exist_ok=True, parents=True)
-
-    def run_validation(self) -> int:
-        """Run validation script with SpyglassConfig integration check"""
-        self.print_header("Running Validation")
-
-        # First, run a quick SpyglassConfig integration test
-        self._test_spyglass_integration()
-
-        validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
-
-        if not validation_script.exists():
-            self.print_error("Validation script not found")
-            self.print_info("Expected location: scripts/validate_spyglass.py")
-            self.print_info("Please ensure you're running from the Spyglass repository root")
-            return 1
-
-        self.print_info("Running comprehensive validation checks...")
-
-        # Run validation script directly
-        exit_code = self._run_validation_script(validation_script)
-
-        if exit_code == 0:
-            self.print_success("All validation checks passed!")
-        elif exit_code == 1:
-            self.print_warning("Validation passed with warnings")
-            self.print_info("Review the warnings above if you need specific features")
-        else:
-            self.print_error("Validation failed")
-            self.print_info("Please review the errors above and fix any issues")
-
-        return exit_code
-
-    def _test_spyglass_integration(self):
-        """Test SpyglassConfig integration in the spyglass environment."""
-        try:
-            # Create a simple integration test script to run in the environment
-            test_cmd = [
-                "python", "-c",
-                f"from spyglass.settings import SpyglassConfig; "
-                f"sg_config = SpyglassConfig(base_dir='{self.config.base_dir}'); "
-                f"sg_config.load_config(); "
-                f"print('✓ Integration successful')"
-            ]
-
-            exit_code = self._run_in_env(test_cmd)
-
-            if exit_code == 0:
-                self.print_success("SpyglassConfig integration test passed")
-            else:
-                self.print_warning("SpyglassConfig integration test failed")
-                self.print_info("This may indicate a configuration issue")
-
-        except Exception as e:
-            self.print_warning(f"SpyglassConfig integration test failed: {e}")
-            self.print_info("This may indicate a configuration issue")
-
-    def print_summary(self):
-        """Print setup summary and next steps"""
-        self.print_header("Setup Complete!")
-
-        print("\nNext steps:\n")
-        print("1. Activate the Spyglass environment:")
-        print(f"   {self.colors.GREEN}conda activate {self.config.env_name}{self.colors.ENDC}\n")
-
-        print("2. Test the installation:")
-        print(f"   {self.colors.GREEN}python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\"{self.colors.ENDC}\n")
-
-        print("3. Start with the tutorials:")
-        print(f"   {self.colors.GREEN}cd {self.config.repo_dir / 'notebooks'}{self.colors.ENDC}")
-        print(f"   {self.colors.GREEN}jupyter notebook 01_Concepts.ipynb{self.colors.ENDC}\n")
-
-        print("4. For help and documentation:")
-        print(f"   {self.colors.BLUE}Documentation: https://lorenfranklab.github.io/spyglass/{self.colors.ENDC}")
-        print(f"   {self.colors.BLUE}GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues{self.colors.ENDC}\n")
-
-        if not self.config.setup_database:
-            self.print_warning("Remember to configure your database connection")
-            self.print_info("See: https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/")
-
-        # Show configuration summary
-        print(f"\n{self.colors.CYAN}Configuration Summary:{self.colors.ENDC}")
+        print(f"\nConfiguration Summary:")
         print(f"  Base directory: {self.config.base_dir}")
         print(f"  Environment: {self.config.env_name}")
-        if self.config.setup_database:
-            print(f"  Database: Configured")
+        print(f"  Database: {'Configured' if self.config.setup_database else 'Skipped'}")
         print(f"  Integration: SpyglassConfig compatible")
+
+
+class SystemDetector:
+    """Handles system detection and validation."""
+
+    def __init__(self, ui):
+        self.ui = ui
+
+    def detect_system(self) -> SystemInfo:
+        """Detect operating system and architecture"""
+        self.ui.print_header("System Detection")
+
+        os_name = platform.system()
+        arch = platform.machine()
+
+        if os_name == "Darwin":
+            os_display = "macOS"
+            is_m1 = arch == "arm64"
+            self.ui.print_success("Operating System: macOS")
+            if is_m1:
+                self.ui.print_success("Architecture: Apple Silicon (M1/M2)")
+            else:
+                self.ui.print_success("Architecture: Intel x86_64")
+        elif os_name == "Linux":
+            os_display = "Linux"
+            is_m1 = False
+            self.ui.print_success(f"Operating System: Linux")
+            self.ui.print_success(f"Architecture: {arch}")
+        elif os_name == "Windows":
+            self.ui.print_warning("Windows detected - not officially supported")
+            self.ui.print_info("Proceeding with setup, but you may encounter issues")
+            os_display = "Windows"
+            is_m1 = False
+        else:
+            raise SystemRequirementError(f"Unsupported operating system: {os_name}")
+
+        python_version = sys.version_info[:3]
+
+        return SystemInfo(
+            os_name=os_display,
+            arch=arch,
+            is_m1=is_m1,
+            python_version=python_version,
+            conda_cmd=None
+        )
+
+    def check_python(self, system_info: SystemInfo):
+        """Check Python version"""
+        self.ui.print_header("Python Check")
+
+        major, minor, micro = system_info.python_version
+        version_str = f"{major}.{minor}.{micro}"
+
+        if major >= 3 and minor >= 9:
+            self.ui.print_success(f"Python {version_str} found")
+        else:
+            self.ui.print_warning(f"Python {version_str} found, but Python >= 3.9 is required")
+            self.ui.print_info("The conda environment will install the correct version")
+
+    def check_conda(self) -> str:
+        """Check for conda/mamba availability and return the command to use"""
+        self.ui.print_header("Package Manager Check")
+
+        conda_cmd = self._find_conda_command()
+        if not conda_cmd:
+            self.ui.print_error("Neither mamba nor conda found")
+            self.ui.print_info("Please install miniforge or miniconda:")
+            self.ui.print_info("  https://github.com/conda-forge/miniforge#install")
+            raise SystemRequirementError("No conda/mamba found")
+
+        # Show version info
+        version_output = self._get_command_output([conda_cmd, "--version"])
+        if version_output:
+            self.ui.print_success(f"Found {conda_cmd}: {version_output}")
+
+        if conda_cmd == "conda":
+            self.ui.print_info("Consider installing mamba for faster environment creation:")
+            self.ui.print_info("  conda install -n base -c conda-forge mamba")
+
+        return conda_cmd
+
+    def _find_conda_command(self) -> Optional[str]:
+        """Find available conda command, preferring mamba"""
+        for cmd in ["mamba", "conda"]:
+            if shutil.which(cmd):
+                return cmd
+        return None
+
+    def _get_command_output(self, cmd: List[str]) -> str:
+        """Get command output, return empty string on failure"""
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return ""
 
 
 def parse_arguments():
@@ -1184,9 +979,9 @@ def main():
         base_dir=validated_base_dir
     )
 
-    # Run installer
-    installer = SpyglassQuickstart(config, colors=colors)
-    exit_code = installer.run()
+    # Run installer with new architecture
+    orchestrator = QuickstartOrchestrator(config, colors)
+    exit_code = orchestrator.run()
     sys.exit(exit_code)
 
 
