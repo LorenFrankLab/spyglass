@@ -329,6 +329,8 @@ class SpyglassValidator:
             Path.cwd() / "dj_local_conf.json",
             # Home directory default
             Path.home() / ".datajoint_config.json",
+            # Repo root fallback (for quickstart-generated configs)
+            Path(__file__).resolve().parent.parent / "dj_local_conf.json",
         ])
 
         # Find existing files
