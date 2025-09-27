@@ -507,11 +507,7 @@ class SpyglassConfig:
                     "project": self.moseq_project_dir,
                     "video": self.moseq_video_dir,
                 },
-                "kachery_zone": (
-                    os.environ.get("KACHERY_ZONE")
-                    or dj.config.get("custom", {}).get("kachery_zone")
-                    or "franklab.default"
-                ),
+                "kachery_zone": os.environ.get("KACHERY_ZONE", "franklab.default"),
             }
         }
 
