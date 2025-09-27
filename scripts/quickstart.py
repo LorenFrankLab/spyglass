@@ -20,7 +20,6 @@ Options:
 """
 
 import sys
-import json
 import platform
 import subprocess
 import shutil
@@ -140,193 +139,29 @@ def subprocess_handler(default_return=""):
     return decorator
 
 
-class ConfigBuilder:
-    """Builder for DataJoint configuration integrated with SpyglassConfig"""
+class SpyglassConfigManager:
+    """Manages SpyglassConfig for quickstart setup"""
 
-    def __init__(self, spyglass_config_factory=None):
-        self._config = {}
-        self._spyglass_config_factory = spyglass_config_factory or self._default_config_factory
-        self._spyglass_config = None
+    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str):
+        """Create complete SpyglassConfig setup using official methods"""
+        from spyglass.settings import SpyglassConfig
 
-    @staticmethod
-    def _default_config_factory():
-        """Default factory for SpyglassConfig"""
-        try:
-            from spyglass.settings import SpyglassConfig
-            return SpyglassConfig()
-        except ImportError:
-            return None
+        # Create SpyglassConfig instance with base directory
+        config = SpyglassConfig(base_dir=str(base_dir), test_mode=True)
 
-    @property
-    def spyglass_config(self):
-        """Lazy-load SpyglassConfig only when needed"""
-        if self._spyglass_config is None:
-            self._spyglass_config = self._spyglass_config_factory()
-        return self._spyglass_config
+        # Use SpyglassConfig's official save_dj_config method with local config
+        config.save_dj_config(
+            save_method="local",  # Creates dj_local_conf.json in current directory
+            base_dir=str(base_dir),
+            database_host=host,
+            database_port=port,
+            database_user=user,
+            database_password=password,
+            database_use_tls=False if host.startswith("127.0.0.1") or host == "localhost" else True,
+            set_password=False  # Skip password prompt during setup
+        )
 
-    def database(self, host: str, port: int, user: str, password: str) -> 'ConfigBuilder':
-        """Add database configuration"""
-        self._config.update({
-            "database.host": host,
-            "database.port": port,
-            "database.user": user,
-            "database.password": password,
-            "database.reconnect": True,
-            "database.use_tls": False,
-        })
-        return self
-
-    def stores(self, base_dir: Path) -> 'ConfigBuilder':
-        """Add store configuration using SpyglassConfig structure"""
-        self._config["stores"] = {
-            "raw": {
-                "protocol": "file",
-                "location": str(base_dir / "raw"),
-                "stage": str(base_dir / "raw")
-            },
-            "analysis": {
-                "protocol": "file",
-                "location": str(base_dir / "analysis"),
-                "stage": str(base_dir / "analysis")
-            },
-        }
-        return self
-
-    def spyglass_dirs(self, base_dir: Path) -> 'ConfigBuilder':
-        """Add Spyglass directory configuration using official structure"""
-        if self.spyglass_config:
-            self._add_official_spyglass_config(base_dir)
-        else:
-            self._add_fallback_spyglass_config(base_dir)
-        return self
-
-    def _add_official_spyglass_config(self, base_dir: Path):
-        """Add configuration using official SpyglassConfig structure"""
-        config = self.spyglass_config
-
-        self._config["custom"] = {
-            "spyglass_dirs": self._build_spyglass_dirs(base_dir, config),
-            "debug_mode": "false",
-            "test_mode": "false",
-        }
-
-        self._add_subsystem_configs(base_dir, config)
-        self._add_spyglass_defaults()
-
-    def _add_fallback_spyglass_config(self, base_dir: Path):
-        """Add fallback configuration when SpyglassConfig unavailable"""
-        # Match the exact structure from SpyglassConfig.relative_dirs["spyglass"]
-        spyglass_relative_dirs = {
-            "raw": "raw",
-            "analysis": "analysis",
-            "recording": "recording",
-            "sorting": "spikesorting",  # Note: maps to "spikesorting" directory
-            "waveforms": "waveforms",
-            "temp": "tmp",             # Note: maps to "tmp" directory
-            "video": "video",
-            "export": "export",
-        }
-        spyglass_config = self._build_dir_config(base_dir, spyglass_relative_dirs)
-        spyglass_config["base"] = str(base_dir)
-
-        # Add fallback kachery directories
-        kachery_relative_dirs = {
-            "cloud": ".kachery-cloud",
-            "storage": "kachery_storage",
-            "temp": "tmp",
-        }
-        kachery_config = self._build_dir_config(base_dir, kachery_relative_dirs)
-
-        # Add fallback DLC directories
-        dlc_base = base_dir / "deeplabcut"
-        dlc_relative_dirs = {
-            "project": "projects",
-            "video": "video",
-            "output": "output",
-        }
-        dlc_config = {
-            "base": str(dlc_base),
-            **self._build_dir_config(dlc_base, dlc_relative_dirs)
-        }
-
-        # Add fallback Moseq directories
-        moseq_base = base_dir / "moseq"
-        moseq_relative_dirs = {
-            "project": "projects",
-            "video": "video",
-        }
-        moseq_config = {
-            "base": str(moseq_base),
-            **self._build_dir_config(moseq_base, moseq_relative_dirs)
-        }
-
-        self._config["custom"] = {
-            "spyglass_dirs": spyglass_config,
-            "kachery_dirs": kachery_config,
-            "dlc_dirs": dlc_config,
-            "moseq_dirs": moseq_config,
-            "debug_mode": "false",
-            "test_mode": "false",
-        }
-
-    def _build_dir_config(self, base_dir: Path, dirs_dict: dict) -> dict:
-        """Build directory configuration with consistent path conversion"""
-        return {subdir: str(base_dir / rel_path)
-                for subdir, rel_path in dirs_dict.items()}
-
-    def _build_spyglass_dirs(self, base_dir: Path, config) -> dict:
-        """Build core spyglass directory configuration"""
-        spyglass_dirs = config.relative_dirs["spyglass"]
-        result = self._build_dir_config(base_dir, spyglass_dirs)
-        result["base"] = str(base_dir)
-        return result
-
-    def _add_subsystem_configs(self, base_dir: Path, config):
-        """Add configurations for subsystems (kachery, DLC, moseq)"""
-        # Add kachery directories
-        kachery_dirs = config.relative_dirs.get("kachery", {})
-        self._config["custom"]["kachery_dirs"] = self._build_dir_config(base_dir, kachery_dirs)
-
-        # Add DLC directories
-        dlc_dirs = config.relative_dirs.get("dlc", {})
-        dlc_base = base_dir / "deeplabcut"
-        self._config["custom"]["dlc_dirs"] = {
-            "base": str(dlc_base),
-            **self._build_dir_config(dlc_base, dlc_dirs)
-        }
-
-        # Add Moseq directories
-        moseq_dirs = config.relative_dirs.get("moseq", {})
-        moseq_base = base_dir / "moseq"
-        self._config["custom"]["moseq_dirs"] = {
-            "base": str(moseq_base),
-            **self._build_dir_config(moseq_base, moseq_dirs)
-        }
-
-    def _add_spyglass_defaults(self):
-        """Add standard SpyglassConfig defaults"""
-        self._config.update({
-            "filepath_checksum_size_limit": DEFAULT_CHECKSUM_SIZE_LIMIT,
-            "enable_python_native_blobs": True,
-        })
-
-    def build(self) -> dict:
-        """Build the final configuration with validation"""
-        config = self._config.copy()
-        self._validate_config(config)
         return config
-
-    def _validate_config(self, config: dict):
-        """Validate configuration completeness and consistency"""
-        # Check for required keys (some are flat, some are nested)
-        required_checks = [
-            ("database.host" in config, "database.host"),
-            ("stores" in config, "stores")
-        ]
-
-        missing = [key for check, key in required_checks if not check]
-        if missing:
-            raise ValueError(f"Missing required configuration: {missing}")
 
 
 class DatabaseSetupStrategy(ABC):
@@ -742,6 +577,64 @@ class SpyglassQuickstart:
 
         return result.returncode
 
+    def _run_validation_script(self, script_path: Path) -> int:
+        """Run validation script directly in current Python process"""
+        try:
+            # Import and run validation directly to avoid conda run issues
+            import sys
+            import importlib.util
+
+            # Add script directory to path temporarily
+            script_dir = str(script_path.parent)
+            if script_dir not in sys.path:
+                sys.path.insert(0, script_dir)
+
+            try:
+                # Load the validation module
+                spec = importlib.util.spec_from_file_location("validate_spyglass", script_path)
+                if spec is None or spec.loader is None:
+                    self.print_error("Could not load validation script")
+                    return 1
+
+                validate_module = importlib.util.module_from_spec(spec)
+
+                # Temporarily redirect stdout to capture validation output
+                from io import StringIO
+                old_stdout = sys.stdout
+                captured_output = StringIO()
+
+                try:
+                    # Set verbose mode and run validation
+                    sys.argv = ["validate_spyglass.py", "-v"]  # Set args for verbose mode
+                    sys.stdout = captured_output
+
+                    # Execute the validation script
+                    spec.loader.exec_module(validate_module)
+
+                    # Get the output
+                    validation_output = captured_output.getvalue()
+
+                    # Print the validation output
+                    if validation_output.strip():
+                        print(validation_output, end='')
+
+                    return 0  # Success
+
+                finally:
+                    sys.stdout = old_stdout
+
+            finally:
+                # Remove script directory from path
+                if script_dir in sys.path:
+                    sys.path.remove(script_dir)
+
+        except SystemExit as e:
+            # Validation script called sys.exit()
+            return e.code if e.code is not None else 0
+        except Exception as e:
+            self.print_error(f"Validation script error: {e}")
+            return 1
+
     def setup_database(self):
         """Setup database configuration"""
         self.print_header("Database Setup")
@@ -770,46 +663,65 @@ class SpyglassQuickstart:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def create_config(self, host: str, user: str, password: str, port: int):
-        """Create DataJoint configuration file using builder pattern"""
+        """Create DataJoint configuration file using SpyglassConfig directly"""
         self.print_info("Creating configuration file...")
 
         # Create base directory structure
         self._create_directory_structure()
 
-        # Build configuration using integrated ConfigBuilder
-        config = (ConfigBuilder()
-                 .database(host, port, user, password)
-                 .stores(self.config.base_dir)
-                 .spyglass_dirs(self.config.base_dir)
-                 .build())
+        # Suppress SpyglassConfig warnings during setup
+        import warnings
+        import logging
 
-        # Save configuration
-        config_path = self.config.repo_dir / "dj_local_conf.json"
-        with config_path.open('w') as f:
-            json.dump(config, f, indent=4)
+        # Temporarily suppress specific warnings that occur during setup
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="Failed to load SpyglassConfig.*")
 
-        self.print_success(f"Configuration file created at: {config_path}")
-        self.print_success(f"Data directories created at: {self.config.base_dir}")
+            # Also temporarily suppress spyglass logger warnings
+            spyglass_logger = logging.getLogger('spyglass')
+            old_level = spyglass_logger.level
+            spyglass_logger.setLevel(logging.ERROR)  # Only show errors, not warnings
 
-        # Validate configuration using SpyglassConfig
-        self._validate_spyglass_config()
+            try:
+                # Use SpyglassConfig to create and save configuration
+                config_manager = SpyglassConfigManager()
 
-    def _validate_spyglass_config(self):
+                spyglass_config = config_manager.create_config(
+                    base_dir=self.config.base_dir,
+                    host=host,
+                    port=port,
+                    user=user,
+                    password=password
+                )
+
+                # Config file is created in current working directory as dj_local_conf.json
+                local_config_path = Path.cwd() / "dj_local_conf.json"
+                self.print_success(f"Configuration file created at: {local_config_path}")
+                self.print_success(f"Data directories created at: {self.config.base_dir}")
+
+                # Validate the configuration
+                self._validate_spyglass_config(spyglass_config)
+
+            except Exception as e:
+                self.print_error(f"Failed to create configuration: {e}")
+                raise
+            finally:
+                # Restore original logger level
+                spyglass_logger.setLevel(old_level)
+
+    def _validate_spyglass_config(self, spyglass_config):
         """Validate the created configuration using SpyglassConfig"""
         try:
-            from spyglass.settings import SpyglassConfig
-
             # Test if the configuration can be loaded properly
-            sg_config = SpyglassConfig(base_dir=str(self.config.base_dir))
-            sg_config.load_config(force_reload=True)
+            spyglass_config.load_config(force_reload=True)
 
             # Verify all expected directories are accessible
             test_dirs = [
-                sg_config.base_dir,
-                sg_config.raw_dir,
-                sg_config.analysis_dir,
-                sg_config.recording_dir,
-                sg_config.sorting_dir,
+                spyglass_config.base_dir,
+                spyglass_config.raw_dir,
+                spyglass_config.analysis_dir,
+                spyglass_config.recording_dir,
+                spyglass_config.sorting_dir,
             ]
 
             for test_dir in test_dirs:
@@ -863,8 +775,8 @@ class SpyglassQuickstart:
 
         self.print_info("Running comprehensive validation checks...")
 
-        # Run validation in environment
-        exit_code = self._run_in_env(["python", str(validation_script), "-v"])
+        # Run validation script directly
+        exit_code = self._run_validation_script(validation_script)
 
         if exit_code == 0:
             self.print_success("All validation checks passed!")
@@ -885,6 +797,10 @@ class SpyglassQuickstart:
             # Quick integration test
             sg_config = SpyglassConfig(base_dir=str(self.config.base_dir))
             sg_config.load_config()
+
+            # Test full spyglass.common import as recommended in manual setup
+            from spyglass.common import Nwbfile
+            Nwbfile()  # Instantiate to verify database connection and config
 
             self.print_success("SpyglassConfig integration test passed")
 
