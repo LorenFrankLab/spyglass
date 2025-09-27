@@ -330,6 +330,8 @@ class SpyglassConfig:
 
         Parameters
         ----------
+        base_dir : str, optional
+            The base directory. If not provided, will use existing config.
         database_user : str, optional
             The database user. If not provided, resulting config will not
             specify.
@@ -338,7 +340,7 @@ class SpyglassConfig:
             specify.
         database_host : str, optional
             Default lmf-db.cin.ucsf.edu. MySQL host name.
-        dapabase_port : int, optional
+        database_port : int, optional
             Default 3306. Port number for MySQL server.
         database_use_tls : bool, optional
             Default True. Use TLS encryption.
@@ -380,7 +382,7 @@ class SpyglassConfig:
             datajoint builtins will be used to save.
         output_filename : str or Path, optional
             Default to datajoint global config. If save_method = 'custom', name
-            of file to generate. Must end in either be either yaml or json.
+            of file to generate. Must end in either yaml or json.
         base_dir : str, optional
             The base directory. If not provided, will default to the env var
         set_password : bool, optional
