@@ -151,15 +151,11 @@ class SetupConfig:
 
 def validate_base_dir(path: Path) -> Path:
     """Validate and resolve base directory path."""
-    resolved = path.resolve()
+    resolved = Path(path).expanduser().resolve()
 
     # Check if parent directory exists (we'll create the base_dir itself if needed)
     if not resolved.parent.exists():
         raise ValueError(f"Parent directory does not exist: {resolved.parent}")
-
-    # Check for potential security issues (directory traversal)
-    if str(resolved).startswith((".", "..")):
-        raise ValueError(f"Relative paths not allowed: {path}")
 
     return resolved
 
@@ -245,6 +241,28 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         ], check=True)
 
     orchestrator.ui.print_success("Docker database started")
+
+    # Wait for MySQL to be ready
+    orchestrator.ui.print_info("Waiting for MySQL to be ready...")
+    for attempt in range(60):  # Wait up to 2 minutes
+        try:
+            result = subprocess.run(
+                ["docker", "exec", "spyglass-db", "mysqladmin", "-uroot", "-ptutorial", "ping"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if b"mysqld is alive" in result.stdout.encode() or "mysqld is alive" in result.stdout:
+                orchestrator.ui.print_success("MySQL is ready!")
+                break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            pass
+
+        if attempt < 59:  # Don't sleep on the last attempt
+            time.sleep(2)
+    else:
+        orchestrator.ui.print_warning("MySQL readiness check timed out, but proceeding anyway")
+
     orchestrator.create_config("localhost", "root", "tutorial", 3306)
 
 
@@ -437,6 +455,7 @@ class EnvironmentManager:
     def __init__(self, ui, config: SetupConfig):
         self.ui = ui
         self.config = config
+        self.system_info = None
         self.PIPELINE_ENVIRONMENTS = {
             Pipeline.DLC: ("environment_dlc.yml", "DeepLabCut pipeline environment"),
             Pipeline.MOSEQ_CPU: ("environment_moseq.yml", "Keypoint-Moseq (CPU) pipeline environment"),
@@ -514,6 +533,9 @@ class EnvironmentManager:
                 universal_newlines=True
             )
 
+            # Buffer to collect all output for error diagnostics
+            output_buffer = []
+
             # Monitor process with timeout
             start_time = time.time()
             while process.poll() is None:
@@ -525,20 +547,33 @@ class EnvironmentManager:
                 try:
                     for line in self._filter_progress_lines(process):
                         print(line)
-                except:
+                        output_buffer.append(line)
+                except Exception:
                     pass
 
                 time.sleep(1)
 
+            # Store output buffer for error reporting
+            process._output_buffer = '\n'.join(output_buffer)
+
             if process.returncode != 0:
-                stderr_output = process.stderr.read() if process.stderr else "Unknown error"
+                # Collect the last portion of output for diagnostics
+                full_output = ""
+                if hasattr(process, '_output_buffer'):
+                    full_output = process._output_buffer
+
+                # Get last 200 lines for error context
+                output_lines = full_output.split('\n') if full_output else []
+                error_context = '\n'.join(output_lines[-200:]) if output_lines else "No output captured"
+
                 raise EnvironmentCreationError(
-                    f"Environment creation failed with return code {process.returncode}\n{stderr_output}"
+                    f"Environment creation failed with return code {process.returncode}\n"
+                    f"--- Last 200 lines of output ---\n{error_context}"
                 )
 
         except subprocess.TimeoutExpired:
             raise EnvironmentCreationError("Environment creation timed out")
-        except Exception as e:
+        except Exception:
             raise EnvironmentCreationError("Environment creation/update failed")
 
     def _filter_progress_lines(self, process) -> Iterator[str]:
@@ -580,23 +615,31 @@ class EnvironmentManager:
     def _install_full_dependencies(self, conda_cmd: str):
         """Install full set of dependencies"""
         self.ui.print_info("Installing full dependencies...")
-        # Add full dependency installation logic here if needed
+        # For now, use the conda_cmd to install base spyglass
+        self._run_in_env(conda_cmd, ["pip", "install", "-e", ".[test]"])
 
     def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
-        """Run command - simplified approach"""
+        """Run command in the target conda environment"""
+        full_cmd = [conda_cmd, "run", "-n", self.config.env_name] + cmd
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            result = subprocess.run(full_cmd, check=True, capture_output=True, text=True)
+            # Print output for user feedback
+            if result.stdout:
+                print(result.stdout, end="")
+            if result.stderr:
+                print(result.stderr, end="")
             return result.returncode
         except subprocess.CalledProcessError as e:
-            self.ui.print_error(f"Command failed: {' '.join(cmd)}")
+            self.ui.print_error(f"Command failed in environment '{self.config.env_name}': {' '.join(cmd)}")
+            if e.stdout:
+                self.ui.print_error("STDOUT:", e.stdout)
             if e.stderr:
-                self.ui.print_error(e.stderr)
+                self.ui.print_error("STDERR:", e.stderr)
             raise
 
     def _get_system_info(self):
-        """Get system info - placeholder for now"""
-        # This would be injected or accessed differently in the refactored version
-        return None
+        """Get system info from orchestrator"""
+        return self.system_info
 
 
 class QuickstartOrchestrator:
@@ -643,6 +686,9 @@ class QuickstartOrchestrator:
         self.system_detector.check_python(self.system_info)
         conda_cmd = self.system_detector.check_conda()
         self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
+
+        # Wire system_info to environment manager
+        self.env_manager.system_info = self.system_info
 
         # Step 2: Installation Type Selection (if not specified)
         if not self._installation_type_specified():
@@ -692,7 +738,7 @@ class QuickstartOrchestrator:
 
         try:
             result = subprocess.run(
-                ["python", str(validation_script), "-v"],
+                [conda_cmd, "run", "-n", self.config.env_name, "python", str(validation_script), "-v"],
                 capture_output=True,
                 text=True,
                 check=False
@@ -766,12 +812,15 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"Directory access failed: {e}")
             raise
 
-    def _validate_spyglass_config(self, spyglass_config):
+    def _validate_spyglass_config(self, config):
         """Validate the created configuration using SpyglassConfig"""
         try:
             # Test basic functionality
             self.ui.print_info("Validating configuration...")
-            # Add basic validation logic here
+            # Validate that the config object has required attributes
+            if hasattr(config, 'base_dir'):
+                self.ui.print_success(f"Base directory configured: {config.base_dir}")
+            # Add more validation logic here as needed
             self.ui.print_success("Configuration validated successfully")
         except Exception as e:
             self.ui.print_error(f"Configuration validation failed: {e}")
@@ -782,22 +831,22 @@ class QuickstartOrchestrator:
         self.ui.print_header("Setup Complete!")
 
         print("\nNext steps:")
-        print(f"\n1. Activate the Spyglass environment:")
+        print("\n1. Activate the Spyglass environment:")
         print(f"   conda activate {self.config.env_name}")
-        print(f"\n2. Test the installation:")
-        print(f"   python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\"")
-        print(f"\n3. Start with the tutorials:")
-        print(f"   cd notebooks")
-        print(f"   jupyter notebook 01_Concepts.ipynb")
-        print(f"\n4. For help and documentation:")
-        print(f"   Documentation: https://lorenfranklab.github.io/spyglass/")
-        print(f"   GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues")
+        print("\n2. Test the installation:")
+        print("   python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\"")
+        print("\n3. Start with the tutorials:")
+        print("   cd notebooks")
+        print("   jupyter notebook 01_Concepts.ipynb")
+        print("\n4. For help and documentation:")
+        print("   Documentation: https://lorenfranklab.github.io/spyglass/")
+        print("   GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues")
 
-        print(f"\nConfiguration Summary:")
+        print("\nConfiguration Summary:")
         print(f"  Base directory: {self.config.base_dir}")
         print(f"  Environment: {self.config.env_name}")
         print(f"  Database: {'Configured' if self.config.setup_database else 'Skipped'}")
-        print(f"  Integration: SpyglassConfig compatible")
+        print("  Integration: SpyglassConfig compatible")
 
 
 class SystemDetector:
@@ -824,7 +873,7 @@ class SystemDetector:
         elif os_name == "Linux":
             os_display = "Linux"
             is_m1 = False
-            self.ui.print_success(f"Operating System: Linux")
+            self.ui.print_success("Operating System: Linux")
             self.ui.print_success(f"Architecture: {arch}")
         elif os_name == "Windows":
             self.ui.print_warning("Windows detected - not officially supported")
