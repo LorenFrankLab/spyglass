@@ -31,17 +31,37 @@ import subprocess
 import shutil
 import argparse
 from pathlib import Path
-from typing import Optional, List, Protocol, Iterator, Tuple
+from typing import Optional, List, Iterator, Tuple
 from dataclasses import dataclass, replace
 from enum import Enum
 from collections import namedtuple
-from contextlib import suppress
-from functools import wraps, lru_cache
-from abc import ABC, abstractmethod
+from functools import lru_cache
+# Removed ABC import - not needed for a simple script
 import getpass
 
 # Named constants
 DEFAULT_CHECKSUM_SIZE_LIMIT = 1024**3  # 1 GB
+
+
+# Exception hierarchy for clear error handling
+class SpyglassSetupError(Exception):
+    """Base exception for setup errors."""
+    pass
+
+
+class SystemRequirementError(SpyglassSetupError):
+    """System doesn't meet requirements."""
+    pass
+
+
+class EnvironmentCreationError(SpyglassSetupError):
+    """Failed to create conda environment."""
+    pass
+
+
+class DatabaseSetupError(SpyglassSetupError):
+    """Failed to setup database."""
+    pass
 
 
 # Immutable Colors using NamedTuple
@@ -98,51 +118,20 @@ class SetupConfig:
     env_name: str = "spyglass"
 
 
-# Protocols for dependency injection
-class CommandRunner(Protocol):
-    """Protocol for command execution"""
-    def run(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
-        ...
+# Simplified helper functions - no need for Protocols in a script
+def run_command(cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
+    """Run a command with subprocess.run."""
+    return subprocess.run(cmd, **kwargs)
 
 
-class FileSystem(Protocol):
-    """Protocol for file system operations"""
-    def exists(self, path: Path) -> bool:
-        ...
-
-    def mkdir(self, path: Path, exist_ok: bool = False) -> None:
-        ...
+def path_exists(path: Path) -> bool:
+    """Check if a path exists."""
+    return path.exists()
 
 
-# Default implementations
-class DefaultCommandRunner:
-    """Default command runner implementation"""
-
-    def run(self, cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
-        return subprocess.run(cmd, **kwargs)
-
-
-class DefaultFileSystem:
-    """Default file system implementation"""
-
-    def exists(self, path: Path) -> bool:
-        return path.exists()
-
-    def mkdir(self, path: Path, exist_ok: bool = False) -> None:
-        path.mkdir(exist_ok=exist_ok)
-
-
-# Decorator for safe subprocess execution
-def subprocess_handler(default_return=""):
-    """Decorator for safe subprocess execution"""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            with suppress(subprocess.CalledProcessError, FileNotFoundError):
-                return func(*args, **kwargs)
-            return default_return
-        return wrapper
-    return decorator
+def make_directory(path: Path, exist_ok: bool = False) -> None:
+    """Create a directory."""
+    path.mkdir(exist_ok=exist_ok, parents=True)
 
 
 class SpyglassConfigManager:
@@ -170,17 +159,16 @@ class SpyglassConfigManager:
         return config
 
 
-class DatabaseSetupStrategy(ABC):
-    """Abstract base class for database setup strategies"""
+class DatabaseSetupStrategy:
+    """Base class for database setup strategies."""
 
-    @abstractmethod
     def setup(self, installer: 'SpyglassQuickstart') -> None:
-        """Setup the database"""
-        pass
+        """Setup the database."""
+        raise NotImplementedError("Subclasses must implement setup()")
 
 
 class DockerDatabaseStrategy(DatabaseSetupStrategy):
-    """Docker database setup strategy"""
+    """Docker database setup strategy."""
 
     def setup(self, installer: 'SpyglassQuickstart') -> None:
         installer.print_info("Setting up local Docker database...")
@@ -189,7 +177,7 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
         if not shutil.which("docker"):
             installer.print_error("Docker is not installed")
             installer.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
-            raise RuntimeError("Docker is not installed")
+            raise SystemRequirementError("Docker is not installed")
 
         # Check Docker daemon
         result = installer.command_runner.run(
@@ -202,7 +190,7 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
             installer.print_info("Please start Docker Desktop and try again")
             installer.print_info("On macOS: Open Docker Desktop application")
             installer.print_info("On Linux: sudo systemctl start docker")
-            raise RuntimeError("Docker daemon is not running")
+            raise SystemRequirementError("Docker daemon is not running")
 
         # Pull and run container
         installer.print_info("Pulling MySQL image...")
@@ -232,7 +220,7 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
 
 class ExistingDatabaseStrategy(DatabaseSetupStrategy):
-    """Existing database setup strategy"""
+    """Existing database setup strategy."""
 
     def setup(self, installer: 'SpyglassQuickstart') -> None:
         installer.print_info("Configuring connection to existing database...")
@@ -256,13 +244,9 @@ class SpyglassQuickstart:
         Pipeline.MOSEQ_GPU: ("environment_moseq_gpu.yml", "Keypoint-Moseq GPU environment"),
     }
 
-    def __init__(self, config: SetupConfig, colors: Optional[object] = None,
-                 command_runner: Optional[CommandRunner] = None,
-                 file_system: Optional[FileSystem] = None):
+    def __init__(self, config: SetupConfig, colors: Optional[object] = None):
         self.config = config
         self.colors = colors or Colors
-        self.command_runner = command_runner or DefaultCommandRunner()
-        self.file_system = file_system or DefaultFileSystem()
         self.system_info: Optional[SystemInfo] = None
 
     def run(self) -> int:
@@ -275,23 +259,50 @@ class SpyglassQuickstart:
         except KeyboardInterrupt:
             self.print_error("\n\nSetup interrupted by user")
             return 130
+        except SystemRequirementError as e:
+            self.print_error(f"\nSystem requirement not met: {e}")
+            self.print_info("Please install missing requirements and try again")
+            return 2
+        except EnvironmentCreationError as e:
+            self.print_error(f"\nFailed to create environment: {e}")
+            self.print_info("Check your conda installation and try again")
+            return 3
+        except DatabaseSetupError as e:
+            self.print_error(f"\nDatabase setup failed: {e}")
+            self.print_info("You can skip database setup with --no-database")
+            return 4
+        except SpyglassSetupError as e:
+            self.print_error(f"\nSetup error: {e}")
+            return 5
         except Exception as e:
-            self.print_error(f"\nSetup failed: {e}")
+            self.print_error(f"\nUnexpected error: {e}")
+            self.print_info("Please report this issue at https://github.com/LorenFrankLab/spyglass/issues")
             return 1
 
     def _execute_setup_steps(self):
-        """Execute all setup steps"""
-        self.detect_system()
-        self.check_python()
-        self.check_conda()
+        """Execute all setup steps in sequence.
 
-        # Let user choose installation type unless specified via command line
-        if not self._installation_type_specified():
-            self.select_installation_type()
+        This method coordinates the setup process. Each step is independent
+        and can be tested separately.
+        """
+        # Define setup steps with their conditions
+        setup_steps = [
+            # Step: (method, condition to run, description)
+            (self.detect_system, True, "Detecting system"),
+            (self.check_python, True, "Checking Python"),
+            (self.check_conda, True, "Checking conda/mamba"),
+            (self.select_installation_type,
+             not self._installation_type_specified(),
+             "Selecting installation type"),
+            (self._confirm_environment_name, True, "Confirming environment name"),
+        ]
 
-        # Let user choose environment name for pipeline-specific installations
-        self._confirm_environment_name()
+        # Execute initial setup steps
+        for method, should_run, description in setup_steps:
+            if should_run:
+                method()
 
+        # Environment setup - special handling for dependencies
         env_file = self.select_environment()
         env_was_updated = self.create_environment(env_file)
 
@@ -299,6 +310,7 @@ class SpyglassQuickstart:
         if env_was_updated:
             self.install_additional_deps()
 
+        # Optional final steps
         if self.config.setup_database:
             self.setup_database()
 
@@ -365,7 +377,7 @@ class SpyglassQuickstart:
             os_display = "Windows"
             is_m1 = False
         else:
-            raise RuntimeError(f"Unsupported operating system: {os_name}")
+            raise SystemRequirementError(f"Unsupported operating system: {os_name}")
 
         python_version = sys.version_info[:3]
 
@@ -399,7 +411,7 @@ class SpyglassQuickstart:
             self.print_error("Neither mamba nor conda found")
             self.print_info("Please install miniforge or miniconda:")
             self.print_info("  https://github.com/conda-forge/miniforge#install")
-            raise RuntimeError("No conda/mamba found")
+            raise SystemRequirementError("No conda/mamba found")
 
         # Update system info with conda command
         self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
@@ -419,28 +431,39 @@ class SpyglassQuickstart:
                 return cmd
         return None
 
-    @subprocess_handler("")
-    def get_command_output(self, cmd: List[str]) -> str:
-        """Run command and return output safely"""
-        result = self.command_runner.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True
-        )
-        return result.stdout.strip()
+    def get_command_output(self, cmd: List[str], default: str = "") -> str:
+        """Run command and return output, or default on failure.
 
-    @lru_cache(maxsize=128)
-    def get_cached_command_output(self, cmd_tuple: tuple) -> str:
-        """Get cached command output"""
-        return self.get_command_output(list(cmd_tuple))
+        Args:
+            cmd: Command to run as list of strings
+            default: Value to return on failure
+
+        Returns:
+            Command output or default value
+        """
+        try:
+            result = run_command(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            # Log failure for debugging but don't crash
+            # In production, you'd want: logger.debug(f"Command failed: {cmd}")
+            return default
+
+    @lru_cache(maxsize=8)  # 8 is plenty for a setup script
+    def cached_command(self, *cmd: str) -> str:
+        """Cache frequently used command outputs."""
+        return self.get_command_output(list(cmd), "")
 
     def _installation_type_specified(self) -> bool:
-        """Check if installation type was specified via command line arguments"""
+        """Check if installation type was specified via command line arguments."""
         # Installation type is considered specified if user used --full or --pipeline flags
-        return (hasattr(self.config, 'install_type') and
-                self.config.install_type == InstallType.FULL) or \
-               (hasattr(self.config, 'pipeline') and
+        # Config always has these attributes due to dataclass defaults
+        return (self.config.install_type == InstallType.FULL or
                 self.config.pipeline is not None)
 
     def select_installation_type(self):
@@ -588,8 +611,8 @@ class SpyglassQuickstart:
 
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
-        if not self.file_system.exists(env_path):
-            raise FileNotFoundError(f"Environment file not found: {env_path}")
+        if not path_exists(env_path):
+            raise EnvironmentCreationError(f"Environment file not found: {env_path}")
 
         return env_file
 
@@ -653,8 +676,14 @@ class SpyglassQuickstart:
             self.print_info("This may take 5-10 minutes...")
             return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
 
-    def _execute_environment_command(self, cmd: List[str]):
-        """Execute environment creation/update command with progress"""
+    def _execute_environment_command(self, cmd: List[str], timeout: int = 600):
+        """Execute environment creation/update command with progress and timeout.
+
+        Args:
+            cmd: Command to execute
+            timeout: Timeout in seconds (default 10 minutes)
+        """
+        import time
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -662,13 +691,22 @@ class SpyglassQuickstart:
             text=True
         )
 
-        # Show progress
+        start_time = time.time()
+
+        # Show progress with timeout check
         for progress_line in self._filter_progress_lines(process):
             print(progress_line)
 
+            # Check timeout
+            if time.time() - start_time > timeout:
+                process.kill()
+                raise EnvironmentCreationError(
+                    f"Environment creation exceeded {timeout}s timeout"
+                )
+
         process.wait()
         if process.returncode != 0:
-            raise RuntimeError("Environment creation/update failed")
+            raise EnvironmentCreationError("Environment creation/update failed")
 
     def _filter_progress_lines(self, process) -> Iterator[str]:
         """Filter and yield relevant progress lines"""
@@ -729,7 +767,7 @@ class SpyglassQuickstart:
         # Use conda run to execute in environment
         full_cmd = [conda_cmd, "run", "-n", env_name] + cmd
 
-        result = self.command_runner.run(
+        result = run_command(
             full_cmd,
             capture_output=True,
             text=True
@@ -743,61 +781,25 @@ class SpyglassQuickstart:
         return result.returncode
 
     def _run_validation_script(self, script_path: Path) -> int:
-        """Run validation script directly in current Python process"""
+        """Run validation script using subprocess - simple and reliable."""
         try:
-            # Import and run validation directly to avoid conda run issues
-            import sys
-            import importlib.util
+            result = subprocess.run(
+                [sys.executable, str(script_path), "-v"],
+                capture_output=True,
+                text=True,
+                check=False  # Don't raise on non-zero exit
+            )
 
-            # Add script directory to path temporarily
-            script_dir = str(script_path.parent)
-            if script_dir not in sys.path:
-                sys.path.insert(0, script_dir)
+            # Print the output
+            if result.stdout:
+                print(result.stdout)
+            if result.stderr:
+                print(result.stderr)
 
-            try:
-                # Load the validation module
-                spec = importlib.util.spec_from_file_location("validate_spyglass", script_path)
-                if spec is None or spec.loader is None:
-                    self.print_error("Could not load validation script")
-                    return 1
+            return result.returncode
 
-                validate_module = importlib.util.module_from_spec(spec)
-
-                # Temporarily redirect stdout to capture validation output
-                from io import StringIO
-                old_stdout = sys.stdout
-                captured_output = StringIO()
-
-                try:
-                    # Set verbose mode and run validation
-                    sys.argv = ["validate_spyglass.py", "-v"]  # Set args for verbose mode
-                    sys.stdout = captured_output
-
-                    # Execute the validation script
-                    spec.loader.exec_module(validate_module)
-
-                    # Get the output
-                    validation_output = captured_output.getvalue()
-
-                    # Print the validation output
-                    if validation_output.strip():
-                        print(validation_output, end='')
-
-                    return 0  # Success
-
-                finally:
-                    sys.stdout = old_stdout
-
-            finally:
-                # Remove script directory from path
-                if script_dir in sys.path:
-                    sys.path.remove(script_dir)
-
-        except SystemExit as e:
-            # Validation script called sys.exit()
-            return e.code if e.code is not None else 0
         except Exception as e:
-            self.print_error(f"Validation script error: {e}")
+            self.print_error(f"Validation failed: {e}")
             return 1
 
     def setup_database(self):
@@ -907,7 +909,7 @@ class SpyglassQuickstart:
     def _create_directory_structure(self):
         """Create base directory structure using SpyglassConfig"""
         base_dir = self.config.base_dir
-        self.file_system.mkdir(base_dir, exist_ok=True)
+        make_directory(base_dir, exist_ok=True)
 
         try:
             # Use SpyglassConfig to create directories with official structure
@@ -924,7 +926,7 @@ class SpyglassQuickstart:
             self.print_warning("SpyglassConfig not available, using fallback directory creation")
             subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
             for subdir in subdirs:
-                self.file_system.mkdir(base_dir / subdir, exist_ok=True)
+                make_directory(base_dir / subdir, exist_ok=True)
 
     def run_validation(self) -> int:
         """Run validation script with SpyglassConfig integration check"""
@@ -935,7 +937,7 @@ class SpyglassQuickstart:
 
         validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
 
-        if not self.file_system.exists(validation_script):
+        if not path_exists(validation_script):
             self.print_error("Validation script not found")
             return 1
 
