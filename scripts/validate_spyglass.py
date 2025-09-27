@@ -422,10 +422,12 @@ class SpyglassValidator:
             try:
                 connection = dj.conn(reset=False)
                 if connection.is_connected:
+                    host_port = f"{connection.host}:{connection.port}" if hasattr(connection, 'port') else connection.host
+                    user = getattr(connection, 'user', 'unknown')
                     self.add_result(
                         "Database Connection",
                         True,
-                        f"Connected to {connection.host}"
+                        f"Connected to {host_port} as {user}"
                     )
                     self._check_spyglass_tables()
                 else:
