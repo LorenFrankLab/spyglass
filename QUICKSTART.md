@@ -7,7 +7,7 @@ Get from zero to analyzing neural data with Spyglass in just a few commands.
 - **Python**: Version 3.9 or higher
 - **Disk Space**: ~10GB for installation + data storage
 - **Operating System**: macOS or Linux (Windows experimental)
-- **Package Manager**: [mamba](https://mamba.readthedocs.io/) or [conda](https://docs.conda.io/) (mamba recommended)
+- **Package Manager**: [conda](https://docs.conda.io/) (23.10.0+ recommended) or [mamba](https://mamba.readthedocs.io/)
 
 If you don't have mamba/conda, install [miniforge](https://github.com/conda-forge/miniforge#install) first.
 
