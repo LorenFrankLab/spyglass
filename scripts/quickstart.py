@@ -215,12 +215,56 @@ class ConfigBuilder:
 
     def _add_fallback_spyglass_config(self, base_dir: Path):
         """Add fallback configuration when SpyglassConfig unavailable"""
-        subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
-        spyglass_config = self._build_dir_config(base_dir, {subdir: subdir for subdir in subdirs})
+        # Match the exact structure from SpyglassConfig.relative_dirs["spyglass"]
+        spyglass_relative_dirs = {
+            "raw": "raw",
+            "analysis": "analysis",
+            "recording": "recording",
+            "sorting": "spikesorting",  # Note: maps to "spikesorting" directory
+            "waveforms": "waveforms",
+            "temp": "tmp",             # Note: maps to "tmp" directory
+            "video": "video",
+            "export": "export",
+        }
+        spyglass_config = self._build_dir_config(base_dir, spyglass_relative_dirs)
         spyglass_config["base"] = str(base_dir)
+
+        # Add fallback kachery directories
+        kachery_relative_dirs = {
+            "cloud": ".kachery-cloud",
+            "storage": "kachery_storage",
+            "temp": "tmp",
+        }
+        kachery_config = self._build_dir_config(base_dir, kachery_relative_dirs)
+
+        # Add fallback DLC directories
+        dlc_base = base_dir / "deeplabcut"
+        dlc_relative_dirs = {
+            "project": "projects",
+            "video": "video",
+            "output": "output",
+        }
+        dlc_config = {
+            "base": str(dlc_base),
+            **self._build_dir_config(dlc_base, dlc_relative_dirs)
+        }
+
+        # Add fallback Moseq directories
+        moseq_base = base_dir / "moseq"
+        moseq_relative_dirs = {
+            "project": "projects",
+            "video": "video",
+        }
+        moseq_config = {
+            "base": str(moseq_base),
+            **self._build_dir_config(moseq_base, moseq_relative_dirs)
+        }
 
         self._config["custom"] = {
             "spyglass_dirs": spyglass_config,
+            "kachery_dirs": kachery_config,
+            "dlc_dirs": dlc_config,
+            "moseq_dirs": moseq_config,
             "debug_mode": "false",
             "test_mode": "false",
         }
@@ -416,7 +460,9 @@ class SpyglassQuickstart:
         print("╔═══════════════════════════════════════╗")
         print("║     Spyglass Quickstart Installer    ║")
         print("╚═══════════════════════════════════════╝")
-        print(f"{self.colors.ENDC}\n")
+        print(f"{self.colors.ENDC}")
+        self.print_info("Note: SpyglassConfig warnings during setup are normal - configuration will be created")
+        print()
 
     def print_header(self, text: str):
         """Print section header"""
