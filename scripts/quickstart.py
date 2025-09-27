@@ -146,6 +146,7 @@ class SetupConfig:
     env_name: str = "spyglass"
     db_port: int = 3306
     auto_yes: bool = False
+    install_type_specified: bool = False
 
 
 # Using standard library functions directly - no unnecessary wrappers
@@ -234,6 +235,15 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         orchestrator.ui.print_warning("Container 'spyglass-db' already exists")
         subprocess.run(["docker", "start", "spyglass-db"], check=True)
     else:
+        # Check if port is already in use
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            result = s.connect_ex(('localhost', orchestrator.config.db_port))
+            if result == 0:
+                orchestrator.ui.print_error(f"Port {orchestrator.config.db_port} is already in use")
+                orchestrator.ui.print_info(f"Try using a different port with --db-port (e.g., --db-port 3307)")
+                raise SystemRequirementError(f"Port {orchestrator.config.db_port} is already in use")
+
         port_mapping = f"{orchestrator.config.db_port}:3306"
         subprocess.run([
             "docker", "run", "-d",
@@ -409,6 +419,9 @@ class UserInterface:
     def confirm_environment_update(self, env_name: str) -> bool:
         """Ask user if they want to update existing environment"""
         self.print_warning(f"Environment '{env_name}' already exists")
+        if self.auto_yes:
+            self.print_info("Auto-accepting environment update (--yes)")
+            return True
         choice = input("Do you want to update it? (y/N): ").strip().lower()
         return choice == 'y'
 
@@ -649,8 +662,9 @@ class EnvironmentManager:
 
         except subprocess.TimeoutExpired:
             raise EnvironmentCreationError("Environment creation timed out")
-        except Exception:
-            raise EnvironmentCreationError("Environment creation/update failed")
+        except Exception as e:
+            # Preserve the original error context
+            raise EnvironmentCreationError(f"Environment creation/update failed: {str(e)}") from e
 
     def _filter_progress_lines(self, process) -> Iterator[str]:
         """Filter and yield relevant progress lines"""
@@ -711,9 +725,9 @@ class EnvironmentManager:
         except subprocess.CalledProcessError as e:
             self.ui.print_error(f"Command failed in environment '{self.config.env_name}': {' '.join(cmd)}")
             if e.stdout:
-                self.ui.print_error("STDOUT:", e.stdout)
+                self.ui.print_error(f"STDOUT: {e.stdout}")
             if e.stderr:
-                self.ui.print_error("STDERR:", e.stderr)
+                self.ui.print_error(f"STDERR: {e.stderr}")
             raise
 
     def _get_system_info(self):
@@ -789,8 +803,7 @@ class QuickstartOrchestrator:
 
     def _installation_type_specified(self) -> bool:
         """Check if installation type was specified via command line arguments."""
-        return (self.config.install_type == InstallType.FULL or
-                self.config.pipeline is not None)
+        return self.config.install_type_specified
 
     def _setup_database(self):
         """Setup database configuration"""
@@ -1178,7 +1191,8 @@ def main():
         base_dir=validated_base_dir,
         env_name=args.env_name,
         db_port=args.db_port,
-        auto_yes=args.yes
+        auto_yes=args.yes,
+        install_type_specified=args.full or args.minimal or bool(args.pipeline)
     )
 
     # Run installer with new architecture
