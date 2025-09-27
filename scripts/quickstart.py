@@ -293,8 +293,11 @@ class SpyglassQuickstart:
         self._confirm_environment_name()
 
         env_file = self.select_environment()
-        self.create_environment(env_file)
-        self.install_additional_deps()
+        env_was_updated = self.create_environment(env_file)
+
+        # Only install additional dependencies if environment was created/updated
+        if env_was_updated:
+            self.install_additional_deps()
 
         if self.config.setup_database:
             self.setup_database()
@@ -607,18 +610,23 @@ class SpyglassQuickstart:
 
         return "environment.yml", description
 
-    def create_environment(self, env_file: str):
-        """Create or update conda environment"""
+    def create_environment(self, env_file: str) -> bool:
+        """Create or update conda environment
+
+        Returns:
+            bool: True if environment was created/updated, False if kept existing
+        """
         self.print_header("Creating Conda Environment")
 
         env_exists = self._check_environment_exists()
         if env_exists and not self._confirm_update():
             self.print_info("Keeping existing environment")
-            return
+            return False
 
         cmd = self._build_environment_command(env_file, env_exists)
         self._execute_environment_command(cmd)
         self.print_success("Environment created/updated successfully")
+        return True
 
     def _check_environment_exists(self) -> bool:
         """Check if environment already exists"""
