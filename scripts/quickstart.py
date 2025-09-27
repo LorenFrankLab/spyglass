@@ -706,7 +706,6 @@ class EnvironmentManager:
                 # Read and display progress
                 try:
                     for line in self._filter_progress_lines(process):
-                        print(line)
                         output_buffer.append(line)
                 except (StopIteration, OSError):
                     pass
@@ -737,12 +736,15 @@ class EnvironmentManager:
         )
 
     def _filter_progress_lines(self, process: subprocess.Popen) -> Iterator[str]:
-        """Filter and yield relevant progress lines."""
+        """Filter and yield all lines while printing only progress lines."""
         progress_keywords = {"Solving environment", "Downloading", "Extracting", "Installing"}
 
         for line in process.stdout:
+            # Always yield all lines for error context buffering
+            yield line
+            # But only print progress-related lines live
             if any(keyword in line for keyword in progress_keywords):
-                yield f"  {line.strip()}"
+                print(f"  {line.strip()}")
 
     def install_additional_dependencies(self, conda_cmd: str) -> None:
         """Install additional dependencies after environment creation."""
@@ -756,7 +758,9 @@ class EnvironmentManager:
         if self.config.pipeline:
             self._install_pipeline_dependencies(conda_cmd)
         elif self.config.install_type == InstallType.FULL:
-            self._install_full_dependencies(conda_cmd)
+            self.ui.print_info("Installing optional dependencies for full installation...")
+            # For full installation using environment.yml, all packages are already included
+            # Editable install already done above
 
         self.ui.print_success("Additional dependencies installed")
 
@@ -771,14 +775,6 @@ class EnvironmentManager:
             if system_info and system_info.is_m1:
                 self.ui.print_info("Detected M1 Mac, installing pyfftw via conda first...")
                 self._run_in_env(conda_cmd, ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
-
-    def _install_full_dependencies(self, conda_cmd: str) -> None:
-        """Install full set of optional dependencies for complete spyglass functionality."""
-        self.ui.print_info("Installing optional dependencies for full installation...")
-
-        # For full installation using environment.yml, all packages are already included
-        # Just install spyglass in development mode
-        self._run_in_env(conda_cmd, ["pip", "install", "-e", "."])
 
 
     def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
@@ -824,7 +820,7 @@ class QuickstartOrchestrator:
             return 0
 
         except KeyboardInterrupt:
-            self.ui.print_error("\n\nSetup interrupted by user")
+            self.ui.print_error("\nSetup interrupted by user")
             return 130
         except SystemRequirementError as e:
             self.ui.print_error(f"\nSystem requirement not met: {e}")
@@ -838,10 +834,7 @@ class QuickstartOrchestrator:
         except SpyglassSetupError as e:
             self.ui.print_error(f"\nSetup error: {e}")
             return 1
-        except KeyboardInterrupt:
-            self.ui.print_error("\nSetup interrupted by user")
-            return 1
-        except (SystemExit, KeyboardInterrupt):
+        except SystemExit:
             raise
         except Exception as e:
             self.ui.print_error(f"\nUnexpected error: {e}")
@@ -938,7 +931,7 @@ class QuickstartOrchestrator:
             else:
                 # Fallback: try conda run anyway
                 self.ui.print_warning(f"Could not find python in environment '{self.config.env_name}', trying conda run...")
-                cmd = [conda_cmd, "run", "-n", self.config.env_name, "python", str(validation_script), "-v"]
+                cmd = [conda_cmd, "run", "--no-capture-output", "-n", self.config.env_name, "python", str(validation_script), "-v"]
                 self.ui.print_info(f"Running: {' '.join(cmd)}")
                 result = subprocess.run(cmd, capture_output=True, text=True, check=False)
 

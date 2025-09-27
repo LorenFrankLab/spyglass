@@ -33,6 +33,9 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 # Import shared color definitions
 from common import Colors, DisabledColors
 
+# Global color palette that can be modified for --no-color support
+PALETTE = Colors
+
 
 class Severity(Enum):
     """Validation result severity levels."""
@@ -54,10 +57,10 @@ class ValidationResult:
 
     def __str__(self) -> str:
         status_symbols = {
-            (True, None): f"{Colors.OKGREEN}✓{Colors.ENDC}",
-            (False, Severity.WARNING): f"{Colors.WARNING}⚠{Colors.ENDC}",
-            (False, Severity.ERROR): f"{Colors.FAIL}✗{Colors.ENDC}",
-            (False, Severity.INFO): f"{Colors.OKCYAN}ℹ{Colors.ENDC}",
+            (True, None): f"{PALETTE.OKGREEN}✓{PALETTE.ENDC}",
+            (False, Severity.WARNING): f"{PALETTE.WARNING}⚠{PALETTE.ENDC}",
+            (False, Severity.ERROR): f"{PALETTE.FAIL}✗{PALETTE.ENDC}",
+            (False, Severity.INFO): f"{PALETTE.OKCYAN}ℹ{PALETTE.ENDC}",
         }
 
         status_key = (self.passed, None if self.passed else self.severity)
@@ -116,7 +119,7 @@ class SpyglassValidator:
 
     def run_all_checks(self) -> int:
         """Run all validation checks and return exit code."""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}Spyglass Installation Validator{Colors.ENDC}")
+        print(f"\n{PALETTE.HEADER}{PALETTE.BOLD}Spyglass Installation Validator{PALETTE.ENDC}")
         print("=" * 50)
 
         # Check prerequisites
@@ -153,7 +156,7 @@ class SpyglassValidator:
 
     def _run_category_checks(self, category: str, checks: List) -> None:
         """Run a category of checks."""
-        print(f"\n{Colors.OKCYAN}Checking {category}...{Colors.ENDC}")
+        print(f"\n{PALETTE.OKCYAN}Checking {category}...{PALETTE.ENDC}")
         for check in checks:
             check()
 
@@ -499,35 +502,35 @@ class SpyglassValidator:
 
     def generate_summary(self) -> int:
         """Generate summary report and return exit code."""
-        print(f"\n{Colors.HEADER}{Colors.BOLD}Validation Summary{Colors.ENDC}")
+        print(f"\n{PALETTE.HEADER}{PALETTE.BOLD}Validation Summary{PALETTE.ENDC}")
         print("=" * 50)
 
         stats = self.get_summary_stats()
 
         print(f"\nTotal checks: {stats.get('total', 0)}")
-        print(f"  {Colors.OKGREEN}Passed: {stats.get('passed', 0)}{Colors.ENDC}")
+        print(f"  {PALETTE.OKGREEN}Passed: {stats.get('passed', 0)}{PALETTE.ENDC}")
 
         warnings = stats.get('warning', 0)
         if warnings > 0:
-            print(f"  {Colors.WARNING}Warnings: {warnings}{Colors.ENDC}")
+            print(f"  {PALETTE.WARNING}Warnings: {warnings}{PALETTE.ENDC}")
 
         errors = stats.get('error', 0)
         if errors > 0:
-            print(f"  {Colors.FAIL}Errors: {errors}{Colors.ENDC}")
+            print(f"  {PALETTE.FAIL}Errors: {errors}{PALETTE.ENDC}")
 
         # Determine exit code and final message
         if errors > 0:
-            print(f"\n{Colors.FAIL}{Colors.BOLD}❌ Validation FAILED{Colors.ENDC}")
+            print(f"\n{PALETTE.FAIL}{PALETTE.BOLD}❌ Validation FAILED{PALETTE.ENDC}")
             print("\nPlease address the errors above before proceeding.")
             print("See https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/")
             return 2
         elif warnings > 0:
-            print(f"\n{Colors.WARNING}{Colors.BOLD}⚠️  Validation PASSED with warnings{Colors.ENDC}")
+            print(f"\n{PALETTE.WARNING}{PALETTE.BOLD}⚠️  Validation PASSED with warnings{PALETTE.ENDC}")
             print("\nSpyglass is functional but some optional features may not work.")
             print("Review the warnings above if you need those features.")
             return 1
         else:
-            print(f"\n{Colors.OKGREEN}{Colors.BOLD}✅ Validation PASSED{Colors.ENDC}")
+            print(f"\n{PALETTE.OKGREEN}{PALETTE.BOLD}✅ Validation PASSED{PALETTE.ENDC}")
             print("\nSpyglass is properly installed and configured!")
             print("You can start with the tutorials in the notebooks directory.")
             return 0
@@ -558,9 +561,10 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Apply --no-color flag
+    global PALETTE
     if args.no_color:
-        # Use disabled colors (namedtuples are immutable, so we reassign)
-        pass  # Colors are already imported as DisabledColors and Colors
+        PALETTE = DisabledColors
 
     validator = SpyglassValidator(verbose=args.verbose, config_file=args.config_file)
     exit_code = validator.run_all_checks()
