@@ -533,10 +533,10 @@ class EnvironmentManager:
             self.ui.print_info(f"Selected: {description}")
         elif self.config.install_type == InstallType.FULL:
             env_file = "environment.yml"
-            self.ui.print_info("Selected: Standard environment (full)")
-        else:
-            env_file = "environment.yml"
-            self.ui.print_info("Selected: Standard environment (minimal)")
+            self.ui.print_info("Selected: Full environment with all optional dependencies")
+        else:  # MINIMAL
+            env_file = "environment-min.yml"
+            self.ui.print_info("Selected: Minimal environment with core dependencies only")
 
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
@@ -675,10 +675,13 @@ class EnvironmentManager:
                 self._run_in_env(conda_cmd, ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
 
     def _install_full_dependencies(self, conda_cmd: str):
-        """Install full set of dependencies"""
-        self.ui.print_info("Installing full dependencies...")
-        # For now, use the conda_cmd to install base spyglass
-        self._run_in_env(conda_cmd, ["pip", "install", "-e", ".[test]"])
+        """Install full set of optional dependencies for complete spyglass functionality"""
+        self.ui.print_info("Installing optional dependencies for full installation...")
+
+        # For full installation using environment.yml, all packages are already included
+        # Just install spyglass in development mode
+        self._run_in_env(conda_cmd, ["pip", "install", "-e", "."])
+
 
     def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
         """Run command in the target conda environment"""
