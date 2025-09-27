@@ -118,20 +118,7 @@ class SetupConfig:
     env_name: str = "spyglass"
 
 
-# Simplified helper functions - no need for Protocols in a script
-def run_command(cmd: List[str], **kwargs) -> subprocess.CompletedProcess:
-    """Run a command with subprocess.run."""
-    return subprocess.run(cmd, **kwargs)
-
-
-def path_exists(path: Path) -> bool:
-    """Check if a path exists."""
-    return path.exists()
-
-
-def make_directory(path: Path, exist_ok: bool = False) -> None:
-    """Create a directory."""
-    path.mkdir(exist_ok=exist_ok, parents=True)
+# Using standard library functions directly - no unnecessary wrappers
 
 
 class SpyglassConfigManager:
@@ -180,7 +167,7 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
             raise SystemRequirementError("Docker is not installed")
 
         # Check Docker daemon
-        result = run_command(
+        result = subprocess.run(
             ["docker", "info"],
             capture_output=True,
             text=True
@@ -194,10 +181,10 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
         # Pull and run container
         installer.print_info("Pulling MySQL image...")
-        run_command(["docker", "pull", "datajoint/mysql:8.0"], check=True)
+        subprocess.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
 
         # Check existing container
-        result = run_command(
+        result = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{.Names}}"],
             capture_output=True,
             text=True
@@ -205,9 +192,9 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
         if "spyglass-db" in result.stdout:
             installer.print_warning("Container 'spyglass-db' already exists")
-            run_command(["docker", "start", "spyglass-db"], check=True)
+            subprocess.run(["docker", "start", "spyglass-db"], check=True)
         else:
-            run_command([
+            subprocess.run([
                 "docker", "run", "-d",
                 "--name", "spyglass-db",
                 "-p", "3306:3306",
@@ -442,7 +429,7 @@ class SpyglassQuickstart:
             Command output or default value
         """
         try:
-            result = run_command(
+            result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -611,7 +598,7 @@ class SpyglassQuickstart:
 
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
-        if not path_exists(env_path):
+        if not env_path.exists():
             raise EnvironmentCreationError(f"Environment file not found: {env_path}")
 
         return env_file
@@ -767,7 +754,7 @@ class SpyglassQuickstart:
         # Use conda run to execute in environment
         full_cmd = [conda_cmd, "run", "-n", env_name] + cmd
 
-        result = run_command(
+        result = subprocess.run(
             full_cmd,
             capture_output=True,
             text=True
@@ -787,7 +774,7 @@ class SpyglassQuickstart:
             conda_cmd = self.system_info.conda_cmd
             env_name = self.config.env_name
 
-            result = run_command(
+            result = subprocess.run(
                 [conda_cmd, "run", "-n", env_name, "python", str(script_path), "-v"],
                 capture_output=True,
                 text=True,
@@ -913,7 +900,7 @@ class SpyglassQuickstart:
     def _create_directory_structure(self):
         """Create base directory structure using SpyglassConfig"""
         base_dir = self.config.base_dir
-        make_directory(base_dir, exist_ok=True)
+        base_dir.mkdir(exist_ok=True, parents=True)
 
         try:
             # Use SpyglassConfig to create directories with official structure
@@ -930,7 +917,7 @@ class SpyglassQuickstart:
             self.print_warning("SpyglassConfig not available, using fallback directory creation")
             subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
             for subdir in subdirs:
-                make_directory(base_dir / subdir, exist_ok=True)
+                (base_dir / subdir).mkdir(exist_ok=True, parents=True)
 
     def run_validation(self) -> int:
         """Run validation script with SpyglassConfig integration check"""
@@ -941,7 +928,7 @@ class SpyglassQuickstart:
 
         validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
 
-        if not path_exists(validation_script):
+        if not validation_script.exists():
             self.print_error("Validation script not found")
             return 1
 
