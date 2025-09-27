@@ -29,7 +29,6 @@ import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
-
 # Import shared color definitions
 from common import Colors, DisabledColors
 
@@ -103,8 +102,6 @@ def import_module_safely(module_name: str) -> Generator[Optional[types.ModuleTyp
     try:
         module = importlib.import_module(module_name)
         yield module
-    except ImportError:
-        yield None
     except (ImportError, AttributeError, TypeError):
         yield None
 

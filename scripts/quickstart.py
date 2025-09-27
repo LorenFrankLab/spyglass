@@ -32,7 +32,7 @@ import argparse
 import time
 import json
 from pathlib import Path
-from typing import Optional, List, Iterator, Tuple, Callable
+from typing import Optional, List, Tuple, Callable, Iterator
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -188,7 +188,7 @@ class SpyglassConfigManager:
                 database_port=port,
                 database_user=user,
                 database_password=password,
-                database_use_tls=False if host.startswith("127.0.0.1") or host == "localhost" else True,
+                database_use_tls=not (host.startswith("127.0.0.1") or host == "localhost"),
                 set_password=False  # Skip password prompt during setup
             )
 
@@ -303,7 +303,7 @@ def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: s
         ui.print_info("Connection will be tested when DataJoint loads")
     except (ConnectionError, OSError, TimeoutError) as e:
         ui.print_error(f"Database connection failed: {e}")
-        raise DatabaseSetupError(f"Cannot connect to database: {e}")
+        raise DatabaseSetupError(f"Cannot connect to database: {e}") from e
 
 
 # Database setup function mapping - simple dictionary approach
@@ -697,10 +697,9 @@ class EnvironmentManager:
         self.ui.print_header("Creating Conda Environment")
 
         update = self._check_environment_exists(conda_cmd)
-        if update:
-            if not self.ui.confirm_environment_update(self.config.env_name):
-                self.ui.print_info("Keeping existing environment unchanged")
-                return True
+        if update and not self.ui.confirm_environment_update(self.config.env_name):
+            self.ui.print_info("Keeping existing environment unchanged")
+            return True
 
         cmd = self._build_environment_command(env_file, conda_cmd, update)
         self._execute_environment_command(cmd)
@@ -764,7 +763,7 @@ class EnvironmentManager:
 
                 time.sleep(1)
         except subprocess.TimeoutExpired:
-            raise EnvironmentCreationError("Environment creation timed out")
+            raise EnvironmentCreationError("Environment creation timed out") from None
         except (subprocess.CalledProcessError, OSError, FileNotFoundError) as e:
             raise EnvironmentCreationError(f"Environment creation/update failed: {str(e)}") from e
 
