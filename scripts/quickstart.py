@@ -302,15 +302,21 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
         # Check Docker availability
         if not shutil.which("docker"):
+            installer.print_error("Docker is not installed")
+            installer.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
             raise RuntimeError("Docker is not installed")
 
         # Check Docker daemon
         result = installer.command_runner.run(
             ["docker", "info"],
             capture_output=True,
-            stderr=subprocess.DEVNULL
+            text=True
         )
         if result.returncode != 0:
+            installer.print_error("Docker daemon is not running")
+            installer.print_info("Please start Docker Desktop and try again")
+            installer.print_info("On macOS: Open Docker Desktop application")
+            installer.print_info("On Linux: sudo systemctl start docker")
             raise RuntimeError("Docker daemon is not running")
 
         # Pull and run container
