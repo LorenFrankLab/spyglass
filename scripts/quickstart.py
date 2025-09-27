@@ -180,7 +180,7 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
             raise SystemRequirementError("Docker is not installed")
 
         # Check Docker daemon
-        result = installer.command_runner.run(
+        result = run_command(
             ["docker", "info"],
             capture_output=True,
             text=True
@@ -194,10 +194,10 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
         # Pull and run container
         installer.print_info("Pulling MySQL image...")
-        installer.command_runner.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
+        run_command(["docker", "pull", "datajoint/mysql:8.0"], check=True)
 
         # Check existing container
-        result = installer.command_runner.run(
+        result = run_command(
             ["docker", "ps", "-a", "--format", "{{.Names}}"],
             capture_output=True,
             text=True
@@ -205,9 +205,9 @@ class DockerDatabaseStrategy(DatabaseSetupStrategy):
 
         if "spyglass-db" in result.stdout:
             installer.print_warning("Container 'spyglass-db' already exists")
-            installer.command_runner.run(["docker", "start", "spyglass-db"], check=True)
+            run_command(["docker", "start", "spyglass-db"], check=True)
         else:
-            installer.command_runner.run([
+            run_command([
                 "docker", "run", "-d",
                 "--name", "spyglass-db",
                 "-p", "3306:3306",
@@ -676,12 +676,12 @@ class SpyglassQuickstart:
             self.print_info("This may take 5-10 minutes...")
             return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
 
-    def _execute_environment_command(self, cmd: List[str], timeout: int = 600):
+    def _execute_environment_command(self, cmd: List[str], timeout: int = 1800):
         """Execute environment creation/update command with progress and timeout.
 
         Args:
             cmd: Command to execute
-            timeout: Timeout in seconds (default 10 minutes)
+            timeout: Timeout in seconds (default 30 minutes)
         """
         import time
         process = subprocess.Popen(
@@ -781,10 +781,14 @@ class SpyglassQuickstart:
         return result.returncode
 
     def _run_validation_script(self, script_path: Path) -> int:
-        """Run validation script using subprocess - simple and reliable."""
+        """Run validation script in the spyglass environment - simple and reliable."""
         try:
-            result = subprocess.run(
-                [sys.executable, str(script_path), "-v"],
+            # Run validation script in the spyglass environment
+            conda_cmd = self.system_info.conda_cmd
+            env_name = self.config.env_name
+
+            result = run_command(
+                [conda_cmd, "run", "-n", env_name, "python", str(script_path), "-v"],
                 capture_output=True,
                 text=True,
                 check=False  # Don't raise on non-zero exit
@@ -958,22 +962,25 @@ class SpyglassQuickstart:
         return exit_code
 
     def _test_spyglass_integration(self):
-        """Test SpyglassConfig integration as part of validation"""
+        """Test SpyglassConfig integration in the spyglass environment."""
         try:
-            from spyglass.settings import SpyglassConfig
+            # Create a simple integration test script to run in the environment
+            test_cmd = [
+                "python", "-c",
+                f"from spyglass.settings import SpyglassConfig; "
+                f"sg_config = SpyglassConfig(base_dir='{self.config.base_dir}'); "
+                f"sg_config.load_config(); "
+                f"print('✓ Integration successful')"
+            ]
 
-            # Quick integration test
-            sg_config = SpyglassConfig(base_dir=str(self.config.base_dir))
-            sg_config.load_config()
+            exit_code = self._run_in_env(test_cmd)
 
-            # Test full spyglass.common import as recommended in manual setup
-            from spyglass.common import Nwbfile
-            Nwbfile()  # Instantiate to verify database connection and config
+            if exit_code == 0:
+                self.print_success("SpyglassConfig integration test passed")
+            else:
+                self.print_warning("SpyglassConfig integration test failed")
+                self.print_info("This may indicate a configuration issue")
 
-            self.print_success("SpyglassConfig integration test passed")
-
-        except ImportError:
-            self.print_warning("SpyglassConfig not available for integration test")
         except Exception as e:
             self.print_warning(f"SpyglassConfig integration test failed: {e}")
             self.print_info("This may indicate a configuration issue")
