@@ -26,6 +26,7 @@ from contextlib import contextmanager
 import warnings
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
 class Colors:

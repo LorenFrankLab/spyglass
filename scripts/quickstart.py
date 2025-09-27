@@ -36,7 +36,6 @@ from typing import Optional, List, Iterator, Tuple
 from dataclasses import dataclass, replace
 from enum import Enum
 from collections import namedtuple
-# Removed ABC import - not needed for a simple script
 import getpass
 
 # Named constants
