@@ -434,8 +434,11 @@ class SpyglassValidator:
             try:
                 connection = dj.conn(reset=False)
                 if connection.is_connected:
-                    host_port = f"{connection.host}:{connection.port}" if hasattr(connection, 'port') else connection.host
-                    user = getattr(connection, 'user', 'unknown')
+                    # Get connection info from dj.config instead of connection object
+                    host = dj.config.get('database.host', 'unknown')
+                    port = dj.config.get('database.port', 'unknown')
+                    user = dj.config.get('database.user', 'unknown')
+                    host_port = f"{host}:{port}"
                     self.add_result(
                         "Database Connection",
                         True,
