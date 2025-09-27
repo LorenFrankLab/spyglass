@@ -27,7 +27,7 @@ import shutil
 import argparse
 from pathlib import Path
 from typing import Optional, List, Protocol, Iterator, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from collections import namedtuple
 from contextlib import suppress
@@ -71,7 +71,7 @@ class Pipeline(Enum):
     DECODING = "decoding"
 
 
-@dataclass(frozen=True)
+@dataclass
 class SystemInfo:
     """System information"""
     os_name: str
@@ -274,20 +274,15 @@ class ConfigBuilder:
 
     def _validate_config(self, config: dict):
         """Validate configuration completeness and consistency"""
-        required_keys = ["database.host", "stores"]
-        missing = [key for key in required_keys if not self._has_nested_key(config, key)]
+        # Check for required keys (some are flat, some are nested)
+        required_checks = [
+            ("database.host" in config, "database.host"),
+            ("stores" in config, "stores")
+        ]
+
+        missing = [key for check, key in required_checks if not check]
         if missing:
             raise ValueError(f"Missing required configuration: {missing}")
-
-    def _has_nested_key(self, config: dict, key: str) -> bool:
-        """Check if nested key exists in config dictionary"""
-        parts = key.split(".")
-        current = config
-        for part in parts:
-            if not isinstance(current, dict) or part not in current:
-                return False
-            current = current[part]
-        return True
 
 
 class DatabaseSetupStrategy(ABC):
@@ -504,7 +499,7 @@ class SpyglassQuickstart:
             raise RuntimeError("No conda/mamba found")
 
         # Update system info with conda command
-        self.system_info = self.system_info._replace(conda_cmd=conda_cmd)
+        self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
 
         version = self.get_command_output([conda_cmd, "--version"])
         if conda_cmd == "mamba":
