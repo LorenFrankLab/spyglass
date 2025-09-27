@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-"""
-Spyglass Quickstart Script (Python version)
+"""Spyglass Quickstart Script (Python version).
 
 One-command setup for Spyglass installation.
 This script provides a streamlined setup process for Spyglass, guiding you
@@ -33,7 +32,7 @@ import argparse
 import time
 import json
 from pathlib import Path
-from typing import Optional, List, Iterator, Tuple, Callable
+from typing import Optional, List, Iterator, Tuple, Callable, Any
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -56,13 +55,15 @@ DEFAULT_CHECKSUM_SIZE_LIMIT = 1024**3  # 1 GB
 
 
 class InstallType(Enum):
-    """Installation type options"""
+    """Installation type options."""
+
     MINIMAL = "minimal"
     FULL = "full"
 
 
 class Pipeline(Enum):
-    """Available pipeline options"""
+    """Available pipeline options."""
+
     DLC = "dlc"
     MOSEQ_CPU = "moseq-cpu"
     MOSEQ_GPU = "moseq-gpu"
@@ -72,7 +73,8 @@ class Pipeline(Enum):
 
 @dataclass
 class SystemInfo:
-    """System information"""
+    """System information."""
+
     os_name: str
     arch: str
     is_m1: bool
@@ -82,7 +84,8 @@ class SystemInfo:
 
 @dataclass
 class SetupConfig:
-    """Configuration for setup process"""
+    """Configuration for setup process."""
+
     install_type: InstallType = InstallType.MINIMAL
     pipeline: Optional[Pipeline] = None
     setup_database: bool = True
@@ -110,10 +113,10 @@ def validate_base_dir(path: Path) -> Path:
 
 
 class SpyglassConfigManager:
-    """Manages SpyglassConfig for quickstart setup"""
+    """Manages SpyglassConfig for quickstart setup."""
 
-    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path):
-        """Create complete SpyglassConfig setup using official methods"""
+    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path) -> None:
+        """Create complete SpyglassConfig setup using official methods."""
         from spyglass.settings import SpyglassConfig
         import os
 
@@ -187,7 +190,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
             result = s.connect_ex(('localhost', orchestrator.config.db_port))
             if result == 0:
                 orchestrator.ui.print_error(f"Port {orchestrator.config.db_port} is already in use")
-                orchestrator.ui.print_info(f"Try using a different port with --db-port (e.g., --db-port 3307)")
+                orchestrator.ui.print_info("Try using a different port with --db-port (e.g., --db-port 3307)")
                 raise SystemRequirementError(f"Port {orchestrator.config.db_port} is already in use")
 
         port_mapping = f"{orchestrator.config.db_port}:3306"
@@ -234,7 +237,7 @@ def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
     orchestrator.create_config(host, user, password, port)
 
 
-def _test_database_connection(ui, host: str, port: int, user: str, password: str):
+def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: str, password: str) -> None:
     """Test database connection before proceeding."""
     ui.print_info("Testing database connection...")
 
@@ -260,14 +263,42 @@ DATABASE_SETUP_METHODS = {
 
 
 class UserInterface:
-    """Handles all user interactions and display formatting."""
+    """Handles all user interactions and display formatting.
 
-    def __init__(self, colors, auto_yes=False):
+    Parameters
+    ----------
+    colors : Colors
+        Color scheme for terminal output
+    auto_yes : bool, optional
+        If True, automatically accept all prompts with defaults, by default False
+
+    """
+
+    def __init__(self, colors: 'Colors', auto_yes: bool = False) -> None:
         self.colors = colors
         self.auto_yes = auto_yes
 
     def get_input(self, prompt: str, default: str = None) -> str:
-        """Get user input with auto-yes support"""
+        """Get user input with auto-yes support.
+
+        Parameters
+        ----------
+        prompt : str
+            The input prompt to display to the user
+        default : str, optional
+            Default value to use in auto-yes mode, by default None
+
+        Returns
+        -------
+        str
+            User input or default value
+
+        Raises
+        ------
+        ValueError
+            If auto_yes is True but no default is provided
+
+        """
         if self.auto_yes:
             if default is not None:
                 self.print_info(f"Auto-accepting: {prompt} -> {default}")
@@ -278,7 +309,25 @@ class UserInterface:
 
     def get_validated_input(self, prompt: str, validator: Callable[[str], bool],
                            error_msg: str, default: str = None) -> str:
-        """Generic validated input helper"""
+        """Generic validated input helper.
+
+        Parameters
+        ----------
+        prompt : str
+            The input prompt to display to the user
+        validator : Callable[[str], bool]
+            Function to validate the input, returns True if valid
+        error_msg : str
+            Error message to display for invalid input
+        default : str, optional
+            Default value to use in auto-yes mode, by default None
+
+        Returns
+        -------
+        str
+            Validated user input or default value
+
+        """
         if self.auto_yes and default is not None:
             self.print_info(f"Auto-accepting: {prompt} -> {default}")
             return default
@@ -289,40 +338,98 @@ class UserInterface:
                 return value
             self.print_error(error_msg)
 
-    def print_header_banner(self):
-        """Print the main application banner"""
+    def print_header_banner(self) -> None:
+        """Print the main application banner."""
         print("\n" + "═" * 43)
         print("║     Spyglass Quickstart Installer    ║")
         print("═" * 43)
 
-    def print_header(self, text: str):
-        """Print section header"""
+    def print_header(self, text: str) -> None:
+        """Print section header.
+
+        Parameters
+        ----------
+        text : str
+            Header text to display
+
+        """
         print(f"\n{'=' * 42}")
         print(text)
         print("=" * 42)
 
     def _format_message(self, text: str, symbol: str, color: str) -> str:
-        """Format a message with color and symbol."""
+        """Format a message with color and symbol.
+
+        Parameters
+        ----------
+        text : str
+            Message text to format
+        symbol : str
+            Symbol to prefix the message with
+        color : str
+            ANSI color code for the message
+
+        Returns
+        -------
+        str
+            Formatted message with color and symbol
+
+        """
         return f"{color}{symbol} {text}{self.colors.ENDC}"
 
-    def print_success(self, text: str):
-        """Print success message"""
+    def print_success(self, text: str) -> None:
+        """Print success message.
+
+        Parameters
+        ----------
+        text : str
+            Success message to display
+
+        """
         print(self._format_message(text, "✓", self.colors.OKGREEN))
 
-    def print_warning(self, text: str):
-        """Print warning message"""
+    def print_warning(self, text: str) -> None:
+        """Print warning message.
+
+        Parameters
+        ----------
+        text : str
+            Warning message to display
+
+        """
         print(self._format_message(text, "⚠", self.colors.WARNING))
 
-    def print_error(self, text: str):
-        """Print error message"""
+    def print_error(self, text: str) -> None:
+        """Print error message.
+
+        Parameters
+        ----------
+        text : str
+            Error message to display
+
+        """
         print(self._format_message(text, "✗", self.colors.FAIL))
 
-    def print_info(self, text: str):
-        """Print info message"""
+    def print_info(self, text: str) -> None:
+        """Print info message.
+
+        Parameters
+        ----------
+        text : str
+            Info message to display
+
+        """
         print(self._format_message(text, "ℹ", self.colors.OKBLUE))
 
     def select_install_type(self) -> Tuple[InstallType, Optional[Pipeline]]:
-        """Let user select installation type"""
+        """Let user select installation type.
+
+        Returns
+        -------
+        Tuple[InstallType, Optional[Pipeline]]
+            Tuple of (installation type, optional pipeline choice)
+
+        """
         print("\nChoose your installation type:")
         print("1) Minimal (core dependencies only)")
         print("   ├─ Basic Spyglass functionality")
@@ -352,7 +459,7 @@ class UserInterface:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def select_pipeline(self) -> Pipeline:
-        """Let user select specific pipeline"""
+        """Let user select specific pipeline."""
         print("\nChoose your pipeline:")
         print("1) DeepLabCut - Pose estimation and behavior analysis")
         print("2) Keypoint-Moseq (CPU) - Behavioral sequence analysis")
@@ -376,7 +483,7 @@ class UserInterface:
                 self.print_error("Invalid choice. Please enter 1-5")
 
     def confirm_environment_update(self, env_name: str) -> bool:
-        """Ask user if they want to update existing environment"""
+        """Ask user if they want to update existing environment."""
         self.print_warning(f"Environment '{env_name}' already exists")
         if self.auto_yes:
             self.print_info("Auto-accepting environment update (--yes)")
@@ -385,7 +492,7 @@ class UserInterface:
         return choice == 'y'
 
     def select_database_setup(self) -> str:
-        """Select database setup choice"""
+        """Select database setup choice."""
         print("\nChoose database setup option:")
         print("1) Local Docker database (recommended for beginners)")
         print("2) Connect to existing database")
@@ -403,7 +510,7 @@ class UserInterface:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def select_config_location(self, repo_dir: Path) -> Path:
-        """Select where to save the DataJoint configuration file"""
+        """Select where to save the DataJoint configuration file."""
         print("\nChoose configuration file location:")
         print(f"1) Repository root (recommended): {repo_dir}")
         print("2) Current directory")
@@ -423,7 +530,7 @@ class UserInterface:
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def _get_custom_path(self) -> Path:
-        """Get custom path from user with validation"""
+        """Get custom path from user with validation."""
         while True:
             custom_path = input("Enter custom directory path: ").strip()
             if not custom_path:
@@ -447,7 +554,7 @@ class UserInterface:
                 continue
 
     def get_database_credentials(self) -> Tuple[str, int, str, str]:
-        """Get database connection credentials from user"""
+        """Get database connection credentials from user."""
         print("\nEnter database connection details:")
 
         host = self._get_host_input()
@@ -499,7 +606,7 @@ class UserInterface:
 class EnvironmentManager:
     """Handles conda environment creation and management."""
 
-    def __init__(self, ui, config: SetupConfig):
+    def __init__(self, ui: 'UserInterface', config: SetupConfig) -> None:
         self.ui = ui
         self.config = config
         self.system_info = None
@@ -512,7 +619,7 @@ class EnvironmentManager:
         }
 
     def select_environment_file(self) -> str:
-        """Select appropriate environment file based on configuration"""
+        """Select appropriate environment file based on configuration."""
         if env_info := self.PIPELINE_ENVIRONMENTS.get(self.config.pipeline):
             env_file, description = env_info
             self.ui.print_info(f"Selected: {description}")
@@ -534,7 +641,7 @@ class EnvironmentManager:
         return env_file
 
     def create_environment(self, env_file: str, conda_cmd: str) -> bool:
-        """Create or update conda environment"""
+        """Create or update conda environment."""
         self.ui.print_header("Creating Conda Environment")
 
         update = self._check_environment_exists(conda_cmd)
@@ -548,7 +655,7 @@ class EnvironmentManager:
         return True
 
     def _check_environment_exists(self, conda_cmd: str) -> bool:
-        """Check if the target environment already exists"""
+        """Check if the target environment already exists."""
         try:
             result = subprocess.run([conda_cmd, "env", "list"], capture_output=True, text=True, check=True)
             return self.config.env_name in result.stdout
@@ -556,7 +663,7 @@ class EnvironmentManager:
             return False
 
     def _build_environment_command(self, env_file: str, conda_cmd: str, update: bool) -> List[str]:
-        """Build conda environment command"""
+        """Build conda environment command."""
         env_path = self.config.repo_dir / env_file
         env_name = self.config.env_name
 
@@ -568,14 +675,14 @@ class EnvironmentManager:
             self.ui.print_info("This may take 5-10 minutes...")
             return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
 
-    def _execute_environment_command(self, cmd: List[str], timeout: int = 1800):
-        """Execute environment creation/update command with progress and timeout"""
+    def _execute_environment_command(self, cmd: List[str], timeout: int = 1800) -> None:
+        """Execute environment creation/update command with progress and timeout."""
         process = self._start_process(cmd)
         output_buffer = self._monitor_process(process, timeout)
         self._handle_process_result(process, output_buffer)
 
     def _start_process(self, cmd: List[str]) -> subprocess.Popen:
-        """Start subprocess with appropriate settings"""
+        """Start subprocess with appropriate settings."""
         return subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -586,7 +693,7 @@ class EnvironmentManager:
         )
 
     def _monitor_process(self, process: subprocess.Popen, timeout: int) -> List[str]:
-        """Monitor process execution with timeout and progress display"""
+        """Monitor process execution with timeout and progress display."""
         output_buffer = []
         start_time = time.time()
 
@@ -612,8 +719,8 @@ class EnvironmentManager:
 
         return output_buffer
 
-    def _handle_process_result(self, process: subprocess.Popen, output_buffer: List[str]):
-        """Handle process completion and errors"""
+    def _handle_process_result(self, process: subprocess.Popen, output_buffer: List[str]) -> None:
+        """Handle process completion and errors."""
         if process.returncode == 0:
             return  # Success
 
@@ -629,16 +736,16 @@ class EnvironmentManager:
             f"--- Last 200 lines of output ---\n{error_context}"
         )
 
-    def _filter_progress_lines(self, process) -> Iterator[str]:
-        """Filter and yield relevant progress lines"""
+    def _filter_progress_lines(self, process: subprocess.Popen) -> Iterator[str]:
+        """Filter and yield relevant progress lines."""
         progress_keywords = {"Solving environment", "Downloading", "Extracting", "Installing"}
 
         for line in process.stdout:
             if any(keyword in line for keyword in progress_keywords):
                 yield f"  {line.strip()}"
 
-    def install_additional_dependencies(self, conda_cmd: str):
-        """Install additional dependencies after environment creation"""
+    def install_additional_dependencies(self, conda_cmd: str) -> None:
+        """Install additional dependencies after environment creation."""
         self.ui.print_header("Installing Additional Dependencies")
 
         # Install in development mode
@@ -653,8 +760,8 @@ class EnvironmentManager:
 
         self.ui.print_success("Additional dependencies installed")
 
-    def _install_pipeline_dependencies(self, conda_cmd: str):
-        """Install dependencies for specific pipeline"""
+    def _install_pipeline_dependencies(self, conda_cmd: str) -> None:
+        """Install dependencies for specific pipeline."""
         self.ui.print_info("Installing pipeline-specific dependencies...")
 
         if self.config.pipeline == Pipeline.LFP:
@@ -665,8 +772,8 @@ class EnvironmentManager:
                 self.ui.print_info("Detected M1 Mac, installing pyfftw via conda first...")
                 self._run_in_env(conda_cmd, ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
 
-    def _install_full_dependencies(self, conda_cmd: str):
-        """Install full set of optional dependencies for complete spyglass functionality"""
+    def _install_full_dependencies(self, conda_cmd: str) -> None:
+        """Install full set of optional dependencies for complete spyglass functionality."""
         self.ui.print_info("Installing optional dependencies for full installation...")
 
         # For full installation using environment.yml, all packages are already included
@@ -675,7 +782,7 @@ class EnvironmentManager:
 
 
     def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
-        """Run command in the target conda environment"""
+        """Run command in the target conda environment."""
         full_cmd = [conda_cmd, "run", "-n", self.config.env_name] + cmd
         try:
             result = subprocess.run(full_cmd, check=True, capture_output=True, text=True)
@@ -693,15 +800,15 @@ class EnvironmentManager:
                 self.ui.print_error(f"STDERR: {e.stderr}")
             raise
 
-    def _get_system_info(self):
-        """Get system info from orchestrator"""
+    def _get_system_info(self) -> Optional[SystemInfo]:
+        """Get system info from orchestrator."""
         return self.system_info
 
 
 class QuickstartOrchestrator:
     """Main orchestrator that coordinates all installation components."""
 
-    def __init__(self, config: SetupConfig, colors):
+    def __init__(self, config: SetupConfig, colors: 'Colors') -> None:
         self.config = config
         self.ui = UserInterface(colors, auto_yes=config.auto_yes)
         self.system_detector = SystemDetector(self.ui)
@@ -740,7 +847,7 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"\nUnexpected error: {e}")
             return 1
 
-    def _execute_setup_steps(self):
+    def _execute_setup_steps(self) -> None:
         """Execute the main setup steps in order."""
         # Step 1: System Detection
         self.system_info = self.system_detector.detect_system()
@@ -773,8 +880,8 @@ class QuickstartOrchestrator:
         """Check if installation type was specified via command line arguments."""
         return self.config.install_type_specified
 
-    def _setup_database(self):
-        """Setup database configuration"""
+    def _setup_database(self) -> None:
+        """Setup database configuration."""
         self.ui.print_header("Database Setup")
 
         choice = self.ui.select_database_setup()
@@ -783,7 +890,7 @@ class QuickstartOrchestrator:
             setup_func(self)
 
     def _run_validation(self, conda_cmd: str) -> int:
-        """Run validation checks"""
+        """Run validation checks."""
         self.ui.print_header("Running Validation")
 
         validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
@@ -876,8 +983,8 @@ class QuickstartOrchestrator:
             self.ui.print_info("This might indicate an issue with conda environment or the validation script")
             return 1
 
-    def create_config(self, host: str, user: str, password: str, port: int):
-        """Create DataJoint configuration file"""
+    def create_config(self, host: str, user: str, password: str, port: int) -> None:
+        """Create DataJoint configuration file."""
         config_dir = self.ui.select_config_location(self.config.repo_dir)
         config_file_path = config_dir / "dj_local_conf.json"
 
@@ -908,8 +1015,8 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"Failed to create configuration: {e}")
             raise
 
-    def _create_directory_structure(self):
-        """Create the basic directory structure for Spyglass"""
+    def _create_directory_structure(self) -> None:
+        """Create the basic directory structure for Spyglass."""
         subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
 
         try:
@@ -923,8 +1030,8 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"Directory access failed: {e}")
             raise
 
-    def _validate_spyglass_config(self, config):
-        """Validate the created configuration using SpyglassConfig"""
+    def _validate_spyglass_config(self, config: None) -> None:
+        """Validate the created configuration using SpyglassConfig."""
         try:
             # Test basic functionality
             self.ui.print_info("Validating configuration...")
@@ -937,8 +1044,8 @@ class QuickstartOrchestrator:
             self.ui.print_error(f"Configuration validation failed: {e}")
             raise
 
-    def _print_summary(self):
-        """Print installation summary"""
+    def _print_summary(self) -> None:
+        """Print installation summary."""
         self.ui.print_header("Setup Complete!")
 
         print("\nNext steps:")
@@ -963,11 +1070,11 @@ class QuickstartOrchestrator:
 class SystemDetector:
     """Handles system detection and validation."""
 
-    def __init__(self, ui):
+    def __init__(self, ui: 'UserInterface') -> None:
         self.ui = ui
 
     def detect_system(self) -> SystemInfo:
-        """Detect operating system and architecture"""
+        """Detect operating system and architecture."""
         self.ui.print_header("System Detection")
 
         os_name = platform.system()
@@ -1004,8 +1111,8 @@ class SystemDetector:
             conda_cmd=None
         )
 
-    def check_python(self, system_info: SystemInfo):
-        """Check Python version"""
+    def check_python(self, system_info: SystemInfo) -> None:
+        """Check Python version."""
         self.ui.print_header("Python Check")
 
         major, minor, micro = system_info.python_version
@@ -1018,7 +1125,7 @@ class SystemDetector:
             self.ui.print_info("The conda environment will install the correct version")
 
     def check_conda(self) -> str:
-        """Check for conda/mamba availability and return the command to use"""
+        """Check for conda/mamba availability and return the command to use."""
         self.ui.print_header("Package Manager Check")
 
         conda_cmd = self._find_conda_command()
@@ -1040,14 +1147,14 @@ class SystemDetector:
         return conda_cmd
 
     def _find_conda_command(self) -> Optional[str]:
-        """Find available conda command, preferring mamba"""
+        """Find available conda command, preferring mamba."""
         for cmd in ["mamba", "conda"]:
             if shutil.which(cmd):
                 return cmd
         return None
 
     def _get_command_output(self, cmd: List[str]) -> str:
-        """Get command output, return empty string on failure"""
+        """Get command output, return empty string on failure."""
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             return result.stdout.strip()
@@ -1055,8 +1162,8 @@ class SystemDetector:
             return ""
 
 
-def parse_arguments():
-    """Parse command line arguments"""
+def parse_arguments() -> argparse.Namespace:
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Spyglass Quickstart Installer",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1136,8 +1243,8 @@ Examples:
     return parser.parse_args()
 
 
-def main():
-    """Main entry point"""
+def main() -> Optional[int]:
+    """Execute the main program."""
     args = parse_arguments()
 
     # Select colors based on arguments and terminal

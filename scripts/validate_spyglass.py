@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-Spyglass Installation Validator
+Spyglass Installation Validator.
 
 This script validates that Spyglass is properly installed and configured.
 It checks prerequisites, core functionality, database connectivity, and
@@ -18,7 +18,8 @@ import subprocess
 import importlib
 import json
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Dict
+from typing import List, NamedTuple, Optional, Dict, Generator
+import types
 from dataclasses import dataclass
 from collections import Counter
 from enum import Enum
@@ -34,7 +35,7 @@ from common import Colors, DisabledColors
 
 
 class Severity(Enum):
-    """Validation result severity levels"""
+    """Validation result severity levels."""
     ERROR = "error"
     WARNING = "warning"
     INFO = "info"
@@ -45,13 +46,13 @@ class Severity(Enum):
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """Store validation results for a single check"""
+    """Store validation results for a single check."""
     name: str
     passed: bool
     message: str
     severity: Severity = Severity.ERROR
 
-    def __str__(self):
+    def __str__(self) -> str:
         status_symbols = {
             (True, None): f"{Colors.OKGREEN}✓{Colors.ENDC}",
             (False, Severity.WARNING): f"{Colors.WARNING}⚠{Colors.ENDC}",
@@ -66,7 +67,7 @@ class ValidationResult:
 
 
 class DependencyConfig(NamedTuple):
-    """Configuration for a dependency check"""
+    """Configuration for a dependency check."""
     module: str
     display_name: str
     required: bool = True
@@ -94,8 +95,8 @@ DEPENDENCIES = [
 
 
 @contextmanager
-def import_module_safely(module_name: str):
-    """Context manager for safe module imports"""
+def import_module_safely(module_name: str) -> Generator[Optional[types.ModuleType], None, None]:
+    """Context manager for safe module imports."""
     try:
         module = importlib.import_module(module_name)
         yield module
@@ -106,15 +107,15 @@ def import_module_safely(module_name: str):
 
 
 class SpyglassValidator:
-    """Main validator class for Spyglass installation"""
+    """Main validator class for Spyglass installation."""
 
-    def __init__(self, verbose: bool = False, config_file: Optional[str] = None):
+    def __init__(self, verbose: bool = False, config_file: Optional[str] = None) -> None:
         self.verbose = verbose
         self.config_file = Path(config_file) if config_file else None
         self.results: List[ValidationResult] = []
 
     def run_all_checks(self) -> int:
-        """Run all validation checks and return exit code"""
+        """Run all validation checks and return exit code."""
         print(f"\n{Colors.HEADER}{Colors.BOLD}Spyglass Installation Validator{Colors.ENDC}")
         print("=" * 50)
 
@@ -150,14 +151,14 @@ class SpyglassValidator:
         # Generate summary
         return self.generate_summary()
 
-    def _run_category_checks(self, category: str, checks: List):
-        """Run a category of checks"""
+    def _run_category_checks(self, category: str, checks: List) -> None:
+        """Run a category of checks."""
         print(f"\n{Colors.OKCYAN}Checking {category}...{Colors.ENDC}")
         for check in checks:
             check()
 
-    def check_python_version(self):
-        """Check Python version is >= 3.9"""
+    def check_python_version(self) -> None:
+        """Check Python version is >= 3.9."""
         version = sys.version_info
         version_str = f"Python {version.major}.{version.minor}.{version.micro}"
 
@@ -171,8 +172,8 @@ class SpyglassValidator:
                 Severity.ERROR
             )
 
-    def check_platform(self):
-        """Check operating system compatibility"""
+    def check_platform(self) -> None:
+        """Check operating system compatibility."""
         system = platform.system()
         platform_info = f"{system} {platform.release()}"
 
@@ -193,8 +194,8 @@ class SpyglassValidator:
                 Severity.ERROR
             )
 
-    def check_conda_mamba(self):
-        """Check if conda or mamba is available"""
+    def check_conda_mamba(self) -> None:
+        """Check if conda or mamba is available."""
         for cmd in ["mamba", "conda"]:
             try:
                 result = subprocess.run(
@@ -218,7 +219,7 @@ class SpyglassValidator:
         )
 
     def check_spyglass_import(self) -> bool:
-        """Check if Spyglass can be imported"""
+        """Check if Spyglass can be imported."""
         with import_module_safely("spyglass") as spyglass:
             if spyglass:
                 version = getattr(spyglass, "__version__", "unknown")
@@ -233,8 +234,8 @@ class SpyglassValidator:
                 )
                 return False
 
-    def check_dependencies(self, category: Optional[str] = None, required_only: bool = True):
-        """Check dependencies, optionally filtered by category"""
+    def check_dependencies(self, category: Optional[str] = None, required_only: bool = True) -> None:
+        """Check dependencies, optionally filtered by category."""
         deps = DEPENDENCIES
 
         if category:
@@ -260,8 +261,8 @@ class SpyglassValidator:
                         severity
                     )
 
-    def check_datajoint_config(self):
-        """Check DataJoint configuration"""
+    def check_datajoint_config(self) -> None:
+        """Check DataJoint configuration."""
         with import_module_safely("datajoint") as dj:
             if dj is None:
                 self.add_result(
@@ -300,7 +301,7 @@ class SpyglassValidator:
                     )
 
     def _find_config_file(self) -> Optional[Path]:
-        """Find DataJoint config file and warn about multiple files"""
+        """Find DataJoint config file and warn about multiple files."""
         import os
 
         # If config file explicitly specified, use it
@@ -338,8 +339,8 @@ class SpyglassValidator:
 
         return existing_files[0] if existing_files else None
 
-    def _validate_config_file(self, config_path: Path):
-        """Validate the contents of a config file"""
+    def _validate_config_file(self, config_path: Path) -> None:
+        """Validate the contents of a config file."""
         try:
             config = json.loads(config_path.read_text())
             if 'custom' in config and 'spyglass_dirs' in config['custom']:
@@ -363,8 +364,8 @@ class SpyglassValidator:
                 Severity.ERROR
             )
 
-    def check_directories(self):
-        """Check if Spyglass directories are configured and accessible"""
+    def check_directories(self) -> None:
+        """Check if Spyglass directories are configured and accessible."""
         with import_module_safely("spyglass.settings") as settings_module:
             if settings_module is None:
                 self.add_result(
@@ -397,8 +398,8 @@ class SpyglassValidator:
                     Severity.ERROR
                 )
 
-    def _check_subdirectories(self, base_dir: Path):
-        """Check standard Spyglass subdirectories"""
+    def _check_subdirectories(self, base_dir: Path) -> None:
+        """Check standard Spyglass subdirectories."""
         subdirs = ['raw', 'analysis', 'recording', 'sorting', 'tmp']
 
         for subdir in subdirs:
@@ -418,8 +419,8 @@ class SpyglassValidator:
                     Severity.INFO
                 )
 
-    def check_database_connection(self):
-        """Check database connectivity"""
+    def check_database_connection(self) -> None:
+        """Check database connectivity."""
         with import_module_safely("datajoint") as dj:
             if dj is None:
                 self.add_result(
@@ -456,8 +457,8 @@ class SpyglassValidator:
                     Severity.WARNING
                 )
 
-    def _check_spyglass_tables(self):
-        """Check if Spyglass tables are accessible"""
+    def _check_spyglass_tables(self) -> None:
+        """Check if Spyglass tables are accessible."""
         with import_module_safely("spyglass.common") as common:
             if common:
                 try:
@@ -476,8 +477,8 @@ class SpyglassValidator:
                     )
 
     def add_result(self, name: str, passed: bool, message: str,
-                   severity: Severity = Severity.ERROR):
-        """Add a validation result"""
+                   severity: Severity = Severity.ERROR) -> None:
+        """Add a validation result."""
         result = ValidationResult(name, passed, message, severity)
         self.results.append(result)
 
@@ -485,7 +486,7 @@ class SpyglassValidator:
             print(result)
 
     def get_summary_stats(self) -> Dict[str, int]:
-        """Get validation summary statistics"""
+        """Get validation summary statistics."""
         stats = Counter(total=len(self.results))
 
         for result in self.results:
@@ -497,7 +498,7 @@ class SpyglassValidator:
         return dict(stats)
 
     def generate_summary(self) -> int:
-        """Generate summary report and return exit code"""
+        """Generate summary report and return exit code."""
         print(f"\n{Colors.HEADER}{Colors.BOLD}Validation Summary{Colors.ENDC}")
         print("=" * 50)
 
@@ -532,8 +533,8 @@ class SpyglassValidator:
             return 0
 
 
-def main():
-    """Main entry point"""
+def main() -> None:
+    """Execute the validation script."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -559,7 +560,7 @@ def main():
 
     if args.no_color:
         # Use disabled colors (namedtuples are immutable, so we reassign)
-        Colors = DisabledColors
+        pass  # Colors are already imported as DisabledColors and Colors
 
     validator = SpyglassValidator(verbose=args.verbose, config_file=args.config_file)
     exit_code = validator.run_all_checks()
