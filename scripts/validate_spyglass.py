@@ -29,17 +29,8 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 
-class Colors:
-    """Terminal color codes for pretty output"""
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+# Import shared color definitions
+from common import Colors, DisabledColors
 
 
 class Severity(Enum):
@@ -567,10 +558,8 @@ def main():
     args = parser.parse_args()
 
     if args.no_color:
-        # Remove color codes
-        for attr in dir(Colors):
-            if not attr.startswith('_'):
-                setattr(Colors, attr, '')
+        # Use disabled colors (namedtuples are immutable, so we reassign)
+        Colors = DisabledColors
 
     validator = SpyglassValidator(verbose=args.verbose, config_file=args.config_file)
     exit_code = validator.run_all_checks()

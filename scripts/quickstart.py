@@ -35,78 +35,23 @@ from pathlib import Path
 from typing import Optional, List, Iterator, Tuple
 from dataclasses import dataclass, replace
 from enum import Enum
-from collections import namedtuple
 import getpass
+
+# Import shared utilities
+from common import (
+    Colors, DisabledColors,
+    SpyglassSetupError, SystemRequirementError,
+    EnvironmentCreationError, DatabaseSetupError,
+    Config, MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
+)
 
 # Named constants
 DEFAULT_CHECKSUM_SIZE_LIMIT = 1024**3  # 1 GB
 
-# User choice constants
-CHOICE_1 = "1"
-CHOICE_2 = "2"
-CHOICE_3 = "3"
-CHOICE_4 = "4"
-CHOICE_5 = "5"
-
-# Installation type choices
-MINIMAL_CHOICE = CHOICE_1
-FULL_CHOICE = CHOICE_2
-PIPELINE_CHOICE = CHOICE_3
-
-# Database setup choices
-DOCKER_DB_CHOICE = CHOICE_1
-EXISTING_DB_CHOICE = CHOICE_2
-SKIP_DB_CHOICE = CHOICE_3
-
-# Config location choices
-REPO_ROOT_CHOICE = CHOICE_1
-CURRENT_DIR_CHOICE = CHOICE_2
-CUSTOM_PATH_CHOICE = CHOICE_3
-
-# Pipeline choices
-DLC_CHOICE = CHOICE_1
-MOSEQ_CPU_CHOICE = CHOICE_2
-MOSEQ_GPU_CHOICE = CHOICE_3
-LFP_CHOICE = CHOICE_4
-DECODING_CHOICE = CHOICE_5
+# Choice constants now replaced with enums from common.py
 
 
-# Exception hierarchy for clear error handling
-class SpyglassSetupError(Exception):
-    """Base exception for setup errors."""
-    pass
-
-
-class SystemRequirementError(SpyglassSetupError):
-    """System doesn't meet requirements."""
-    pass
-
-
-class EnvironmentCreationError(SpyglassSetupError):
-    """Failed to create conda environment."""
-    pass
-
-
-class DatabaseSetupError(SpyglassSetupError):
-    """Failed to setup database."""
-    pass
-
-
-# Immutable Colors using NamedTuple
-Colors = namedtuple('Colors', [
-    'RED', 'GREEN', 'YELLOW', 'BLUE', 'CYAN', 'BOLD', 'ENDC'
-])(
-    RED='\033[0;31m',
-    GREEN='\033[0;32m',
-    YELLOW='\033[1;33m',
-    BLUE='\033[0;34m',
-    CYAN='\033[0;36m',
-    BOLD='\033[1m',
-    ENDC='\033[0m'
-)
-
-# Disabled colors instance
-DisabledColors = Colors._replace(**{field: '' for field in Colors._fields})
+# Color and exception definitions now imported from common.py
 
 
 class InstallType(Enum):
@@ -307,9 +252,9 @@ def _test_database_connection(ui, host: str, port: int, user: str, password: str
 
 # Database setup function mapping - simple dictionary approach
 DATABASE_SETUP_METHODS = {
-    DOCKER_DB_CHOICE: setup_docker_database,
-    EXISTING_DB_CHOICE: setup_existing_database,
-    SKIP_DB_CHOICE: lambda _: None  # Skip setup
+    DatabaseChoice.DOCKER: setup_docker_database,
+    DatabaseChoice.EXISTING: setup_existing_database,
+    DatabaseChoice.SKIP: lambda _: None  # Skip setup
 }
 
 
@@ -348,19 +293,19 @@ class UserInterface:
 
     def print_success(self, text: str):
         """Print success message"""
-        print(self._format_message(text, "✓", self.colors.GREEN))
+        print(self._format_message(text, "✓", self.colors.OKGREEN))
 
     def print_warning(self, text: str):
         """Print warning message"""
-        print(self._format_message(text, "⚠", self.colors.YELLOW))
+        print(self._format_message(text, "⚠", self.colors.WARNING))
 
     def print_error(self, text: str):
         """Print error message"""
-        print(self._format_message(text, "✗", self.colors.RED))
+        print(self._format_message(text, "✗", self.colors.FAIL))
 
     def print_info(self, text: str):
         """Print info message"""
-        print(self._format_message(text, "ℹ", self.colors.BLUE))
+        print(self._format_message(text, "ℹ", self.colors.OKBLUE))
 
     def select_install_type(self) -> Tuple[InstallType, Optional[Pipeline]]:
         """Let user select installation type"""
@@ -382,11 +327,11 @@ class UserInterface:
 
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
-            if choice == MINIMAL_CHOICE:
+            if choice == str(MenuChoice.MINIMAL.value):
                 return InstallType.MINIMAL, None
-            elif choice == FULL_CHOICE:
+            elif choice == str(MenuChoice.FULL.value):
                 return InstallType.FULL, None
-            elif choice == PIPELINE_CHOICE:
+            elif choice == str(MenuChoice.PIPELINE.value):
                 pipeline = self.select_pipeline()
                 return InstallType.MINIMAL, pipeline
             else:
@@ -403,15 +348,15 @@ class UserInterface:
 
         while True:
             choice = input("\nEnter choice (1-5): ").strip()
-            if choice == DLC_CHOICE:
+            if choice == str(PipelineChoice.DLC.value):
                 return Pipeline.DLC
-            elif choice == MOSEQ_CPU_CHOICE:
+            elif choice == str(PipelineChoice.MOSEQ_CPU.value):
                 return Pipeline.MOSEQ_CPU
-            elif choice == MOSEQ_GPU_CHOICE:
+            elif choice == str(PipelineChoice.MOSEQ_GPU.value):
                 return Pipeline.MOSEQ_GPU
-            elif choice == LFP_CHOICE:
+            elif choice == str(PipelineChoice.LFP.value):
                 return Pipeline.LFP
-            elif choice == DECODING_CHOICE:
+            elif choice == str(PipelineChoice.DECODING.value):
                 return Pipeline.DECODING
             else:
                 self.print_error("Invalid choice. Please enter 1-5")
@@ -434,12 +379,13 @@ class UserInterface:
 
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
-            if choice in [DOCKER_DB_CHOICE, EXISTING_DB_CHOICE, SKIP_DB_CHOICE]:
-                if choice == SKIP_DB_CHOICE:
+            try:
+                db_choice = DatabaseChoice(int(choice))
+                if db_choice == DatabaseChoice.SKIP:
                     self.print_info("Skipping database setup")
                     self.print_warning("You'll need to configure the database manually later")
-                return choice
-            else:
+                return db_choice
+            except (ValueError, IndexError):
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def select_config_location(self, repo_dir: Path) -> Path:
@@ -451,13 +397,15 @@ class UserInterface:
 
         while True:
             choice = input("\nEnter choice (1-3): ").strip()
-            if choice == REPO_ROOT_CHOICE:
-                return repo_dir
-            elif choice == CURRENT_DIR_CHOICE:
-                return Path.cwd()
-            elif choice == CUSTOM_PATH_CHOICE:
-                return self._get_custom_path()
-            else:
+            try:
+                config_choice = ConfigLocationChoice(int(choice))
+                if config_choice == ConfigLocationChoice.REPO_ROOT:
+                    return repo_dir
+                elif config_choice == ConfigLocationChoice.CURRENT_DIR:
+                    return Path.cwd()
+                elif config_choice == ConfigLocationChoice.CUSTOM:
+                    return self._get_custom_path()
+            except (ValueError, IndexError):
                 self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def _get_custom_path(self) -> Path:
@@ -612,21 +560,27 @@ class EnvironmentManager:
 
     def _execute_environment_command(self, cmd: List[str], timeout: int = 1800):
         """Execute environment creation/update command with progress and timeout"""
+        process = self._start_process(cmd)
+        output_buffer = self._monitor_process(process, timeout)
+        self._handle_process_result(process, output_buffer)
+
+    def _start_process(self, cmd: List[str]) -> subprocess.Popen:
+        """Start subprocess with appropriate settings"""
+        return subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+
+    def _monitor_process(self, process: subprocess.Popen, timeout: int) -> List[str]:
+        """Monitor process execution with timeout and progress display"""
+        output_buffer = []
+        start_time = time.time()
+
         try:
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
-
-            # Buffer to collect all output for error diagnostics
-            output_buffer = []
-
-            # Monitor process with timeout
-            start_time = time.time()
             while process.poll() is None:
                 if time.time() - start_time > timeout:
                     process.kill()
@@ -641,30 +595,29 @@ class EnvironmentManager:
                     pass
 
                 time.sleep(1)
-
-            # Store output buffer for error reporting
-            process._output_buffer = '\n'.join(output_buffer)
-
-            if process.returncode != 0:
-                # Collect the last portion of output for diagnostics
-                full_output = ""
-                if hasattr(process, '_output_buffer'):
-                    full_output = process._output_buffer
-
-                # Get last 200 lines for error context
-                output_lines = full_output.split('\n') if full_output else []
-                error_context = '\n'.join(output_lines[-200:]) if output_lines else "No output captured"
-
-                raise EnvironmentCreationError(
-                    f"Environment creation failed with return code {process.returncode}\n"
-                    f"--- Last 200 lines of output ---\n{error_context}"
-                )
-
         except subprocess.TimeoutExpired:
             raise EnvironmentCreationError("Environment creation timed out")
         except Exception as e:
-            # Preserve the original error context
             raise EnvironmentCreationError(f"Environment creation/update failed: {str(e)}") from e
+
+        return output_buffer
+
+    def _handle_process_result(self, process: subprocess.Popen, output_buffer: List[str]):
+        """Handle process completion and errors"""
+        if process.returncode == 0:
+            return  # Success
+
+        # Handle failure case
+        full_output = '\n'.join(output_buffer) if output_buffer else "No output captured"
+
+        # Get last 200 lines for error context
+        output_lines = full_output.split('\n') if full_output else []
+        error_context = '\n'.join(output_lines[-200:]) if output_lines else "No output captured"
+
+        raise EnvironmentCreationError(
+            f"Environment creation failed with return code {process.returncode}\n"
+            f"--- Last 200 lines of output ---\n{error_context}"
+        )
 
     def _filter_progress_lines(self, process) -> Iterator[str]:
         """Filter and yield relevant progress lines"""
