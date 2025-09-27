@@ -640,9 +640,10 @@ class SpyglassQuickstart:
         self.print_header("Database Setup")
 
         strategy = self._select_database_strategy()
-        strategy.setup(self)
+        if strategy is not None:
+            strategy.setup(self)
 
-    def _select_database_strategy(self) -> DatabaseSetupStrategy:
+    def _select_database_strategy(self) -> Optional[DatabaseSetupStrategy]:
         """Select database setup strategy"""
         print("\nChoose database setup option:")
         print("1) Local Docker database (recommended for beginners)")
