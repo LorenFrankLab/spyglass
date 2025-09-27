@@ -10,13 +10,19 @@ Usage:
     python quickstart.py [OPTIONS]
 
 Options:
-    --minimal       Install core dependencies only (default)
-    --full          Install all optional dependencies
-    --pipeline=X    Install specific pipeline dependencies
+    --minimal       Install core dependencies only (will prompt if not specified)
+    --full          Install all optional dependencies (will prompt if not specified)
+    --pipeline=X    Install specific pipeline dependencies (will prompt if not specified)
     --no-database   Skip database setup
     --no-validate   Skip validation after setup
     --base-dir=PATH Set base directory for data
     --help          Show help message
+
+Interactive Mode:
+    If no installation type is specified, you'll be prompted to choose between:
+    1) Minimal installation (core dependencies only)
+    2) Full installation (all optional dependencies)
+    3) Pipeline-specific installation (choose from DLC, Moseq, LFP, Decoding)
 """
 
 import sys
@@ -279,6 +285,10 @@ class SpyglassQuickstart:
         self.check_python()
         self.check_conda()
 
+        # Let user choose installation type unless specified via command line
+        if not self._installation_type_specified():
+            self.select_installation_type()
+
         env_file = self.select_environment()
         self.create_environment(env_file)
         self.install_additional_deps()
@@ -418,6 +428,84 @@ class SpyglassQuickstart:
     def get_cached_command_output(self, cmd_tuple: tuple) -> str:
         """Get cached command output"""
         return self.get_command_output(list(cmd_tuple))
+
+    def _installation_type_specified(self) -> bool:
+        """Check if installation type was specified via command line arguments"""
+        # Installation type is considered specified if user used --full or --pipeline flags
+        return (hasattr(self.config, 'install_type') and
+                self.config.install_type == InstallType.FULL) or \
+               (hasattr(self.config, 'pipeline') and
+                self.config.pipeline is not None)
+
+    def select_installation_type(self):
+        """Let user select installation type interactively"""
+        self.print_header("Installation Type Selection")
+
+        print("\nChoose your installation type:")
+        print("1) Minimal (core dependencies only)")
+        print("   ├─ Basic Spyglass functionality")
+        print("   ├─ Standard data analysis tools")
+        print("   └─ Fastest installation (~5-10 minutes)")
+        print()
+        print("2) Full (all optional dependencies)")
+        print("   ├─ All analysis pipelines included")
+        print("   ├─ Spike sorting, LFP, visualization tools")
+        print("   └─ Longer installation (~15-30 minutes)")
+        print()
+        print("3) Pipeline-specific")
+        print("   ├─ Choose specific analysis pipeline")
+        print("   ├─ DeepLabCut, Moseq, LFP, or Decoding")
+        print("   └─ Optimized environment for your workflow")
+
+        while True:
+            choice = input("\nEnter choice (1-3): ").strip()
+            if choice == "1":
+                # Keep current minimal setup
+                self.print_info("Selected: Minimal installation")
+                break
+            elif choice == "2":
+                self.config.install_type = InstallType.FULL
+                self.print_info("Selected: Full installation")
+                break
+            elif choice == "3":
+                self._select_pipeline()
+                break
+            else:
+                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+
+    def _select_pipeline(self):
+        """Let user select specific pipeline"""
+        print("\nChoose your pipeline:")
+        print("1) DeepLabCut - Pose estimation and behavior analysis")
+        print("2) Keypoint-Moseq (CPU) - Behavioral sequence analysis")
+        print("3) Keypoint-Moseq (GPU) - GPU-accelerated behavioral analysis")
+        print("4) LFP Analysis - Local field potential processing")
+        print("5) Decoding - Neural population decoding")
+
+        while True:
+            choice = input("\nEnter choice (1-5): ").strip()
+            if choice == "1":
+                self.config.pipeline = Pipeline.DLC
+                self.print_info("Selected: DeepLabCut pipeline")
+                break
+            elif choice == "2":
+                self.config.pipeline = Pipeline.MOSEQ_CPU
+                self.print_info("Selected: Keypoint-Moseq (CPU) pipeline")
+                break
+            elif choice == "3":
+                self.config.pipeline = Pipeline.MOSEQ_GPU
+                self.print_info("Selected: Keypoint-Moseq (GPU) pipeline")
+                break
+            elif choice == "4":
+                self.config.pipeline = Pipeline.LFP
+                self.print_info("Selected: LFP Analysis pipeline")
+                break
+            elif choice == "5":
+                self.config.pipeline = Pipeline.DECODING
+                self.print_info("Selected: Neural Decoding pipeline")
+                break
+            else:
+                self.print_error("Invalid choice. Please enter 1-5")
 
     def select_environment(self) -> str:
         """Select appropriate environment file"""
@@ -862,18 +950,18 @@ Examples:
     install_group.add_argument(
         "--minimal",
         action="store_true",
-        help="Install core dependencies only (default)"
+        help="Install core dependencies only (will prompt if none specified)"
     )
     install_group.add_argument(
         "--full",
         action="store_true",
-        help="Install all optional dependencies"
+        help="Install all optional dependencies (will prompt if none specified)"
     )
 
     parser.add_argument(
         "--pipeline",
         choices=["dlc", "moseq-cpu", "moseq-gpu", "lfp", "decoding"],
-        help="Install specific pipeline dependencies"
+        help="Install specific pipeline dependencies (will prompt if none specified)"
     )
 
     parser.add_argument(
