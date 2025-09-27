@@ -840,8 +840,24 @@ class QuickstartOrchestrator:
             # Print validation output
             if result.stdout:
                 print(result.stdout)
+
+            # Filter out conda's overly aggressive error logging for non-zero exit codes
             if result.stderr:
-                print(result.stderr)
+                stderr_lines = result.stderr.split('\n')
+                filtered_lines = []
+
+                for line in stderr_lines:
+                    # Skip conda's false-positive error messages
+                    if "ERROR conda.cli.main_run:execute(127):" in line and "failed." in line:
+                        continue
+                    if "failed. (See above for error)" in line:
+                        continue
+                    # Keep legitimate stderr content (like deprecation warnings)
+                    if line.strip():
+                        filtered_lines.append(line)
+
+                if filtered_lines:
+                    print('\n'.join(filtered_lines))
 
             if result.returncode == 0:
                 self.ui.print_success("All validation checks passed!")
