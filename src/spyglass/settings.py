@@ -160,12 +160,17 @@ class SpyglassConfig:
             or os.environ.get("SPYGLASS_BASE_DIR")
         )
 
-        if resolved_base and not Path(resolved_base).exists():
-            resolved_base = Path(resolved_base).expanduser()
-        if not resolved_base or not Path(resolved_base).exists():
+        if resolved_base:
+            base_path = Path(resolved_base).expanduser().resolve()
+            if not self._debug_mode:
+                # Create base directory if it doesn't exist
+                base_path.mkdir(parents=True, exist_ok=True)
+            resolved_base = str(base_path)
+
+        if not resolved_base:
             if not on_startup:  # Only warn if not on startup
                 logger.error(
-                    f"Could not find SPYGLASS_BASE_DIR: {resolved_base}"
+                    "Could not find SPYGLASS_BASE_DIR"
                     + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
                     + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
                 )
@@ -178,14 +183,14 @@ class SpyglassConfig:
             or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(exist_ok=True)
+        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
 
         self._moseq_base = (
             dj_moseq.get("base")
             or os.environ.get("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
-        Path(self._moseq_base).mkdir(exist_ok=True)
+        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
@@ -257,7 +262,7 @@ class SpyglassConfig:
         if self._debug_mode:
             return
         for dir_str in dir_dict.values():
-            Path(dir_str).mkdir(exist_ok=True)
+            Path(dir_str).mkdir(parents=True, exist_ok=True)
 
     def _set_dj_config_stores(self, check_match=True, set_stores=True) -> None:
         """
@@ -419,7 +424,8 @@ class SpyglassConfig:
 
         user_warn = (
             f"Replace existing file? {filepath.resolve()}\n\t"
-            + "\n\t".join([f"{k}: {v}" for k, v in config.items()])
+            + "\n\t".join([f"{k}: {v if k != 'database.password' else '***'}"
+                          for k, v in dj.config._conf.items()])
             + "\n"
         )
 
@@ -501,7 +507,11 @@ class SpyglassConfig:
                     "project": self.moseq_project_dir,
                     "video": self.moseq_video_dir,
                 },
-                "kachery_zone": "franklab.default",
+                "kachery_zone": (
+                    os.environ.get("KACHERY_ZONE")
+                    or dj.config.get("custom", {}).get("kachery_zone")
+                    or "franklab.default"
+                ),
             }
         }
 
