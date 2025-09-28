@@ -164,39 +164,6 @@ def validate_base_dir(path: Path) -> Path:
     return resolved
 
 
-class SpyglassConfigManager:
-    """Manages SpyglassConfig for quickstart setup."""
-
-    def create_config(self, base_dir: Path, host: str, port: int, user: str, password: str, config_dir: Path):
-        """Create complete SpyglassConfig setup using official methods."""
-        from spyglass.settings import SpyglassConfig
-        import os
-
-        # Temporarily change to config directory so dj_local_conf.json gets created there
-        original_cwd = Path.cwd()
-        try:
-            os.chdir(config_dir)
-
-            # Create SpyglassConfig instance with base directory
-            config = SpyglassConfig(base_dir=str(base_dir), test_mode=True)
-
-            # Use SpyglassConfig's official save_dj_config method with local config
-            config.save_dj_config(
-                save_method="local",  # Creates dj_local_conf.json in current directory (config_dir)
-                base_dir=str(base_dir),
-                database_host=host,
-                database_port=port,
-                database_user=user,
-                database_password=password,
-                database_use_tls=not (host.startswith("127.0.0.1") or host == "localhost"),
-                set_password=False  # Skip password prompt during setup
-            )
-
-            return config
-        finally:
-            # Always restore original working directory
-            os.chdir(original_cwd)
-
 
 def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
     """Setup Docker database - simple function."""
@@ -499,16 +466,21 @@ class UserInterface:
         print("   └─ Optimized environment for your workflow")
 
         while True:
-            choice = input("\nEnter choice (1-3): ").strip()
-            if choice == str(MenuChoice.MINIMAL.value):
+            try:
+                choice = input("\nEnter choice (1-3): ").strip()
+                if choice == str(MenuChoice.MINIMAL.value):
+                    return InstallType.MINIMAL, None
+                elif choice == str(MenuChoice.FULL.value):
+                    return InstallType.FULL, None
+                elif choice == str(MenuChoice.PIPELINE.value):
+                    pipeline = self.select_pipeline()
+                    return InstallType.MINIMAL, pipeline
+                else:
+                    self.print_error("Invalid choice. Please enter 1, 2, or 3")
+            except EOFError:
+                self.print_warning("Interactive input not available, defaulting to minimal installation")
+                self.print_info("Use --minimal, --full, or --pipeline flags to specify installation type")
                 return InstallType.MINIMAL, None
-            elif choice == str(MenuChoice.FULL.value):
-                return InstallType.FULL, None
-            elif choice == str(MenuChoice.PIPELINE.value):
-                pipeline = self.select_pipeline()
-                return InstallType.MINIMAL, pipeline
-            else:
-                self.print_error("Invalid choice. Please enter 1, 2, or 3")
 
     def select_pipeline(self) -> Pipeline:
         """Let user select specific pipeline."""
@@ -520,19 +492,24 @@ class UserInterface:
         print("5) Decoding - Neural population decoding")
 
         while True:
-            choice = input("\nEnter choice (1-5): ").strip()
-            if choice == str(PipelineChoice.DLC.value):
+            try:
+                choice = input("\nEnter choice (1-5): ").strip()
+                if choice == str(PipelineChoice.DLC.value):
+                    return Pipeline.DLC
+                elif choice == str(PipelineChoice.MOSEQ_CPU.value):
+                    return Pipeline.MOSEQ_CPU
+                elif choice == str(PipelineChoice.MOSEQ_GPU.value):
+                    return Pipeline.MOSEQ_GPU
+                elif choice == str(PipelineChoice.LFP.value):
+                    return Pipeline.LFP
+                elif choice == str(PipelineChoice.DECODING.value):
+                    return Pipeline.DECODING
+                else:
+                    self.print_error("Invalid choice. Please enter 1-5")
+            except EOFError:
+                self.print_warning("Interactive input not available, defaulting to DeepLabCut")
+                self.print_info("Use --pipeline flag to specify pipeline type")
                 return Pipeline.DLC
-            elif choice == str(PipelineChoice.MOSEQ_CPU.value):
-                return Pipeline.MOSEQ_CPU
-            elif choice == str(PipelineChoice.MOSEQ_GPU.value):
-                return Pipeline.MOSEQ_GPU
-            elif choice == str(PipelineChoice.LFP.value):
-                return Pipeline.LFP
-            elif choice == str(PipelineChoice.DECODING.value):
-                return Pipeline.DECODING
-            else:
-                self.print_error("Invalid choice. Please enter 1-5")
 
     def confirm_environment_update(self, env_name: str) -> bool:
         """Ask user if they want to update existing environment."""
@@ -540,8 +517,15 @@ class UserInterface:
         if self.auto_yes:
             self.print_info("Auto-accepting environment update (--yes)")
             return True
-        choice = input("Do you want to update it? (y/N): ").strip().lower()
-        return choice == 'y'
+
+        try:
+            choice = input("Do you want to update it? (y/N): ").strip().lower()
+            return choice == 'y'
+        except EOFError:
+            # Handle case where stdin is not available (e.g., non-interactive environment)
+            self.print_warning("Interactive input not available, defaulting to 'no'")
+            self.print_info("Use --yes flag to auto-accept prompts")
+            return False
 
     def select_database_setup(self) -> str:
         """Select database setup choice."""
@@ -551,15 +535,20 @@ class UserInterface:
         print("3) Skip database setup")
 
         while True:
-            choice = input("\nEnter choice (1-3): ").strip()
             try:
-                db_choice = DatabaseChoice(int(choice))
-                if db_choice == DatabaseChoice.SKIP:
-                    self.print_info("Skipping database setup")
-                    self.print_warning("You'll need to configure the database manually later")
-                return db_choice
-            except (ValueError, IndexError):
-                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+                choice = input("\nEnter choice (1-3): ").strip()
+                try:
+                    db_choice = DatabaseChoice(int(choice))
+                    if db_choice == DatabaseChoice.SKIP:
+                        self.print_info("Skipping database setup")
+                        self.print_warning("You'll need to configure the database manually later")
+                    return db_choice
+                except (ValueError, IndexError):
+                    self.print_error("Invalid choice. Please enter 1, 2, or 3")
+            except EOFError:
+                self.print_warning("Interactive input not available, defaulting to skip database setup")
+                self.print_info("Use --no-database flag to skip database setup")
+                return DatabaseChoice.SKIP
 
     def select_config_location(self, repo_dir: Path) -> Path:
         """Select where to save the DataJoint configuration file."""
@@ -569,41 +558,52 @@ class UserInterface:
         print("3) Custom location")
 
         while True:
-            choice = input("\nEnter choice (1-3): ").strip()
             try:
-                config_choice = ConfigLocationChoice(int(choice))
-                if config_choice == ConfigLocationChoice.REPO_ROOT:
-                    return repo_dir
-                elif config_choice == ConfigLocationChoice.CURRENT_DIR:
-                    return Path.cwd()
-                elif config_choice == ConfigLocationChoice.CUSTOM:
-                    return self._get_custom_path()
-            except (ValueError, IndexError):
-                self.print_error("Invalid choice. Please enter 1, 2, or 3")
+                choice = input("\nEnter choice (1-3): ").strip()
+                try:
+                    config_choice = ConfigLocationChoice(int(choice))
+                    if config_choice == ConfigLocationChoice.REPO_ROOT:
+                        return repo_dir
+                    elif config_choice == ConfigLocationChoice.CURRENT_DIR:
+                        return Path.cwd()
+                    elif config_choice == ConfigLocationChoice.CUSTOM:
+                        return self._get_custom_path()
+                except (ValueError, IndexError):
+                    self.print_error("Invalid choice. Please enter 1, 2, or 3")
+            except EOFError:
+                self.print_warning("Interactive input not available, defaulting to repository root")
+                self.print_info("Use --base-dir to specify a different location")
+                return repo_dir
 
     def _get_custom_path(self) -> Path:
         """Get custom path from user with validation."""
         while True:
-            custom_path = input("Enter custom directory path: ").strip()
-            if not custom_path:
-                self.print_error("Path cannot be empty")
-                continue
-
             try:
-                path = Path(custom_path).expanduser().resolve()
-                if not path.exists():
-                    create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
-                    if create == 'y':
-                        path.mkdir(parents=True, exist_ok=True)
-                    else:
-                        continue
-                if not path.is_dir():
-                    self.print_error("Path must be a directory")
+                custom_path = input("Enter custom directory path: ").strip()
+                if not custom_path:
+                    self.print_error("Path cannot be empty")
                     continue
+
+                try:
+                    path = Path(custom_path).expanduser().resolve()
+                    if not path.exists():
+                        try:
+                            create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
+                            if create == 'y':
+                                path.mkdir(parents=True, exist_ok=True)
+                            else:
+                                continue
+                        except EOFError:
+                            self.print_warning("Interactive input not available, creating directory automatically")
+                            path.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    self.print_error(f"Invalid path: {e}")
+                    continue
+
                 return path
-            except (OSError, PermissionError, ValueError) as e:
-                self.print_error(f"Invalid path: {e}")
-                continue
+            except EOFError:
+                self.print_warning("Interactive input not available, using current directory")
+                return Path.cwd()
 
     def get_database_credentials(self) -> Tuple[str, int, str, str]:
         """Get database connection credentials from user."""
@@ -1037,27 +1037,116 @@ class QuickstartOrchestrator:
         # Create base directory structure
         self._create_directory_structure()
 
-        # Use SpyglassConfig to create configuration
+        # Create configuration using spyglass environment (without test_mode)
         try:
-            config_manager = SpyglassConfigManager()
-            spyglass_config = config_manager.create_config(
-                base_dir=self.config.base_dir,
-                host=host,
-                port=port,
-                user=user,
-                password=password,
-                config_dir=config_dir
-            )
-
+            self._create_config_in_env(host, user, password, port, config_dir)
             self.ui.print_success(f"Configuration file created at: {config_file_path}")
             self.ui.print_success(f"Data directories created at: {self.config.base_dir}")
-
-            # Validate the configuration
-            self._validate_spyglass_config(spyglass_config)
 
         except (OSError, PermissionError, ValueError, json.JSONDecodeError) as e:
             self.ui.print_error(f"Failed to create configuration: {e}")
             raise
+
+    def _create_config_in_env(self, host: str, user: str, password: str, port: int, config_dir: Path) -> None:
+        """Create configuration within the spyglass environment."""
+        import tempfile
+
+        # Create a temporary Python script file for better subprocess handling
+        python_script_content = f'''
+import sys
+import os
+from pathlib import Path
+
+# Change to config directory
+original_cwd = Path.cwd()
+try:
+    os.chdir("{config_dir}")
+
+    # Import and use SpyglassConfig
+    from spyglass.settings import SpyglassConfig
+
+    # Create SpyglassConfig instance (without test_mode)
+    config = SpyglassConfig(base_dir="{self.config.base_dir}")
+
+    # Save configuration
+    config.save_dj_config(
+        save_method="local",
+        base_dir="{self.config.base_dir}",
+        database_host="{host}",
+        database_port={port},
+        database_user="{user}",
+        database_password="{password}",
+        database_use_tls={not (host.startswith("127.0.0.1") or host == "localhost")},
+        set_password=False
+    )
+
+    print("SUCCESS: Configuration created successfully")
+
+finally:
+    os.chdir(original_cwd)
+'''
+
+        # Write script to temporary file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+            temp_file.write(python_script_content)
+            temp_script_path = temp_file.name
+
+        try:
+            # Find the python executable in the spyglass environment directly
+            env_name = self.config.env_name
+
+            # Get the python executable path for the spyglass environment
+            python_executable = self._get_env_python_executable(env_name)
+
+            # Execute directly with the environment's python executable
+            cmd = [python_executable, temp_script_path]
+
+            # Run with stdin/stdout/stderr inherited to allow interactive prompts
+            subprocess.run(cmd, check=True, stdin=None, stdout=None, stderr=None)
+            self.ui.print_info("Configuration created in spyglass environment")
+
+        except subprocess.CalledProcessError as e:
+            self.ui.print_error(f"Failed to create configuration in environment '{env_name}'")
+            self.ui.print_error(f"Return code: {e.returncode}")
+            raise
+        finally:
+            # Clean up temporary file
+            import os
+            try:
+                os.unlink(temp_script_path)
+            except OSError:
+                pass
+
+    def _get_env_python_executable(self, env_name: str) -> str:
+        """Get the python executable path for a conda environment."""
+        import sys
+        import subprocess
+        from pathlib import Path
+
+        # Try to get conda base path
+        conda_base = Path(sys.executable).parent.parent
+
+        # Common paths for conda environment python executables
+        possible_paths = [
+            conda_base / "envs" / env_name / "bin" / "python",  # Linux/Mac
+            conda_base / "envs" / env_name / "python.exe",     # Windows
+        ]
+
+        for python_path in possible_paths:
+            if python_path.exists():
+                return str(python_path)
+
+        # Fallback: try to find using conda command
+        try:
+            result = subprocess.run(
+                ["conda", "run", "-n", env_name, "python", "-c", "import sys; print(sys.executable)"],
+                capture_output=True, text=True, check=True
+            )
+            return result.stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+
+        raise RuntimeError(f"Could not find Python executable for environment '{env_name}'")
 
     def _create_directory_structure(self) -> None:
         """Create the basic directory structure for Spyglass."""
