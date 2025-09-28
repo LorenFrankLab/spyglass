@@ -170,74 +170,96 @@ def validate_base_dir(path: Path) -> Path:
 
 
 def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
-    """Setup Docker database - simple function."""
+    """Setup Docker database using pure functions with structured error handling."""
+    # Import Docker operations
+    import sys
+    from pathlib import Path
+    scripts_dir = Path(__file__).parent
+    sys.path.insert(0, str(scripts_dir))
+
+    from core.docker_operations import (
+        DockerConfig, validate_docker_prerequisites, assess_docker_readiness,
+        build_docker_run_command, build_docker_pull_command,
+        build_mysql_ping_command, get_container_info
+    )
+
     orchestrator.ui.print_info("Setting up local Docker database...")
 
-    # Check Docker availability
-    if not shutil.which("docker"):
-        orchestrator.ui.print_error("Docker is not installed")
-        orchestrator.ui.print_info("Please install Docker from: https://docs.docker.com/engine/install/")
-        raise SystemRequirementError("Docker is not installed")
-
-    # Check Docker daemon
-    result = subprocess.run(
-        ["docker", "info"],
-        capture_output=True,
-        text=True
-    )
-    if result.returncode != 0:
-        orchestrator.ui.print_error("Docker daemon is not running")
-        orchestrator.ui.print_info("Please start Docker Desktop and try again")
-        orchestrator.ui.print_info("On macOS: Open Docker Desktop application")
-        orchestrator.ui.print_info("On Linux: sudo systemctl start docker")
-        raise SystemRequirementError("Docker daemon is not running")
-
-    # Pull and run container
-    orchestrator.ui.print_info("Pulling MySQL image...")
-    subprocess.run(["docker", "pull", "datajoint/mysql:8.0"], check=True)
-
-    # Check existing container
-    result = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True
+    # Create Docker configuration
+    docker_config = DockerConfig(
+        container_name="spyglass-db",
+        image="datajoint/mysql:8.0",
+        port=orchestrator.config.db_port,
+        password="tutorial"
     )
 
-    if "spyglass-db" in result.stdout:
-        orchestrator.ui.print_warning("Container 'spyglass-db' already exists")
-        subprocess.run(["docker", "start", "spyglass-db"], check=True)
+    # Validate Docker prerequisites using pure functions
+    orchestrator.ui.print_info("Checking Docker prerequisites...")
+    validations = validate_docker_prerequisites(docker_config)
+    readiness = assess_docker_readiness(validations)
+
+    if readiness.is_failure:
+        orchestrator.ui.print_error("Docker setup requirements not met:")
+        orchestrator.ui.print_error(f"  {readiness.message}")
+
+        # Display structured recovery actions
+        for action in readiness.recovery_actions:
+            orchestrator.ui.print_info(f"  → {action}")
+
+        raise SystemRequirementError(f"Docker prerequisites failed: {readiness.message}")
+
+    orchestrator.ui.print_success("Docker prerequisites validated")
+
+    # Check if container already exists
+    container_info_result = get_container_info(docker_config.container_name)
+
+    if container_info_result.is_success and container_info_result.value.exists:
+        if container_info_result.value.running:
+            orchestrator.ui.print_info(f"Container '{docker_config.container_name}' is already running")
+        else:
+            orchestrator.ui.print_info(f"Starting existing container '{docker_config.container_name}'...")
+            try:
+                subprocess.run(["docker", "start", docker_config.container_name], check=True)
+                orchestrator.ui.print_success("Container started successfully")
+            except subprocess.CalledProcessError as e:
+                orchestrator.ui.print_error(f"Failed to start existing container: {e}")
+                raise SystemRequirementError("Could not start Docker container")
     else:
-        # Check if port is already in use
-        import socket
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            result = s.connect_ex(('localhost', orchestrator.config.db_port))
-            if result == 0:
-                orchestrator.ui.print_error(f"Port {orchestrator.config.db_port} is already in use")
-                orchestrator.ui.print_info("Try using a different port with --db-port (e.g., --db-port 3307)")
-                raise SystemRequirementError(f"Port {orchestrator.config.db_port} is already in use")
+        # Pull image using pure function
+        pull_cmd = build_docker_pull_command(docker_config)
+        orchestrator.ui.print_info(f"Pulling image: {docker_config.image}...")
 
-        port_mapping = f"{orchestrator.config.db_port}:3306"
-        subprocess.run([
-            "docker", "run", "-d",
-            "--name", "spyglass-db",
-            "-p", port_mapping,
-            "-e", "MYSQL_ROOT_PASSWORD=tutorial",
-            "datajoint/mysql:8.0"
-        ], check=True)
+        try:
+            subprocess.run(pull_cmd, check=True)
+            orchestrator.ui.print_success("Image pulled successfully")
+        except subprocess.CalledProcessError as e:
+            orchestrator.ui.print_error("Failed to pull Docker image")
+            orchestrator.ui.print_info("→ Check your internet connection")
+            orchestrator.ui.print_info("→ Verify Docker has access to Docker Hub")
+            raise SystemRequirementError(f"Docker image pull failed: {e}")
 
-    orchestrator.ui.print_success("Docker database started")
+        # Create and run container using pure function
+        run_cmd = build_docker_run_command(docker_config)
+        orchestrator.ui.print_info(f"Creating container '{docker_config.container_name}'...")
 
-    # Wait for MySQL to be ready
+        try:
+            subprocess.run(run_cmd, check=True)
+            orchestrator.ui.print_success("Container created and started")
+        except subprocess.CalledProcessError as e:
+            orchestrator.ui.print_error("Failed to create Docker container")
+            orchestrator.ui.print_info(f"→ Port {docker_config.port} might be in use")
+            orchestrator.ui.print_info(f"→ Try different port: --db-port {docker_config.port + 1}")
+            orchestrator.ui.print_info("→ Check Docker daemon is running properly")
+            raise SystemRequirementError(f"Docker container creation failed: {e}")
+
+    # Wait for MySQL readiness using pure function
     orchestrator.ui.print_info("Waiting for MySQL to be ready...")
+    ping_cmd = build_mysql_ping_command(docker_config)
+
     for attempt in range(60):  # Wait up to 2 minutes
         try:
-            result = subprocess.run(
-                ["docker", "exec", "spyglass-db", "mysqladmin", "-uroot", "-ptutorial", "ping"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            if b"mysqld is alive" in result.stdout.encode() or "mysqld is alive" in result.stdout:
+            result = subprocess.run(ping_cmd, capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
                 orchestrator.ui.print_success("MySQL is ready!")
                 break
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
@@ -247,8 +269,11 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
             time.sleep(2)
     else:
         orchestrator.ui.print_warning("MySQL readiness check timed out, but proceeding anyway")
+        orchestrator.ui.print_info("→ Database may take a few more minutes to fully initialize")
+        orchestrator.ui.print_info("→ Try connecting again if you encounter issues")
 
-    orchestrator.create_config("localhost", "root", "tutorial", orchestrator.config.db_port)
+    # Create configuration
+    orchestrator.create_config("localhost", "root", docker_config.password, docker_config.port)
 
 
 def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
