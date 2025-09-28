@@ -1118,17 +1118,67 @@ class QuickstartOrchestrator:
         else:
             print(f"\n⚠️  Note: Space is limited ({available_space:.1f} GB available). Minimal installation advised.")
 
-        # Get user choice using existing UI method
-        install_type, pipeline = self.ui.select_install_type()
+        # Get user choice directly (avoiding duplicate menu)
+        while True:
+            try:
+                choice = input("\nEnter choice (1-3): ").strip()
+                if choice == "1":
+                    install_type = InstallType.MINIMAL
+                    pipeline = None
+                    chosen_install_type = InstallationType.MINIMAL
+                    break
+                elif choice == "2":
+                    install_type = InstallType.FULL
+                    pipeline = None
+                    chosen_install_type = InstallationType.FULL
+                    break
+                elif choice == "3":
+                    # For pipeline-specific, we still need to get the pipeline choice
+                    pipeline = self._select_pipeline_with_estimates(system_info)
+                    install_type = InstallType.MINIMAL  # Pipeline-specific uses minimal base
+                    chosen_install_type = InstallationType.PIPELINE_SPECIFIC
+                    break
+                else:
+                    self.ui.print_error("Invalid choice. Please enter 1, 2, or 3")
+            except EOFError:
+                self.ui.print_warning("Interactive input not available, defaulting to minimal installation")
+                install_type = InstallType.MINIMAL
+                pipeline = None
+                chosen_install_type = InstallationType.MINIMAL
+                break
 
         # Show final estimates for chosen type
-        chosen_install_type = self._map_install_type_to_requirements_type()
-        if pipeline:
-            chosen_install_type = InstallationType.PIPELINE_SPECIFIC
-
         self._display_installation_estimates(system_info, chosen_install_type)
 
         return install_type, pipeline
+
+    def _select_pipeline_with_estimates(self, system_info) -> Pipeline:
+        """Select specific pipeline with estimates (called from installation type selection)."""
+        print("\nChoose your specific pipeline:")
+        print("1) DeepLabCut - Pose estimation and behavior analysis")
+        print("2) Keypoint-Moseq (CPU) - Behavioral sequence analysis")
+        print("3) Keypoint-Moseq (GPU) - GPU-accelerated behavioral analysis")
+        print("4) LFP Analysis - Local field potential processing")
+        print("5) Decoding - Neural population decoding")
+
+        while True:
+            try:
+                choice = input("\nEnter choice (1-5): ").strip()
+                if choice == "1":
+                    return Pipeline.DLC
+                elif choice == "2":
+                    return Pipeline.MOSEQ_CPU
+                elif choice == "3":
+                    return Pipeline.MOSEQ_GPU
+                elif choice == "4":
+                    return Pipeline.LFP
+                elif choice == "5":
+                    return Pipeline.DECODING
+                else:
+                    self.ui.print_error("Invalid choice. Please enter 1-5")
+            except EOFError:
+                self.ui.print_warning("Interactive input not available, defaulting to DeepLabCut")
+                return Pipeline.DLC
 
     def _installation_type_specified(self) -> bool:
         """Check if installation type was specified via command line arguments."""
