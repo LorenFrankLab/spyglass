@@ -1193,7 +1193,9 @@ class QuickstartOrchestrator:
 
         print("Choose a name for your conda environment:")
         print("")
-        print("💡 Recommended: 'spyglass' (standard name for Spyglass installations)")
+
+        # Use consistent color pattern for recommendations
+        print(f"{self.ui.colors.OKCYAN}💡 Recommended:{self.ui.colors.ENDC} 'spyglass' (standard name for Spyglass installations)")
         print("   Examples: spyglass, spyglass-dev, my-spyglass, analysis-env")
         print("")
 
@@ -1204,14 +1206,14 @@ class QuickstartOrchestrator:
                 # Use default if no input
                 if not user_input:
                     env_name = "spyglass"
-                    print(f"Using default environment name: {env_name}")
+                    self.ui.print_info(f"Using default environment name: {env_name}")
                     return env_name
 
                 # Validate the environment name
                 validation_result = validate_environment_name(user_input)
 
                 if validation_result.is_success:
-                    print(f"Using environment name: {user_input}")
+                    self.ui.print_info(f"Using environment name: {user_input}")
                     return user_input
                 else:
                     self.ui.print_error(f"Invalid environment name: {validation_result.error.message}")
