@@ -909,6 +909,11 @@ class QuickstartOrchestrator:
             install_type, pipeline = self._select_install_type_with_estimates(system_info)
             self.config = replace(self.config, install_type=install_type, pipeline=pipeline)
 
+        # Step 2.5: Environment Name Selection (if not auto-yes mode)
+        if not self.config.auto_yes:
+            env_name = self._select_environment_name()
+            self.config = replace(self.config, env_name=env_name)
+
         # Step 3: Environment Creation
         env_file = self.env_manager.select_environment_file()
         self.env_manager.create_environment(env_file, conda_cmd)
@@ -1179,6 +1184,44 @@ class QuickstartOrchestrator:
             except EOFError:
                 self.ui.print_warning("Interactive input not available, defaulting to DeepLabCut")
                 return Pipeline.DLC
+
+    def _select_environment_name(self) -> str:
+        """Select conda environment name with spyglass as recommended default."""
+        from ux.validation import validate_environment_name
+
+        self.ui.print_header("Environment Name Selection")
+
+        print("Choose a name for your conda environment:")
+        print("")
+        print("💡 Recommended: 'spyglass' (standard name for Spyglass installations)")
+        print("   Examples: spyglass, spyglass-dev, my-spyglass, analysis-env")
+        print("")
+
+        while True:
+            try:
+                user_input = input("Environment name (press Enter for 'spyglass'): ").strip()
+
+                # Use default if no input
+                if not user_input:
+                    env_name = "spyglass"
+                    print(f"Using default environment name: {env_name}")
+                    return env_name
+
+                # Validate the environment name
+                validation_result = validate_environment_name(user_input)
+
+                if validation_result.is_success:
+                    print(f"Using environment name: {user_input}")
+                    return user_input
+                else:
+                    self.ui.print_error(f"Invalid environment name: {validation_result.error.message}")
+                    for action in validation_result.error.recovery_actions:
+                        self.ui.print_info(f"  → {action}")
+                    print("")  # Add spacing for readability
+
+            except EOFError:
+                self.ui.print_warning("Interactive input not available, using default 'spyglass'")
+                return "spyglass"
 
     def _installation_type_specified(self) -> bool:
         """Check if installation type was specified via command line arguments."""
