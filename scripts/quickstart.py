@@ -385,6 +385,7 @@ class UserInterface:
             if validator(value):
                 return value
             self.print_error(error_msg)
+            self.print_info("→ Please try again with a valid value")
 
     def print_header_banner(self) -> None:
         """Print the main application banner."""
@@ -605,31 +606,54 @@ class UserInterface:
                 return repo_dir
 
     def _get_custom_path(self) -> Path:
-        """Get custom path from user with validation."""
+        """Get custom path from user with enhanced validation."""
+        # Import validation functions
+        import sys
+        from pathlib import Path
+        scripts_dir = Path(__file__).parent
+        sys.path.insert(0, str(scripts_dir))
+
+        from ux.validation import validate_directory
+
         while True:
             try:
-                custom_path = input("Enter custom directory path: ").strip()
-                if not custom_path:
+                user_input = input("Enter custom directory path: ").strip()
+
+                # Check for empty input
+                if not user_input:
                     self.print_error("Path cannot be empty")
+                    self.print_info("→ Enter a valid directory path")
+                    self.print_info("→ Use ~ for home directory (e.g., ~/my-spyglass)")
                     continue
 
-                try:
-                    path = Path(custom_path).expanduser().resolve()
+                # Validate the directory path
+                validation_result = validate_directory(user_input, must_exist=False)
+
+                if validation_result.is_success:
+                    path = Path(user_input).expanduser().resolve()
+
+                    # Handle directory creation if it doesn't exist
                     if not path.exists():
                         try:
                             create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
                             if create == 'y':
                                 path.mkdir(parents=True, exist_ok=True)
+                                self.print_success(f"Created directory: {path}")
                             else:
                                 continue
                         except EOFError:
                             self.print_warning("Interactive input not available, creating directory automatically")
                             path.mkdir(parents=True, exist_ok=True)
-                except Exception as e:
-                    self.print_error(f"Invalid path: {e}")
-                    continue
+                            self.print_success(f"Created directory: {path}")
 
-                return path
+                    self.print_info(f"Using directory: {path}")
+                    return path
+                else:
+                    self.print_error(f"Invalid directory path: {validation_result.error.message}")
+                    for action in validation_result.error.recovery_actions:
+                        self.print_info(f"  → {action}")
+                    print("")  # Add spacing for readability
+
             except EOFError:
                 self.print_warning("Interactive input not available, using current directory")
                 return Path.cwd()
@@ -646,25 +670,76 @@ class UserInterface:
         return host, port, user, password
 
     def _get_host_input(self) -> str:
-        """Get host input with default."""
-        return input("Host (default: localhost): ").strip() or "localhost"
+        """Get and validate host input."""
+        # Import validation functions
+        import sys
+        from pathlib import Path
+        scripts_dir = Path(__file__).parent
+        sys.path.insert(0, str(scripts_dir))
+
+        from ux.validation import validate_host
+
+        while True:
+            try:
+                user_input = input("Host (default: localhost): ").strip()
+
+                # Use default if no input
+                if not user_input:
+                    host = "localhost"
+                    self.print_info(f"Using default host: {host}")
+                    return host
+
+                # Validate the host
+                validation_result = validate_host(user_input)
+
+                if validation_result.is_success:
+                    self.print_info(f"Using host: {user_input}")
+                    return user_input
+                else:
+                    self.print_error(f"Invalid host: {validation_result.error.message}")
+                    for action in validation_result.error.recovery_actions:
+                        self.print_info(f"  → {action}")
+                    print("")  # Add spacing for readability
+
+            except EOFError:
+                self.print_warning("Interactive input not available, using default 'localhost'")
+                return "localhost"
 
     def _get_port_input(self) -> int:
-        """Get and validate port input."""
-        def is_valid_port(port_str: str) -> bool:
-            try:
-                port = int(port_str)
-                return 1 <= port <= 65535
-            except ValueError:
-                return False
+        """Get and validate port input with enhanced error recovery."""
+        # Import validation functions
+        import sys
+        from pathlib import Path
+        scripts_dir = Path(__file__).parent
+        sys.path.insert(0, str(scripts_dir))
 
-        port_str = self.get_validated_input(
-            "Port (default: 3306): ",
-            is_valid_port,
-            "Port must be between 1 and 65535",
-            "3306"
-        )
-        return int(port_str)
+        from ux.validation import validate_port
+
+        while True:
+            try:
+                user_input = input("Port (default: 3306): ").strip()
+
+                # Use default if no input
+                if not user_input:
+                    port = "3306"
+                    self.print_info(f"Using default port: {port}")
+                    return int(port)
+
+                # Validate the port
+                validation_result = validate_port(user_input)
+
+                if validation_result.is_success:
+                    self.print_info(f"Using port: {user_input}")
+                    return int(user_input)
+                else:
+                    self.print_error(f"Invalid port: {validation_result.error.message}")
+                    for action in validation_result.error.recovery_actions:
+                        self.print_info(f"  → {action}")
+                    print("")  # Add spacing for readability
+
+            except EOFError:
+                self.print_warning("Interactive input not available, using default port 3306")
+                return 3306
 
     def _get_user_input(self) -> str:
         """Get username input with default."""
@@ -738,7 +813,20 @@ class EnvironmentManager:
         """Check if the target environment already exists."""
         try:
             result = subprocess.run([conda_cmd, "env", "list"], capture_output=True, text=True, check=True)
-            return self.config.env_name in result.stdout
+
+            # Parse environment list more carefully to avoid false positives
+            # conda env list output format: environment name, then path/status
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                # Extract environment name (first column)
+                env_name = line.split()[0]
+                if env_name == self.config.env_name:
+                    return True
+
+            return False
         except subprocess.CalledProcessError:
             return False
 
@@ -938,6 +1026,8 @@ class QuickstartOrchestrator:
         if not self.config.auto_yes:
             env_name = self._select_environment_name()
             self.config = replace(self.config, env_name=env_name)
+            # Update environment manager with new config
+            self.env_manager.config = self.config
 
         # Step 3: Environment Creation
         env_file = self.env_manager.select_environment_file()
