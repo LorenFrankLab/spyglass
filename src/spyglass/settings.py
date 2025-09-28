@@ -607,44 +607,11 @@ class SpyglassConfig:
         return self.config.get(self.dir_to_var("video", "moseq"))
 
 
-def init_spyglass_settings():
-    """Initialize Spyglass settings - call this explicitly when needed."""
-    global sg_config
-    sg_config = SpyglassConfig()
-    sg_config.load_config(on_startup=True)
-
-
-# Check if we should auto-initialize at import time
-AUTO_INIT = str_to_bool(os.getenv("SPYGLASS_AUTO_INIT", "true"))
-if AUTO_INIT:
-    init_spyglass_settings()
-else:
-    # Create a stub config for cases where initialization is delayed
-    sg_config = None
-
-if sg_config is None:  # Delayed initialization mode
-    # Set default values when auto-init is disabled
-    config = {}
-    prepopulate = False
-    test_mode = False
-    debug_mode = False
-    base_dir = None
-    raw_dir = None
-    recording_dir = None
-    temp_dir = None
-    analysis_dir = None
-    sorting_dir = None
-    waveforms_dir = None
-    video_dir = None
-    export_dir = None
-    dlc_project_dir = None
-    dlc_video_dir = None
-    dlc_output_dir = None
-    moseq_project_dir = None
-    moseq_video_dir = None
-elif sg_config.load_failed:  # Failed to load
+sg_config = SpyglassConfig()
+sg_config.load_config(on_startup=True)
+if sg_config.load_failed:  # Failed to load
     logger.warning("Failed to load SpyglassConfig. Please set up config file.")
-    config = {}  # Let __intit__ fetch empty config for first time setup
+    config = {}  # Let __init__ fetch empty config for first time setup
     prepopulate = False
     test_mode = False
     debug_mode = False
