@@ -10,8 +10,12 @@ from typing import List, Dict, Any
 from pathlib import Path
 from dataclasses import dataclass
 
-# Import from scripts utils
-from ..utils.result_types import (
+# Import from utils (using absolute path within scripts)
+import sys
+scripts_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(scripts_dir))
+
+from utils.result_types import (
     Result, success, failure, DockerResult, DockerError
 )
 

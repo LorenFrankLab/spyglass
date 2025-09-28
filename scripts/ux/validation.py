@@ -10,8 +10,13 @@ from pathlib import Path
 from typing import Optional, List
 from urllib.parse import urlparse
 
-# Import from scripts utils
-from ..utils.result_types import (
+# Import from utils (using absolute path within scripts)
+import sys
+from pathlib import Path
+scripts_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(scripts_dir))
+
+from utils.result_types import (
     ValidationResult, validation_success, validation_failure, Severity
 )
 

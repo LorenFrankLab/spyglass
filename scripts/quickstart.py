@@ -25,7 +25,6 @@ Interactive Mode:
 """
 
 import sys
-import platform
 import subprocess
 import shutil
 import argparse
@@ -43,6 +42,11 @@ from common import (
     SpyglassSetupError, SystemRequirementError,
     EnvironmentCreationError, DatabaseSetupError,
     MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
+)
+
+# Import new UX modules
+from ux.system_requirements import (
+    SystemRequirementsChecker, InstallationType
 )
 
 
@@ -858,9 +862,10 @@ class QuickstartOrchestrator:
     def __init__(self, config: SetupConfig, colors: 'Colors') -> None:
         self.config = config
         self.ui = UserInterface(colors, auto_yes=config.auto_yes)
-        self.system_detector = SystemDetector(self.ui)
         self.env_manager = EnvironmentManager(self.ui, config)
         self.system_info = None
+        # Use new comprehensive system requirements checker
+        self.requirements_checker = SystemRequirementsChecker(config.base_dir)
 
     def run(self) -> int:
         """Run the complete installation process."""
@@ -893,18 +898,15 @@ class QuickstartOrchestrator:
 
     def _execute_setup_steps(self) -> None:
         """Execute the main setup steps in order."""
-        # Step 1: System Detection
-        self.system_info = self.system_detector.detect_system()
-        self.system_detector.check_python(self.system_info)
-        conda_cmd = self.system_detector.check_conda()
-        self.system_info = replace(self.system_info, conda_cmd=conda_cmd)
+        # Step 1: Comprehensive System Requirements Check
+        conda_cmd, system_info = self._run_system_requirements_check()
 
-        # Wire system_info to environment manager
-        self.env_manager.system_info = self.system_info
+        # Wire system_info to environment manager (converted format)
+        self.env_manager.system_info = self._convert_system_info(system_info)
 
         # Step 2: Installation Type Selection (if not specified)
         if not self._installation_type_specified():
-            install_type, pipeline = self.ui.select_install_type()
+            install_type, pipeline = self._select_install_type_with_estimates(system_info)
             self.config = replace(self.config, install_type=install_type, pipeline=pipeline)
 
         # Step 3: Environment Creation
@@ -919,6 +921,214 @@ class QuickstartOrchestrator:
         # Step 5: Validation
         if self.config.run_validation:
             self._run_validation(conda_cmd)
+
+    def _map_install_type_to_requirements_type(self) -> InstallationType:
+        """Map our InstallType enum to the requirements checker InstallationType."""
+        if self.config.pipeline:
+            return InstallationType.PIPELINE_SPECIFIC
+        elif self.config.install_type == InstallType.FULL:
+            return InstallationType.FULL
+        else:
+            return InstallationType.MINIMAL
+
+    def _run_system_requirements_check(self) -> Tuple[str, 'SystemInfo']:
+        """Run comprehensive system requirements check with user-friendly output.
+
+        Returns:
+            Tuple of (conda_cmd, system_info) for use in subsequent steps
+        """
+        self.ui.print_header("System Requirements Check")
+
+        # Detect system info
+        system_info = self.requirements_checker.detect_system_info()
+
+        # Use minimal as baseline for general compatibility check (not specific estimates)
+        baseline_install_type = InstallationType.MINIMAL
+
+        # Run comprehensive checks (for compatibility, not specific to user's choice)
+        checks = self.requirements_checker.run_comprehensive_check(baseline_install_type)
+
+        # Display system information
+        self._display_system_info(system_info)
+
+        # Display requirement checks
+        self._display_requirement_checks(checks)
+
+        # Show general system readiness (without specific installation estimates)
+        self._display_system_readiness(system_info)
+
+        # Check for critical failures
+        critical_failures = [check for check in checks.values()
+                           if not check.met and check.severity.value in ['error', 'critical']]
+
+        if critical_failures:
+            self.ui.print_error("\nCritical requirements not met. Installation cannot proceed.")
+            for check in critical_failures:
+                self.ui.print_error(f"  • {check.message}")
+                for suggestion in check.suggestions:
+                    self.ui.print_info(f"    → {suggestion}")
+            raise SystemRequirementError("Critical system requirements not met")
+
+        # Determine conda command from system info
+        if system_info.mamba_available:
+            conda_cmd = "mamba"
+        elif system_info.conda_available:
+            conda_cmd = "conda"
+        else:
+            raise SystemRequirementError("No conda/mamba found - should have been caught above")
+
+        # Show that system is ready for installation (without specific estimates)
+        if not self.config.auto_yes:
+            self.ui.print_info("\nSystem compatibility confirmed. Ready to proceed with installation.")
+            proceed = self.ui.get_input("Continue to installation options? [Y/n]: ", "y").lower()
+            if proceed and proceed[0] == 'n':
+                self.ui.print_info("Installation cancelled by user.")
+                raise KeyboardInterrupt()
+
+        return conda_cmd, system_info
+
+    def _convert_system_info(self, new_system_info) -> SystemInfo:
+        """Convert from new SystemInfo to old SystemInfo format for EnvironmentManager."""
+        return SystemInfo(
+            os_name=new_system_info.os_name,
+            arch=new_system_info.architecture,
+            is_m1=new_system_info.is_m1_mac,
+            python_version=new_system_info.python_version,
+            conda_cmd="mamba" if new_system_info.mamba_available else "conda"
+        )
+
+    def _display_system_info(self, system_info) -> None:
+        """Display detected system information."""
+        print(f"\n🖥️  System Information:")
+        print(f"   Operating System: {system_info.os_name} {system_info.os_version}")
+        print(f"   Architecture: {system_info.architecture}")
+        if system_info.is_m1_mac:
+            print(f"   Apple Silicon: Yes (optimized builds available)")
+
+        python_version = f"{system_info.python_version[0]}.{system_info.python_version[1]}.{system_info.python_version[2]}"
+        print(f"   Python: {python_version}")
+        print(f"   Disk Space: {system_info.available_space_gb:.1f} GB available")
+
+    def _display_requirement_checks(self, checks: dict) -> None:
+        """Display requirement check results."""
+        print(f"\n📋 Requirements Status:")
+
+        for check in checks.values():
+            if check.met:
+                if check.severity.value == 'warning':
+                    symbol = "⚠️"
+                    color = "WARNING"
+                else:
+                    symbol = "✅"
+                    color = "OKGREEN"
+            else:
+                if check.severity.value in ['error', 'critical']:
+                    symbol = "❌"
+                    color = "FAIL"
+                else:
+                    symbol = "⚠️"
+                    color = "WARNING"
+
+            # Format the message with color
+            if hasattr(self.ui.colors, color):
+                color_code = getattr(self.ui.colors, color)
+                print(f"   {symbol} {color_code}{check.name}: {check.message}{self.ui.colors.ENDC}")
+            else:
+                print(f"   {symbol} {check.name}: {check.message}")
+
+            # Show suggestions for warnings or failures
+            if check.suggestions and (not check.met or check.severity.value == 'warning'):
+                for suggestion in check.suggestions[:2]:  # Limit to 2 suggestions for brevity
+                    print(f"      💡 {suggestion}")
+
+    def _display_system_readiness(self, system_info) -> None:
+        """Display general system readiness without specific installation estimates."""
+        print(f"\n🚀 System Readiness:")
+        print(f"   Available Space: {system_info.available_space_gb:.1f} GB (sufficient for all installation types)")
+
+        if system_info.is_m1_mac:
+            print(f"   Performance: Optimized builds available for Apple Silicon")
+
+        if system_info.mamba_available:
+            print(f"   Package Manager: Mamba (fastest option)")
+        elif system_info.conda_available:
+            # Check if it's modern conda
+            conda_version = self.requirements_checker._get_conda_version()
+            if conda_version and self.requirements_checker._has_libmamba_solver(conda_version):
+                print(f"   Package Manager: Conda with fast libmamba solver")
+            else:
+                print(f"   Package Manager: Conda (classic solver)")
+
+    def _display_installation_estimates(self, system_info, install_type: InstallationType) -> None:
+        """Display installation time and space estimates for a specific type."""
+        time_estimate = self.requirements_checker.estimate_installation_time(system_info, install_type)
+        space_estimate = self.requirements_checker.DISK_ESTIMATES[install_type]
+
+        print(f"\n📊 {install_type.value.title()} Installation Estimates:")
+        print(f"   Time: {time_estimate.format_range()}")
+        print(f"   Space: {space_estimate.format_summary()}")
+
+        if time_estimate.factors:
+            print(f"   Factors: {', '.join(time_estimate.factors)}")
+
+    def _select_install_type_with_estimates(self, system_info) -> Tuple[InstallType, Optional[Pipeline]]:
+        """Let user select installation type with time/space estimates for each option."""
+        self.ui.print_header("Installation Type Selection")
+
+        # Show estimates for each installation type
+        print("\nChoose your installation type:\n")
+
+        # Minimal installation
+        minimal_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.MINIMAL)
+        minimal_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.MINIMAL]
+        print("1) Minimal Installation")
+        print("   ├─ Basic Spyglass functionality")
+        print("   ├─ Standard data analysis tools")
+        print(f"   ├─ Time: {minimal_time.format_range()}")
+        print(f"   └─ Space: {minimal_space.total_required_gb:.1f} GB required")
+
+        print("")
+
+        # Full installation
+        full_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.FULL)
+        full_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.FULL]
+        print("2) Full Installation")
+        print("   ├─ All analysis pipelines included")
+        print("   ├─ Spike sorting, LFP, visualization tools")
+        print(f"   ├─ Time: {full_time.format_range()}")
+        print(f"   └─ Space: {full_space.total_required_gb:.1f} GB required")
+
+        print("")
+
+        # Pipeline-specific installation
+        pipeline_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.PIPELINE_SPECIFIC)
+        pipeline_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.PIPELINE_SPECIFIC]
+        print("3) Pipeline-Specific Installation")
+        print("   ├─ Choose specific analysis pipeline")
+        print("   ├─ DeepLabCut, Moseq, LFP, or Decoding")
+        print(f"   ├─ Time: {pipeline_time.format_range()}")
+        print(f"   └─ Space: {pipeline_space.total_required_gb:.1f} GB required")
+
+        # Show recommendation based on available space
+        available_space = system_info.available_space_gb
+        if available_space >= full_space.total_recommended_gb:
+            print(f"\n💡 Recommendation: Full installation is well-supported with {available_space:.1f} GB available")
+        elif available_space >= minimal_space.total_recommended_gb:
+            print(f"\n💡 Recommendation: Minimal installation recommended with {available_space:.1f} GB available")
+        else:
+            print(f"\n⚠️  Note: Space is limited ({available_space:.1f} GB available). Minimal installation advised.")
+
+        # Get user choice using existing UI method
+        install_type, pipeline = self.ui.select_install_type()
+
+        # Show final estimates for chosen type
+        chosen_install_type = self._map_install_type_to_requirements_type()
+        if pipeline:
+            chosen_install_type = InstallationType.PIPELINE_SPECIFIC
+
+        self._display_installation_estimates(system_info, chosen_install_type)
+
+        return install_type, pipeline
 
     def _installation_type_specified(self) -> bool:
         """Check if installation type was specified via command line arguments."""
@@ -1198,101 +1408,6 @@ finally:
         print(f"  Environment: {self.config.env_name}")
         print(f"  Database: {'Configured' if self.config.setup_database else 'Skipped'}")
         print("  Integration: SpyglassConfig compatible")
-
-
-class SystemDetector:
-    """Handles system detection and validation."""
-
-    def __init__(self, ui: 'UserInterface') -> None:
-        self.ui = ui
-
-    def detect_system(self) -> SystemInfo:
-        """Detect operating system and architecture."""
-        self.ui.print_header("System Detection")
-
-        os_name = platform.system()
-        arch = platform.machine()
-
-        if os_name == "Darwin":
-            os_display = "macOS"
-            is_m1 = arch == "arm64"
-            self.ui.print_success("Operating System: macOS")
-            if is_m1:
-                self.ui.print_success("Architecture: Apple Silicon (M1/M2)")
-            else:
-                self.ui.print_success("Architecture: Intel x86_64")
-        elif os_name == "Linux":
-            os_display = "Linux"
-            is_m1 = False
-            self.ui.print_success("Operating System: Linux")
-            self.ui.print_success(f"Architecture: {arch}")
-        elif os_name == "Windows":
-            self.ui.print_warning("Windows detected - not officially supported")
-            self.ui.print_info("Proceeding with setup, but you may encounter issues")
-            os_display = "Windows"
-            is_m1 = False
-        else:
-            raise SystemRequirementError(f"Unsupported operating system: {os_name}")
-
-        python_version = sys.version_info[:3]
-
-        return SystemInfo(
-            os_name=os_display,
-            arch=arch,
-            is_m1=is_m1,
-            python_version=python_version,
-            conda_cmd=None
-        )
-
-    def check_python(self, system_info: SystemInfo) -> None:
-        """Check Python version."""
-        self.ui.print_header("Python Check")
-
-        major, minor, micro = system_info.python_version
-        version_str = f"{major}.{minor}.{micro}"
-
-        if major >= 3 and minor >= 9:
-            self.ui.print_success(f"Python {version_str} found")
-        else:
-            self.ui.print_warning(f"Python {version_str} found, but Python >= 3.9 is required")
-            self.ui.print_info("The conda environment will install the correct version")
-
-    def check_conda(self) -> str:
-        """Check for conda/mamba availability and return the command to use."""
-        self.ui.print_header("Package Manager Check")
-
-        conda_cmd = self._find_conda_command()
-        if not conda_cmd:
-            self.ui.print_error("Neither mamba nor conda found")
-            self.ui.print_info("Please install miniforge or miniconda:")
-            self.ui.print_info("  https://github.com/conda-forge/miniforge#install")
-            raise SystemRequirementError("No conda/mamba found")
-
-        # Show version info
-        version_output = self._get_command_output([conda_cmd, "--version"])
-        if version_output:
-            self.ui.print_success(f"Found {conda_cmd}: {version_output}")
-
-        if conda_cmd == "conda":
-            self.ui.print_info("Consider installing mamba for faster environment creation:")
-            self.ui.print_info("  conda install -n base -c conda-forge mamba")
-
-        return conda_cmd
-
-    def _find_conda_command(self) -> Optional[str]:
-        """Find available conda command, preferring mamba."""
-        for cmd in ["mamba", "conda"]:
-            if shutil.which(cmd):
-                return cmd
-        return None
-
-    def _get_command_output(self, cmd: List[str]) -> str:
-        """Get command output, return empty string on failure."""
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return result.stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            return ""
 
 
 def parse_arguments() -> argparse.Namespace:
