@@ -401,7 +401,7 @@ class SpyglassConfig:
         if output_filename:
             save_method = "custom"
             path = Path(output_filename).expanduser()  # Expand ~
-            filepath = path if path.is_absolute() else path.resolve()
+            filepath = path if path.is_absolute() else path.resolve()  # Get canonical path
             filepath.parent.mkdir(exist_ok=True, parents=True)
             filepath = (
                 filepath.with_suffix(".json")  # ensure suffix, default json
