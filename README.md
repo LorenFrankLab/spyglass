@@ -65,7 +65,24 @@ Documentation can be found at -
 
 ## Installation
 
-For installation instructions see -
+### Quick Start (Recommended)
+
+Get up and running in 5 minutes with our automated installer:
+
+```bash
+# Clone the repository
+git clone https://github.com/LorenFrankLab/spyglass.git
+cd spyglass
+
+# Run quickstart
+python scripts/quickstart.py
+```
+
+See [QUICKSTART.md](QUICKSTART.md) for detailed options and troubleshooting.
+
+### Full Installation Guide
+
+For manual installation and advanced configuration options see -
 [https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 
 Typical installation time is: 5-10 minutes
