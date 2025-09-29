@@ -371,7 +371,7 @@ class ErrorRecoveryGuide:
         """Handle generic errors."""
         self.ui.print_header("General Troubleshooting")
 
-        print(f"\n❓ **Unexpected Error**\n")
+        print("\n❓ **Unexpected Error**\n")
         print(f"Error: {error}\n")
 
         print("🔍 **General Debugging Steps:**")

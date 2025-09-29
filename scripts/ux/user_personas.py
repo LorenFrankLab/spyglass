@@ -149,16 +149,16 @@ class PersonaOnboarding:
 
         if config.setup_database:
             if config.include_sample_data:
-                print(f"  🗄️ Database: Local Docker (configured automatically)")
+                print("  🗄️ Database: Local Docker (configured automatically)")
             else:
-                print(f"  🗄️ Database: Local Docker container")
+                print("  🗄️ Database: Local Docker container")
         elif config.database_config:
-            print(f"  🗄️ Database: Connecting to existing")
+            print("  🗄️ Database: Connecting to existing")
 
         print(f"  📦 Installation: {config.install_type}")
 
         if config.include_sample_data:
-            print(f"  📊 Sample Data: Included")
+            print("  📊 Sample Data: Included")
 
         print("")
 
@@ -340,7 +340,7 @@ class LabMemberOnboarding(PersonaOnboarding):
         if isinstance(error, dict) and error.get('error_code') == 1045:
             mysql_error = error.get('mysql_error', '')
 
-            print(f"\n🔒 **MySQL Authentication Failed**")
+            print("\n🔒 **MySQL Authentication Failed**")
             print(f"   Error: {mysql_error}")
             print("\n**Most likely causes:**\n")
 
@@ -416,9 +416,9 @@ class TrialUserOnboarding(PersonaOnboarding):
 
         # Estimate time and space
         print("📊 **Resource Requirements:**")
-        print(f"  💾 Disk Space: ~8GB (includes sample data)")
-        print(f"  ⏱️ Install Time: 5-8 minutes")
-        print(f"  🔧 Prerequisites: Docker (will be configured automatically)")
+        print("  💾 Disk Space: ~8GB (includes sample data)")
+        print("  ⏱️ Install Time: 5-8 minutes")
+        print("  🔧 Prerequisites: Docker (will be configured automatically)")
         print("")
 
         if not self._confirm_installation("Ready to set up your trial environment?"):

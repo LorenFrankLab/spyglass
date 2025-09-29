@@ -93,7 +93,7 @@ def build_mysql_ping_command(config: DockerConfig) -> List[str]:
     """
     return [
         "docker", "exec", config.container_name,
-        "mysqladmin", f"-uroot", f"-p{config.password}", "ping"
+        "mysqladmin", "-uroot", f"-p{config.password}", "ping"
     ]
 
 

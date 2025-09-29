@@ -28,10 +28,17 @@ import sys
 import subprocess
 import shutil
 import argparse
+
+# Constants - Extract magic numbers for clarity and maintainability
+DEFAULT_MYSQL_PORT = 3306
+DEFAULT_ENVIRONMENT_TIMEOUT = 1800  # 30 minutes for environment operations
+DEFAULT_DOCKER_WAIT_ATTEMPTS = 60   # 2 minutes at 2 second intervals
+CONDA_ERROR_EXIT_CODE = 127
+LOCALHOST_ADDRESSES = ("127.0.0.1", "localhost")
 import time
 import json
 from pathlib import Path
-from typing import Optional, List, Tuple, Callable, Iterator, Dict
+from typing import Optional, List, Tuple, Callable, Iterator, Dict, Union, Any
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -43,6 +50,14 @@ from common import (
     EnvironmentCreationError, DatabaseSetupError,
     MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
 )
+
+# Import result types
+from utils.result_types import Result, success, failure
+
+# Import persona types (forward references)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ux.user_personas import PersonaOrchestrator, UserPersona
 
 # Import new UX modules
 from ux.system_requirements import (
@@ -153,7 +168,7 @@ class SetupConfig:
     base_dir: Path = Path.home() / "spyglass_data"
     repo_dir: Path = Path(__file__).parent.parent
     env_name: str = "spyglass"
-    db_port: int = 3306
+    db_port: int = DEFAULT_MYSQL_PORT
     auto_yes: bool = False
     install_type_specified: bool = False
     external_database: Optional[Dict] = None
@@ -163,15 +178,28 @@ class SetupConfig:
 # Using standard library functions directly - no unnecessary wrappers
 
 
-def validate_base_dir(path: Path) -> Path:
-    """Validate and resolve base directory path."""
-    resolved = Path(path).expanduser().resolve()
+def validate_base_dir(path: Path) -> Result[Path, ValueError]:
+    """Validate and resolve base directory path.
 
-    # Check if parent directory exists (we'll create the base_dir itself if needed)
-    if not resolved.parent.exists():
-        raise ValueError(f"Parent directory does not exist: {resolved.parent}")
+    Args:
+        path: Path to validate
 
-    return resolved
+    Returns:
+        Result containing validated path or error
+    """
+    try:
+        resolved = Path(path).expanduser().resolve()
+
+        # Check if parent directory exists (we'll create the base_dir itself if needed)
+        if not resolved.parent.exists():
+            return failure(
+                ValueError(f"Parent directory does not exist: {resolved.parent}"),
+                f"Invalid base directory path: {resolved.parent} does not exist"
+            )
+
+        return success(resolved, f"Valid base directory: {resolved}")
+    except Exception as e:
+        return failure(e, f"Directory validation failed: {e}")
 
 
 
@@ -258,7 +286,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
     orchestrator.ui.print_info("Waiting for MySQL to be ready...")
     ping_cmd = build_mysql_ping_command(docker_config)
 
-    for attempt in range(60):  # Wait up to 2 minutes
+    for attempt in range(DEFAULT_DOCKER_WAIT_ATTEMPTS):  # Wait up to 2 minutes
         try:
             result = subprocess.run(ping_cmd, capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
@@ -728,11 +756,11 @@ class UserInterface:
 
         while True:
             try:
-                user_input = input("Port (default: 3306): ").strip()
+                user_input = input(f"Port (default: {DEFAULT_MYSQL_PORT}): ").strip()
 
                 # Use default if no input
                 if not user_input:
-                    port = "3306"
+                    port = str(DEFAULT_MYSQL_PORT)
                     self.print_info(f"Using default port: {port}")
                     return int(port)
 
@@ -749,8 +777,8 @@ class UserInterface:
                     print("")  # Add spacing for readability
 
             except EOFError:
-                self.print_warning("Interactive input not available, using default port 3306")
-                return 3306
+                self.print_warning(f"Interactive input not available, using default port {DEFAULT_MYSQL_PORT}")
+                return DEFAULT_MYSQL_PORT
 
     def _get_user_input(self) -> str:
         """Get username input with default."""
@@ -854,7 +882,7 @@ class EnvironmentManager:
             self.ui.print_info("This may take 5-10 minutes...")
             return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
 
-    def _execute_environment_command(self, cmd: List[str], timeout: int = 1800) -> None:
+    def _execute_environment_command(self, cmd: List[str], timeout: int = DEFAULT_ENVIRONMENT_TIMEOUT) -> None:
         """Execute environment creation/update command with progress and timeout."""
         process = self._start_process(cmd)
         output_buffer = self._monitor_process(process, timeout)
@@ -1130,11 +1158,11 @@ class QuickstartOrchestrator:
 
     def _display_system_info(self, system_info) -> None:
         """Display detected system information."""
-        print(f"\n🖥️  System Information:")
+        print("\n🖥️  System Information:")
         print(f"   Operating System: {system_info.os_name} {system_info.os_version}")
         print(f"   Architecture: {system_info.architecture}")
         if system_info.is_m1_mac:
-            print(f"   Apple Silicon: Yes (optimized builds available)")
+            print("   Apple Silicon: Yes (optimized builds available)")
 
         python_version = f"{system_info.python_version[0]}.{system_info.python_version[1]}.{system_info.python_version[2]}"
         print(f"   Python: {python_version}")
@@ -1142,7 +1170,7 @@ class QuickstartOrchestrator:
 
     def _display_requirement_checks(self, checks: dict) -> None:
         """Display requirement check results."""
-        print(f"\n📋 Requirements Status:")
+        print("\n📋 Requirements Status:")
 
         for check in checks.values():
             if check.met:
@@ -1174,21 +1202,21 @@ class QuickstartOrchestrator:
 
     def _display_system_readiness(self, system_info) -> None:
         """Display general system readiness without specific installation estimates."""
-        print(f"\n🚀 System Readiness:")
+        print("\n🚀 System Readiness:")
         print(f"   Available Space: {system_info.available_space_gb:.1f} GB (sufficient for all installation types)")
 
         if system_info.is_m1_mac:
-            print(f"   Performance: Optimized builds available for Apple Silicon")
+            print("   Performance: Optimized builds available for Apple Silicon")
 
         if system_info.mamba_available:
-            print(f"   Package Manager: Mamba (fastest option)")
+            print("   Package Manager: Mamba (fastest option)")
         elif system_info.conda_available:
             # Check if it's modern conda
             conda_version = self.requirements_checker._get_conda_version()
             if conda_version and self.requirements_checker._has_libmamba_solver(conda_version):
-                print(f"   Package Manager: Conda with fast libmamba solver")
+                print("   Package Manager: Conda with fast libmamba solver")
             else:
-                print(f"   Package Manager: Conda (classic solver)")
+                print("   Package Manager: Conda (classic solver)")
 
     def _display_installation_estimates(self, system_info, install_type: InstallationType) -> None:
         """Display installation time and space estimates for a specific type."""
@@ -1365,7 +1393,7 @@ class QuickstartOrchestrator:
             # Use external database config provided by lab member onboarding
             db_config = self.config.external_database
             host = db_config.get('host', 'localhost')
-            port = db_config.get('port', 3306)
+            port = db_config.get('port', DEFAULT_MYSQL_PORT)
             user = db_config.get('username', 'root')
             password = db_config.get('password', '')
 
@@ -1455,7 +1483,7 @@ class QuickstartOrchestrator:
 
                 for line in stderr_lines:
                     # Skip conda's false-positive error messages
-                    if "ERROR conda.cli.main_run:execute(127):" in line and "failed." in line:
+                    if f"ERROR conda.cli.main_run:execute({CONDA_ERROR_EXIT_CODE}):" in line and "failed." in line:
                         continue
                     if "failed. (See above for error)" in line:
                         continue
@@ -1534,7 +1562,7 @@ try:
         database_port={port},
         database_user="{user}",
         database_password="{password}",
-        database_use_tls={not (host.startswith("127.0.0.1") or host == "localhost")},
+        database_use_tls={not (host.startswith(LOCALHOST_ADDRESSES[0]) or host == LOCALHOST_ADDRESSES[1])},
         set_password=False
     )
 
@@ -1753,93 +1781,95 @@ Examples:
     parser.add_argument(
         "--db-port",
         type=int,
-        default=3306,
-        help="Host port for MySQL database (default: 3306)"
+        default=DEFAULT_MYSQL_PORT,
+        help=f"Host port for MySQL database (default: {DEFAULT_MYSQL_PORT})"
     )
 
     return parser.parse_args()
 
 
-def main() -> Optional[int]:
-    """Execute the main program."""
-    args = parse_arguments()
+class InstallerFactory:
+    """Factory for creating installers based on command line arguments."""
 
-    # Select colors based on arguments and terminal
-    colors = DisabledColors if args.no_color or not sys.stdout.isatty() else Colors
+    @staticmethod
+    def create_from_args(args: 'argparse.Namespace', colors: 'Colors') -> 'QuickstartOrchestrator':
+        """Create installer from command line arguments."""
+        from ux.user_personas import PersonaOrchestrator, UserPersona
 
-    # Import persona modules
-    from ux.user_personas import PersonaOrchestrator, UserPersona
+        # Create UI for persona orchestrator
+        ui = UserInterface(colors, auto_yes=args.yes)
 
-    # Create UI for persona orchestrator
-    ui = UserInterface(colors, auto_yes=args.yes)
+        # Check if user specified a persona
+        persona_orchestrator = PersonaOrchestrator(ui)
+        persona = persona_orchestrator.detect_persona(args)
 
-    # Check if user specified a persona
-    persona_orchestrator = PersonaOrchestrator(ui)
-    persona = persona_orchestrator.detect_persona(args)
+        # If no persona detected and no legacy options, ask user
+        if (persona == UserPersona.UNDECIDED and
+            not args.full and not args.minimal and not args.pipeline):
+            persona = persona_orchestrator._ask_user_persona()
 
-    # If no persona detected and no legacy options, ask user
-    if (persona == UserPersona.UNDECIDED and
-        not args.full and not args.minimal and not args.pipeline):
-        persona = persona_orchestrator._ask_user_persona()
+        # Create config based on persona
+        if persona != UserPersona.UNDECIDED:
+            config = InstallerFactory._create_persona_config(persona_orchestrator, persona, args)
+        else:
+            config = InstallerFactory._create_legacy_config(args)
 
-    # Run persona-based flow if persona selected
-    if persona != UserPersona.UNDECIDED:
+        return QuickstartOrchestrator(config, colors)
+
+    @staticmethod
+    def _create_persona_config(persona_orchestrator: 'PersonaOrchestrator', persona: 'UserPersona', args: 'argparse.Namespace') -> SetupConfig:
+        """Create configuration for persona-based installation."""
+        from ux.user_personas import UserPersona
+
         result = persona_orchestrator.run_onboarding(persona)
 
         if result.is_failure:
             if "cancelled" in result.message.lower() or "alternative" in result.message.lower():
-                return 0  # User cancelled or chose alternative, not an error
+                sys.exit(0)  # User cancelled or chose alternative, not an error
             else:
                 print(f"\nError: {result.message}")
-                return 1
+                sys.exit(1)
 
         # Get persona config
         persona_config = result.value
 
         # For lab members, handle differently
         if persona == UserPersona.LAB_MEMBER:
-            # Lab members need special handling for database connection
-            # Create minimal config for environment setup only
-            config = SetupConfig(
+            return SetupConfig(
                 install_type=InstallType.MINIMAL,
                 setup_database=True,  # We do want database setup, but with external config
                 run_validation=not args.no_validate,
                 base_dir=persona_config.base_dir,
                 env_name=persona_config.env_name,
-                db_port=persona_config.database_config.get('port', 3306) if persona_config.database_config else 3306,
+                db_port=persona_config.database_config.get('port', DEFAULT_MYSQL_PORT) if persona_config.database_config else DEFAULT_MYSQL_PORT,
                 auto_yes=args.yes,
                 install_type_specified=True,
                 external_database=persona_config.database_config  # Set directly in constructor
             )
-
-        elif persona == UserPersona.TRIAL_USER:
-            # Trial users get everything set up locally
-            config = SetupConfig(
+        else:  # Trial user
+            return SetupConfig(
                 install_type=InstallType.MINIMAL,
                 setup_database=True,
                 run_validation=True,
                 base_dir=persona_config.base_dir,
                 env_name=persona_config.env_name,
-                db_port=3306,
+                db_port=DEFAULT_MYSQL_PORT,
                 auto_yes=args.yes,
                 install_type_specified=True,
                 include_sample_data=persona_config.include_sample_data
             )
 
-        elif persona == UserPersona.ADMIN:
-            # Admin falls through to legacy flow
-            pass
-
-    # If no persona or admin selected, use legacy flow
-    if persona == UserPersona.UNDECIDED or persona == UserPersona.ADMIN:
+    @staticmethod
+    def _create_legacy_config(args: 'argparse.Namespace') -> SetupConfig:
+        """Create configuration for legacy installation."""
         # Create configuration with validated base directory
-        try:
-            validated_base_dir = validate_base_dir(Path(args.base_dir))
-        except ValueError as e:
-            print(f"Error: Invalid base directory: {e}")
-            return 1
+        base_dir_result = validate_base_dir(Path(args.base_dir))
+        if base_dir_result.is_failure:
+            print(f"Error: {base_dir_result.message}")
+            sys.exit(1)
+        validated_base_dir = base_dir_result.value
 
-        config = SetupConfig(
+        return SetupConfig(
             install_type=InstallType.FULL if args.full else InstallType.MINIMAL,
             pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
             setup_database=not args.no_database,
@@ -1848,13 +1878,30 @@ def main() -> Optional[int]:
             env_name=args.env_name,
             db_port=args.db_port,
             auto_yes=args.yes,
-            install_type_specified=args.full or args.minimal or bool(args.pipeline)
+            install_type_specified=args.full or args.minimal or args.pipeline
         )
 
-    # Run installer with new architecture
-    orchestrator = QuickstartOrchestrator(config, colors)
-    exit_code = orchestrator.run()
-    sys.exit(exit_code)
+
+def main() -> Optional[int]:
+    """Main entry point with minimal logic."""
+    try:
+        args = parse_arguments()
+
+        # Select colors based on arguments and terminal
+        colors = DisabledColors if args.no_color or not sys.stdout.isatty() else Colors
+
+        # Create and run installer
+        installer = InstallerFactory.create_from_args(args, colors)
+        return installer.run()
+
+    except KeyboardInterrupt:
+        print("\nInstallation cancelled by user")
+        return 130
+    except Exception as e:
+        print(f"\nUnexpected error: {e}")
+        return 1
+
+
 
 
 if __name__ == "__main__":

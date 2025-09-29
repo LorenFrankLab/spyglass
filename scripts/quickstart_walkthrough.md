@@ -1,6 +1,17 @@
 # quickstart.py Walkthrough
 
-An interactive installer that automates Spyglass setup with minimal user input, transforming the complex manual process into a streamlined experience.
+An interactive installer that automates Spyglass setup with minimal user input, providing a robust installation experience through functional programming patterns.
+
+## Architecture Overview
+
+The quickstart script uses modern Python patterns for reliability and maintainability:
+
+- **Result types**: All operations return explicit Success/Failure outcomes
+- **Factory pattern**: Clean object creation through InstallerFactory
+- **Pure functions**: Validation and configuration functions have no side effects
+- **Immutable data**: SetupConfig uses frozen dataclasses
+- **Named constants**: Clear configuration values replace magic numbers
+- **Error recovery**: Comprehensive guidance for troubleshooting issues
 
 ## Purpose
 
@@ -46,10 +57,11 @@ System Detection
 ✓ Architecture: Apple Silicon (M1/M2)
 ```
 
-**What it does:**
-- Detects OS (macOS/Linux/Windows)
-- Identifies architecture (x86_64/ARM64)
-- Handles platform-specific requirements automatically
+**Implementation:**
+- `SystemDetector` class identifies OS and architecture
+- Platform-specific logic handles macOS/Linux/Windows differences
+- Returns `Result[SystemInfo, SystemError]` for explicit handling
+- Immutable `SystemInfo` dataclass stores detection results
 
 ### 2. Python & Package Manager Check (No User Input)
 
@@ -69,10 +81,12 @@ Package Manager Check
 ℹ   conda install -n base -c conda-forge mamba
 ```
 
-**What it does:**
-- Verifies Python ≥3.9
-- Finds conda/mamba (prefers mamba)
-- Provides helpful suggestions
+**Implementation:**
+- `validate_python_version()` pure function checks version requirements
+- Package manager detection prefers mamba over conda for performance
+- Returns `Result[PackageManager, ValidationError]` outcomes
+- `MINIMUM_PYTHON_VERSION` constant defines requirements
+- Error messages include specific recovery actions
 
 ### 3. Installation Type Selection (Interactive Choice)
 
@@ -114,11 +128,13 @@ Choose your pipeline:
 Enter choice (1-5): █
 ```
 
-**What it does:**
-- Prompts user for installation type if not specified via command line
-- Skipped if user provided `--full`, `--minimal`, or `--pipeline` flags
-- Determines which environment file and dependencies to install
-- Provides clear descriptions and time estimates for each option
+**Implementation:**
+- `InstallType` enum provides type-safe installation options
+- `UserInterface` class handles interactive prompts with fallbacks
+- Command-line flags bypass prompts for automation
+- `InstallerFactory` creates appropriate configuration objects
+- `SetupConfig` frozen dataclass stores all installation parameters
+- Menu displays include time estimates and dependency descriptions
 
 ### 4. Environment Selection & Creation (Conditional Prompt)
 
@@ -128,7 +144,7 @@ Environment Selection
 ==========================================
 
 ℹ Selected: DeepLabCut pipeline environment
-   (or "Standard environment (minimal)" / "Full environment" etc.)
+  (or "Standard environment (minimal)" / "Full environment" etc.)
 
 ==========================================
 Creating Conda Environment
@@ -143,11 +159,13 @@ Do you want to update it? (y/N): █
 
 **User Decision:** Update existing environment or keep it unchanged.
 
-**What it does:**
-- Selects appropriate environment file based on installation type choice
-- Uses specialized environment files for pipelines (environment_dlc.yml, etc.)
-- Creates new environment or updates existing one
-- Shows progress during installation
+**Implementation:**
+- `EnvironmentManager` encapsulates all conda operations
+- `select_environment_file()` function maps installation types to files
+- Pipeline-specific environments (environment_dlc.yml, environment_moseq_*.yml)
+- Returns `Result[Environment, CondaError]` for all operations
+- Handles existing environments with user confirmation prompts
+- `ErrorRecoveryGuide` provides conda-specific troubleshooting
 
 ### 5. Dependency Installation (No User Input)
 
@@ -162,10 +180,13 @@ Installing Additional Dependencies
 ✓ Additional dependencies installed
 ```
 
-**What it does:**
-- Installs Spyglass in development mode
-- Handles platform-specific dependencies (M1 Mac workarounds)
-- Installs pipeline-specific packages based on options
+**Implementation:**
+- Development mode installation with `pip install -e .`
+- Platform-specific dependency handling through `SystemDetector`
+- M1 Mac pyfftw workarounds automatically applied
+- `Pipeline` enum determines additional package requirements
+- `ErrorCategory` enum classifies installation failures
+- `ErrorRecoveryGuide` provides targeted troubleshooting steps
 
 ### 6. Database Setup (Interactive Choice)
 
@@ -223,11 +244,13 @@ Running Validation
 ✓ All validation checks passed!
 ```
 
-**What it does:**
-- Creates DataJoint configuration file
-- Sets up directory structure
-- Runs comprehensive validation
-- Reports any issues
+**Implementation:**
+- DataJoint configuration generation through pure functions
+- `validate_base_dir()` ensures directory path safety and accessibility
+- Directory structure creation using `DEFAULT_SPYGLASS_DIRS` constants
+- Validation system returns `Result[ValidationSummary, ValidationError]`
+- Configuration written atomically with backup handling
+- Success/failure outcomes guide user through any issues
 
 ### 8. Setup Complete (No User Input)
 
@@ -339,12 +362,52 @@ python scripts/quickstart.py
 - Docker MySQL container (if Docker option chosen)
 - Port 3306 exposed for database access
 
-## Safety Features
+## Code Quality Features
 
-- **Backup awareness**: Warns before overwriting existing environments
-- **Validation**: Runs comprehensive checks after installation
-- **Error handling**: Clear error messages with actionable advice
-- **Graceful degradation**: Works even if optional components fail
-- **User control**: Can skip database setup if needed
+**Functional Programming Patterns:**
+- Pure functions for validation and configuration logic
+- Immutable data structures prevent accidental state changes
+- Result types make error handling explicit and composable
 
-This script transforms the complex 200+ line manual setup process into a simple, interactive experience that gets users from zero to working Spyglass installation in under 10 minutes.
+**Type Safety:**
+- Comprehensive type hints including forward references
+- Enum classes for type-safe choices (InstallType, Pipeline, etc.)
+- Generic Result types for consistent error handling
+
+**Error Handling:**
+- Categorized errors (Docker, Conda, Python, Network, Permissions)
+- Platform-specific recovery guidance
+- No silent failures - all operations return explicit results
+
+**User Experience:**
+- Graceful degradation when optional components fail
+- Clear progress indicators and informative error messages
+- Minimal prompts with sensible defaults
+- Backup warnings before overwriting existing configurations
+
+## Key Classes and Functions
+
+**Core Classes:**
+- `SetupConfig`: Immutable configuration container
+- `QuickstartOrchestrator`: Main installation coordinator
+- `EnvironmentManager`: Conda environment operations
+- `UserInterface`: User interaction and display
+- `InstallerFactory`: Object creation and configuration
+- `ErrorRecoveryGuide`: Troubleshooting assistance
+
+**Pure Functions:**
+- `validate_base_dir()`: Path validation and safety checks
+- `validate_python_version()`: Version requirement verification
+- `select_environment_file()`: Environment file selection logic
+
+**Result Types:**
+- `Success[T]`: Successful operation with value
+- `Failure[E]`: Failed operation with error details
+- `Result[T, E]`: Union type for explicit error handling
+
+**Constants:**
+- `DEFAULT_MYSQL_PORT`: Database connection default
+- `MINIMUM_PYTHON_VERSION`: Required Python version
+- `DEFAULT_SPYGLASS_DIRS`: Standard directory structure
+
+This architecture provides a robust, maintainable installation system that guides users from initial setup to working Spyglass environment with comprehensive error handling and recovery.

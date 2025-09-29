@@ -4,6 +4,7 @@ Replaces boolean validation functions with Result-returning validators
 that provide actionable error messages, as recommended in REVIEW.md.
 """
 
+import os
 import re
 import socket
 from pathlib import Path
@@ -12,7 +13,6 @@ from urllib.parse import urlparse
 
 # Import from utils (using absolute path within scripts)
 import sys
-from pathlib import Path
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
@@ -178,7 +178,7 @@ class PathValidator:
                     ]
                 )
 
-            if not path.access(path, path.W_OK):
+            if not os.access(path, os.W_OK):
                 return validation_failure(
                     field="directory_path",
                     message=f"No write permission for directory: {path}",
@@ -224,7 +224,7 @@ class PathValidator:
                     recovery_actions=[
                         "Free up disk space by deleting unnecessary files",
                         "Choose a different location with more space",
-                        f"Use minimal installation to reduce space requirements"
+                        "Use minimal installation to reduce space requirements"
                     ]
                 )
 

@@ -15,8 +15,6 @@ from typing import Optional, List, Dict, Tuple
 from enum import Enum
 
 # Import from utils (using absolute path within scripts)
-import sys
-from pathlib import Path
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 

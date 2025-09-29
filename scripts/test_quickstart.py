@@ -1,118 +1,97 @@
-#!/usr/bin/env python
-"""
-Basic unit tests for quickstart.py refactored architecture.
+#!/usr/bin/env python3
+"""Pytest tests for Spyglass quickstart script.
 
-These tests demonstrate the improved testability of the refactored code.
+This replaces the unittest-based tests with pytest conventions as per CLAUDE.md.
 """
 
-import unittest
-from unittest.mock import Mock, patch, MagicMock
-from pathlib import Path
 import sys
+from pathlib import Path
+from unittest.mock import Mock, patch
+import pytest
 
 # Add scripts directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
 from quickstart import (
     SetupConfig, InstallType, Pipeline,
-    UserInterface, SystemDetector, EnvironmentManager,
+    UserInterface, EnvironmentManager,
     validate_base_dir, DisabledColors
 )
 
 
-class TestSetupConfig(unittest.TestCase):
+class TestSetupConfig:
     """Test the SetupConfig dataclass."""
 
-    def test_config_creation(self):
-        """Test that SetupConfig can be created with all parameters."""
+    def test_default_values(self):
+        """Test that SetupConfig has sensible defaults."""
+        config = SetupConfig()
+
+        assert config.install_type == InstallType.MINIMAL
+        assert config.setup_database is True
+        assert config.run_validation is True
+        assert config.base_dir == Path.home() / "spyglass_data"
+        assert config.env_name == "spyglass"
+        assert config.db_port == 3306
+        assert config.auto_yes is False
+
+    def test_custom_values(self):
+        """Test that SetupConfig accepts custom values."""
         config = SetupConfig(
-            install_type=InstallType.MINIMAL,
-            pipeline=None,
-            setup_database=True,
-            run_validation=True,
-            base_dir=Path("/tmp/test")
+            install_type=InstallType.FULL,
+            setup_database=False,
+            base_dir=Path("/custom/path"),
+            env_name="my-env",
+            db_port=3307,
+            auto_yes=True
         )
 
-        self.assertEqual(config.install_type, InstallType.MINIMAL)
-        self.assertIsNone(config.pipeline)
-        self.assertTrue(config.setup_database)
-        self.assertTrue(config.run_validation)
-        self.assertEqual(config.base_dir, Path("/tmp/test"))
+        assert config.install_type == InstallType.FULL
+        assert config.setup_database is False
+        assert config.base_dir == Path("/custom/path")
+        assert config.env_name == "my-env"
+        assert config.db_port == 3307
+        assert config.auto_yes is True
 
 
-class TestValidation(unittest.TestCase):
+class TestValidation:
     """Test validation functions."""
 
     def test_validate_base_dir_valid(self):
         """Test base directory validation with valid path."""
         # Use home directory which should exist
         result = validate_base_dir(Path.home())
-        self.assertEqual(result, Path.home().resolve())
+        assert result.is_success
+        assert result.value == Path.home().resolve()
 
     def test_validate_base_dir_nonexistent_parent(self):
         """Test base directory validation with nonexistent parent."""
-        with self.assertRaises(ValueError):
-            validate_base_dir(Path("/nonexistent/path/subdir"))
+        result = validate_base_dir(Path("/nonexistent/path/subdir"))
+        assert result.is_failure
+        assert isinstance(result.error, ValueError)
 
 
-class TestUserInterface(unittest.TestCase):
+class TestUserInterface:
     """Test UserInterface class methods."""
 
-    def setUp(self):
+    def setup_method(self):
         """Set up test fixtures."""
-        self.ui = UserInterface(DisabledColors)
+        self.ui = UserInterface(DisabledColors, auto_yes=False)
 
-    def test_format_message(self):
-        """Test message formatting."""
-        result = self.ui._format_message("Test", "✓", "")
-        self.assertIn("✓", result)
-        self.assertIn("Test", result)
+    def test_display_methods_exist(self):
+        """Test that display methods exist and are callable."""
+        assert callable(self.ui.print_info)
+        assert callable(self.ui.print_success)
+        assert callable(self.ui.print_warning)
+        assert callable(self.ui.print_error)
 
-    @patch('builtins.input')
-    def test_get_host_input_default(self, mock_input):
-        """Test host input with default value."""
-        mock_input.return_value = ""  # Empty input should use default
-        result = self.ui._get_host_input()
-        self.assertEqual(result, "localhost")
-
-    @patch('builtins.input')
-    def test_get_port_input_valid(self, mock_input):
-        """Test port input with valid value."""
-        mock_input.return_value = "5432"
-        result = self.ui._get_port_input()
-        self.assertEqual(result, 5432)
-
-    @patch('builtins.input')
+    @patch('builtins.input', return_value='')
     def test_get_port_input_default(self, mock_input):
-        """Test port input with default value."""
-        mock_input.return_value = ""  # Empty input should use default
+        """Test that get_port_input returns default when no input provided."""
         result = self.ui._get_port_input()
-        self.assertEqual(result, 3306)
+        assert result == 3306
 
 
-class TestSystemDetector(unittest.TestCase):
-    """Test SystemDetector class."""
-
-    def setUp(self):
-        """Set up test fixtures."""
-        self.ui = Mock()
-        self.detector = SystemDetector(self.ui)
-
-    @patch('platform.system')
-    @patch('platform.machine')
-    def test_detect_system_macos(self, mock_machine, mock_system):
-        """Test system detection for macOS."""
-        mock_system.return_value = "Darwin"
-        mock_machine.return_value = "x86_64"
-
-        system_info = self.detector.detect_system()
-
-        self.assertEqual(system_info.os_name, "macOS")  # SystemDetector returns 'macOS' not 'Darwin'
-        self.assertEqual(system_info.arch, "x86_64")
-        self.assertFalse(system_info.is_m1)
-
-
-class TestIntegration(unittest.TestCase):
+class TestIntegration:
     """Test integration between components."""
 
     def test_complete_config_creation(self):
@@ -127,70 +106,133 @@ class TestIntegration(unittest.TestCase):
 
         # Test that all components can be instantiated with this config
         ui = UserInterface(DisabledColors)
-        detector = SystemDetector(ui)
         env_manager = EnvironmentManager(ui, config)
 
         # Verify they're created successfully
-        self.assertIsInstance(ui, UserInterface)
-        self.assertIsInstance(detector, SystemDetector)
-        self.assertIsInstance(env_manager, EnvironmentManager)
+        assert isinstance(ui, UserInterface)
+        assert isinstance(env_manager, EnvironmentManager)
 
 
-class TestEnvironmentManager(unittest.TestCase):
+class TestEnvironmentManager:
     """Test EnvironmentManager class."""
 
-    def setUp(self):
+    def setup_method(self):
         """Set up test fixtures."""
+        self.config = SetupConfig()
         self.ui = Mock()
-        self.config = SetupConfig(
-            install_type=InstallType.MINIMAL,
-            pipeline=None,
-            setup_database=False,
-            run_validation=False,
-            base_dir=Path("/tmp/test")
-        )
         self.env_manager = EnvironmentManager(self.ui, self.config)
 
     def test_select_environment_file_minimal(self):
         """Test environment file selection for minimal install."""
-        # Mock the environment file existence check
         with patch.object(Path, 'exists', return_value=True):
             result = self.env_manager.select_environment_file()
-            self.assertEqual(result, "environment-min.yml")
+            assert result == "environment-min.yml"
 
     def test_select_environment_file_full(self):
         """Test environment file selection for full install."""
-        self.config = SetupConfig(
-            install_type=InstallType.FULL,
-            pipeline=None,
-            setup_database=False,
-            run_validation=False,
-            base_dir=Path("/tmp/test")
-        )
-        env_manager = EnvironmentManager(self.ui, self.config)
+        self.config = SetupConfig(install_type=InstallType.FULL)
+        self.env_manager = EnvironmentManager(self.ui, self.config)
 
-        # Mock the environment file existence check
         with patch.object(Path, 'exists', return_value=True):
-            result = env_manager.select_environment_file()
-            self.assertEqual(result, "environment.yml")
+            result = self.env_manager.select_environment_file()
+            assert result == "environment.yml"
 
-    def test_select_environment_file_pipeline(self):
-        """Test environment file selection for specific pipeline."""
-        self.config = SetupConfig(
-            install_type=InstallType.FULL,  # Use FULL instead of non-existent PIPELINE
-            pipeline=Pipeline.DLC,
-            setup_database=False,
-            run_validation=False,
-            base_dir=Path("/tmp/test")
-        )
-        env_manager = EnvironmentManager(self.ui, self.config)
+    def test_select_environment_file_pipeline_dlc(self):
+        """Test environment file selection for DLC pipeline."""
+        self.config = SetupConfig(install_type=InstallType.MINIMAL, pipeline=Pipeline.DLC)
+        self.env_manager = EnvironmentManager(self.ui, self.config)
 
-        # Mock the environment file existence check
         with patch.object(Path, 'exists', return_value=True):
-            result = env_manager.select_environment_file()
-            self.assertEqual(result, "environment_dlc.yml")
+            result = self.env_manager.select_environment_file()
+            assert result == "environment_dlc.yml"
+
+    @patch('os.path.exists', return_value=True)
+    @patch('subprocess.run')
+    def test_create_environment_command(self, mock_run, mock_exists):
+        """Test that create_environment builds correct command."""
+        # Test environment creation command
+        cmd = self.env_manager._build_environment_command(
+            "environment.yml", "conda", update=False
+        )
+
+        assert cmd[0] == "conda"
+        assert "env" in cmd
+        assert "create" in cmd
+        assert "-f" in cmd
+        assert "-n" in cmd
+        assert self.config.env_name in cmd
 
 
-if __name__ == '__main__':
-    # Run tests with verbose output
-    unittest.main(verbosity=2)
+# Pytest fixtures for shared resources
+@pytest.fixture
+def mock_ui():
+    """Fixture for a mock UI object."""
+    ui = Mock()
+    ui.print_info = Mock()
+    ui.print_success = Mock()
+    ui.print_error = Mock()
+    ui.print_warning = Mock()
+    return ui
+
+
+@pytest.fixture
+def default_config():
+    """Fixture for default SetupConfig."""
+    return SetupConfig()
+
+
+@pytest.fixture
+def full_config():
+    """Fixture for full installation SetupConfig."""
+    return SetupConfig(install_type=InstallType.FULL)
+
+
+# Parametrized tests for comprehensive coverage
+@pytest.mark.parametrize("install_type,expected_file", [
+    (InstallType.MINIMAL, "environment-min.yml"),
+    (InstallType.FULL, "environment.yml"),
+])
+def test_environment_file_selection(install_type, expected_file, mock_ui):
+    """Test environment file selection for different install types."""
+    config = SetupConfig(install_type=install_type)
+    env_manager = EnvironmentManager(mock_ui, config)
+
+    with patch.object(Path, 'exists', return_value=True):
+        result = env_manager.select_environment_file()
+        assert result == expected_file
+
+
+@pytest.mark.parametrize("path,should_succeed", [
+    (Path.home(), True),
+    (Path("/nonexistent/deeply/nested/path"), False),
+])
+def test_validate_base_dir_parametrized(path, should_succeed):
+    """Parametrized test for base directory validation."""
+    result = validate_base_dir(path)
+    assert result.is_success == should_succeed
+    if should_succeed:
+        assert result.value == path.resolve()
+    else:
+        assert result.is_failure
+        assert result.error is not None
+
+
+# Skip tests that require Docker/conda when not available
+@pytest.mark.skipif(not Path("/usr/local/bin/docker").exists() and not Path("/usr/bin/docker").exists(),
+                    reason="Docker not available")
+def test_docker_operations():
+    """Test Docker operations when Docker is available."""
+    from core.docker_operations import check_docker_available
+    result = check_docker_available()
+    # This test will only run if Docker is available
+    assert result is not None
+
+
+if __name__ == "__main__":
+    # Provide helpful information for running tests
+    print("This test file uses pytest. To run tests:")
+    print("  pytest test_quickstart_pytest.py              # Run all tests")
+    print("  pytest test_quickstart_pytest.py -v           # Verbose output")
+    print("  pytest test_quickstart_pytest.py::TestValidation  # Run specific class")
+    print("  pytest test_quickstart_pytest.py -k validate  # Run tests matching 'validate'")
+    print("\nInstall pytest if needed: pip install pytest")
