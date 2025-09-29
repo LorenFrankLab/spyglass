@@ -219,14 +219,41 @@ class PathValidator:
 
         path = Path(value).expanduser().resolve()
 
-        # Check available disk space
+        # Check available disk space (with timeout for performance-sensitive scenarios)
         try:
             import shutil
+            import threading
+            import time
 
-            _, _, available_bytes = shutil.disk_usage(
-                path.parent if path.exists() else path.parent
-            )
-            available_gb = available_bytes / (1024**3)
+            # Use threading for cross-platform timeout support
+            result_container = {}
+            exception_container = {}
+
+            def disk_check():
+                try:
+                    _, _, available_bytes = shutil.disk_usage(
+                        path.parent if path.exists() else path.parent
+                    )
+                    result_container["available_gb"] = available_bytes / (
+                        1024**3
+                    )
+                except Exception as e:
+                    exception_container["error"] = e
+
+            # Start disk check in separate thread with 5-second timeout
+            thread = threading.Thread(target=disk_check)
+            thread.daemon = True
+            thread.start()
+            thread.join(timeout=5.0)
+
+            if thread.is_alive():
+                # Timeout occurred
+                raise TimeoutError("Disk space check timed out")
+            elif "error" in exception_container:
+                # Exception occurred in thread
+                raise exception_container["error"]
+            else:
+                available_gb = result_container["available_gb"]
 
             if available_gb < min_space_gb:
                 return validation_failure(
@@ -252,15 +279,26 @@ class PathValidator:
                     ],
                 )
 
-        except (OSError, ValueError) as e:
-            return validation_failure(
-                field="base_directory",
-                message=f"Cannot check disk space: {e}",
-                severity=Severity.WARNING,
-                recovery_actions=[
+        except (OSError, ValueError, TimeoutError) as e:
+            if isinstance(e, TimeoutError):
+                message = "Disk space check timed out (may be slow filesystem)"
+                recovery_actions = [
+                    "Check disk usage manually with: df -h",
+                    "Ensure you have sufficient space (~10GB minimum)",
+                    "Consider using a faster storage device",
+                ]
+            else:
+                message = f"Cannot check disk space: {e}"
+                recovery_actions = [
                     "Ensure you have sufficient space (~10GB minimum)",
                     "Check disk usage manually with: df -h",
-                ],
+                ]
+
+            return validation_failure(
+                field="base_directory",
+                message=message,
+                severity=Severity.WARNING,
+                recovery_actions=recovery_actions,
             )
 
         return validation_success(

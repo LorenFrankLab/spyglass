@@ -1886,7 +1886,7 @@ try:
         database_port={port},
         database_user="{user}",
         database_password="{password}",
-        database_use_tls={not (host.startswith(LOCALHOST_ADDRESSES[0]) or host == LOCALHOST_ADDRESSES[1])},
+        database_use_tls={host not in LOCALHOST_ADDRESSES},
         set_password=False
     )
 
