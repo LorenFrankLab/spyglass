@@ -13,11 +13,15 @@ from urllib.parse import urlparse
 
 # Import from utils (using absolute path within scripts)
 import sys
+
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
 from utils.result_types import (
-    ValidationResult, validation_success, validation_failure, Severity
+    ValidationResult,
+    validation_success,
+    validation_failure,
+    Severity,
 )
 
 
@@ -47,7 +51,7 @@ class PortValidator:
                 field="port",
                 message="Port number is required",
                 severity=Severity.ERROR,
-                recovery_actions=["Enter a port number between 1 and 65535"]
+                recovery_actions=["Enter a port number between 1 and 65535"],
             )
 
         try:
@@ -59,8 +63,8 @@ class PortValidator:
                 severity=Severity.ERROR,
                 recovery_actions=[
                     "Enter a numeric port number (e.g., 3306)",
-                    "Common ports: 3306 (MySQL), 5432 (PostgreSQL)"
-                ]
+                    "Common ports: 3306 (MySQL), 5432 (PostgreSQL)",
+                ],
             )
 
         if not (1 <= port <= 65535):
@@ -71,8 +75,8 @@ class PortValidator:
                 recovery_actions=[
                     "Use standard MySQL port: 3306",
                     "Choose an available port above 1024",
-                    "Check for port conflicts with: lsof -i :PORT"
-                ]
+                    "Check for port conflicts with: lsof -i :PORT",
+                ],
             )
 
         # Check for well-known ports that might cause issues
@@ -83,8 +87,8 @@ class PortValidator:
                 severity=Severity.WARNING,
                 recovery_actions=[
                     "Use port 3306 (standard MySQL port)",
-                    "Choose a port above 1024 to avoid permission issues"
-                ]
+                    "Choose a port above 1024 to avoid permission issues",
+                ],
             )
 
         return validation_success(f"Port {port} is valid")
@@ -94,8 +98,9 @@ class PathValidator:
     """Validator for file and directory paths."""
 
     @staticmethod
-    def validate_directory_path(value: str, must_exist: bool = False,
-                               create_if_missing: bool = False) -> ValidationResult:
+    def validate_directory_path(
+        value: str, must_exist: bool = False, create_if_missing: bool = False
+    ) -> ValidationResult:
         """Validate directory path input.
 
         Args:
@@ -111,7 +116,7 @@ class PathValidator:
                 field="directory_path",
                 message="Directory path is required",
                 severity=Severity.ERROR,
-                recovery_actions=["Enter a valid directory path"]
+                recovery_actions=["Enter a valid directory path"],
             )
 
         try:
@@ -124,8 +129,8 @@ class PathValidator:
                 recovery_actions=[
                     "Use absolute paths (e.g., /home/user/spyglass)",
                     "Avoid special characters in path names",
-                    "Use ~ for home directory (e.g., ~/spyglass)"
-                ]
+                    "Use ~ for home directory (e.g., ~/spyglass)",
+                ],
             )
 
         # Check for path traversal attempts
@@ -136,8 +141,8 @@ class PathValidator:
                 severity=Severity.ERROR,
                 recovery_actions=[
                     "Use absolute paths without '..' components",
-                    "Specify direct path to target directory"
-                ]
+                    "Specify direct path to target directory",
+                ],
             )
 
         # Check if path exists
@@ -149,8 +154,8 @@ class PathValidator:
                 recovery_actions=[
                     f"Create directory: mkdir -p {path}",
                     "Check path spelling and permissions",
-                    "Use an existing directory"
-                ]
+                    "Use an existing directory",
+                ],
             )
 
         # Check if parent exists (for creation)
@@ -161,8 +166,8 @@ class PathValidator:
                 severity=Severity.ERROR,
                 recovery_actions=[
                     f"Create parent directory: mkdir -p {path.parent}",
-                    "Choose a path with existing parent directory"
-                ]
+                    "Choose a path with existing parent directory",
+                ],
             )
 
         # Check permissions
@@ -174,8 +179,8 @@ class PathValidator:
                     severity=Severity.ERROR,
                     recovery_actions=[
                         "Choose a different path",
-                        "Remove the existing file if not needed"
-                    ]
+                        "Remove the existing file if not needed",
+                    ],
                 )
 
             if not os.access(path, os.W_OK):
@@ -186,14 +191,16 @@ class PathValidator:
                     recovery_actions=[
                         f"Fix permissions: chmod u+w {path}",
                         "Choose a directory you have write access to",
-                        "Run with appropriate user permissions"
-                    ]
+                        "Run with appropriate user permissions",
+                    ],
                 )
 
         return validation_success(f"Directory path '{path}' is valid")
 
     @staticmethod
-    def validate_base_directory(value: str, min_space_gb: float = 10.0) -> ValidationResult:
+    def validate_base_directory(
+        value: str, min_space_gb: float = 10.0
+    ) -> ValidationResult:
         """Validate base directory for Spyglass installation.
 
         Args:
@@ -204,7 +211,9 @@ class PathValidator:
             ValidationResult with space and permission checks
         """
         # First validate as regular directory
-        path_result = PathValidator.validate_directory_path(value, must_exist=False)
+        path_result = PathValidator.validate_directory_path(
+            value, must_exist=False
+        )
         if path_result.is_failure:
             return path_result
 
@@ -213,7 +222,10 @@ class PathValidator:
         # Check available disk space
         try:
             import shutil
-            _, _, available_bytes = shutil.disk_usage(path.parent if path.exists() else path.parent)
+
+            _, _, available_bytes = shutil.disk_usage(
+                path.parent if path.exists() else path.parent
+            )
             available_gb = available_bytes / (1024**3)
 
             if available_gb < min_space_gb:
@@ -224,8 +236,8 @@ class PathValidator:
                     recovery_actions=[
                         "Free up disk space by deleting unnecessary files",
                         "Choose a different location with more space",
-                        "Use minimal installation to reduce space requirements"
-                    ]
+                        "Use minimal installation to reduce space requirements",
+                    ],
                 )
 
             space_warning_threshold = min_space_gb * 1.5
@@ -236,8 +248,8 @@ class PathValidator:
                     severity=Severity.WARNING,
                     recovery_actions=[
                         "Consider freeing up more space for sample data",
-                        "Monitor disk usage during installation"
-                    ]
+                        "Monitor disk usage during installation",
+                    ],
                 )
 
         except (OSError, ValueError) as e:
@@ -247,11 +259,13 @@ class PathValidator:
                 severity=Severity.WARNING,
                 recovery_actions=[
                     "Ensure you have sufficient space (~10GB minimum)",
-                    "Check disk usage manually with: df -h"
-                ]
+                    "Check disk usage manually with: df -h",
+                ],
             )
 
-        return validation_success(f"Base directory '{path}' is valid with {available_gb:.1f}GB available")
+        return validation_success(
+            f"Base directory '{path}' is valid with {available_gb:.1f}GB available"
+        )
 
 
 class HostValidator:
@@ -272,13 +286,17 @@ class HostValidator:
                 field="host",
                 message="Host address is required",
                 severity=Severity.ERROR,
-                recovery_actions=["Enter a host address (e.g., localhost, 192.168.1.100)"]
+                recovery_actions=[
+                    "Enter a host address (e.g., localhost, 192.168.1.100)"
+                ],
             )
 
         host = value.strip()
 
         # Check for valid hostname/IP format
-        if not HostValidator._is_valid_hostname(host) and not HostValidator._is_valid_ip(host):
+        if not HostValidator._is_valid_hostname(
+            host
+        ) and not HostValidator._is_valid_ip(host):
             return validation_failure(
                 field="host",
                 message=f"Invalid host format: {host}",
@@ -286,17 +304,17 @@ class HostValidator:
                 recovery_actions=[
                     "Use localhost for local database",
                     "Use valid IP address (e.g., 192.168.1.100)",
-                    "Use valid hostname (e.g., database.example.com)"
-                ]
+                    "Use valid hostname (e.g., database.example.com)",
+                ],
             )
 
         # Warn about localhost alternatives
-        if host.lower() in ['127.0.0.1', '::1']:
+        if host.lower() in ["127.0.0.1", "::1"]:
             return validation_failure(
                 field="host",
                 message=f"Using {host} (consider 'localhost' for clarity)",
                 severity=Severity.INFO,
-                recovery_actions=["Use 'localhost' for local connections"]
+                recovery_actions=["Use 'localhost' for local connections"],
             )
 
         return validation_success(f"Host '{host}' is valid")
@@ -308,12 +326,12 @@ class HostValidator:
             return False
 
         # Remove trailing dot
-        if hostname.endswith('.'):
+        if hostname.endswith("."):
             hostname = hostname[:-1]
 
         # Check each label
-        allowed = re.compile(r'^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$')
-        labels = hostname.split('.')
+        allowed = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+        labels = hostname.split(".")
 
         return all(allowed.match(label) for label in labels)
 
@@ -345,21 +363,23 @@ class EnvironmentNameValidator:
                 field="environment_name",
                 message="Environment name is required",
                 severity=Severity.ERROR,
-                recovery_actions=["Enter a valid environment name (e.g., spyglass)"]
+                recovery_actions=[
+                    "Enter a valid environment name (e.g., spyglass)"
+                ],
             )
 
         name = value.strip()
 
         # Check for valid conda environment name format
-        if not re.match(r'^[a-zA-Z0-9_-]+$', name):
+        if not re.match(r"^[a-zA-Z0-9_-]+$", name):
             return validation_failure(
                 field="environment_name",
                 message="Environment name contains invalid characters",
                 severity=Severity.ERROR,
                 recovery_actions=[
                     "Use only letters, numbers, underscores, and hyphens",
-                    "Example: spyglass, spyglass_v1, my-analysis"
-                ]
+                    "Example: spyglass, spyglass_v1, my-analysis",
+                ],
             )
 
         # Check length
@@ -368,11 +388,11 @@ class EnvironmentNameValidator:
                 field="environment_name",
                 message=f"Environment name too long ({len(name)} chars, max 50)",
                 severity=Severity.ERROR,
-                recovery_actions=["Use a shorter environment name"]
+                recovery_actions=["Use a shorter environment name"],
             )
 
         # Warn about reserved names
-        reserved_names = ['base', 'root', 'conda', 'python', 'pip']
+        reserved_names = ["base", "root", "conda", "python", "pip"]
         if name.lower() in reserved_names:
             return validation_failure(
                 field="environment_name",
@@ -380,8 +400,8 @@ class EnvironmentNameValidator:
                 severity=Severity.WARNING,
                 recovery_actions=[
                     "Use a different name (e.g., spyglass, my_analysis)",
-                    "Avoid reserved conda/python names"
-                ]
+                    "Avoid reserved conda/python names",
+                ],
             )
 
         return validation_success(f"Environment name '{name}' is valid")
@@ -393,12 +413,16 @@ def validate_port(port_str: str) -> ValidationResult:
     return PortValidator.validate(port_str)
 
 
-def validate_directory(path_str: str, must_exist: bool = False) -> ValidationResult:
+def validate_directory(
+    path_str: str, must_exist: bool = False
+) -> ValidationResult:
     """Validate directory path string."""
     return PathValidator.validate_directory_path(path_str, must_exist)
 
 
-def validate_base_directory(path_str: str, min_space_gb: float = 10.0) -> ValidationResult:
+def validate_base_directory(
+    path_str: str, min_space_gb: float = 10.0
+) -> ValidationResult:
     """Validate base directory with space requirements."""
     return PathValidator.validate_base_directory(path_str, min_space_gb)
 

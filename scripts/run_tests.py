@@ -8,6 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def run_command(cmd, description):
     """Run a command and report results."""
     print(f"\n🧪 {description}")
@@ -23,6 +24,7 @@ def run_command(cmd, description):
 
     return result.returncode
 
+
 def main():
     """Run various test scenarios."""
     print("=" * 60)
@@ -30,8 +32,9 @@ def main():
     print("=" * 60)
 
     # Check if pytest is installed
-    pytest_check = subprocess.run(["python", "-m", "pytest", "--version"],
-                                 capture_output=True, text=True)
+    pytest_check = subprocess.run(
+        ["python", "-m", "pytest", "--version"], capture_output=True, text=True
+    )
 
     if pytest_check.returncode != 0:
         print("\n❌ pytest is not installed!")
@@ -45,17 +48,28 @@ def main():
 
     # Test commands to demonstrate
     test_commands = [
-        (["python", "-m", "pytest", "test_quickstart.py", "-v"],
-         "Run all quickstart tests (verbose)"),
-
-        (["python", "-m", "pytest", "test_quickstart.py::TestValidation", "-v"],
-         "Run validation tests only"),
-
-        (["python", "-m", "pytest", "test_quickstart.py", "-k", "validate"],
-         "Run tests matching 'validate'"),
-
-        (["python", "-m", "pytest", "test_quickstart.py", "--collect-only"],
-         "Show available tests without running"),
+        (
+            ["python", "-m", "pytest", "test_quickstart.py", "-v"],
+            "Run all quickstart tests (verbose)",
+        ),
+        (
+            [
+                "python",
+                "-m",
+                "pytest",
+                "test_quickstart.py::TestValidation",
+                "-v",
+            ],
+            "Run validation tests only",
+        ),
+        (
+            ["python", "-m", "pytest", "test_quickstart.py", "-k", "validate"],
+            "Run tests matching 'validate'",
+        ),
+        (
+            ["python", "-m", "pytest", "test_quickstart.py", "--collect-only"],
+            "Show available tests without running",
+        ),
     ]
 
     print("\n" + "=" * 60)
@@ -73,7 +87,7 @@ def main():
     # Actually run the validation tests as a demo
     result = run_command(
         ["python", "-m", "pytest", "test_quickstart.py::TestValidation", "-v"],
-        "Validation Tests"
+        "Validation Tests",
     )
 
     if result == 0:
@@ -86,13 +100,16 @@ def main():
     print("=" * 60)
 
     print("\nAccording to CLAUDE.md, you can also:")
-    print("  • Run with coverage: pytest --cov=spyglass --cov-report=term-missing")
+    print(
+        "  • Run with coverage: pytest --cov=spyglass --cov-report=term-missing"
+    )
     print("  • Run without Docker: pytest --no-docker")
     print("  • Run without DLC: pytest --no-dlc")
     print("\nFor property-based tests (if hypothesis installed):")
     print("  • pytest test_property_based.py")
 
     return result
+
 
 if __name__ == "__main__":
     sys.exit(main())

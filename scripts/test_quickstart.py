@@ -13,9 +13,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 from quickstart import (
-    SetupConfig, InstallType, Pipeline,
-    UserInterface, EnvironmentManager,
-    validate_base_dir, DisabledColors
+    SetupConfig,
+    InstallType,
+    Pipeline,
+    UserInterface,
+    EnvironmentManager,
+    validate_base_dir,
+    DisabledColors,
 )
 
 
@@ -42,7 +46,7 @@ class TestSetupConfig:
             base_dir=Path("/custom/path"),
             env_name="my-env",
             db_port=3307,
-            auto_yes=True
+            auto_yes=True,
         )
 
         assert config.install_type == InstallType.FULL
@@ -84,7 +88,7 @@ class TestUserInterface:
         assert callable(self.ui.print_warning)
         assert callable(self.ui.print_error)
 
-    @patch('builtins.input', return_value='')
+    @patch("builtins.input", return_value="")
     def test_get_port_input_default(self, mock_input):
         """Test that get_port_input returns default when no input provided."""
         result = self.ui._get_port_input()
@@ -101,7 +105,7 @@ class TestIntegration:
             pipeline=Pipeline.DLC,
             setup_database=True,
             run_validation=True,
-            base_dir=Path("/tmp/spyglass")
+            base_dir=Path("/tmp/spyglass"),
         )
 
         # Test that all components can be instantiated with this config
@@ -124,7 +128,7 @@ class TestEnvironmentManager:
 
     def test_select_environment_file_minimal(self):
         """Test environment file selection for minimal install."""
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = self.env_manager.select_environment_file()
             assert result == "environment-min.yml"
 
@@ -133,21 +137,23 @@ class TestEnvironmentManager:
         self.config = SetupConfig(install_type=InstallType.FULL)
         self.env_manager = EnvironmentManager(self.ui, self.config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = self.env_manager.select_environment_file()
             assert result == "environment.yml"
 
     def test_select_environment_file_pipeline_dlc(self):
         """Test environment file selection for DLC pipeline."""
-        self.config = SetupConfig(install_type=InstallType.MINIMAL, pipeline=Pipeline.DLC)
+        self.config = SetupConfig(
+            install_type=InstallType.MINIMAL, pipeline=Pipeline.DLC
+        )
         self.env_manager = EnvironmentManager(self.ui, self.config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = self.env_manager.select_environment_file()
             assert result == "environment_dlc.yml"
 
-    @patch('os.path.exists', return_value=True)
-    @patch('subprocess.run')
+    @patch("os.path.exists", return_value=True)
+    @patch("subprocess.run")
     def test_create_environment_command(self, mock_run, mock_exists):
         """Test that create_environment builds correct command."""
         # Test environment creation command
@@ -188,24 +194,30 @@ def full_config():
 
 
 # Parametrized tests for comprehensive coverage
-@pytest.mark.parametrize("install_type,expected_file", [
-    (InstallType.MINIMAL, "environment-min.yml"),
-    (InstallType.FULL, "environment.yml"),
-])
+@pytest.mark.parametrize(
+    "install_type,expected_file",
+    [
+        (InstallType.MINIMAL, "environment-min.yml"),
+        (InstallType.FULL, "environment.yml"),
+    ],
+)
 def test_environment_file_selection(install_type, expected_file, mock_ui):
     """Test environment file selection for different install types."""
     config = SetupConfig(install_type=install_type)
     env_manager = EnvironmentManager(mock_ui, config)
 
-    with patch.object(Path, 'exists', return_value=True):
+    with patch.object(Path, "exists", return_value=True):
         result = env_manager.select_environment_file()
         assert result == expected_file
 
 
-@pytest.mark.parametrize("path,should_succeed", [
-    (Path.home(), True),
-    (Path("/nonexistent/deeply/nested/path"), False),
-])
+@pytest.mark.parametrize(
+    "path,should_succeed",
+    [
+        (Path.home(), True),
+        (Path("/nonexistent/deeply/nested/path"), False),
+    ],
+)
 def test_validate_base_dir_parametrized(path, should_succeed):
     """Parametrized test for base directory validation."""
     result = validate_base_dir(path)
@@ -218,11 +230,15 @@ def test_validate_base_dir_parametrized(path, should_succeed):
 
 
 # Skip tests that require Docker/conda when not available
-@pytest.mark.skipif(not Path("/usr/local/bin/docker").exists() and not Path("/usr/bin/docker").exists(),
-                    reason="Docker not available")
+@pytest.mark.skipif(
+    not Path("/usr/local/bin/docker").exists()
+    and not Path("/usr/bin/docker").exists(),
+    reason="Docker not available",
+)
 def test_docker_operations():
     """Test Docker operations when Docker is available."""
     from core.docker_operations import check_docker_available
+
     result = check_docker_available()
     # This test will only run if Docker is available
     assert result is not None
@@ -233,6 +249,10 @@ if __name__ == "__main__":
     print("This test file uses pytest. To run tests:")
     print("  pytest test_quickstart_pytest.py              # Run all tests")
     print("  pytest test_quickstart_pytest.py -v           # Verbose output")
-    print("  pytest test_quickstart_pytest.py::TestValidation  # Run specific class")
-    print("  pytest test_quickstart_pytest.py -k validate  # Run tests matching 'validate'")
+    print(
+        "  pytest test_quickstart_pytest.py::TestValidation  # Run specific class"
+    )
+    print(
+        "  pytest test_quickstart_pytest.py -k validate  # Run tests matching 'validate'"
+    )
     print("\nInstall pytest if needed: pip install pytest")

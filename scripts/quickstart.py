@@ -32,7 +32,7 @@ import argparse
 # Constants - Extract magic numbers for clarity and maintainability
 DEFAULT_MYSQL_PORT = 3306
 DEFAULT_ENVIRONMENT_TIMEOUT = 1800  # 30 minutes for environment operations
-DEFAULT_DOCKER_WAIT_ATTEMPTS = 60   # 2 minutes at 2 second intervals
+DEFAULT_DOCKER_WAIT_ATTEMPTS = 60  # 2 minutes at 2 second intervals
 CONDA_ERROR_EXIT_CODE = 127
 LOCALHOST_ADDRESSES = ("127.0.0.1", "localhost")
 import time
@@ -45,10 +45,16 @@ import getpass
 
 # Import shared utilities
 from common import (
-    Colors, DisabledColors,
-    SpyglassSetupError, SystemRequirementError,
-    EnvironmentCreationError, DatabaseSetupError,
-    MenuChoice, DatabaseChoice, ConfigLocationChoice, PipelineChoice
+    Colors,
+    DisabledColors,
+    SpyglassSetupError,
+    SystemRequirementError,
+    EnvironmentCreationError,
+    DatabaseSetupError,
+    MenuChoice,
+    DatabaseChoice,
+    ConfigLocationChoice,
+    PipelineChoice,
 )
 
 # Import result types
@@ -56,13 +62,12 @@ from utils.result_types import Result, success, failure
 
 # Import persona types (forward references)
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from ux.user_personas import PersonaOrchestrator, UserPersona
 
 # Import new UX modules
-from ux.system_requirements import (
-    SystemRequirementsChecker, InstallationType
-)
+from ux.system_requirements import SystemRequirementsChecker, InstallationType
 
 
 class InstallType(Enum):
@@ -193,8 +198,10 @@ def validate_base_dir(path: Path) -> Result[Path, ValueError]:
         # Check if parent directory exists (we'll create the base_dir itself if needed)
         if not resolved.parent.exists():
             return failure(
-                ValueError(f"Parent directory does not exist: {resolved.parent}"),
-                f"Invalid base directory path: {resolved.parent} does not exist"
+                ValueError(
+                    f"Parent directory does not exist: {resolved.parent}"
+                ),
+                f"Invalid base directory path: {resolved.parent} does not exist",
             )
 
         return success(resolved, f"Valid base directory: {resolved}")
@@ -202,21 +209,29 @@ def validate_base_dir(path: Path) -> Result[Path, ValueError]:
         return failure(e, f"Directory validation failed: {e}")
 
 
-
-def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
+def setup_docker_database(orchestrator: "QuickstartOrchestrator") -> None:
     """Setup Docker database using pure functions with structured error handling."""
     # Import Docker operations
     import sys
     from pathlib import Path
+
     scripts_dir = Path(__file__).parent
     sys.path.insert(0, str(scripts_dir))
 
     from core.docker_operations import (
-        DockerConfig, validate_docker_prerequisites, assess_docker_readiness,
-        build_docker_run_command, build_docker_pull_command,
-        build_mysql_ping_command, get_container_info
+        DockerConfig,
+        validate_docker_prerequisites,
+        assess_docker_readiness,
+        build_docker_run_command,
+        build_docker_pull_command,
+        build_mysql_ping_command,
+        get_container_info,
     )
-    from ux.error_recovery import handle_docker_error, create_error_context, ErrorCategory
+    from ux.error_recovery import (
+        handle_docker_error,
+        create_error_context,
+        ErrorCategory,
+    )
 
     orchestrator.ui.print_info("Setting up local Docker database...")
 
@@ -225,7 +240,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         container_name="spyglass-db",
         image="datajoint/mysql:8.0",
         port=orchestrator.config.db_port,
-        password="tutorial"
+        password="tutorial",
     )
 
     # Validate Docker prerequisites using pure functions
@@ -241,7 +256,9 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         for action in readiness.recovery_actions:
             orchestrator.ui.print_info(f"  → {action}")
 
-        raise SystemRequirementError(f"Docker prerequisites failed: {readiness.message}")
+        raise SystemRequirementError(
+            f"Docker prerequisites failed: {readiness.message}"
+        )
 
     orchestrator.ui.print_success("Docker prerequisites validated")
 
@@ -250,14 +267,25 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
 
     if container_info_result.is_success and container_info_result.value.exists:
         if container_info_result.value.running:
-            orchestrator.ui.print_info(f"Container '{docker_config.container_name}' is already running")
+            orchestrator.ui.print_info(
+                f"Container '{docker_config.container_name}' is already running"
+            )
         else:
-            orchestrator.ui.print_info(f"Starting existing container '{docker_config.container_name}'...")
+            orchestrator.ui.print_info(
+                f"Starting existing container '{docker_config.container_name}'..."
+            )
             try:
-                subprocess.run(["docker", "start", docker_config.container_name], check=True)
+                subprocess.run(
+                    ["docker", "start", docker_config.container_name],
+                    check=True,
+                )
                 orchestrator.ui.print_success("Container started successfully")
             except subprocess.CalledProcessError as e:
-                handle_docker_error(orchestrator.ui, e, f"docker start {docker_config.container_name}")
+                handle_docker_error(
+                    orchestrator.ui,
+                    e,
+                    f"docker start {docker_config.container_name}",
+                )
                 raise SystemRequirementError("Could not start Docker container")
     else:
         # Pull image using pure function
@@ -273,14 +301,18 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
 
         # Create and run container using pure function
         run_cmd = build_docker_run_command(docker_config)
-        orchestrator.ui.print_info(f"Creating container '{docker_config.container_name}'...")
+        orchestrator.ui.print_info(
+            f"Creating container '{docker_config.container_name}'..."
+        )
 
         try:
             subprocess.run(run_cmd, check=True)
             orchestrator.ui.print_success("Container created and started")
         except subprocess.CalledProcessError as e:
             handle_docker_error(orchestrator.ui, e, " ".join(run_cmd))
-            raise SystemRequirementError(f"Docker container creation failed: {e}")
+            raise SystemRequirementError(
+                f"Docker container creation failed: {e}"
+            )
 
     # Wait for MySQL readiness using pure function
     orchestrator.ui.print_info("Waiting for MySQL to be ready...")
@@ -288,7 +320,9 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
 
     for attempt in range(DEFAULT_DOCKER_WAIT_ATTEMPTS):  # Wait up to 2 minutes
         try:
-            result = subprocess.run(ping_cmd, capture_output=True, text=True, timeout=5)
+            result = subprocess.run(
+                ping_cmd, capture_output=True, text=True, timeout=5
+            )
             if result.returncode == 0:
                 orchestrator.ui.print_success("MySQL is ready!")
                 break
@@ -298,15 +332,23 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         if attempt < 59:  # Don't sleep on the last attempt
             time.sleep(2)
     else:
-        orchestrator.ui.print_warning("MySQL readiness check timed out, but proceeding anyway")
-        orchestrator.ui.print_info("→ Database may take a few more minutes to fully initialize")
-        orchestrator.ui.print_info("→ Try connecting again if you encounter issues")
+        orchestrator.ui.print_warning(
+            "MySQL readiness check timed out, but proceeding anyway"
+        )
+        orchestrator.ui.print_info(
+            "→ Database may take a few more minutes to fully initialize"
+        )
+        orchestrator.ui.print_info(
+            "→ Try connecting again if you encounter issues"
+        )
 
     # Create configuration
-    orchestrator.create_config("localhost", "root", docker_config.password, docker_config.port)
+    orchestrator.create_config(
+        "localhost", "root", docker_config.password, docker_config.port
+    )
 
 
-def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
+def setup_existing_database(orchestrator: "QuickstartOrchestrator") -> None:
     """Setup existing database connection."""
     orchestrator.ui.print_info("Configuring connection to existing database...")
 
@@ -315,15 +357,24 @@ def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
     orchestrator.create_config(host, user, password, port)
 
 
-def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: str, password: str) -> None:
+def _test_database_connection(
+    ui: "UserInterface", host: str, port: int, user: str, password: str
+) -> None:
     """Test database connection before proceeding."""
-    from ux.error_recovery import create_error_context, ErrorCategory, ErrorRecoveryGuide
+    from ux.error_recovery import (
+        create_error_context,
+        ErrorCategory,
+        ErrorRecoveryGuide,
+    )
 
     ui.print_info("Testing database connection...")
 
     try:
         import pymysql
-        connection = pymysql.connect(host=host, port=port, user=user, password=password)
+
+        connection = pymysql.connect(
+            host=host, port=port, user=user, password=password
+        )
         connection.close()
         ui.print_success("Database connection successful")
     except ImportError:
@@ -334,7 +385,7 @@ def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: s
         context = create_error_context(
             ErrorCategory.VALIDATION,
             f"Database connection to {host}:{port} failed",
-            f"pymysql.connect(host={host}, port={port}, user={user})"
+            f"pymysql.connect(host={host}, port={port}, user={user})",
         )
         guide = ErrorRecoveryGuide(ui)
         guide.handle_error(e, context)
@@ -345,7 +396,7 @@ def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: s
 DATABASE_SETUP_METHODS = {
     DatabaseChoice.DOCKER: setup_docker_database,
     DatabaseChoice.EXISTING: setup_existing_database,
-    DatabaseChoice.SKIP: lambda _: None  # Skip setup
+    DatabaseChoice.SKIP: lambda _: None,  # Skip setup
 }
 
 
@@ -361,7 +412,7 @@ class UserInterface:
 
     """
 
-    def __init__(self, colors: 'Colors', auto_yes: bool = False) -> None:
+    def __init__(self, colors: "Colors", auto_yes: bool = False) -> None:
         self.colors = colors
         self.auto_yes = auto_yes
 
@@ -391,11 +442,18 @@ class UserInterface:
                 self.print_info(f"Auto-accepting: {prompt} -> {default}")
                 return default
             else:
-                raise ValueError(f"Cannot auto-accept prompt without default: {prompt}")
+                raise ValueError(
+                    f"Cannot auto-accept prompt without default: {prompt}"
+                )
         return input(prompt).strip()
 
-    def get_validated_input(self, prompt: str, validator: Callable[[str], bool],
-                           error_msg: str, default: str = None) -> str:
+    def get_validated_input(
+        self,
+        prompt: str,
+        validator: Callable[[str], bool],
+        error_msg: str,
+        default: str = None,
+    ) -> str:
         """Generic validated input helper.
 
         Parameters
@@ -547,8 +605,12 @@ class UserInterface:
                 else:
                     self.print_error("Invalid choice. Please enter 1, 2, or 3")
             except EOFError:
-                self.print_warning("Interactive input not available, defaulting to minimal installation")
-                self.print_info("Use --minimal, --full, or --pipeline flags to specify installation type")
+                self.print_warning(
+                    "Interactive input not available, defaulting to minimal installation"
+                )
+                self.print_info(
+                    "Use --minimal, --full, or --pipeline flags to specify installation type"
+                )
                 return InstallType.MINIMAL, None
 
     def select_pipeline(self) -> Pipeline:
@@ -576,7 +638,9 @@ class UserInterface:
                 else:
                     self.print_error("Invalid choice. Please enter 1-5")
             except EOFError:
-                self.print_warning("Interactive input not available, defaulting to DeepLabCut")
+                self.print_warning(
+                    "Interactive input not available, defaulting to DeepLabCut"
+                )
                 self.print_info("Use --pipeline flag to specify pipeline type")
                 return Pipeline.DLC
 
@@ -589,10 +653,12 @@ class UserInterface:
 
         try:
             choice = input("Do you want to update it? (y/N): ").strip().lower()
-            return choice == 'y'
+            return choice == "y"
         except EOFError:
             # Handle case where stdin is not available (e.g., non-interactive environment)
-            self.print_warning("Interactive input not available, defaulting to 'no'")
+            self.print_warning(
+                "Interactive input not available, defaulting to 'no'"
+            )
             self.print_info("Use --yes flag to auto-accept prompts")
             return False
 
@@ -610,12 +676,16 @@ class UserInterface:
                     db_choice = DatabaseChoice(int(choice))
                     if db_choice == DatabaseChoice.SKIP:
                         self.print_info("Skipping database setup")
-                        self.print_warning("You'll need to configure the database manually later")
+                        self.print_warning(
+                            "You'll need to configure the database manually later"
+                        )
                     return db_choice
                 except (ValueError, IndexError):
                     self.print_error("Invalid choice. Please enter 1, 2, or 3")
             except EOFError:
-                self.print_warning("Interactive input not available, defaulting to skip database setup")
+                self.print_warning(
+                    "Interactive input not available, defaulting to skip database setup"
+                )
                 self.print_info("Use --no-database flag to skip database setup")
                 return DatabaseChoice.SKIP
 
@@ -640,8 +710,12 @@ class UserInterface:
                 except (ValueError, IndexError):
                     self.print_error("Invalid choice. Please enter 1, 2, or 3")
             except EOFError:
-                self.print_warning("Interactive input not available, defaulting to repository root")
-                self.print_info("Use --base-dir to specify a different location")
+                self.print_warning(
+                    "Interactive input not available, defaulting to repository root"
+                )
+                self.print_info(
+                    "Use --base-dir to specify a different location"
+                )
                 return repo_dir
 
     def _get_custom_path(self) -> Path:
@@ -649,6 +723,7 @@ class UserInterface:
         # Import validation functions
         import sys
         from pathlib import Path
+
         scripts_dir = Path(__file__).parent
         sys.path.insert(0, str(scripts_dir))
 
@@ -662,11 +737,15 @@ class UserInterface:
                 if not user_input:
                     self.print_error("Path cannot be empty")
                     self.print_info("→ Enter a valid directory path")
-                    self.print_info("→ Use ~ for home directory (e.g., ~/my-spyglass)")
+                    self.print_info(
+                        "→ Use ~ for home directory (e.g., ~/my-spyglass)"
+                    )
                     continue
 
                 # Validate the directory path
-                validation_result = validate_directory(user_input, must_exist=False)
+                validation_result = validate_directory(
+                    user_input, must_exist=False
+                )
 
                 if validation_result.is_success:
                     path = Path(user_input).expanduser().resolve()
@@ -674,27 +753,39 @@ class UserInterface:
                     # Handle directory creation if it doesn't exist
                     if not path.exists():
                         try:
-                            create = input(f"Directory {path} doesn't exist. Create it? (y/N): ").strip().lower()
-                            if create == 'y':
+                            create = (
+                                input(
+                                    f"Directory {path} doesn't exist. Create it? (y/N): "
+                                )
+                                .strip()
+                                .lower()
+                            )
+                            if create == "y":
                                 path.mkdir(parents=True, exist_ok=True)
                                 self.print_success(f"Created directory: {path}")
                             else:
                                 continue
                         except EOFError:
-                            self.print_warning("Interactive input not available, creating directory automatically")
+                            self.print_warning(
+                                "Interactive input not available, creating directory automatically"
+                            )
                             path.mkdir(parents=True, exist_ok=True)
                             self.print_success(f"Created directory: {path}")
 
                     self.print_info(f"Using directory: {path}")
                     return path
                 else:
-                    self.print_error(f"Invalid directory path: {validation_result.error.message}")
+                    self.print_error(
+                        f"Invalid directory path: {validation_result.error.message}"
+                    )
                     for action in validation_result.error.recovery_actions:
                         self.print_info(f"  → {action}")
                     print("")  # Add spacing for readability
 
             except EOFError:
-                self.print_warning("Interactive input not available, using current directory")
+                self.print_warning(
+                    "Interactive input not available, using current directory"
+                )
                 return Path.cwd()
 
     def get_database_credentials(self) -> Tuple[str, int, str, str]:
@@ -713,6 +804,7 @@ class UserInterface:
         # Import validation functions
         import sys
         from pathlib import Path
+
         scripts_dir = Path(__file__).parent
         sys.path.insert(0, str(scripts_dir))
 
@@ -735,13 +827,17 @@ class UserInterface:
                     self.print_info(f"Using host: {user_input}")
                     return user_input
                 else:
-                    self.print_error(f"Invalid host: {validation_result.error.message}")
+                    self.print_error(
+                        f"Invalid host: {validation_result.error.message}"
+                    )
                     for action in validation_result.error.recovery_actions:
                         self.print_info(f"  → {action}")
                     print("")  # Add spacing for readability
 
             except EOFError:
-                self.print_warning("Interactive input not available, using default 'localhost'")
+                self.print_warning(
+                    "Interactive input not available, using default 'localhost'"
+                )
                 return "localhost"
 
     def _get_port_input(self) -> int:
@@ -749,6 +845,7 @@ class UserInterface:
         # Import validation functions
         import sys
         from pathlib import Path
+
         scripts_dir = Path(__file__).parent
         sys.path.insert(0, str(scripts_dir))
 
@@ -756,7 +853,9 @@ class UserInterface:
 
         while True:
             try:
-                user_input = input(f"Port (default: {DEFAULT_MYSQL_PORT}): ").strip()
+                user_input = input(
+                    f"Port (default: {DEFAULT_MYSQL_PORT}): "
+                ).strip()
 
                 # Use default if no input
                 if not user_input:
@@ -771,13 +870,17 @@ class UserInterface:
                     self.print_info(f"Using port: {user_input}")
                     return int(user_input)
                 else:
-                    self.print_error(f"Invalid port: {validation_result.error.message}")
+                    self.print_error(
+                        f"Invalid port: {validation_result.error.message}"
+                    )
                     for action in validation_result.error.recovery_actions:
                         self.print_info(f"  → {action}")
                     print("")  # Add spacing for readability
 
             except EOFError:
-                self.print_warning(f"Interactive input not available, using default port {DEFAULT_MYSQL_PORT}")
+                self.print_warning(
+                    f"Interactive input not available, using default port {DEFAULT_MYSQL_PORT}"
+                )
                 return DEFAULT_MYSQL_PORT
 
     def _get_user_input(self) -> str:
@@ -793,7 +896,7 @@ class UserInterface:
 
             # Confirm if user wants empty password
             confirm = input("Use empty password? (y/N): ").strip().lower()
-            if confirm == 'y':
+            if confirm == "y":
                 return password
             self.print_info("Please enter a password or confirm empty password")
 
@@ -801,16 +904,28 @@ class UserInterface:
 class EnvironmentManager:
     """Handles conda environment creation and management."""
 
-    def __init__(self, ui: 'UserInterface', config: SetupConfig) -> None:
+    def __init__(self, ui: "UserInterface", config: SetupConfig) -> None:
         self.ui = ui
         self.config = config
         self.system_info = None
         self.PIPELINE_ENVIRONMENTS = {
-            Pipeline.DLC: ("environment_dlc.yml", "DeepLabCut pipeline environment"),
-            Pipeline.MOSEQ_CPU: ("environment_moseq.yml", "Keypoint-Moseq (CPU) pipeline environment"),
-            Pipeline.MOSEQ_GPU: ("environment_moseq_gpu.yml", "Keypoint-Moseq (GPU) pipeline environment"),
+            Pipeline.DLC: (
+                "environment_dlc.yml",
+                "DeepLabCut pipeline environment",
+            ),
+            Pipeline.MOSEQ_CPU: (
+                "environment_moseq.yml",
+                "Keypoint-Moseq (CPU) pipeline environment",
+            ),
+            Pipeline.MOSEQ_GPU: (
+                "environment_moseq_gpu.yml",
+                "Keypoint-Moseq (GPU) pipeline environment",
+            ),
             Pipeline.LFP: ("environment_lfp.yml", "LFP pipeline environment"),
-            Pipeline.DECODING: ("environment_decoding.yml", "Decoding pipeline environment"),
+            Pipeline.DECODING: (
+                "environment_decoding.yml",
+                "Decoding pipeline environment",
+            ),
         }
 
     def select_environment_file(self) -> str:
@@ -820,10 +935,14 @@ class EnvironmentManager:
             self.ui.print_info(f"Selected: {description}")
         elif self.config.install_type == InstallType.FULL:
             env_file = "environment.yml"
-            self.ui.print_info("Selected: Full environment with all optional dependencies")
+            self.ui.print_info(
+                "Selected: Full environment with all optional dependencies"
+            )
         else:  # MINIMAL
             env_file = "environment-min.yml"
-            self.ui.print_info("Selected: Minimal environment with core dependencies only")
+            self.ui.print_info(
+                "Selected: Minimal environment with core dependencies only"
+            )
 
         # Verify environment file exists
         env_path = self.config.repo_dir / env_file
@@ -840,7 +959,9 @@ class EnvironmentManager:
         self.ui.print_header("Creating Conda Environment")
 
         update = self._check_environment_exists(conda_cmd)
-        if update and not self.ui.confirm_environment_update(self.config.env_name):
+        if update and not self.ui.confirm_environment_update(
+            self.config.env_name
+        ):
             self.ui.print_info("Keeping existing environment unchanged")
             return True
 
@@ -851,13 +972,18 @@ class EnvironmentManager:
     def _check_environment_exists(self, conda_cmd: str) -> bool:
         """Check if the target environment already exists."""
         try:
-            result = subprocess.run([conda_cmd, "env", "list"], capture_output=True, text=True, check=True)
+            result = subprocess.run(
+                [conda_cmd, "env", "list"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
 
             # Parse environment list more carefully to avoid false positives
             # conda env list output format: environment name, then path/status
             for line in result.stdout.splitlines():
                 line = line.strip()
-                if not line or line.startswith('#'):
+                if not line or line.startswith("#"):
                     continue
 
                 # Extract environment name (first column)
@@ -869,20 +995,40 @@ class EnvironmentManager:
         except subprocess.CalledProcessError:
             return False
 
-    def _build_environment_command(self, env_file: str, conda_cmd: str, update: bool) -> List[str]:
+    def _build_environment_command(
+        self, env_file: str, conda_cmd: str, update: bool
+    ) -> List[str]:
         """Build conda environment command."""
         env_path = self.config.repo_dir / env_file
         env_name = self.config.env_name
 
         if update:
             self.ui.print_info("Updating existing environment...")
-            return [conda_cmd, "env", "update", "-f", str(env_path), "-n", env_name]
+            return [
+                conda_cmd,
+                "env",
+                "update",
+                "-f",
+                str(env_path),
+                "-n",
+                env_name,
+            ]
         else:
             self.ui.print_info(f"Creating new environment '{env_name}'...")
             self.ui.print_info("This may take 5-10 minutes...")
-            return [conda_cmd, "env", "create", "-f", str(env_path), "-n", env_name]
+            return [
+                conda_cmd,
+                "env",
+                "create",
+                "-f",
+                str(env_path),
+                "-n",
+                env_name,
+            ]
 
-    def _execute_environment_command(self, cmd: List[str], timeout: int = DEFAULT_ENVIRONMENT_TIMEOUT) -> None:
+    def _execute_environment_command(
+        self, cmd: List[str], timeout: int = DEFAULT_ENVIRONMENT_TIMEOUT
+    ) -> None:
         """Execute environment creation/update command with progress and timeout."""
         process = self._start_process(cmd)
         output_buffer = self._monitor_process(process, timeout)
@@ -896,10 +1042,12 @@ class EnvironmentManager:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
-            universal_newlines=True
+            universal_newlines=True,
         )
 
-    def _monitor_process(self, process: subprocess.Popen, timeout: int) -> List[str]:
+    def _monitor_process(
+        self, process: subprocess.Popen, timeout: int
+    ) -> List[str]:
         """Monitor process execution with timeout and progress display."""
         output_buffer = []
         start_time = time.time()
@@ -908,7 +1056,9 @@ class EnvironmentManager:
             while process.poll() is None:
                 if time.time() - start_time > timeout:
                     process.kill()
-                    raise EnvironmentCreationError("Environment creation timed out after 30 minutes")
+                    raise EnvironmentCreationError(
+                        "Environment creation timed out after 30 minutes"
+                    )
 
                 # Read and display progress
                 try:
@@ -919,32 +1069,51 @@ class EnvironmentManager:
 
                 time.sleep(1)
         except subprocess.TimeoutExpired:
-            raise EnvironmentCreationError("Environment creation timed out") from None
+            raise EnvironmentCreationError(
+                "Environment creation timed out"
+            ) from None
         except (subprocess.CalledProcessError, OSError, FileNotFoundError) as e:
-            raise EnvironmentCreationError(f"Environment creation/update failed: {str(e)}") from e
+            raise EnvironmentCreationError(
+                f"Environment creation/update failed: {str(e)}"
+            ) from e
 
         return output_buffer
 
-    def _handle_process_result(self, process: subprocess.Popen, output_buffer: List[str]) -> None:
+    def _handle_process_result(
+        self, process: subprocess.Popen, output_buffer: List[str]
+    ) -> None:
         """Handle process completion and errors."""
         if process.returncode == 0:
             return  # Success
 
         # Handle failure case
-        full_output = '\n'.join(output_buffer) if output_buffer else "No output captured"
+        full_output = (
+            "\n".join(output_buffer) if output_buffer else "No output captured"
+        )
 
         # Get last 200 lines for error context
-        output_lines = full_output.split('\n') if full_output else []
-        error_context = '\n'.join(output_lines[-200:]) if output_lines else "No output captured"
+        output_lines = full_output.split("\n") if full_output else []
+        error_context = (
+            "\n".join(output_lines[-200:])
+            if output_lines
+            else "No output captured"
+        )
 
         raise EnvironmentCreationError(
             f"Environment creation failed with return code {process.returncode}\n"
             f"--- Last 200 lines of output ---\n{error_context}"
         )
 
-    def _filter_progress_lines(self, process: subprocess.Popen) -> Iterator[str]:
+    def _filter_progress_lines(
+        self, process: subprocess.Popen
+    ) -> Iterator[str]:
         """Filter and yield all lines while printing only progress lines."""
-        progress_keywords = {"Solving environment", "Downloading", "Extracting", "Installing"}
+        progress_keywords = {
+            "Solving environment",
+            "Downloading",
+            "Extracting",
+            "Installing",
+        }
 
         for line in process.stdout:
             # Always yield all lines for error context buffering
@@ -959,13 +1128,17 @@ class EnvironmentManager:
 
         # Install in development mode
         self.ui.print_info("Installing Spyglass in development mode...")
-        self._run_in_env(conda_cmd, ["pip", "install", "-e", str(self.config.repo_dir)])
+        self._run_in_env(
+            conda_cmd, ["pip", "install", "-e", str(self.config.repo_dir)]
+        )
 
         # Install pipeline-specific dependencies
         if self.config.pipeline:
             self._install_pipeline_dependencies(conda_cmd)
         elif self.config.install_type == InstallType.FULL:
-            self.ui.print_info("Installing optional dependencies for full installation...")
+            self.ui.print_info(
+                "Installing optional dependencies for full installation..."
+            )
             # For full installation using environment.yml, all packages are already included
             # Editable install already done above
 
@@ -980,15 +1153,21 @@ class EnvironmentManager:
             # Handle M1 Mac specific installation
             system_info = self._get_system_info()
             if system_info and system_info.is_m1:
-                self.ui.print_info("Detected M1 Mac, installing pyfftw via conda first...")
-                self._run_in_env(conda_cmd, ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"])
-
+                self.ui.print_info(
+                    "Detected M1 Mac, installing pyfftw via conda first..."
+                )
+                self._run_in_env(
+                    conda_cmd,
+                    ["conda", "install", "-c", "conda-forge", "pyfftw", "-y"],
+                )
 
     def _run_in_env(self, conda_cmd: str, cmd: List[str]) -> int:
         """Run command in the target conda environment."""
         full_cmd = [conda_cmd, "run", "-n", self.config.env_name] + cmd
         try:
-            result = subprocess.run(full_cmd, check=True, capture_output=True, text=True)
+            result = subprocess.run(
+                full_cmd, check=True, capture_output=True, text=True
+            )
             # Print output for user feedback
             if result.stdout:
                 print(result.stdout, end="")
@@ -996,7 +1175,9 @@ class EnvironmentManager:
                 print(result.stderr, end="")
             return result.returncode
         except subprocess.CalledProcessError as e:
-            self.ui.print_error(f"Command failed in environment '{self.config.env_name}': {' '.join(cmd)}")
+            self.ui.print_error(
+                f"Command failed in environment '{self.config.env_name}': {' '.join(cmd)}"
+            )
             if e.stdout:
                 self.ui.print_error(f"STDOUT: {e.stdout}")
             if e.stderr:
@@ -1011,7 +1192,7 @@ class EnvironmentManager:
 class QuickstartOrchestrator:
     """Main orchestrator that coordinates all installation components."""
 
-    def __init__(self, config: SetupConfig, colors: 'Colors') -> None:
+    def __init__(self, config: SetupConfig, colors: "Colors") -> None:
         self.config = config
         self.ui = UserInterface(colors, auto_yes=config.auto_yes)
         self.env_manager = EnvironmentManager(self.ui, config)
@@ -1058,8 +1239,12 @@ class QuickstartOrchestrator:
 
         # Step 2: Installation Type Selection (if not specified)
         if not self._installation_type_specified():
-            install_type, pipeline = self._select_install_type_with_estimates(system_info)
-            self.config = replace(self.config, install_type=install_type, pipeline=pipeline)
+            install_type, pipeline = self._select_install_type_with_estimates(
+                system_info
+            )
+            self.config = replace(
+                self.config, install_type=install_type, pipeline=pipeline
+            )
 
         # Step 2.5: Environment Name Selection (if not auto-yes mode)
         if not self.config.auto_yes:
@@ -1090,7 +1275,7 @@ class QuickstartOrchestrator:
         else:
             return InstallationType.MINIMAL
 
-    def _run_system_requirements_check(self) -> Tuple[str, 'SystemInfo']:
+    def _run_system_requirements_check(self) -> Tuple[str, "SystemInfo"]:
         """Run comprehensive system requirements check with user-friendly output.
 
         Returns:
@@ -1105,7 +1290,9 @@ class QuickstartOrchestrator:
         baseline_install_type = InstallationType.MINIMAL
 
         # Run comprehensive checks (for compatibility, not specific to user's choice)
-        checks = self.requirements_checker.run_comprehensive_check(baseline_install_type)
+        checks = self.requirements_checker.run_comprehensive_check(
+            baseline_install_type
+        )
 
         # Display system information
         self._display_system_info(system_info)
@@ -1117,11 +1304,16 @@ class QuickstartOrchestrator:
         self._display_system_readiness(system_info)
 
         # Check for critical failures
-        critical_failures = [check for check in checks.values()
-                           if not check.met and check.severity.value in ['error', 'critical']]
+        critical_failures = [
+            check
+            for check in checks.values()
+            if not check.met and check.severity.value in ["error", "critical"]
+        ]
 
         if critical_failures:
-            self.ui.print_error("\nCritical requirements not met. Installation cannot proceed.")
+            self.ui.print_error(
+                "\nCritical requirements not met. Installation cannot proceed."
+            )
             for check in critical_failures:
                 self.ui.print_error(f"  • {check.message}")
                 for suggestion in check.suggestions:
@@ -1134,13 +1326,19 @@ class QuickstartOrchestrator:
         elif system_info.conda_available:
             conda_cmd = "conda"
         else:
-            raise SystemRequirementError("No conda/mamba found - should have been caught above")
+            raise SystemRequirementError(
+                "No conda/mamba found - should have been caught above"
+            )
 
         # Show that system is ready for installation (without specific estimates)
         if not self.config.auto_yes:
-            self.ui.print_info("\nSystem compatibility confirmed. Ready to proceed with installation.")
-            proceed = self.ui.get_input("Continue to installation options? [Y/n]: ", "y").lower()
-            if proceed and proceed[0] == 'n':
+            self.ui.print_info(
+                "\nSystem compatibility confirmed. Ready to proceed with installation."
+            )
+            proceed = self.ui.get_input(
+                "Continue to installation options? [Y/n]: ", "y"
+            ).lower()
+            if proceed and proceed[0] == "n":
                 self.ui.print_info("Installation cancelled by user.")
                 raise KeyboardInterrupt()
 
@@ -1153,20 +1351,24 @@ class QuickstartOrchestrator:
             arch=new_system_info.architecture,
             is_m1=new_system_info.is_m1_mac,
             python_version=new_system_info.python_version,
-            conda_cmd="mamba" if new_system_info.mamba_available else "conda"
+            conda_cmd="mamba" if new_system_info.mamba_available else "conda",
         )
 
     def _display_system_info(self, system_info) -> None:
         """Display detected system information."""
         print("\n🖥️  System Information:")
-        print(f"   Operating System: {system_info.os_name} {system_info.os_version}")
+        print(
+            f"   Operating System: {system_info.os_name} {system_info.os_version}"
+        )
         print(f"   Architecture: {system_info.architecture}")
         if system_info.is_m1_mac:
             print("   Apple Silicon: Yes (optimized builds available)")
 
         python_version = f"{system_info.python_version[0]}.{system_info.python_version[1]}.{system_info.python_version[2]}"
         print(f"   Python: {python_version}")
-        print(f"   Disk Space: {system_info.available_space_gb:.1f} GB available")
+        print(
+            f"   Disk Space: {system_info.available_space_gb:.1f} GB available"
+        )
 
     def _display_requirement_checks(self, checks: dict) -> None:
         """Display requirement check results."""
@@ -1174,14 +1376,14 @@ class QuickstartOrchestrator:
 
         for check in checks.values():
             if check.met:
-                if check.severity.value == 'warning':
+                if check.severity.value == "warning":
                     symbol = "⚠️"
                     color = "WARNING"
                 else:
                     symbol = "✅"
                     color = "OKGREEN"
             else:
-                if check.severity.value in ['error', 'critical']:
+                if check.severity.value in ["error", "critical"]:
                     symbol = "❌"
                     color = "FAIL"
                 else:
@@ -1191,36 +1393,55 @@ class QuickstartOrchestrator:
             # Format the message with color
             if hasattr(self.ui.colors, color):
                 color_code = getattr(self.ui.colors, color)
-                print(f"   {symbol} {color_code}{check.name}: {check.message}{self.ui.colors.ENDC}")
+                print(
+                    f"   {symbol} {color_code}{check.name}: {check.message}{self.ui.colors.ENDC}"
+                )
             else:
                 print(f"   {symbol} {check.name}: {check.message}")
 
             # Show suggestions for warnings or failures
-            if check.suggestions and (not check.met or check.severity.value == 'warning'):
-                for suggestion in check.suggestions[:2]:  # Limit to 2 suggestions for brevity
+            if check.suggestions and (
+                not check.met or check.severity.value == "warning"
+            ):
+                for suggestion in check.suggestions[
+                    :2
+                ]:  # Limit to 2 suggestions for brevity
                     print(f"      💡 {suggestion}")
 
     def _display_system_readiness(self, system_info) -> None:
         """Display general system readiness without specific installation estimates."""
         print("\n🚀 System Readiness:")
-        print(f"   Available Space: {system_info.available_space_gb:.1f} GB (sufficient for all installation types)")
+        print(
+            f"   Available Space: {system_info.available_space_gb:.1f} GB (sufficient for all installation types)"
+        )
 
         if system_info.is_m1_mac:
-            print("   Performance: Optimized builds available for Apple Silicon")
+            print(
+                "   Performance: Optimized builds available for Apple Silicon"
+            )
 
         if system_info.mamba_available:
             print("   Package Manager: Mamba (fastest option)")
         elif system_info.conda_available:
             # Check if it's modern conda
             conda_version = self.requirements_checker._get_conda_version()
-            if conda_version and self.requirements_checker._has_libmamba_solver(conda_version):
+            if (
+                conda_version
+                and self.requirements_checker._has_libmamba_solver(
+                    conda_version
+                )
+            ):
                 print("   Package Manager: Conda with fast libmamba solver")
             else:
                 print("   Package Manager: Conda (classic solver)")
 
-    def _display_installation_estimates(self, system_info, install_type: InstallationType) -> None:
+    def _display_installation_estimates(
+        self, system_info, install_type: InstallationType
+    ) -> None:
         """Display installation time and space estimates for a specific type."""
-        time_estimate = self.requirements_checker.estimate_installation_time(system_info, install_type)
+        time_estimate = self.requirements_checker.estimate_installation_time(
+            system_info, install_type
+        )
         space_estimate = self.requirements_checker.DISK_ESTIMATES[install_type]
 
         print(f"\n📊 {install_type.value.title()} Installation Estimates:")
@@ -1230,7 +1451,9 @@ class QuickstartOrchestrator:
         if time_estimate.factors:
             print(f"   Factors: {', '.join(time_estimate.factors)}")
 
-    def _select_install_type_with_estimates(self, system_info) -> Tuple[InstallType, Optional[Pipeline]]:
+    def _select_install_type_with_estimates(
+        self, system_info
+    ) -> Tuple[InstallType, Optional[Pipeline]]:
         """Let user select installation type with time/space estimates for each option."""
         self.ui.print_header("Installation Type Selection")
 
@@ -1238,8 +1461,12 @@ class QuickstartOrchestrator:
         print("\nChoose your installation type:\n")
 
         # Minimal installation
-        minimal_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.MINIMAL)
-        minimal_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.MINIMAL]
+        minimal_time = self.requirements_checker.estimate_installation_time(
+            system_info, InstallationType.MINIMAL
+        )
+        minimal_space = self.requirements_checker.DISK_ESTIMATES[
+            InstallationType.MINIMAL
+        ]
         print("1) Minimal Installation")
         print("   ├─ Basic Spyglass functionality")
         print("   ├─ Standard data analysis tools")
@@ -1249,8 +1476,12 @@ class QuickstartOrchestrator:
         print("")
 
         # Full installation
-        full_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.FULL)
-        full_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.FULL]
+        full_time = self.requirements_checker.estimate_installation_time(
+            system_info, InstallationType.FULL
+        )
+        full_space = self.requirements_checker.DISK_ESTIMATES[
+            InstallationType.FULL
+        ]
         print("2) Full Installation")
         print("   ├─ All analysis pipelines included")
         print("   ├─ Spike sorting, LFP, visualization tools")
@@ -1260,22 +1491,34 @@ class QuickstartOrchestrator:
         print("")
 
         # Pipeline-specific installation
-        pipeline_time = self.requirements_checker.estimate_installation_time(system_info, InstallationType.PIPELINE_SPECIFIC)
-        pipeline_space = self.requirements_checker.DISK_ESTIMATES[InstallationType.PIPELINE_SPECIFIC]
+        pipeline_time = self.requirements_checker.estimate_installation_time(
+            system_info, InstallationType.PIPELINE_SPECIFIC
+        )
+        pipeline_space = self.requirements_checker.DISK_ESTIMATES[
+            InstallationType.PIPELINE_SPECIFIC
+        ]
         print("3) Pipeline-Specific Installation")
         print("   ├─ Choose specific analysis pipeline")
         print("   ├─ DeepLabCut, Moseq, LFP, or Decoding")
         print(f"   ├─ Time: {pipeline_time.format_range()}")
-        print(f"   └─ Space: {pipeline_space.total_required_gb:.1f} GB required")
+        print(
+            f"   └─ Space: {pipeline_space.total_required_gb:.1f} GB required"
+        )
 
         # Show recommendation based on available space
         available_space = system_info.available_space_gb
         if available_space >= full_space.total_recommended_gb:
-            print(f"\n💡 Recommendation: Full installation is well-supported with {available_space:.1f} GB available")
+            print(
+                f"\n💡 Recommendation: Full installation is well-supported with {available_space:.1f} GB available"
+            )
         elif available_space >= minimal_space.total_recommended_gb:
-            print(f"\n💡 Recommendation: Minimal installation recommended with {available_space:.1f} GB available")
+            print(
+                f"\n💡 Recommendation: Minimal installation recommended with {available_space:.1f} GB available"
+            )
         else:
-            print(f"\n⚠️  Note: Space is limited ({available_space:.1f} GB available). Minimal installation advised.")
+            print(
+                f"\n⚠️  Note: Space is limited ({available_space:.1f} GB available). Minimal installation advised."
+            )
 
         # Get user choice directly (avoiding duplicate menu)
         while True:
@@ -1294,13 +1537,19 @@ class QuickstartOrchestrator:
                 elif choice == "3":
                     # For pipeline-specific, we still need to get the pipeline choice
                     pipeline = self._select_pipeline_with_estimates(system_info)
-                    install_type = InstallType.MINIMAL  # Pipeline-specific uses minimal base
+                    install_type = (
+                        InstallType.MINIMAL
+                    )  # Pipeline-specific uses minimal base
                     chosen_install_type = InstallationType.PIPELINE_SPECIFIC
                     break
                 else:
-                    self.ui.print_error("Invalid choice. Please enter 1, 2, or 3")
+                    self.ui.print_error(
+                        "Invalid choice. Please enter 1, 2, or 3"
+                    )
             except EOFError:
-                self.ui.print_warning("Interactive input not available, defaulting to minimal installation")
+                self.ui.print_warning(
+                    "Interactive input not available, defaulting to minimal installation"
+                )
                 install_type = InstallType.MINIMAL
                 pipeline = None
                 chosen_install_type = InstallationType.MINIMAL
@@ -1336,7 +1585,9 @@ class QuickstartOrchestrator:
                 else:
                     self.ui.print_error("Invalid choice. Please enter 1-5")
             except EOFError:
-                self.ui.print_warning("Interactive input not available, defaulting to DeepLabCut")
+                self.ui.print_warning(
+                    "Interactive input not available, defaulting to DeepLabCut"
+                )
                 return Pipeline.DLC
 
     def _select_environment_name(self) -> str:
@@ -1349,18 +1600,24 @@ class QuickstartOrchestrator:
         print("")
 
         # Use consistent color pattern for recommendations
-        print(f"{self.ui.colors.OKCYAN}💡 Recommended:{self.ui.colors.ENDC} 'spyglass' (standard name for Spyglass installations)")
+        print(
+            f"{self.ui.colors.OKCYAN}💡 Recommended:{self.ui.colors.ENDC} 'spyglass' (standard name for Spyglass installations)"
+        )
         print("   Examples: spyglass, spyglass-dev, my-spyglass, analysis-env")
         print("")
 
         while True:
             try:
-                user_input = input("Environment name (press Enter for 'spyglass'): ").strip()
+                user_input = input(
+                    "Environment name (press Enter for 'spyglass'): "
+                ).strip()
 
                 # Use default if no input
                 if not user_input:
                     env_name = "spyglass"
-                    self.ui.print_info(f"Using default environment name: {env_name}")
+                    self.ui.print_info(
+                        f"Using default environment name: {env_name}"
+                    )
                     return env_name
 
                 # Validate the environment name
@@ -1370,13 +1627,17 @@ class QuickstartOrchestrator:
                     self.ui.print_info(f"Using environment name: {user_input}")
                     return user_input
                 else:
-                    self.ui.print_error(f"Invalid environment name: {validation_result.error.message}")
+                    self.ui.print_error(
+                        f"Invalid environment name: {validation_result.error.message}"
+                    )
                     for action in validation_result.error.recovery_actions:
                         self.ui.print_info(f"  → {action}")
                     print("")  # Add spacing for readability
 
             except EOFError:
-                self.ui.print_warning("Interactive input not available, using default 'spyglass'")
+                self.ui.print_warning(
+                    "Interactive input not available, using default 'spyglass'"
+                )
                 return "spyglass"
 
     def _installation_type_specified(self) -> bool:
@@ -1386,16 +1647,19 @@ class QuickstartOrchestrator:
     def _setup_database(self) -> None:
         """Setup database configuration."""
         # Check if lab member with external database
-        if hasattr(self.config, 'external_database') and self.config.external_database:
+        if (
+            hasattr(self.config, "external_database")
+            and self.config.external_database
+        ):
             self.ui.print_header("Database Configuration")
             self.ui.print_info("Configuring connection to lab database...")
 
             # Use external database config provided by lab member onboarding
             db_config = self.config.external_database
-            host = db_config.get('host', 'localhost')
-            port = db_config.get('port', DEFAULT_MYSQL_PORT)
-            user = db_config.get('username', 'root')
-            password = db_config.get('password', '')
+            host = db_config.get("host", "localhost")
+            port = db_config.get("port", DEFAULT_MYSQL_PORT)
+            user = db_config.get("username", "root")
+            password = db_config.get("password", "")
 
             # Create configuration with lab database
             self.create_config(host, user, password, port)
@@ -1403,9 +1667,14 @@ class QuickstartOrchestrator:
             return
 
         # Check if trial user - automatically set up local Docker database
-        if hasattr(self.config, 'include_sample_data') and self.config.include_sample_data:
+        if (
+            hasattr(self.config, "include_sample_data")
+            and self.config.include_sample_data
+        ):
             self.ui.print_header("Database Configuration")
-            self.ui.print_info("Setting up local Docker database for trial environment...")
+            self.ui.print_info(
+                "Setting up local Docker database for trial environment..."
+            )
 
             # Automatically use Docker setup for trial users
             setup_docker_database(self)
@@ -1423,12 +1692,18 @@ class QuickstartOrchestrator:
         """Run validation checks."""
         self.ui.print_header("Running Validation")
 
-        validation_script = self.config.repo_dir / "scripts" / "validate_spyglass.py"
+        validation_script = (
+            self.config.repo_dir / "scripts" / "validate_spyglass.py"
+        )
 
         if not validation_script.exists():
             self.ui.print_error("Validation script not found")
-            self.ui.print_info("Expected location: scripts/validate_spyglass.py")
-            self.ui.print_info("Please ensure you're running from the Spyglass repository root")
+            self.ui.print_info(
+                "Expected location: scripts/validate_spyglass.py"
+            )
+            self.ui.print_info(
+                "Please ensure you're running from the Spyglass repository root"
+            )
             return 1
 
         self.ui.print_info("Running comprehensive validation checks...")
@@ -1440,14 +1715,19 @@ class QuickstartOrchestrator:
             # Get conda environment info
             env_info_result = subprocess.run(
                 [conda_cmd, "info", "--envs"],
-                capture_output=True, text=True, check=False
+                capture_output=True,
+                text=True,
+                check=False,
             )
 
             python_path = None
             if env_info_result.returncode == 0:
                 # Parse environment path
-                for line in env_info_result.stdout.split('\n'):
-                    if self.config.env_name in line and not line.strip().startswith('#'):
+                for line in env_info_result.stdout.split("\n"):
+                    if (
+                        self.config.env_name in line
+                        and not line.strip().startswith("#")
+                    ):
                         parts = line.split()
                         if len(parts) >= 2:
                             env_path = parts[-1]
@@ -1464,13 +1744,28 @@ class QuickstartOrchestrator:
                 # Use direct python execution
                 cmd = [python_path, str(validation_script), "-v"]
                 self.ui.print_info(f"Running: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=False
+                )
             else:
                 # Fallback: try conda run anyway
-                self.ui.print_warning(f"Could not find python in environment '{self.config.env_name}', trying conda run...")
-                cmd = [conda_cmd, "run", "--no-capture-output", "-n", self.config.env_name, "python", str(validation_script), "-v"]
+                self.ui.print_warning(
+                    f"Could not find python in environment '{self.config.env_name}', trying conda run..."
+                )
+                cmd = [
+                    conda_cmd,
+                    "run",
+                    "--no-capture-output",
+                    "-n",
+                    self.config.env_name,
+                    "python",
+                    str(validation_script),
+                    "-v",
+                ]
                 self.ui.print_info(f"Running: {' '.join(cmd)}")
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, check=False
+                )
 
             # Print validation output
             if result.stdout:
@@ -1478,12 +1773,16 @@ class QuickstartOrchestrator:
 
             # Filter out conda's overly aggressive error logging for non-zero exit codes
             if result.stderr:
-                stderr_lines = result.stderr.split('\n')
+                stderr_lines = result.stderr.split("\n")
                 filtered_lines = []
 
                 for line in stderr_lines:
                     # Skip conda's false-positive error messages
-                    if f"ERROR conda.cli.main_run:execute({CONDA_ERROR_EXIT_CODE}):" in line and "failed." in line:
+                    if (
+                        f"ERROR conda.cli.main_run:execute({CONDA_ERROR_EXIT_CODE}):"
+                        in line
+                        and "failed." in line
+                    ):
                         continue
                     if "failed. (See above for error)" in line:
                         continue
@@ -1492,33 +1791,47 @@ class QuickstartOrchestrator:
                         filtered_lines.append(line)
 
                 if filtered_lines:
-                    print('\n'.join(filtered_lines))
+                    print("\n".join(filtered_lines))
 
             if result.returncode == 0:
                 self.ui.print_success("All validation checks passed!")
             elif result.returncode == 1:
                 self.ui.print_warning("Validation passed with warnings")
-                self.ui.print_info("Review the warnings above if you need specific features")
+                self.ui.print_info(
+                    "Review the warnings above if you need specific features"
+                )
             else:
-                self.ui.print_error(f"Validation failed with return code {result.returncode}")
+                self.ui.print_error(
+                    f"Validation failed with return code {result.returncode}"
+                )
                 if result.stderr:
                     self.ui.print_error(f"Error details:\\n{result.stderr}")
-                self.ui.print_info("Please review the errors above and fix any issues")
+                self.ui.print_info(
+                    "Please review the errors above and fix any issues"
+                )
 
             return result.returncode
 
         except (subprocess.CalledProcessError, FileNotFoundError, OSError) as e:
             self.ui.print_error(f"Failed to run validation script: {e}")
-            self.ui.print_info(f"Attempted command: {conda_cmd} run -n {self.config.env_name} python {validation_script} -v")
-            self.ui.print_info("This might indicate an issue with conda environment or the validation script")
+            self.ui.print_info(
+                f"Attempted command: {conda_cmd} run -n {self.config.env_name} python {validation_script} -v"
+            )
+            self.ui.print_info(
+                "This might indicate an issue with conda environment or the validation script"
+            )
             return 1
 
-    def create_config(self, host: str, user: str, password: str, port: int) -> None:
+    def create_config(
+        self, host: str, user: str, password: str, port: int
+    ) -> None:
         """Create DataJoint configuration file."""
         config_dir = self.ui.select_config_location(self.config.repo_dir)
         config_file_path = config_dir / "dj_local_conf.json"
 
-        self.ui.print_info(f"Creating configuration file at: {config_file_path}")
+        self.ui.print_info(
+            f"Creating configuration file at: {config_file_path}"
+        )
 
         # Create base directory structure
         self._create_directory_structure()
@@ -1526,19 +1839,30 @@ class QuickstartOrchestrator:
         # Create configuration using spyglass environment (without test_mode)
         try:
             self._create_config_in_env(host, user, password, port, config_dir)
-            self.ui.print_success(f"Configuration file created at: {config_file_path}")
-            self.ui.print_success(f"Data directories created at: {self.config.base_dir}")
+            self.ui.print_success(
+                f"Configuration file created at: {config_file_path}"
+            )
+            self.ui.print_success(
+                f"Data directories created at: {self.config.base_dir}"
+            )
 
-        except (OSError, PermissionError, ValueError, json.JSONDecodeError) as e:
+        except (
+            OSError,
+            PermissionError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as e:
             self.ui.print_error(f"Failed to create configuration: {e}")
             raise
 
-    def _create_config_in_env(self, host: str, user: str, password: str, port: int, config_dir: Path) -> None:
+    def _create_config_in_env(
+        self, host: str, user: str, password: str, port: int, config_dir: Path
+    ) -> None:
         """Create configuration within the spyglass environment."""
         import tempfile
 
         # Create a temporary Python script file for better subprocess handling
-        python_script_content = f'''
+        python_script_content = f"""
 import sys
 import os
 from pathlib import Path
@@ -1570,10 +1894,12 @@ try:
 
 finally:
     os.chdir(original_cwd)
-'''
+"""
 
         # Write script to temporary file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", delete=False
+        ) as temp_file:
             temp_file.write(python_script_content)
             temp_script_path = temp_file.name
 
@@ -1588,16 +1914,21 @@ finally:
             cmd = [python_executable, temp_script_path]
 
             # Run with stdin/stdout/stderr inherited to allow interactive prompts
-            subprocess.run(cmd, check=True, stdin=None, stdout=None, stderr=None)
+            subprocess.run(
+                cmd, check=True, stdin=None, stdout=None, stderr=None
+            )
             self.ui.print_info("Configuration created in spyglass environment")
 
         except subprocess.CalledProcessError as e:
-            self.ui.print_error(f"Failed to create configuration in environment '{env_name}'")
+            self.ui.print_error(
+                f"Failed to create configuration in environment '{env_name}'"
+            )
             self.ui.print_error(f"Return code: {e.returncode}")
             raise
         finally:
             # Clean up temporary file
             import os
+
             try:
                 os.unlink(temp_script_path)
             except OSError:
@@ -1615,7 +1946,7 @@ finally:
         # Common paths for conda environment python executables
         possible_paths = [
             conda_base / "envs" / env_name / "bin" / "python",  # Linux/Mac
-            conda_base / "envs" / env_name / "python.exe",     # Windows
+            conda_base / "envs" / env_name / "python.exe",  # Windows
         ]
 
         for python_path in possible_paths:
@@ -1625,23 +1956,45 @@ finally:
         # Fallback: try to find using conda command
         try:
             result = subprocess.run(
-                ["conda", "run", "-n", env_name, "python", "-c", "import sys; print(sys.executable)"],
-                capture_output=True, text=True, check=True
+                [
+                    "conda",
+                    "run",
+                    "-n",
+                    env_name,
+                    "python",
+                    "-c",
+                    "import sys; print(sys.executable)",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
             )
             return result.stdout.strip()
         except (subprocess.CalledProcessError, FileNotFoundError):
             pass
 
-        raise RuntimeError(f"Could not find Python executable for environment '{env_name}'")
+        raise RuntimeError(
+            f"Could not find Python executable for environment '{env_name}'"
+        )
 
     def _create_directory_structure(self) -> None:
         """Create the basic directory structure for Spyglass."""
-        subdirs = ["raw", "analysis", "recording", "sorting", "tmp", "video", "waveforms"]
+        subdirs = [
+            "raw",
+            "analysis",
+            "recording",
+            "sorting",
+            "tmp",
+            "video",
+            "waveforms",
+        ]
 
         try:
             self.config.base_dir.mkdir(parents=True, exist_ok=True)
             for subdir in subdirs:
-                (self.config.base_dir / subdir).mkdir(parents=True, exist_ok=True)
+                (self.config.base_dir / subdir).mkdir(
+                    parents=True, exist_ok=True
+                )
         except PermissionError as e:
             self.ui.print_error(f"Permission denied creating directories: {e}")
             raise
@@ -1655,8 +2008,10 @@ finally:
             # Test basic functionality
             self.ui.print_info("Validating configuration...")
             # Validate that the config object has required attributes
-            if hasattr(config, 'base_dir'):
-                self.ui.print_success(f"Base directory configured: {config.base_dir}")
+            if hasattr(config, "base_dir"):
+                self.ui.print_success(
+                    f"Base directory configured: {config.base_dir}"
+                )
             # Add more validation logic here as needed
             self.ui.print_success("Configuration validated successfully")
         except (ValueError, AttributeError, TypeError) as e:
@@ -1671,18 +2026,24 @@ finally:
         print("\n1. Activate the Spyglass environment:")
         print(f"   conda activate {self.config.env_name}")
         print("\n2. Test the installation:")
-        print("   python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\"")
+        print(
+            "   python -c \"from spyglass.settings import SpyglassConfig; print('✓ Integration successful')\""
+        )
         print("\n3. Start with the tutorials:")
         print("   cd notebooks")
         print("   jupyter notebook 01_Concepts.ipynb")
         print("\n4. For help and documentation:")
         print("   Documentation: https://lorenfranklab.github.io/spyglass/")
-        print("   GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues")
+        print(
+            "   GitHub Issues: https://github.com/LorenFrankLab/spyglass/issues"
+        )
 
         print("\nConfiguration Summary:")
         print(f"  Base directory: {self.config.base_dir}")
         print(f"  Environment: {self.config.env_name}")
-        print(f"  Database: {'Configured' if self.config.setup_database else 'Skipped'}")
+        print(
+            f"  Database: {'Configured' if self.config.setup_database else 'Skipped'}"
+        )
         print("  Integration: SpyglassConfig compatible")
 
 
@@ -1700,7 +2061,7 @@ Examples:
   python quickstart.py --full           # Full installation (legacy)
   python quickstart.py --pipeline=dlc   # DeepLabCut pipeline (legacy)
   python quickstart.py --no-database    # Skip database setup (legacy)
-        """
+        """,
     )
 
     # Persona-based setup options (new approach)
@@ -1708,17 +2069,17 @@ Examples:
     persona_group.add_argument(
         "--lab-member",
         action="store_true",
-        help="Setup for lab members joining existing infrastructure"
+        help="Setup for lab members joining existing infrastructure",
     )
     persona_group.add_argument(
         "--trial",
         action="store_true",
-        help="Trial setup with everything configured locally"
+        help="Trial setup with everything configured locally",
     )
     persona_group.add_argument(
         "--advanced",
         action="store_true",
-        help="Advanced configuration with full control over all options"
+        help="Advanced configuration with full control over all options",
     )
 
     # Legacy installation type options (kept for backward compatibility)
@@ -1726,63 +2087,58 @@ Examples:
     install_group.add_argument(
         "--minimal",
         action="store_true",
-        help="Install core dependencies only (will prompt if none specified)"
+        help="Install core dependencies only (will prompt if none specified)",
     )
     install_group.add_argument(
         "--full",
         action="store_true",
-        help="Install all optional dependencies (will prompt if none specified)"
+        help="Install all optional dependencies (will prompt if none specified)",
     )
 
     parser.add_argument(
         "--pipeline",
         choices=["dlc", "moseq-cpu", "moseq-gpu", "lfp", "decoding"],
-        help="Install specific pipeline dependencies (will prompt if none specified)"
+        help="Install specific pipeline dependencies (will prompt if none specified)",
     )
 
     parser.add_argument(
-        "--no-database",
-        action="store_true",
-        help="Skip database setup"
+        "--no-database", action="store_true", help="Skip database setup"
     )
 
     parser.add_argument(
-        "--no-validate",
-        action="store_true",
-        help="Skip validation after setup"
+        "--no-validate", action="store_true", help="Skip validation after setup"
     )
 
     parser.add_argument(
         "--base-dir",
         type=str,
         default=str(Path.home() / "spyglass_data"),
-        help="Set base directory for data (default: ~/spyglass_data)"
+        help="Set base directory for data (default: ~/spyglass_data)",
     )
 
     parser.add_argument(
-        "--no-color",
-        action="store_true",
-        help="Disable colored output"
+        "--no-color", action="store_true", help="Disable colored output"
     )
 
     parser.add_argument(
         "--env-name",
         type=str,
         default="spyglass",
-        help="Name of conda environment to create (default: spyglass)"
+        help="Name of conda environment to create (default: spyglass)",
     )
 
     parser.add_argument(
-        "--yes", "-y",
+        "--yes",
+        "-y",
         action="store_true",
-        help="Auto-accept all prompts (non-interactive mode)"
+        help="Auto-accept all prompts (non-interactive mode)",
     )
 
     parser.add_argument(
         "--db-port",
         type=int,
         default=DEFAULT_MYSQL_PORT,
-        help=f"Host port for MySQL database (default: {DEFAULT_MYSQL_PORT})"
+        help=f"Host port for MySQL database (default: {DEFAULT_MYSQL_PORT})",
     )
 
     return parser.parse_args()
@@ -1792,7 +2148,9 @@ class InstallerFactory:
     """Factory for creating installers based on command line arguments."""
 
     @staticmethod
-    def create_from_args(args: 'argparse.Namespace', colors: 'Colors') -> 'QuickstartOrchestrator':
+    def create_from_args(
+        args: "argparse.Namespace", colors: "Colors"
+    ) -> "QuickstartOrchestrator":
         """Create installer from command line arguments."""
         from ux.user_personas import PersonaOrchestrator, UserPersona
 
@@ -1804,27 +2162,40 @@ class InstallerFactory:
         persona = persona_orchestrator.detect_persona(args)
 
         # If no persona detected and no legacy options, ask user
-        if (persona == UserPersona.UNDECIDED and
-            not args.full and not args.minimal and not args.pipeline):
+        if (
+            persona == UserPersona.UNDECIDED
+            and not args.full
+            and not args.minimal
+            and not args.pipeline
+        ):
             persona = persona_orchestrator._ask_user_persona()
 
         # Create config based on persona
         if persona != UserPersona.UNDECIDED:
-            config = InstallerFactory._create_persona_config(persona_orchestrator, persona, args)
+            config = InstallerFactory._create_persona_config(
+                persona_orchestrator, persona, args
+            )
         else:
             config = InstallerFactory._create_legacy_config(args)
 
         return QuickstartOrchestrator(config, colors)
 
     @staticmethod
-    def _create_persona_config(persona_orchestrator: 'PersonaOrchestrator', persona: 'UserPersona', args: 'argparse.Namespace') -> SetupConfig:
+    def _create_persona_config(
+        persona_orchestrator: "PersonaOrchestrator",
+        persona: "UserPersona",
+        args: "argparse.Namespace",
+    ) -> SetupConfig:
         """Create configuration for persona-based installation."""
         from ux.user_personas import UserPersona
 
         result = persona_orchestrator.run_onboarding(persona)
 
         if result.is_failure:
-            if "cancelled" in result.message.lower() or "alternative" in result.message.lower():
+            if (
+                "cancelled" in result.message.lower()
+                or "alternative" in result.message.lower()
+            ):
                 sys.exit(0)  # User cancelled or chose alternative, not an error
             else:
                 print(f"\nError: {result.message}")
@@ -1841,10 +2212,16 @@ class InstallerFactory:
                 run_validation=not args.no_validate,
                 base_dir=persona_config.base_dir,
                 env_name=persona_config.env_name,
-                db_port=persona_config.database_config.get('port', DEFAULT_MYSQL_PORT) if persona_config.database_config else DEFAULT_MYSQL_PORT,
+                db_port=(
+                    persona_config.database_config.get(
+                        "port", DEFAULT_MYSQL_PORT
+                    )
+                    if persona_config.database_config
+                    else DEFAULT_MYSQL_PORT
+                ),
                 auto_yes=args.yes,
                 install_type_specified=True,
-                external_database=persona_config.database_config  # Set directly in constructor
+                external_database=persona_config.database_config,  # Set directly in constructor
             )
         else:  # Trial user
             return SetupConfig(
@@ -1856,11 +2233,11 @@ class InstallerFactory:
                 db_port=DEFAULT_MYSQL_PORT,
                 auto_yes=args.yes,
                 install_type_specified=True,
-                include_sample_data=persona_config.include_sample_data
+                include_sample_data=persona_config.include_sample_data,
             )
 
     @staticmethod
-    def _create_legacy_config(args: 'argparse.Namespace') -> SetupConfig:
+    def _create_legacy_config(args: "argparse.Namespace") -> SetupConfig:
         """Create configuration for legacy installation."""
         # Create configuration with validated base directory
         base_dir_result = validate_base_dir(Path(args.base_dir))
@@ -1871,14 +2248,20 @@ class InstallerFactory:
 
         return SetupConfig(
             install_type=InstallType.FULL if args.full else InstallType.MINIMAL,
-            pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
+            pipeline=(
+                Pipeline.__members__.get(
+                    args.pipeline.replace("-", "_").upper()
+                )
+                if args.pipeline
+                else None
+            ),
             setup_database=not args.no_database,
             run_validation=not args.no_validate,
             base_dir=validated_base_dir,
             env_name=args.env_name,
             db_port=args.db_port,
             auto_yes=args.yes,
-            install_type_specified=args.full or args.minimal or args.pipeline
+            install_type_specified=args.full or args.minimal or args.pipeline,
         )
 
 
@@ -1888,7 +2271,11 @@ def main() -> Optional[int]:
         args = parse_arguments()
 
         # Select colors based on arguments and terminal
-        colors = DisabledColors if args.no_color or not sys.stdout.isatty() else Colors
+        colors = (
+            DisabledColors
+            if args.no_color or not sys.stdout.isatty()
+            else Colors
+        )
 
         # Create and run installer
         installer = InstallerFactory.create_from_args(args, colors)
@@ -1900,8 +2287,6 @@ def main() -> Optional[int]:
     except Exception as e:
         print(f"\nUnexpected error: {e}")
         return 1
-
-
 
 
 if __name__ == "__main__":

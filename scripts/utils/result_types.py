@@ -9,12 +9,13 @@ from dataclasses import dataclass
 from enum import Enum
 
 
-T = TypeVar('T')
-E = TypeVar('E')
+T = TypeVar("T")
+E = TypeVar("E")
 
 
 class Severity(Enum):
     """Error severity levels."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -24,6 +25,7 @@ class Severity(Enum):
 @dataclass(frozen=True)
 class ValidationError:
     """Structured validation error with context."""
+
     message: str
     field: str
     severity: Severity = Severity.ERROR
@@ -31,12 +33,13 @@ class ValidationError:
 
     def __post_init__(self):
         if self.recovery_actions is None:
-            object.__setattr__(self, 'recovery_actions', [])
+            object.__setattr__(self, "recovery_actions", [])
 
 
 @dataclass(frozen=True)
 class Success(Generic[T]):
     """Successful result containing a value."""
+
     value: T
     message: str = ""
 
@@ -52,6 +55,7 @@ class Success(Generic[T]):
 @dataclass(frozen=True)
 class Failure(Generic[E]):
     """Failed result containing error information."""
+
     error: E
     message: str
     context: dict = None
@@ -59,9 +63,9 @@ class Failure(Generic[E]):
 
     def __post_init__(self):
         if self.context is None:
-            object.__setattr__(self, 'context', {})
+            object.__setattr__(self, "context", {})
         if self.recovery_actions is None:
-            object.__setattr__(self, 'recovery_actions', [])
+            object.__setattr__(self, "recovery_actions", [])
 
     @property
     def is_success(self) -> bool:
@@ -82,14 +86,22 @@ def success(value: T, message: str = "") -> Success[T]:
     return Success(value, message)
 
 
-def failure(error: E, message: str, context: dict = None,
-           recovery_actions: List[str] = None) -> Failure[E]:
+def failure(
+    error: E,
+    message: str,
+    context: dict = None,
+    recovery_actions: List[str] = None,
+) -> Failure[E]:
     """Create a failed result."""
     return Failure(error, message, context or {}, recovery_actions or [])
 
 
-def validation_failure(field: str, message: str, severity: Severity = Severity.ERROR,
-                      recovery_actions: List[str] = None) -> Failure[ValidationError]:
+def validation_failure(
+    field: str,
+    message: str,
+    severity: Severity = Severity.ERROR,
+    recovery_actions: List[str] = None,
+) -> Failure[ValidationError]:
     """Create a validation failure result."""
     error = ValidationError(message, field, severity, recovery_actions or [])
     return Failure(error, f"Validation failed for {field}: {message}")
@@ -127,6 +139,7 @@ def first_error(results: List[Result]) -> Optional[Failure]:
 @dataclass(frozen=True)
 class SystemRequirementError:
     """System requirement not met."""
+
     requirement: str
     found: Optional[str]
     minimum: Optional[str]
@@ -136,6 +149,7 @@ class SystemRequirementError:
 @dataclass(frozen=True)
 class DockerError:
     """Docker-related error."""
+
     operation: str
     docker_available: bool
     daemon_running: bool
@@ -145,6 +159,7 @@ class DockerError:
 @dataclass(frozen=True)
 class NetworkError:
     """Network-related error."""
+
     operation: str
     url: Optional[str]
     timeout: bool
@@ -154,6 +169,7 @@ class NetworkError:
 @dataclass(frozen=True)
 class DiskSpaceError:
     """Disk space related error."""
+
     path: str
     required_gb: float
     available_gb: float

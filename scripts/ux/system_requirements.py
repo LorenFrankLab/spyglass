@@ -19,12 +19,17 @@ scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
 from utils.result_types import (
-    SystemResult, success, failure, SystemRequirementError, Severity
+    SystemResult,
+    success,
+    failure,
+    SystemRequirementError,
+    Severity,
 )
 
 
 class InstallationType(Enum):
     """Installation type options."""
+
     MINIMAL = "minimal"
     FULL = "full"
     PIPELINE_SPECIFIC = "pipeline"
@@ -33,6 +38,7 @@ class InstallationType(Enum):
 @dataclass(frozen=True)
 class DiskEstimate:
     """Disk space requirements estimate."""
+
     base_install_gb: float
     conda_env_gb: float
     sample_data_gb: float
@@ -47,14 +53,17 @@ class DiskEstimate:
 
     def format_summary(self) -> str:
         """Format disk space summary for user display."""
-        return (f"Required: {self.total_required_gb:.1f}GB | "
-                f"Recommended: {self.total_recommended_gb:.1f}GB | "
-                f"Minimum: {self.total_minimum_gb:.1f}GB")
+        return (
+            f"Required: {self.total_required_gb:.1f}GB | "
+            f"Recommended: {self.total_recommended_gb:.1f}GB | "
+            f"Minimum: {self.total_minimum_gb:.1f}GB"
+        )
 
 
 @dataclass(frozen=True)
 class TimeEstimate:
     """Installation time estimate."""
+
     download_minutes: int
     install_minutes: int
     setup_minutes: int
@@ -76,6 +85,7 @@ class TimeEstimate:
 @dataclass(frozen=True)
 class SystemInfo:
     """Comprehensive system information."""
+
     os_name: str
     os_version: str
     architecture: str
@@ -93,6 +103,7 @@ class SystemInfo:
 @dataclass(frozen=True)
 class RequirementCheck:
     """Individual requirement check result."""
+
     name: str
     met: bool
     found: Optional[str]
@@ -113,7 +124,7 @@ class SystemRequirementsChecker:
             sample_data_gb=1.0,
             working_space_gb=2.0,
             total_required_gb=8.5,
-            total_recommended_gb=15.0
+            total_recommended_gb=15.0,
         ),
         InstallationType.FULL: DiskEstimate(
             base_install_gb=5.0,
@@ -121,7 +132,7 @@ class SystemRequirementsChecker:
             sample_data_gb=2.0,
             working_space_gb=3.0,
             total_required_gb=18.0,
-            total_recommended_gb=30.0
+            total_recommended_gb=30.0,
         ),
         InstallationType.PIPELINE_SPECIFIC: DiskEstimate(
             base_install_gb=3.0,
@@ -129,8 +140,8 @@ class SystemRequirementsChecker:
             sample_data_gb=1.5,
             working_space_gb=2.5,
             total_required_gb=12.0,
-            total_recommended_gb=20.0
-        )
+            total_recommended_gb=20.0,
+        ),
     }
 
     def __init__(self, base_dir: Optional[Path] = None):
@@ -148,11 +159,11 @@ class SystemRequirementsChecker:
         os_display_name = {
             "Darwin": "macOS",
             "Linux": "Linux",
-            "Windows": "Windows"
+            "Windows": "Windows",
         }.get(os_name, os_name)
 
         # Apple Silicon detection
-        is_m1_mac = (os_name == "Darwin" and architecture == "arm64")
+        is_m1_mac = os_name == "Darwin" and architecture == "arm64"
 
         # Python version
         python_version = sys.version_info[:3]
@@ -160,7 +171,11 @@ class SystemRequirementsChecker:
 
         # Available disk space
         try:
-            _, _, available_bytes = shutil.disk_usage(self.base_dir.parent if self.base_dir.exists() else self.base_dir.parent)
+            _, _, available_bytes = shutil.disk_usage(
+                self.base_dir.parent
+                if self.base_dir.exists()
+                else self.base_dir.parent
+            )
             available_space_gb = available_bytes / (1024**3)
         except (OSError, AttributeError):
             available_space_gb = 0.0
@@ -182,7 +197,7 @@ class SystemRequirementsChecker:
             conda_available=conda_available,
             mamba_available=mamba_available,
             docker_available=docker_available,
-            git_available=git_available
+            git_available=git_available,
         )
 
     def check_python_version(self, system_info: SystemInfo) -> RequirementCheck:
@@ -198,7 +213,7 @@ class SystemRequirementsChecker:
                 required="≥3.9",
                 severity=Severity.INFO,
                 message=f"Python {version_str} meets requirements",
-                suggestions=[]
+                suggestions=[],
             )
         else:
             return RequirementCheck(
@@ -211,11 +226,13 @@ class SystemRequirementsChecker:
                 suggestions=[
                     "Install Python 3.9+ from python.org",
                     "Use conda to install newer Python in environment",
-                    "Consider using pyenv for Python version management"
-                ]
+                    "Consider using pyenv for Python version management",
+                ],
             )
 
-    def check_operating_system(self, system_info: SystemInfo) -> RequirementCheck:
+    def check_operating_system(
+        self, system_info: SystemInfo
+    ) -> RequirementCheck:
         """Check operating system compatibility."""
         if system_info.os_name in ["macOS", "Linux"]:
             return RequirementCheck(
@@ -225,7 +242,7 @@ class SystemRequirementsChecker:
                 required="macOS or Linux",
                 severity=Severity.INFO,
                 message=f"{system_info.os_name} is fully supported",
-                suggestions=[]
+                suggestions=[],
             )
         elif system_info.os_name == "Windows":
             return RequirementCheck(
@@ -238,8 +255,8 @@ class SystemRequirementsChecker:
                 suggestions=[
                     "Consider using Windows Subsystem for Linux (WSL)",
                     "Some features may not work as expected",
-                    "Docker Desktop for Windows is recommended"
-                ]
+                    "Docker Desktop for Windows is recommended",
+                ],
             )
         else:
             return RequirementCheck(
@@ -251,11 +268,13 @@ class SystemRequirementsChecker:
                 message=f"Unsupported operating system: {system_info.os_name}",
                 suggestions=[
                     "Use macOS, Linux, or Windows with WSL",
-                    "Check community support for your platform"
-                ]
+                    "Check community support for your platform",
+                ],
             )
 
-    def check_package_manager(self, system_info: SystemInfo) -> RequirementCheck:
+    def check_package_manager(
+        self, system_info: SystemInfo
+    ) -> RequirementCheck:
         """Check package manager availability with intelligent recommendations."""
         if system_info.mamba_available:
             return RequirementCheck(
@@ -265,7 +284,7 @@ class SystemRequirementsChecker:
                 required="conda or mamba",
                 severity=Severity.INFO,
                 message="Mamba provides fastest package resolution",
-                suggestions=[]
+                suggestions=[],
             )
         elif system_info.conda_available:
             # Check conda version to determine solver
@@ -278,7 +297,7 @@ class SystemRequirementsChecker:
                     required="conda or mamba",
                     severity=Severity.INFO,
                     message="Conda with libmamba solver is fast and reliable",
-                    suggestions=[]
+                    suggestions=[],
                 )
             else:
                 return RequirementCheck(
@@ -291,8 +310,8 @@ class SystemRequirementsChecker:
                     suggestions=[
                         "Install mamba for faster package resolution: conda install mamba -n base -c conda-forge",
                         "Update conda for libmamba solver: conda update conda",
-                        "Current setup will work but may be slower"
-                    ]
+                        "Current setup will work but may be slower",
+                    ],
                 )
         else:
             return RequirementCheck(
@@ -305,12 +324,13 @@ class SystemRequirementsChecker:
                 suggestions=[
                     "Install miniforge (recommended): https://github.com/conda-forge/miniforge",
                     "Install miniconda: https://docs.conda.io/en/latest/miniconda.html",
-                    "Install Anaconda: https://www.anaconda.com/products/distribution"
-                ]
+                    "Install Anaconda: https://www.anaconda.com/products/distribution",
+                ],
             )
 
-    def check_disk_space(self, system_info: SystemInfo,
-                         install_type: InstallationType) -> RequirementCheck:
+    def check_disk_space(
+        self, system_info: SystemInfo, install_type: InstallationType
+    ) -> RequirementCheck:
         """Check available disk space against requirements."""
         estimate = self.DISK_ESTIMATES[install_type]
         available = system_info.available_space_gb
@@ -323,7 +343,7 @@ class SystemRequirementsChecker:
                 required=f"{estimate.total_required_gb:.1f}GB minimum",
                 severity=Severity.INFO,
                 message=f"Excellent! {available:.1f}GB available ({estimate.format_summary()})",
-                suggestions=[]
+                suggestions=[],
             )
         elif available >= estimate.total_required_gb:
             return RequirementCheck(
@@ -335,8 +355,8 @@ class SystemRequirementsChecker:
                 message=f"Sufficient space: {available:.1f}GB available, {estimate.total_required_gb:.1f}GB required",
                 suggestions=[
                     f"Consider freeing up space for optimal experience ({estimate.total_recommended_gb:.1f}GB recommended)",
-                    "Monitor disk usage during installation"
-                ]
+                    "Monitor disk usage during installation",
+                ],
             )
         elif available >= estimate.total_minimum_gb:
             return RequirementCheck(
@@ -349,8 +369,8 @@ class SystemRequirementsChecker:
                 suggestions=[
                     "Consider minimal installation to reduce space requirements",
                     "Free up space before installation",
-                    "Install to external drive if available"
-                ]
+                    "Install to external drive if available",
+                ],
             )
         else:
             return RequirementCheck(
@@ -363,75 +383,90 @@ class SystemRequirementsChecker:
                 suggestions=[
                     f"Free up {estimate.total_minimum_gb - available:.1f}GB of disk space",
                     "Delete unnecessary files or move to external storage",
-                    "Choose installation location with more space"
-                ]
+                    "Choose installation location with more space",
+                ],
             )
 
-    def check_optional_tools(self, system_info: SystemInfo) -> List[RequirementCheck]:
+    def check_optional_tools(
+        self, system_info: SystemInfo
+    ) -> List[RequirementCheck]:
         """Check optional tools that enhance the experience."""
         checks = []
 
         # Docker check
         if system_info.docker_available:
-            checks.append(RequirementCheck(
-                name="Docker",
-                met=True,
-                found="available",
-                required="optional (for local database)",
-                severity=Severity.INFO,
-                message="Docker available for local database setup",
-                suggestions=[]
-            ))
+            checks.append(
+                RequirementCheck(
+                    name="Docker",
+                    met=True,
+                    found="available",
+                    required="optional (for local database)",
+                    severity=Severity.INFO,
+                    message="Docker available for local database setup",
+                    suggestions=[],
+                )
+            )
         else:
-            checks.append(RequirementCheck(
-                name="Docker",
-                met=False,
-                found="not found",
-                required="optional (for local database)",
-                severity=Severity.INFO,
-                message="Docker not found - can install later for database",
-                suggestions=[
-                    "Install Docker for easy database setup: https://docs.docker.com/get-docker/",
-                    "Alternatively, configure external database connection",
-                    "Can be installed later if needed"
-                ]
-            ))
+            checks.append(
+                RequirementCheck(
+                    name="Docker",
+                    met=False,
+                    found="not found",
+                    required="optional (for local database)",
+                    severity=Severity.INFO,
+                    message="Docker not found - can install later for database",
+                    suggestions=[
+                        "Install Docker for easy database setup: https://docs.docker.com/get-docker/",
+                        "Alternatively, configure external database connection",
+                        "Can be installed later if needed",
+                    ],
+                )
+            )
 
         # Git check
         if system_info.git_available:
-            checks.append(RequirementCheck(
-                name="Git",
-                met=True,
-                found="available",
-                required="recommended",
-                severity=Severity.INFO,
-                message="Git available for repository management",
-                suggestions=[]
-            ))
+            checks.append(
+                RequirementCheck(
+                    name="Git",
+                    met=True,
+                    found="available",
+                    required="recommended",
+                    severity=Severity.INFO,
+                    message="Git available for repository management",
+                    suggestions=[],
+                )
+            )
         else:
-            checks.append(RequirementCheck(
-                name="Git",
-                met=False,
-                found="not found",
-                required="recommended",
-                severity=Severity.WARNING,
-                message="Git not found - needed for development",
-                suggestions=[
-                    "Install Git: https://git-scm.com/downloads",
-                    "Required for cloning repository and version control",
-                    "Can download ZIP file as alternative"
-                ]
-            ))
+            checks.append(
+                RequirementCheck(
+                    name="Git",
+                    met=False,
+                    found="not found",
+                    required="recommended",
+                    severity=Severity.WARNING,
+                    message="Git not found - needed for development",
+                    suggestions=[
+                        "Install Git: https://git-scm.com/downloads",
+                        "Required for cloning repository and version control",
+                        "Can download ZIP file as alternative",
+                    ],
+                )
+            )
 
         return checks
 
-    def estimate_installation_time(self, system_info: SystemInfo,
-                                  install_type: InstallationType) -> TimeEstimate:
+    def estimate_installation_time(
+        self, system_info: SystemInfo, install_type: InstallationType
+    ) -> TimeEstimate:
         """Estimate installation time based on system and installation type."""
         base_times = {
             InstallationType.MINIMAL: {"download": 3, "install": 4, "setup": 1},
             InstallationType.FULL: {"download": 8, "install": 12, "setup": 2},
-            InstallationType.PIPELINE_SPECIFIC: {"download": 5, "install": 7, "setup": 2}
+            InstallationType.PIPELINE_SPECIFIC: {
+                "download": 5,
+                "install": 7,
+                "setup": 2,
+            },
         }
 
         times = base_times[install_type].copy()
@@ -467,10 +502,12 @@ class SystemRequirementsChecker:
             install_minutes=times["install"],
             setup_minutes=times["setup"],
             total_minutes=total,
-            factors=factors
+            factors=factors,
         )
 
-    def run_comprehensive_check(self, install_type: InstallationType = InstallationType.MINIMAL) -> Dict[str, RequirementCheck]:
+    def run_comprehensive_check(
+        self, install_type: InstallationType = InstallationType.MINIMAL
+    ) -> Dict[str, RequirementCheck]:
         """Run all system requirement checks."""
         system_info = self.detect_system_info()
 
@@ -478,7 +515,7 @@ class SystemRequirementsChecker:
             "python": self.check_python_version(system_info),
             "os": self.check_operating_system(system_info),
             "package_manager": self.check_package_manager(system_info),
-            "disk_space": self.check_disk_space(system_info, install_type)
+            "disk_space": self.check_disk_space(system_info, install_type),
         }
 
         # Add optional tool checks
@@ -495,14 +532,19 @@ class SystemRequirementsChecker:
                 ["conda", "--version"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=5,
             )
             if result.returncode == 0:
                 # Extract version from "conda 23.10.0"
                 import re
-                match = re.search(r'conda (\d+\.\d+\.\d+)', result.stdout)
+
+                match = re.search(r"conda (\d+\.\d+\.\d+)", result.stdout)
                 return match.group(1) if match else None
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            subprocess.TimeoutExpired,
+        ):
             pass
         return None
 
@@ -510,11 +552,12 @@ class SystemRequirementsChecker:
         """Check if conda version includes libmamba solver by default."""
         try:
             from packaging import version
+
             return version.parse(conda_version) >= version.parse("23.10.0")
         except (ImportError, Exception):
             # Fallback to simple comparison
             try:
-                major, minor, patch = map(int, conda_version.split('.'))
+                major, minor, patch = map(int, conda_version.split("."))
                 return (major > 23) or (major == 23 and minor >= 10)
             except ValueError:
                 return False
@@ -527,8 +570,10 @@ class SystemRequirementsChecker:
 
 
 # Convenience function for quick system check
-def check_system_requirements(install_type: InstallationType = InstallationType.MINIMAL,
-                             base_dir: Optional[Path] = None) -> Dict[str, RequirementCheck]:
+def check_system_requirements(
+    install_type: InstallationType = InstallationType.MINIMAL,
+    base_dir: Optional[Path] = None,
+) -> Dict[str, RequirementCheck]:
     """Quick system requirements check."""
     checker = SystemRequirementsChecker(base_dir)
     return checker.run_comprehensive_check(install_type)

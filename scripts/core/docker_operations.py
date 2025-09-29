@@ -12,17 +12,23 @@ from dataclasses import dataclass
 
 # Import from utils (using absolute path within scripts)
 import sys
+
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
 from utils.result_types import (
-    Result, success, failure, DockerResult, DockerError
+    Result,
+    success,
+    failure,
+    DockerResult,
+    DockerError,
 )
 
 
 @dataclass(frozen=True)
 class DockerConfig:
     """Configuration for Docker database setup."""
+
     container_name: str = "spyglass-db"
     image: str = "datajoint/mysql:8.0"
     port: int = 3306
@@ -33,6 +39,7 @@ class DockerConfig:
 @dataclass(frozen=True)
 class DockerContainerInfo:
     """Information about Docker container state."""
+
     name: str
     exists: bool
     running: bool
@@ -58,11 +65,16 @@ def build_docker_run_command(config: DockerConfig) -> List[str]:
     port_mapping = f"{config.port}:{config.mysql_port}"
 
     return [
-        "docker", "run", "-d",
-        "--name", config.container_name,
-        "-p", port_mapping,
-        "-e", f"MYSQL_ROOT_PASSWORD={config.password}",
-        config.image
+        "docker",
+        "run",
+        "-d",
+        "--name",
+        config.container_name,
+        "-p",
+        port_mapping,
+        "-e",
+        f"MYSQL_ROOT_PASSWORD={config.password}",
+        config.image,
     ]
 
 
@@ -92,8 +104,13 @@ def build_mysql_ping_command(config: DockerConfig) -> List[str]:
         List of command arguments for MySQL ping
     """
     return [
-        "docker", "exec", config.container_name,
-        "mysqladmin", "-uroot", f"-p{config.password}", "ping"
+        "docker",
+        "exec",
+        config.container_name,
+        "mysqladmin",
+        "-uroot",
+        f"-p{config.password}",
+        "ping",
     ]
 
 
@@ -111,13 +128,13 @@ def check_docker_available() -> DockerResult:
                 operation="check_availability",
                 docker_available=False,
                 daemon_running=False,
-                permission_error=False
+                permission_error=False,
             ),
             "Docker is not installed or not in PATH",
             recovery_actions=[
                 "Install Docker from: https://docs.docker.com/engine/install/",
-                "Make sure docker command is in your PATH"
-            ]
+                "Make sure docker command is in your PATH",
+            ],
         )
 
     return success(True, "Docker command found")
@@ -131,10 +148,7 @@ def check_docker_daemon_running() -> DockerResult:
     """
     try:
         result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            text=True,
-            timeout=10
+            ["docker", "info"], capture_output=True, text=True, timeout=10
         )
 
         if result.returncode == 0:
@@ -145,14 +159,15 @@ def check_docker_daemon_running() -> DockerResult:
                     operation="check_daemon",
                     docker_available=True,
                     daemon_running=False,
-                    permission_error="permission denied" in result.stderr.lower()
+                    permission_error="permission denied"
+                    in result.stderr.lower(),
                 ),
                 "Docker daemon is not running",
                 recovery_actions=[
                     "Start Docker Desktop application (macOS/Windows)",
                     "Run: sudo systemctl start docker (Linux)",
-                    "Check Docker Desktop is running and accessible"
-                ]
+                    "Check Docker Desktop is running and accessible",
+                ],
             )
 
     except subprocess.TimeoutExpired:
@@ -161,14 +176,14 @@ def check_docker_daemon_running() -> DockerResult:
                 operation="check_daemon",
                 docker_available=True,
                 daemon_running=False,
-                permission_error=False
+                permission_error=False,
             ),
             "Docker daemon check timed out",
             recovery_actions=[
                 "Check if Docker Desktop is starting up",
                 "Restart Docker Desktop",
-                "Check system resources and Docker configuration"
-            ]
+                "Check system resources and Docker configuration",
+            ],
         )
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         return failure(
@@ -176,14 +191,14 @@ def check_docker_daemon_running() -> DockerResult:
                 operation="check_daemon",
                 docker_available=True,
                 daemon_running=False,
-                permission_error="permission" in str(e).lower()
+                permission_error="permission" in str(e).lower(),
             ),
             f"Failed to check Docker daemon: {e}",
             recovery_actions=[
                 "Verify Docker installation",
                 "Check Docker permissions",
-                "Restart Docker service"
-            ]
+                "Restart Docker service",
+            ],
         )
 
 
@@ -198,7 +213,7 @@ def check_port_available(port: int) -> DockerResult:
     """
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            result = s.connect_ex(('localhost', port))
+            result = s.connect_ex(("localhost", port))
 
             if result == 0:
                 return failure(
@@ -206,14 +221,14 @@ def check_port_available(port: int) -> DockerResult:
                         operation="check_port",
                         docker_available=True,
                         daemon_running=True,
-                        permission_error=False
+                        permission_error=False,
                     ),
                     f"Port {port} is already in use",
                     recovery_actions=[
                         f"Use a different port with --db-port (e.g., --db-port {port + 1})",
                         f"Stop service using port {port}",
-                        "Check what's running on the port with: lsof -i :3306"
-                    ]
+                        "Check what's running on the port with: lsof -i :3306",
+                    ],
                 )
             else:
                 return success(True, f"Port {port} is available")
@@ -224,13 +239,13 @@ def check_port_available(port: int) -> DockerResult:
                 operation="check_port",
                 docker_available=True,
                 daemon_running=True,
-                permission_error=False
+                permission_error=False,
             ),
             f"Failed to check port availability: {e}",
             recovery_actions=[
                 "Check network configuration",
-                "Try a different port number"
-            ]
+                "Try a different port number",
+            ],
         )
 
 
@@ -249,7 +264,7 @@ def get_container_info(container_name: str) -> DockerResult:
             ["docker", "ps", "-a", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
 
         if result.returncode != 0:
@@ -258,13 +273,13 @@ def get_container_info(container_name: str) -> DockerResult:
                     operation="list_containers",
                     docker_available=True,
                     daemon_running=False,
-                    permission_error=False
+                    permission_error=False,
                 ),
                 "Failed to list Docker containers",
                 recovery_actions=[
                     "Check Docker daemon is running",
-                    "Verify Docker permissions"
-                ]
+                    "Verify Docker permissions",
+                ],
             )
 
         exists = container_name in result.stdout
@@ -274,16 +289,18 @@ def get_container_info(container_name: str) -> DockerResult:
                 name=container_name,
                 exists=False,
                 running=False,
-                port_mapping=""
+                port_mapping="",
             )
-            return success(container_info, f"Container '{container_name}' does not exist")
+            return success(
+                container_info, f"Container '{container_name}' does not exist"
+            )
 
         # Check if container is running
         running_result = subprocess.run(
             ["docker", "ps", "--format", "{{.Names}}"],
             capture_output=True,
             text=True,
-            timeout=10
+            timeout=10,
         )
 
         running = container_name in running_result.stdout
@@ -292,11 +309,14 @@ def get_container_info(container_name: str) -> DockerResult:
             name=container_name,
             exists=True,
             running=running,
-            port_mapping=""  # Could be enhanced to parse port mapping
+            port_mapping="",  # Could be enhanced to parse port mapping
         )
 
         status = "running" if running else "stopped"
-        return success(container_info, f"Container '{container_name}' exists and is {status}")
+        return success(
+            container_info,
+            f"Container '{container_name}' exists and is {status}",
+        )
 
     except subprocess.TimeoutExpired:
         return failure(
@@ -304,13 +324,13 @@ def get_container_info(container_name: str) -> DockerResult:
                 operation="get_container_info",
                 docker_available=True,
                 daemon_running=False,
-                permission_error=False
+                permission_error=False,
             ),
             "Timeout checking container status",
             recovery_actions=[
                 "Check Docker daemon responsiveness",
-                "Restart Docker if needed"
-            ]
+                "Restart Docker if needed",
+            ],
         )
     except Exception as e:
         return failure(
@@ -318,13 +338,13 @@ def get_container_info(container_name: str) -> DockerResult:
                 operation="get_container_info",
                 docker_available=True,
                 daemon_running=True,
-                permission_error=False
+                permission_error=False,
             ),
             f"Failed to get container info: {e}",
             recovery_actions=[
                 "Check Docker installation",
-                "Verify container name is correct"
-            ]
+                "Verify container name is correct",
+            ],
         )
 
 
@@ -342,7 +362,7 @@ def validate_docker_prerequisites(config: DockerConfig) -> List[DockerResult]:
     validations = [
         check_docker_available(),
         check_docker_daemon_running(),
-        check_port_available(config.port)
+        check_port_available(config.port),
     ]
 
     # Only check container info if Docker is available
@@ -374,7 +394,10 @@ def assess_docker_readiness(validations: List[DockerResult]) -> DockerResult:
     recoverable_failures = []
 
     for failure_result in failures:
-        if failure_result.error.operation in ["check_availability", "check_daemon"]:
+        if failure_result.error.operation in [
+            "check_availability",
+            "check_daemon",
+        ]:
             critical_failures.append(failure_result)
         else:
             recoverable_failures.append(failure_result)
@@ -389,14 +412,30 @@ def assess_docker_readiness(validations: List[DockerResult]) -> DockerResult:
         return failure(
             DockerError(
                 operation="overall_assessment",
-                docker_available=len([f for f in critical_failures
-                                    if f.error.operation == "check_availability"]) == 0,
-                daemon_running=len([f for f in critical_failures
-                                  if f.error.operation == "check_daemon"]) == 0,
-                permission_error=any(f.error.permission_error for f in critical_failures)
+                docker_available=len(
+                    [
+                        f
+                        for f in critical_failures
+                        if f.error.operation == "check_availability"
+                    ]
+                )
+                == 0,
+                daemon_running=len(
+                    [
+                        f
+                        for f in critical_failures
+                        if f.error.operation == "check_daemon"
+                    ]
+                )
+                == 0,
+                permission_error=any(
+                    f.error.permission_error for f in critical_failures
+                ),
             ),
             f"Critical Docker issues: {'; '.join(messages)}",
-            recovery_actions=list(dict.fromkeys(all_actions))  # Remove duplicates
+            recovery_actions=list(
+                dict.fromkeys(all_actions)
+            ),  # Remove duplicates
         )
 
     elif recoverable_failures:
@@ -407,10 +446,7 @@ def assess_docker_readiness(validations: List[DockerResult]) -> DockerResult:
             all_actions.extend(f.recovery_actions)
 
         return success(
-            True,
-            f"Docker ready with minor issues: {'; '.join(messages)}"
+            True, f"Docker ready with minor issues: {'; '.join(messages)}"
         )
 
     return success(True, "Docker is ready")
-
-

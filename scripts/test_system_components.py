@@ -15,14 +15,21 @@ import platform
 sys.path.insert(0, str(Path(__file__).parent))
 
 from quickstart import (
-    InstallType, Pipeline, SetupConfig, SystemInfo,
-    UserInterface, EnvironmentManager, QuickstartOrchestrator,
-    InstallerFactory, DisabledColors
+    InstallType,
+    Pipeline,
+    SetupConfig,
+    SystemInfo,
+    UserInterface,
+    EnvironmentManager,
+    QuickstartOrchestrator,
+    InstallerFactory,
+    DisabledColors,
 )
 from common import EnvironmentCreationError
 
 try:
     from ux.error_recovery import ErrorRecoveryGuide, ErrorCategory
+
     ERROR_RECOVERY_AVAILABLE = True
 except ImportError:
     ERROR_RECOVERY_AVAILABLE = False
@@ -38,7 +45,7 @@ class TestSystemInfo:
             arch="arm64",
             is_m1=True,
             python_version=(3, 10, 18),
-            conda_cmd="conda"
+            conda_cmd="conda",
         )
 
         assert system_info.os_name == "Darwin"
@@ -54,7 +61,7 @@ class TestSystemInfo:
             arch="x86_64",
             is_m1=False,
             python_version=(3, 9, 0),
-            conda_cmd="mamba"
+            conda_cmd="mamba",
         )
 
         # Should be able to read fields
@@ -66,14 +73,14 @@ class TestSystemInfo:
         """Test SystemInfo with actual system data."""
         current_os = platform.system()
         current_arch = platform.machine()
-        current_python = tuple(map(int, platform.python_version().split('.')))
+        current_python = tuple(map(int, platform.python_version().split(".")))
 
         system_info = SystemInfo(
             os_name=current_os,
             arch=current_arch,
             is_m1=current_arch == "arm64",
             python_version=current_python,
-            conda_cmd="conda"
+            conda_cmd="conda",
         )
 
         assert system_info.os_name == current_os
@@ -88,9 +95,6 @@ class TestInstallerFactory:
         """Test that factory can be instantiated."""
         factory = InstallerFactory()
         assert isinstance(factory, InstallerFactory)
-
-
-
 
 
 class TestUserInterface:
@@ -122,26 +126,26 @@ class TestUserInterface:
         ui = UserInterface(DisabledColors)
 
         # Test that _format_message works (if it exists)
-        if hasattr(ui, '_format_message'):
+        if hasattr(ui, "_format_message"):
             result = ui._format_message("Test message", "✓", "")
             assert isinstance(result, str)
             assert "Test message" in result
 
-    @patch('builtins.input', return_value='y')
+    @patch("builtins.input", return_value="y")
     def test_confirmation_prompt_yes(self, mock_input):
         """Test confirmation prompt with yes response."""
         ui = UserInterface(DisabledColors, auto_yes=False)
 
-        if hasattr(ui, 'confirm'):
+        if hasattr(ui, "confirm"):
             result = ui.confirm("Continue?")
             assert result is True
 
-    @patch('builtins.input', return_value='n')
+    @patch("builtins.input", return_value="n")
     def test_confirmation_prompt_no(self, mock_input):
         """Test confirmation prompt with no response."""
         ui = UserInterface(DisabledColors, auto_yes=False)
 
-        if hasattr(ui, 'confirm'):
+        if hasattr(ui, "confirm"):
             result = ui.confirm("Continue?")
             assert result is False
 
@@ -149,7 +153,7 @@ class TestUserInterface:
         """Test that auto_yes mode bypasses prompts."""
         ui = UserInterface(DisabledColors, auto_yes=True)
 
-        if hasattr(ui, 'confirm'):
+        if hasattr(ui, "confirm"):
             # Should return True without prompting
             result = ui.confirm("Continue?")
             assert result is True
@@ -172,7 +176,7 @@ class TestEnvironmentManager:
 
     def test_select_environment_file_minimal(self):
         """Test environment file selection for minimal install."""
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = self.env_manager.select_environment_file()
             assert result == "environment-min.yml"
 
@@ -181,7 +185,7 @@ class TestEnvironmentManager:
         full_config = SetupConfig(install_type=InstallType.FULL)
         env_manager = EnvironmentManager(self.ui, full_config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = env_manager.select_environment_file()
             assert result == "environment.yml"
 
@@ -190,19 +194,19 @@ class TestEnvironmentManager:
         dlc_config = SetupConfig(pipeline=Pipeline.DLC)
         env_manager = EnvironmentManager(self.ui, dlc_config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = env_manager.select_environment_file()
             assert result == "environment_dlc.yml"
 
     def test_environment_file_missing(self):
         """Test behavior when environment file doesn't exist."""
-        with patch.object(Path, 'exists', return_value=False):
+        with patch.object(Path, "exists", return_value=False):
             # Should raise EnvironmentCreationError for missing files
             with pytest.raises(EnvironmentCreationError) as exc_info:
                 self.env_manager.select_environment_file()
             assert "Environment file not found" in str(exc_info.value)
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_build_environment_command(self, mock_run):
         """Test building conda environment commands."""
         cmd = self.env_manager._build_environment_command(
@@ -217,7 +221,7 @@ class TestEnvironmentManager:
         assert "-n" in cmd
         assert self.config.env_name in cmd
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_build_update_command(self, mock_run):
         """Test building conda environment update commands."""
         cmd = self.env_manager._build_environment_command(
@@ -251,13 +255,13 @@ class TestQuickstartOrchestrator:
     def test_orchestrator_has_required_methods(self):
         """Test that orchestrator has required methods."""
         # Check for key methods that should exist
-        required_methods = ['run', 'setup_database', 'validate_installation']
+        required_methods = ["run", "setup_database", "validate_installation"]
 
         for method_name in required_methods:
             if hasattr(self.orchestrator, method_name):
                 assert callable(getattr(self.orchestrator, method_name))
 
-    @patch('quickstart.validate_base_dir')
+    @patch("quickstart.validate_base_dir")
     def test_orchestrator_validation_integration(self, mock_validate):
         """Test that orchestrator integrates with validation functions."""
         from utils.result_types import success
@@ -266,13 +270,16 @@ class TestQuickstartOrchestrator:
         mock_validate.return_value = success(Path("/tmp/test"))
 
         # Test that validation is called during orchestration
-        if hasattr(self.orchestrator, 'validate_configuration'):
+        if hasattr(self.orchestrator, "validate_configuration"):
             result = self.orchestrator.validate_configuration()
             # Should get some kind of result
             assert result is not None
 
 
-@pytest.mark.skipif(not ERROR_RECOVERY_AVAILABLE, reason="ux.error_recovery module not available")
+@pytest.mark.skipif(
+    not ERROR_RECOVERY_AVAILABLE,
+    reason="ux.error_recovery module not available",
+)
 class TestErrorRecovery:
     """Test error recovery functionality."""
 
@@ -289,7 +296,7 @@ class TestErrorRecovery:
             ErrorCategory.DOCKER,
             ErrorCategory.CONDA,
             ErrorCategory.PYTHON,
-            ErrorCategory.NETWORK
+            ErrorCategory.NETWORK,
         ]
 
         for category in common_categories:
@@ -301,7 +308,7 @@ class TestErrorRecovery:
         guide = ErrorRecoveryGuide(ui)
 
         # Should have methods for handling different error types
-        required_methods = ['handle_error']
+        required_methods = ["handle_error"]
         for method_name in required_methods:
             if hasattr(guide, method_name):
                 assert callable(getattr(guide, method_name))
@@ -317,7 +324,7 @@ class TestSystemIntegration:
             install_type=InstallType.FULL,
             pipeline=Pipeline.DLC,
             base_dir=Path("/tmp/test"),
-            env_name="test-env"
+            env_name="test-env",
         )
 
         ui = UserInterface(DisabledColors)
@@ -335,28 +342,35 @@ class TestSystemIntegration:
         assert orchestrator.env_manager.config == config
 
 
-
 # Parametrized tests for comprehensive coverage
-@pytest.mark.parametrize("install_type,pipeline,expected_env_file", [
-    (InstallType.MINIMAL, None, "environment-min.yml"),
-    (InstallType.FULL, None, "environment.yml"),
-    (InstallType.MINIMAL, Pipeline.DLC, "environment_dlc.yml"),
-])
-def test_environment_file_selection_parametrized(install_type, pipeline, expected_env_file):
+@pytest.mark.parametrize(
+    "install_type,pipeline,expected_env_file",
+    [
+        (InstallType.MINIMAL, None, "environment-min.yml"),
+        (InstallType.FULL, None, "environment.yml"),
+        (InstallType.MINIMAL, Pipeline.DLC, "environment_dlc.yml"),
+    ],
+)
+def test_environment_file_selection_parametrized(
+    install_type, pipeline, expected_env_file
+):
     """Test environment file selection for different configurations."""
     config = SetupConfig(install_type=install_type, pipeline=pipeline)
     ui = Mock()
     env_manager = EnvironmentManager(ui, config)
 
-    with patch.object(Path, 'exists', return_value=True):
+    with patch.object(Path, "exists", return_value=True):
         result = env_manager.select_environment_file()
         assert result == expected_env_file
 
 
-@pytest.mark.parametrize("auto_yes,expected_behavior", [
-    (True, "automatic"),
-    (False, "interactive"),
-])
+@pytest.mark.parametrize(
+    "auto_yes,expected_behavior",
+    [
+        (True, "automatic"),
+        (False, "interactive"),
+    ],
+)
 def test_user_interface_modes(auto_yes, expected_behavior):
     """Test different UserInterface modes."""
     ui = UserInterface(DisabledColors, auto_yes=auto_yes)
@@ -374,6 +388,12 @@ if __name__ == "__main__":
     print("To run tests:")
     print("  pytest test_system_components.py              # Run all tests")
     print("  pytest test_system_components.py -v           # Verbose output")
-    print("  pytest test_system_components.py::TestInstallerFactory  # Run specific class")
-    print("  pytest test_system_components.py -k factory   # Run tests matching 'factory'")
-    print("\nNote: Some tests require the ux.error_recovery module to be available.")
+    print(
+        "  pytest test_system_components.py::TestInstallerFactory  # Run specific class"
+    )
+    print(
+        "  pytest test_system_components.py -k factory   # Run tests matching 'factory'"
+    )
+    print(
+        "\nNote: Some tests require the ux.error_recovery module to be available."
+    )

@@ -15,16 +15,27 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # Import only what we know exists and works
 from quickstart import (
-    SetupConfig, InstallType, Pipeline, validate_base_dir,
-    UserInterface, EnvironmentManager, DisabledColors
+    SetupConfig,
+    InstallType,
+    Pipeline,
+    validate_base_dir,
+    UserInterface,
+    EnvironmentManager,
+    DisabledColors,
 )
 from utils.result_types import (
-    Success, Failure, success, failure, ValidationError, Severity
+    Success,
+    Failure,
+    success,
+    failure,
+    ValidationError,
+    Severity,
 )
 
 # Test the UX validation if available
 try:
     from ux.validation import validate_port
+
     UX_VALIDATION_AVAILABLE = True
 except ImportError:
     UX_VALIDATION_AVAILABLE = False
@@ -49,7 +60,9 @@ class TestCriticalValidationFunctions:
 
     def test_validate_base_dir_impossible_path(self):
         """Test validate_base_dir with clearly impossible path."""
-        result = validate_base_dir(Path("/nonexistent/impossible/nested/deep/path"))
+        result = validate_base_dir(
+            Path("/nonexistent/impossible/nested/deep/path")
+        )
         assert result.is_failure
         assert isinstance(result.error, ValueError)
 
@@ -60,19 +73,23 @@ class TestCriticalValidationFunctions:
         for test_path in test_paths:
             result = validate_base_dir(test_path)
             # Must be either Success or Failure
-            assert hasattr(result, 'is_success')
-            assert hasattr(result, 'is_failure')
-            assert result.is_success != result.is_failure  # Exactly one should be true
+            assert hasattr(result, "is_success")
+            assert hasattr(result, "is_failure")
+            assert (
+                result.is_success != result.is_failure
+            )  # Exactly one should be true
 
             if result.is_success:
-                assert hasattr(result, 'value')
+                assert hasattr(result, "value")
                 assert isinstance(result.value, Path)
             else:
-                assert hasattr(result, 'error')
+                assert hasattr(result, "error")
                 assert isinstance(result.error, Exception)
 
 
-@pytest.mark.skipif(not UX_VALIDATION_AVAILABLE, reason="ux.validation not available")
+@pytest.mark.skipif(
+    not UX_VALIDATION_AVAILABLE, reason="ux.validation not available"
+)
 class TestUXValidationCore:
     """Test critical UX validation functions."""
 
@@ -88,7 +105,7 @@ class TestUXValidationCore:
         for port_str in invalid_ports:
             result = validate_port(port_str)
             assert result.is_failure
-            assert hasattr(result, 'error')
+            assert hasattr(result, "error")
 
     def test_validate_port_out_of_range(self):
         """Test validating out-of-range port numbers."""
@@ -96,7 +113,10 @@ class TestUXValidationCore:
         for port_str in out_of_range:
             result = validate_port(port_str)
             assert result.is_failure
-            assert "range" in result.error.message.lower() or "between" in result.error.message.lower()
+            assert (
+                "range" in result.error.message.lower()
+                or "between" in result.error.message.lower()
+            )
 
 
 class TestSetupConfigBehavior:
@@ -118,8 +138,7 @@ class TestSetupConfigBehavior:
     def test_pipeline_configuration(self):
         """Test configuration with pipeline settings."""
         config = SetupConfig(
-            install_type=InstallType.FULL,
-            pipeline=Pipeline.DLC
+            install_type=InstallType.FULL, pipeline=Pipeline.DLC
         )
 
         assert config.install_type == InstallType.FULL
@@ -160,7 +179,7 @@ class TestEnvironmentManagerCore:
 
     def test_environment_file_selection_minimal(self):
         """Test environment file selection for minimal install."""
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = self.env_manager.select_environment_file()
             assert isinstance(result, str)
             assert "environment" in result
@@ -171,7 +190,7 @@ class TestEnvironmentManagerCore:
         full_config = SetupConfig(install_type=InstallType.FULL)
         env_manager = EnvironmentManager(self.ui, full_config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = env_manager.select_environment_file()
             assert isinstance(result, str)
             assert "environment" in result
@@ -182,12 +201,12 @@ class TestEnvironmentManagerCore:
         dlc_config = SetupConfig(pipeline=Pipeline.DLC)
         env_manager = EnvironmentManager(self.ui, dlc_config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             result = env_manager.select_environment_file()
             assert isinstance(result, str)
             assert "dlc" in result.lower()
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_build_environment_command_structure(self, mock_run):
         """Test that environment commands have proper structure."""
         cmd = self.env_manager._build_environment_command(
@@ -195,8 +214,13 @@ class TestEnvironmentManagerCore:
         )
 
         assert isinstance(cmd, list)
-        assert len(cmd) > 3  # Should have conda, env, create/update, -f, -n, name
-        assert cmd[0] in ["conda", "mamba"]  # First item should be package manager
+        assert (
+            len(cmd) > 3
+        )  # Should have conda, env, create/update, -f, -n, name
+        assert cmd[0] in [
+            "conda",
+            "mamba",
+        ]  # First item should be package manager
         assert "env" in cmd
         assert "-f" in cmd  # Should specify file
         assert "-n" in cmd  # Should specify name
@@ -219,7 +243,12 @@ class TestUserInterfaceCore:
         """Test that essential display methods exist."""
         ui = UserInterface(DisabledColors)
 
-        essential_methods = ['print_info', 'print_success', 'print_warning', 'print_error']
+        essential_methods = [
+            "print_info",
+            "print_success",
+            "print_warning",
+            "print_error",
+        ]
         for method_name in essential_methods:
             assert hasattr(ui, method_name)
             assert callable(getattr(ui, method_name))
@@ -231,8 +260,8 @@ class TestEnumDefinitions:
     def test_install_type_enum(self):
         """Test InstallType enum values."""
         # Test that expected values exist
-        assert hasattr(InstallType, 'MINIMAL')
-        assert hasattr(InstallType, 'FULL')
+        assert hasattr(InstallType, "MINIMAL")
+        assert hasattr(InstallType, "FULL")
 
         # Test that they're different
         assert InstallType.MINIMAL != InstallType.FULL
@@ -244,7 +273,7 @@ class TestEnumDefinitions:
     def test_pipeline_enum(self):
         """Test Pipeline enum values."""
         # Test that DLC pipeline exists (most commonly tested)
-        assert hasattr(Pipeline, 'DLC')
+        assert hasattr(Pipeline, "DLC")
 
         # Test that it can be used in configuration
         config = SetupConfig(pipeline=Pipeline.DLC)
@@ -253,10 +282,10 @@ class TestEnumDefinitions:
     def test_severity_enum(self):
         """Test Severity enum values."""
         # Test that all expected severity levels exist
-        assert hasattr(Severity, 'INFO')
-        assert hasattr(Severity, 'WARNING')
-        assert hasattr(Severity, 'ERROR')
-        assert hasattr(Severity, 'CRITICAL')
+        assert hasattr(Severity, "INFO")
+        assert hasattr(Severity, "WARNING")
+        assert hasattr(Severity, "ERROR")
+        assert hasattr(Severity, "CRITICAL")
 
         # Test that they're different
         assert Severity.INFO != Severity.ERROR
@@ -310,7 +339,7 @@ class TestCriticalWorkflows:
         ui = Mock()
         env_manager = EnvironmentManager(ui, config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             env_file = env_manager.select_environment_file()
             assert isinstance(env_file, str)
             assert "min" in env_file or "minimal" in env_file.lower()
@@ -321,7 +350,7 @@ class TestCriticalWorkflows:
         ui = Mock()
         env_manager = EnvironmentManager(ui, config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             env_file = env_manager.select_environment_file()
             assert isinstance(env_file, str)
             # For full install, should not be the minimal environment
@@ -333,7 +362,7 @@ class TestCriticalWorkflows:
         ui = Mock()
         env_manager = EnvironmentManager(ui, config)
 
-        with patch.object(Path, 'exists', return_value=True):
+        with patch.object(Path, "exists", return_value=True):
             env_file = env_manager.select_environment_file()
             assert isinstance(env_file, str)
             assert "dlc" in env_file.lower()
@@ -372,8 +401,8 @@ class TestEdgeCases:
         result = validate_base_dir(long_path)
 
         # Should handle gracefully (either succeed or fail with clear message)
-        assert hasattr(result, 'is_success')
-        assert hasattr(result, 'is_failure')
+        assert hasattr(result, "is_success")
+        assert hasattr(result, "is_failure")
 
     def test_special_characters_in_path(self):
         """Test handling of paths with special characters."""
@@ -386,25 +415,27 @@ class TestEdgeCases:
         for path in special_paths:
             result = validate_base_dir(path)
             # Should handle all these cases gracefully
-            assert hasattr(result, 'is_success')
+            assert hasattr(result, "is_success")
             if result.is_success:
                 assert isinstance(result.value, Path)
 
-    @pytest.mark.skipif(not UX_VALIDATION_AVAILABLE, reason="ux.validation not available")
+    @pytest.mark.skipif(
+        not UX_VALIDATION_AVAILABLE, reason="ux.validation not available"
+    )
     def test_port_edge_cases(self):
         """Test port validation edge cases."""
         edge_cases = [
-            "1024",    # First non-privileged port
-            "49152",   # Common ephemeral port
-            "65534",   # Almost maximum
+            "1024",  # First non-privileged port
+            "49152",  # Common ephemeral port
+            "65534",  # Almost maximum
         ]
 
         for port_str in edge_cases:
             result = validate_port(port_str)
             # Should handle all these cases (success or clear failure)
-            assert hasattr(result, 'is_success')
+            assert hasattr(result, "is_success")
             if result.is_failure:
-                assert hasattr(result, 'error')
+                assert hasattr(result, "error")
                 assert len(result.error.message) > 0
 
 
@@ -416,7 +447,7 @@ class TestDataIntegrity:
         config = SetupConfig(
             install_type=InstallType.FULL,
             pipeline=Pipeline.DLC,
-            env_name="test-env"
+            env_name="test-env",
         )
 
         # Values should remain as set
@@ -447,5 +478,7 @@ if __name__ == "__main__":
     print("To run tests:")
     print("  pytest test_core_functions.py              # Run all tests")
     print("  pytest test_core_functions.py -v           # Verbose output")
-    print("  pytest test_core_functions.py::TestCriticalValidationFunctions  # Critical tests")
+    print(
+        "  pytest test_core_functions.py::TestCriticalValidationFunctions  # Critical tests"
+    )
     print("  pytest test_core_functions.py -k workflow  # Run workflow tests")

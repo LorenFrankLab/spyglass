@@ -14,18 +14,29 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 from quickstart import (
-    SetupConfig, InstallType, Pipeline, validate_base_dir,
-    UserInterface, EnvironmentManager, DisabledColors
+    SetupConfig,
+    InstallType,
+    Pipeline,
+    validate_base_dir,
+    UserInterface,
+    EnvironmentManager,
+    DisabledColors,
 )
 from utils.result_types import (
-    Success, Failure, ValidationError, Severity,
-    success, failure, validation_failure
+    Success,
+    Failure,
+    ValidationError,
+    Severity,
+    success,
+    failure,
+    validation_failure,
 )
 from common import EnvironmentCreationError
 
 # Test error recovery if available
 try:
     from ux.error_recovery import ErrorRecoveryGuide, ErrorCategory
+
     ERROR_RECOVERY_AVAILABLE = True
 except ImportError:
     ERROR_RECOVERY_AVAILABLE = False
@@ -59,7 +70,7 @@ class TestPathValidationErrors:
         result = validate_base_dir(Path("/tmp"))
 
         # Should handle symlinks gracefully
-        assert hasattr(result, 'is_success')
+        assert hasattr(result, "is_success")
         if result.is_success:
             assert isinstance(result.value, Path)
 
@@ -69,7 +80,7 @@ class TestPathValidationErrors:
         result = validate_base_dir(Path("/root/spyglass_data"))
 
         # Should either succeed or fail with clear error
-        assert hasattr(result, 'is_success')
+        assert hasattr(result, "is_success")
         if result.is_failure:
             assert isinstance(result.error, Exception)
             assert len(str(result.error)) > 0
@@ -116,13 +127,13 @@ class TestEnvironmentCreationErrors:
 
     def test_missing_environment_file(self):
         """Test behavior when environment file is missing."""
-        with patch.object(Path, 'exists', return_value=False):
+        with patch.object(Path, "exists", return_value=False):
             # Should raise EnvironmentCreationError for missing files
             with pytest.raises(EnvironmentCreationError) as exc_info:
                 self.env_manager.select_environment_file()
             assert "Environment file not found" in str(exc_info.value)
 
-    @patch('subprocess.run')
+    @patch("subprocess.run")
     def test_conda_command_failure_simulation(self, mock_run):
         """Test handling of conda command failures."""
         # Simulate conda command failure
@@ -145,7 +156,9 @@ class TestEnvironmentCreationErrors:
         assert env_manager.config.env_name == "complex-test_env.2024"
 
 
-@pytest.mark.skipif(not ERROR_RECOVERY_AVAILABLE, reason="ux.error_recovery not available")
+@pytest.mark.skipif(
+    not ERROR_RECOVERY_AVAILABLE, reason="ux.error_recovery not available"
+)
 class TestErrorRecoverySystem:
     """Test the error recovery and guidance system."""
 
@@ -157,10 +170,12 @@ class TestErrorRecoverySystem:
 
     def test_error_category_completeness(self):
         """Test that ErrorCategory enum has expected categories."""
-        expected_categories = ['DOCKER', 'CONDA', 'PYTHON', 'NETWORK']
+        expected_categories = ["DOCKER", "CONDA", "PYTHON", "NETWORK"]
 
         for category_name in expected_categories:
-            assert hasattr(ErrorCategory, category_name), f"Missing {category_name} category"
+            assert hasattr(
+                ErrorCategory, category_name
+            ), f"Missing {category_name} category"
 
     def test_error_category_usage(self):
         """Test that error categories can be used properly."""
@@ -177,7 +192,7 @@ class TestErrorRecoverySystem:
         guide = ErrorRecoveryGuide(ui)
 
         # Should have some method for handling errors
-        expected_methods = ['handle_error']
+        expected_methods = ["handle_error"]
         for method_name in expected_methods:
             if hasattr(guide, method_name):
                 assert callable(getattr(guide, method_name))
@@ -199,7 +214,7 @@ class TestResultTypeEdgeCases:
             message="Complex validation error",
             field="test_field",
             severity=Severity.ERROR,
-            recovery_actions=["Action 1", "Action 2"]
+            recovery_actions=["Action 1", "Action 2"],
         )
 
         result = failure(complex_error, "Validation failed")
@@ -213,7 +228,7 @@ class TestResultTypeEdgeCases:
             "port",
             "Invalid port number",
             Severity.ERROR,
-            ["Use port 3306", "Check port availability"]
+            ["Use port 3306", "Check port availability"],
         )
 
         assert result.is_failure
@@ -247,7 +262,13 @@ class TestUserInterfaceErrorHandling:
         ui = UserInterface(DisabledColors)
 
         # Test with various edge case inputs
-        edge_cases = ["", None, "Very long message " * 100, "Unicode: 🚀", "\n\t"]
+        edge_cases = [
+            "",
+            None,
+            "Very long message " * 100,
+            "Unicode: 🚀",
+            "\n\t",
+        ]
 
         for test_input in edge_cases:
             try:
@@ -258,15 +279,17 @@ class TestUserInterfaceErrorHandling:
                     ui.print_error(str(test_input))
                 # Should not crash
             except Exception as e:
-                pytest.fail(f"Display method crashed on input '{test_input}': {e}")
+                pytest.fail(
+                    f"Display method crashed on input '{test_input}': {e}"
+                )
 
-    @patch('builtins.input', return_value='')
+    @patch("builtins.input", return_value="")
     def test_input_methods_with_empty_response(self, mock_input):
         """Test input methods with empty user responses."""
         ui = UserInterface(DisabledColors, auto_yes=False)
 
         # Test methods that have default values
-        if hasattr(ui, '_get_port_input'):
+        if hasattr(ui, "_get_port_input"):
             result = ui._get_port_input()
             assert isinstance(result, int)
             assert 1 <= result <= 65535
@@ -296,8 +319,8 @@ class TestSystemRobustness:
         """Test configuration with extreme but valid values."""
         extreme_config = SetupConfig(
             base_dir=Path("/tmp"),  # Minimal path
-            env_name="a",           # Single character
-            db_port=65535           # Maximum port
+            env_name="a",  # Single character
+            db_port=65535,  # Maximum port
         )
 
         assert extreme_config.base_dir == Path("/tmp")
@@ -309,7 +332,7 @@ class TestSystemRobustness:
         extreme_config = SetupConfig(
             install_type=InstallType.FULL,
             pipeline=Pipeline.DLC,
-            env_name="test-with-many-hyphens-and-numbers-123"
+            env_name="test-with-many-hyphens-and-numbers-123",
         )
 
         ui = Mock()
@@ -323,7 +346,7 @@ class TestSystemRobustness:
         configs = [
             SetupConfig(env_name="env1"),
             SetupConfig(env_name="env2"),
-            SetupConfig(env_name="env3")
+            SetupConfig(env_name="env3"),
         ]
 
         ui = Mock()
@@ -373,5 +396,7 @@ if __name__ == "__main__":
     print("To run tests:")
     print("  pytest test_error_handling.py              # Run all tests")
     print("  pytest test_error_handling.py -v           # Verbose output")
-    print("  pytest test_error_handling.py::TestPathValidationErrors  # Path tests")
+    print(
+        "  pytest test_error_handling.py::TestPathValidationErrors  # Path tests"
+    )
     print("  pytest test_error_handling.py -k performance  # Performance tests")

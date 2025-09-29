@@ -16,15 +16,27 @@ sys.path.insert(0, str(Path(__file__).parent))
 # Import the actual functions we want to test
 from quickstart import validate_base_dir, InstallType, Pipeline, SetupConfig
 from utils.result_types import (
-    Success, Failure, Result, success, failure, validation_failure,
-    ValidationError, Severity, ValidationResult, validation_success
+    Success,
+    Failure,
+    Result,
+    success,
+    failure,
+    validation_failure,
+    ValidationError,
+    Severity,
+    ValidationResult,
+    validation_success,
 )
 
 try:
     from ux.validation import (
-        validate_port, validate_directory, validate_base_directory,
-        validate_host, validate_environment_name
+        validate_port,
+        validate_directory,
+        validate_base_directory,
+        validate_host,
+        validate_environment_name,
     )
+
     UX_VALIDATION_AVAILABLE = True
 except ImportError:
     UX_VALIDATION_AVAILABLE = False
@@ -58,7 +70,7 @@ class TestResultTypes:
             "test_field",
             "Test validation error",
             Severity.ERROR,
-            ["Try this", "Or that"]
+            ["Try this", "Or that"],
         )
         assert isinstance(result, Failure)
         assert isinstance(result.error, ValidationError)
@@ -111,7 +123,9 @@ class TestValidateBaseDir:
         assert result.value.is_absolute()  # Should be converted to absolute
 
 
-@pytest.mark.skipif(not UX_VALIDATION_AVAILABLE, reason="ux.validation module not available")
+@pytest.mark.skipif(
+    not UX_VALIDATION_AVAILABLE, reason="ux.validation module not available"
+)
 class TestUXValidationFunctions:
     """Test validation functions from ux.validation module."""
 
@@ -138,25 +152,36 @@ class TestUXValidationFunctions:
         for port_str in privileged_ports:
             result = validate_port(port_str)
             # Privileged ports return warnings (failures)
-            assert result.is_failure, f"Port {port_str} should be flagged as privileged"
+            assert (
+                result.is_failure
+            ), f"Port {port_str} should be flagged as privileged"
             assert "privileged" in result.error.message
 
     def test_validate_environment_name_valid(self):
         """Test environment name validation with valid names."""
-        valid_names = ["spyglass", "my-env", "test_env", "env123", "a", "production-env"]
+        valid_names = [
+            "spyglass",
+            "my-env",
+            "test_env",
+            "env123",
+            "a",
+            "production-env",
+        ]
         for name in valid_names:
             result = validate_environment_name(name)
             # Note: We don't assert success here since some names might be reserved
             # Just ensure we get a result
-            assert hasattr(result, 'is_success')
-            assert hasattr(result, 'is_failure')
+            assert hasattr(result, "is_success")
+            assert hasattr(result, "is_failure")
 
     def test_validate_environment_name_invalid(self):
         """Test environment name validation with clearly invalid names."""
         invalid_names = ["", " ", "env with spaces", "env/with/slashes"]
         for name in invalid_names:
             result = validate_environment_name(name)
-            assert result.is_failure, f"Environment name '{name}' should be invalid"
+            assert (
+                result.is_failure
+            ), f"Environment name '{name}' should be invalid"
 
     def test_validate_host_valid(self):
         """Test host validation with valid hostnames."""
@@ -168,7 +193,7 @@ class TestUXValidationFunctions:
                 # Log why it failed for debugging
                 print(f"Host '{host}' failed: {result.error.message}")
             # Don't assert success - just ensure we get a result
-            assert hasattr(result, 'is_success')
+            assert hasattr(result, "is_success")
 
     def test_validate_host_invalid(self):
         """Test host validation with invalid hostnames."""
@@ -191,7 +216,9 @@ class TestUXValidationFunctions:
     def test_validate_directory_nonexistent_optional(self):
         """Test directory validation when nonexistent but optional."""
         # Use a path where parent exists but directory doesn't
-        result = validate_directory("/tmp/nonexistent_test_dir", must_exist=False)
+        result = validate_directory(
+            "/tmp/nonexistent_test_dir", must_exist=False
+        )
         # Should succeed since existence is not required and parent (/tmp) exists
         assert result.is_success
         assert result.value is None
@@ -206,7 +233,9 @@ class TestUXValidationFunctions:
     def test_validate_base_directory_insufficient_space(self):
         """Test base directory validation with unrealistic space requirement."""
         # Require an unrealistic amount of space
-        result = validate_base_directory(str(Path.home()), min_space_gb=999999.0)
+        result = validate_base_directory(
+            str(Path.home()), min_space_gb=999999.0
+        )
         assert result.is_failure
         assert "space" in result.error.message.lower()
 
@@ -235,7 +264,7 @@ class TestDataClasses:
             base_dir=custom_path,
             env_name="custom-env",
             db_port=5432,
-            auto_yes=True
+            auto_yes=True,
         )
 
         assert config.install_type == InstallType.FULL
@@ -251,7 +280,7 @@ class TestDataClasses:
             message="Test error",
             field="test_field",
             severity=Severity.ERROR,
-            recovery_actions=["action1", "action2"]
+            recovery_actions=["action1", "action2"],
         )
 
         assert error.message == "Test error"
@@ -291,7 +320,12 @@ class TestEnumValidation:
         assert Severity.CRITICAL in Severity
 
         # Test ordering if needed for severity levels
-        severities = [Severity.INFO, Severity.WARNING, Severity.ERROR, Severity.CRITICAL]
+        severities = [
+            Severity.INFO,
+            Severity.WARNING,
+            Severity.ERROR,
+            Severity.CRITICAL,
+        ]
         assert len(severities) == 4
 
 
@@ -306,7 +340,7 @@ class TestResultHelperFunctions:
             success("value1"),
             failure(ValueError("error1"), "message1"),
             success("value2"),
-            failure(RuntimeError("error2"), "message2")
+            failure(RuntimeError("error2"), "message2"),
         ]
 
         errors = collect_errors(results)
@@ -324,7 +358,11 @@ class TestResultHelperFunctions:
         assert all_successful(results1)
 
         # Some failures
-        results2 = [success("value1"), failure(ValueError(), "error"), success("value3")]
+        results2 = [
+            success("value1"),
+            failure(ValueError(), "error"),
+            success("value3"),
+        ]
         assert not all_successful(results2)
 
         # Empty list
@@ -350,32 +388,40 @@ class TestResultHelperFunctions:
 
 
 # Parametrized tests for comprehensive coverage
-@pytest.mark.parametrize("install_type,expected_minimal", [
-    (InstallType.MINIMAL, True),
-    (InstallType.FULL, False),
-])
+@pytest.mark.parametrize(
+    "install_type,expected_minimal",
+    [
+        (InstallType.MINIMAL, True),
+        (InstallType.FULL, False),
+    ],
+)
 def test_install_type_characteristics(install_type, expected_minimal):
     """Test characteristics of different install types."""
     config = SetupConfig(install_type=install_type)
-    is_minimal = (config.install_type == InstallType.MINIMAL)
+    is_minimal = config.install_type == InstallType.MINIMAL
     assert is_minimal == expected_minimal
 
 
-@pytest.mark.skipif(not UX_VALIDATION_AVAILABLE, reason="ux.validation module not available")
-@pytest.mark.parametrize("port_str,expected_status", [
-    ("3306", "success"),  # Non-privileged, valid
-    ("5432", "success"),  # Non-privileged, valid
-    ("65535", "success"), # Non-privileged, valid
-    ("80", "warning"),    # Privileged port
-    ("443", "warning"),   # Privileged port
-    ("1", "warning"),     # Privileged port
-    ("0", "error"),       # Invalid range
-    ("-1", "error"),      # Invalid range
-    ("65536", "error"),   # Invalid range
-    ("abc", "error"),     # Non-numeric
-    ("", "error"),        # Empty
-    ("3306.5", "error"),  # Float
-])
+@pytest.mark.skipif(
+    not UX_VALIDATION_AVAILABLE, reason="ux.validation module not available"
+)
+@pytest.mark.parametrize(
+    "port_str,expected_status",
+    [
+        ("3306", "success"),  # Non-privileged, valid
+        ("5432", "success"),  # Non-privileged, valid
+        ("65535", "success"),  # Non-privileged, valid
+        ("80", "warning"),  # Privileged port
+        ("443", "warning"),  # Privileged port
+        ("1", "warning"),  # Privileged port
+        ("0", "error"),  # Invalid range
+        ("-1", "error"),  # Invalid range
+        ("65536", "error"),  # Invalid range
+        ("abc", "error"),  # Non-numeric
+        ("", "error"),  # Empty
+        ("3306.5", "error"),  # Float
+    ],
+)
 def test_port_validation_parametrized(port_str, expected_status):
     """Parametrized test for port validation."""
     result = validate_port(port_str)
@@ -388,11 +434,14 @@ def test_port_validation_parametrized(port_str, expected_status):
             assert "privileged" in result.error.message.lower()
 
 
-@pytest.mark.parametrize("path_input,should_succeed", [
-    (Path.home(), True),
-    (Path("."), True),  # Current directory should work
-    (Path("/nonexistent/deeply/nested"), False),
-])
+@pytest.mark.parametrize(
+    "path_input,should_succeed",
+    [
+        (Path.home(), True),
+        (Path("."), True),  # Current directory should work
+        (Path("/nonexistent/deeply/nested"), False),
+    ],
+)
 def test_base_dir_validation_parametrized(path_input, should_succeed):
     """Parametrized test for base directory validation."""
     result = validate_base_dir(path_input)
@@ -404,10 +453,18 @@ def test_base_dir_validation_parametrized(path_input, should_succeed):
 
 if __name__ == "__main__":
     # Provide helpful information for running tests
-    print("This test file validates the core validation functions and Result types.")
+    print(
+        "This test file validates the core validation functions and Result types."
+    )
     print("To run tests:")
     print("  pytest test_validation_functions.py              # Run all tests")
     print("  pytest test_validation_functions.py -v           # Verbose output")
-    print("  pytest test_validation_functions.py::TestResultTypes  # Run specific class")
-    print("  pytest test_validation_functions.py -k validation     # Run tests matching 'validation'")
-    print("\nNote: Some tests require the ux.validation module to be available.")
+    print(
+        "  pytest test_validation_functions.py::TestResultTypes  # Run specific class"
+    )
+    print(
+        "  pytest test_validation_functions.py -k validation     # Run tests matching 'validation'"
+    )
+    print(
+        "\nNote: Some tests require the ux.validation module to be available."
+    )

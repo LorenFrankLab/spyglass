@@ -21,21 +21,29 @@ import getpass
 
 # Import from utils (using absolute path within scripts)
 import sys
+
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
 from utils.result_types import (
-    Result, success, failure,
-    ValidationResult, validation_success, validation_failure
+    Result,
+    success,
+    failure,
+    ValidationResult,
+    validation_success,
+    validation_failure,
 )
 from ux.validation import (
-    validate_host, validate_port, validate_directory,
-    validate_environment_name
+    validate_host,
+    validate_port,
+    validate_directory,
+    validate_environment_name,
 )
 
 
 class UserPersona(Enum):
     """User personas for Spyglass onboarding."""
+
     LAB_MEMBER = "lab_member"
     TRIAL_USER = "trial_user"
     ADMIN = "admin"
@@ -45,6 +53,7 @@ class UserPersona(Enum):
 @dataclass
 class PersonaConfig:
     """Configuration specific to each user persona."""
+
     persona: UserPersona
     install_type: str = "minimal"
     setup_database: bool = True
@@ -80,6 +89,7 @@ class PersonaConfig:
 @dataclass
 class LabDatabaseConfig:
     """Database configuration for lab members."""
+
     host: str
     port: int = 3306
     username: str = ""
@@ -88,13 +98,15 @@ class LabDatabaseConfig:
 
     def is_complete(self) -> bool:
         """Check if all required fields are filled."""
-        return all([
-            self.host,
-            self.port,
-            self.username,
-            self.password,
-            self.database_name
-        ])
+        return all(
+            [
+                self.host,
+                self.port,
+                self.username,
+                self.password,
+                self.database_name,
+            ]
+        )
 
 
 class PersonaDetector:
@@ -103,11 +115,11 @@ class PersonaDetector:
     @staticmethod
     def detect_from_args(args) -> UserPersona:
         """Detect persona from command line arguments."""
-        if hasattr(args, 'lab_member') and args.lab_member:
+        if hasattr(args, "lab_member") and args.lab_member:
             return UserPersona.LAB_MEMBER
-        elif hasattr(args, 'trial') and args.trial:
+        elif hasattr(args, "trial") and args.trial:
             return UserPersona.TRIAL_USER
-        elif hasattr(args, 'advanced') and args.advanced:
+        elif hasattr(args, "advanced") and args.advanced:
             return UserPersona.ADMIN
         else:
             return UserPersona.UNDECIDED
@@ -118,11 +130,11 @@ class PersonaDetector:
         import os
 
         # Check for lab environment variables
-        if os.getenv('SPYGLASS_LAB_HOST') or os.getenv('DJ_HOST'):
+        if os.getenv("SPYGLASS_LAB_HOST") or os.getenv("DJ_HOST"):
             return UserPersona.LAB_MEMBER
 
         # Check for CI/testing environment
-        if os.getenv('CI') or os.getenv('GITHUB_ACTIONS'):
+        if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
             return UserPersona.ADMIN
 
         return None
@@ -162,11 +174,13 @@ class PersonaOnboarding:
 
         print("")
 
-    def _confirm_installation(self, message: str = "Proceed with installation?") -> bool:
+    def _confirm_installation(
+        self, message: str = "Proceed with installation?"
+    ) -> bool:
         """Get user confirmation."""
         try:
             response = input(f"\n{message} [Y/n]: ").strip().lower()
-            return response in ['', 'y', 'yes']
+            return response in ["", "y", "yes"]
         except (EOFError, KeyboardInterrupt):
             return False
 
@@ -178,8 +192,12 @@ class LabMemberOnboarding(PersonaOnboarding):
         """Execute lab member onboarding."""
         self.ui.print_header("Lab Member Setup")
 
-        print("\nPerfect! You'll connect to your lab's existing Spyglass database.")
-        print("This setup is optimized for working with shared lab resources.\n")
+        print(
+            "\nPerfect! You'll connect to your lab's existing Spyglass database."
+        )
+        print(
+            "This setup is optimized for working with shared lab resources.\n"
+        )
 
         # Collect database connection info
         db_config = self._collect_database_info()
@@ -189,7 +207,7 @@ class LabMemberOnboarding(PersonaOnboarding):
         # Create persona config
         config = PersonaConfig(
             persona=UserPersona.LAB_MEMBER,
-            database_config=db_config.value.__dict__
+            database_config=db_config.value.__dict__,
         )
 
         # Test connection before proceeding
@@ -204,8 +222,12 @@ class LabMemberOnboarding(PersonaOnboarding):
 
         # Add note about validation
         if "Basic connectivity test passed" in connection_result.message:
-            print("\n💡 Note: Full MySQL authentication will be tested during validation.")
-            print("   If validation fails with authentication errors, the troubleshooting")
+            print(
+                "\n💡 Note: Full MySQL authentication will be tested during validation."
+            )
+            print(
+                "   If validation fails with authentication errors, the troubleshooting"
+            )
             print("   guide will provide specific steps for your lab admin.")
 
         # Show preview and confirm
@@ -252,7 +274,9 @@ class LabMemberOnboarding(PersonaOnboarding):
         # Collect username
         config.username = input("  Username: ").strip()
         if not config.username:
-            print("\n💡 Tip: Your lab admin will provide your database username")
+            print(
+                "\n💡 Tip: Your lab admin will provide your database username"
+            )
             return failure(None, "Username is required")
 
         # Collect password (hidden input)
@@ -275,6 +299,7 @@ class LabMemberOnboarding(PersonaOnboarding):
         try:
             # First test basic connectivity
             import socket
+
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(5)
             result = sock.connect_ex((config.host, config.port))
@@ -283,7 +308,7 @@ class LabMemberOnboarding(PersonaOnboarding):
             if result != 0:
                 return failure(
                     {"host": config.host, "port": config.port},
-                    f"Cannot connect to {config.host}:{config.port}"
+                    f"Cannot connect to {config.host}:{config.port}",
                 )
 
             # Test actual MySQL authentication
@@ -291,9 +316,15 @@ class LabMemberOnboarding(PersonaOnboarding):
                 import pymysql
             except ImportError:
                 # pymysql not available, fall back to basic connectivity test
-                print("  ⚠️  Note: Cannot test MySQL authentication (PyMySQL not available)")
-                print("      Full authentication test will happen during validation")
-                return success(True, "Basic connectivity test passed - host reachable")
+                print(
+                    "  ⚠️  Note: Cannot test MySQL authentication (PyMySQL not available)"
+                )
+                print(
+                    "      Full authentication test will happen during validation"
+                )
+                return success(
+                    True, "Basic connectivity test passed - host reachable"
+                )
 
             try:
                 connection = pymysql.connect(
@@ -302,7 +333,7 @@ class LabMemberOnboarding(PersonaOnboarding):
                     user=config.username,
                     password=config.password,
                     database=config.database_name,
-                    connect_timeout=10
+                    connect_timeout=10,
                 )
                 connection.close()
                 return success(True, "MySQL authentication successful")
@@ -313,17 +344,17 @@ class LabMemberOnboarding(PersonaOnboarding):
                 if error_code == 1045:  # Access denied
                     return failure(
                         {"error_code": error_code, "mysql_error": error_msg},
-                        f"MySQL authentication failed: {error_msg}"
+                        f"MySQL authentication failed: {error_msg}",
                     )
                 elif error_code == 2003:  # Can't connect to server
                     return failure(
                         {"error_code": error_code, "mysql_error": error_msg},
-                        f"Cannot reach MySQL server: {error_msg}"
+                        f"Cannot reach MySQL server: {error_msg}",
                     )
                 else:
                     return failure(
                         {"error_code": error_code, "mysql_error": error_msg},
-                        f"MySQL error ({error_code}): {error_msg}"
+                        f"MySQL error ({error_code}): {error_msg}",
                     )
 
             except Exception as e:
@@ -337,17 +368,19 @@ class LabMemberOnboarding(PersonaOnboarding):
         self.ui.print_header("Connection Troubleshooting")
 
         # Check if this is a MySQL authentication error
-        if isinstance(error, dict) and error.get('error_code') == 1045:
-            mysql_error = error.get('mysql_error', '')
+        if isinstance(error, dict) and error.get("error_code") == 1045:
+            mysql_error = error.get("mysql_error", "")
 
             print("\n🔒 **MySQL Authentication Failed**")
             print(f"   Error: {mysql_error}")
             print("\n**Most likely causes:**\n")
 
-            if '@' in mysql_error and 'using password: YES' in mysql_error:
+            if "@" in mysql_error and "using password: YES" in mysql_error:
                 # Extract the hostname from error message
                 print("  1. **Database permissions issue**")
-                print("     → Your database user may not have permission from this location")
+                print(
+                    "     → Your database user may not have permission from this location"
+                )
                 print("     → MySQL sees hostname/IP resolution differently")
                 print("")
                 print("  2. **VPN/Network location**")
@@ -393,7 +426,9 @@ class TrialUserOnboarding(PersonaOnboarding):
         """Execute trial user onboarding."""
         self.ui.print_header("Research Trial Setup")
 
-        print("\nGreat choice! I'll set up everything you need to explore Spyglass.")
+        print(
+            "\nGreat choice! I'll set up everything you need to explore Spyglass."
+        )
         print("This includes a complete local environment perfect for:")
         print("  → Learning Spyglass concepts")
         print("  → Testing with your own data")
@@ -405,7 +440,7 @@ class TrialUserOnboarding(PersonaOnboarding):
             install_type="minimal",
             setup_database=True,
             include_sample_data=True,
-            base_dir=Path.home() / "spyglass_trial"
+            base_dir=Path.home() / "spyglass_trial",
         )
 
         # Show what they'll get
@@ -421,7 +456,9 @@ class TrialUserOnboarding(PersonaOnboarding):
         print("  🔧 Prerequisites: Docker (will be configured automatically)")
         print("")
 
-        if not self._confirm_installation("Ready to set up your trial environment?"):
+        if not self._confirm_installation(
+            "Ready to set up your trial environment?"
+        ):
             return self._offer_alternatives()
 
         return success(config, "Trial configuration ready")
@@ -472,10 +509,7 @@ class AdminOnboarding(PersonaOnboarding):
 
         # Return to original detailed flow
         # This maintains backward compatibility
-        config = PersonaConfig(
-            persona=UserPersona.ADMIN,
-            install_type="full"
-        )
+        config = PersonaConfig(persona=UserPersona.ADMIN, install_type="full")
 
         # Signal to use traditional detailed setup
         return success(config, "Using advanced configuration mode")
@@ -519,7 +553,9 @@ class PersonaOrchestrator:
 
         while True:
             try:
-                choice = input("Which describes your situation? [1-3]: ").strip()
+                choice = input(
+                    "Which describes your situation? [1-3]: "
+                ).strip()
 
                 if choice == "1":
                     return UserPersona.LAB_MEMBER

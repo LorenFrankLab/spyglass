@@ -50,20 +50,34 @@ if HYPOTHESIS_AVAILABLE:
         # If the name passes validation, it should contain only allowed characters
         if result.is_success:
             # Valid names should contain only letters, numbers, hyphens, underscores
-            allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_')
-            assert all(c in allowed_chars for c in name), f"Valid name {name} contains invalid characters"
+            allowed_chars = set(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+            )
+            assert all(
+                c in allowed_chars for c in name
+            ), f"Valid name {name} contains invalid characters"
 
             # Valid names should not be empty or just whitespace
-            assert name.strip(), f"Valid name should not be empty or whitespace: '{name}'"
+            assert (
+                name.strip()
+            ), f"Valid name should not be empty or whitespace: '{name}'"
 
             # Valid names should not start with numbers or special characters
-            assert name[0].isalpha() or name[0] == '_', f"Valid name should start with letter or underscore: '{name}'"
+            assert (
+                name[0].isalpha() or name[0] == "_"
+            ), f"Valid name should start with letter or underscore: '{name}'"
 
-    @given(st.text(alphabet=['a', 'b', 'c', '1', '2', '3', '_', '-'], min_size=1, max_size=20))
+    @given(
+        st.text(
+            alphabet=["a", "b", "c", "1", "2", "3", "_", "-"],
+            min_size=1,
+            max_size=20,
+        )
+    )
     def test_well_formed_environment_names(name):
         """Test that well-formed environment names behave predictably."""
         # Skip names that start with numbers or hyphens (invalid)
-        assume(name[0].isalpha() or name[0] == '_')
+        assume(name[0].isalpha() or name[0] == "_")
 
         result = validate_environment_name(name)
 
@@ -71,9 +85,10 @@ if HYPOTHESIS_AVAILABLE:
         if result.is_failure:
             # If it fails, it should be for a specific reason we can identify
             error_message = result.message.lower()
-            assert any(keyword in error_message for keyword in
-                      ['reserved', 'invalid', 'length', 'character']), \
-                f"Failure reason should be clear for name '{name}': {result.message}"
+            assert any(
+                keyword in error_message
+                for keyword in ["reserved", "invalid", "length", "character"]
+            ), f"Failure reason should be clear for name '{name}': {result.message}"
 
     def test_base_directory_validation_properties():
         """Test base directory validation properties."""
@@ -84,8 +99,12 @@ if HYPOTHESIS_AVAILABLE:
         # Test that result is always a resolved absolute path
         if home_result.is_success:
             resolved_path = home_result.value
-            assert resolved_path.is_absolute(), "Validated path should be absolute"
-            assert str(resolved_path) == str(resolved_path.resolve()), "Validated path should be resolved"
+            assert (
+                resolved_path.is_absolute()
+            ), "Validated path should be absolute"
+            assert str(resolved_path) == str(
+                resolved_path.resolve()
+            ), "Validated path should be resolved"
 
     @given(st.text(min_size=1, max_size=10))
     def test_port_string_formats(port_str):
@@ -96,10 +115,16 @@ if HYPOTHESIS_AVAILABLE:
         if result.is_success:
             try:
                 port_int = int(port_str)
-                assert 1 <= port_int <= 65535, f"Valid port should be in range 1-65535: {port_int}"
-                assert result.value == port_int, "Validated port should match parsed integer"
+                assert (
+                    1 <= port_int <= 65535
+                ), f"Valid port should be in range 1-65535: {port_int}"
+                assert (
+                    result.value == port_int
+                ), "Validated port should match parsed integer"
             except ValueError:
-                assert False, f"Valid port string should be parseable as integer: '{port_str}'"
+                assert (
+                    False
+                ), f"Valid port string should be parseable as integer: '{port_str}'"
 
     def test_hypothesis_examples():
         """Example-based tests to demonstrate hypothesis usage."""
@@ -129,10 +154,14 @@ if __name__ == "__main__":
         print("\nTo run these tests:")
         print("  1. Install hypothesis: pip install hypothesis")
         print("  2. Run with pytest: pytest test_property_based.py")
-        print("  3. Or run specific tests: pytest test_property_based.py::test_valid_ports_always_pass")
+        print(
+            "  3. Or run specific tests: pytest test_property_based.py::test_valid_ports_always_pass"
+        )
         print("\nBenefits of property-based testing:")
         print("  • Automatically finds edge cases you didn't think of")
         print("  • Tests invariants across large input spaces")
         print("  • Provides better confidence than example-based tests")
     else:
-        print("❌ Hypothesis not available. Install with: pip install hypothesis")
+        print(
+            "❌ Hypothesis not available. Install with: pip install hypothesis"
+        )

@@ -14,6 +14,7 @@ from enum import Enum
 
 # Import from utils (using absolute path within scripts)
 import sys
+
 scripts_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(scripts_dir))
 
@@ -22,6 +23,7 @@ from utils.result_types import Result, failure
 
 class ErrorCategory(Enum):
     """Categories of errors that can occur during setup."""
+
     DOCKER = "docker"
     CONDA = "conda"
     PYTHON = "python"
@@ -34,6 +36,7 @@ class ErrorCategory(Enum):
 @dataclass
 class ErrorContext:
     """Context information for an error."""
+
     category: ErrorCategory
     error_message: str
     command_attempted: Optional[str] = None
@@ -66,7 +69,9 @@ class ErrorRecoveryGuide:
         else:
             self._handle_generic_error(error, context)
 
-    def _handle_docker_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_docker_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle Docker-related errors."""
         self.ui.print_header("Docker Troubleshooting")
 
@@ -77,23 +82,26 @@ class ErrorRecoveryGuide:
         # Extract stderr/stdout if available from CalledProcessError
         stderr_msg = ""
         stdout_msg = ""
-        if hasattr(error, 'stderr') and error.stderr:
+        if hasattr(error, "stderr") and error.stderr:
             stderr_msg = str(error.stderr).lower()
-        if hasattr(error, 'stdout') and error.stdout:
+        if hasattr(error, "stdout") and error.stdout:
             stdout_msg = str(error.stdout).lower()
 
         full_error_text = f"{error_msg} {stderr_msg} {stdout_msg} {command_msg}"
 
         # Check for common Docker error patterns
-        if (("not found" in full_error_text and "docker" in full_error_text) or
-            (hasattr(error, 'returncode') and error.returncode == 127)):
+        if ("not found" in full_error_text and "docker" in full_error_text) or (
+            hasattr(error, "returncode") and error.returncode == 127
+        ):
             print("\n🐳 **Docker Not Installed**\n")
             print("Docker is required for the local database setup.\n")
 
             system = platform.system()
             if system == "Darwin":  # macOS
                 print("📥 **Install Docker Desktop for macOS:**")
-                print("  1. Visit: https://docs.docker.com/desktop/install/mac-install/")
+                print(
+                    "  1. Visit: https://docs.docker.com/desktop/install/mac-install/"
+                )
                 print("  2. Download Docker Desktop")
                 print("  3. Install and start Docker Desktop")
                 print("  4. Verify with: docker --version")
@@ -105,7 +113,9 @@ class ErrorRecoveryGuide:
                 print("  4. Verify with: docker --version")
             elif system == "Windows":
                 print("📥 **Install Docker Desktop for Windows:**")
-                print("  1. Visit: https://docs.docker.com/desktop/install/windows-install/")
+                print(
+                    "  1. Visit: https://docs.docker.com/desktop/install/windows-install/"
+                )
                 print("  2. Download Docker Desktop")
                 print("  3. Install and restart your computer")
                 print("  4. Verify with: docker --version")
@@ -114,12 +124,17 @@ class ErrorRecoveryGuide:
             print("  → Restart your terminal")
             print("  → Run: python scripts/quickstart.py --trial")
 
-        elif ("permission denied" in full_error_text or "access denied" in full_error_text):
+        elif (
+            "permission denied" in full_error_text
+            or "access denied" in full_error_text
+        ):
             print("\n🔒 **Docker Permission Issue**\n")
 
             system = platform.system()
             if system == "Linux":
-                print("**Most likely cause**: Your user is not in the docker group\n")
+                print(
+                    "**Most likely cause**: Your user is not in the docker group\n"
+                )
                 print("🛠️ **Fix for Linux:**")
                 print("  1. Add your user to docker group:")
                 print("     sudo usermod -aG docker $USER")
@@ -132,8 +147,12 @@ class ErrorRecoveryGuide:
                 print("  2. Wait for Docker to be ready (green status)")
                 print("  3. Try again")
 
-        elif ("docker daemon" in full_error_text or "cannot connect" in full_error_text or
-              "connection refused" in full_error_text or "is the docker daemon running" in full_error_text):
+        elif (
+            "docker daemon" in full_error_text
+            or "cannot connect" in full_error_text
+            or "connection refused" in full_error_text
+            or "is the docker daemon running" in full_error_text
+        ):
             print("\n🔄 **Docker Daemon Not Running**\n")
             print("Docker is installed but not running.\n")
 
@@ -152,8 +171,16 @@ class ErrorRecoveryGuide:
             print("\n✅ **Verify Docker is Ready:**")
             print("  → Run: docker run hello-world")
 
-        elif (("port" in full_error_text and ("in use" in full_error_text or "bind" in full_error_text)) or
-              ("3306" in command_msg and ("already in use" in full_error_text or "address already in use" in full_error_text))):
+        elif (
+            "port" in full_error_text
+            and ("in use" in full_error_text or "bind" in full_error_text)
+        ) or (
+            "3306" in command_msg
+            and (
+                "already in use" in full_error_text
+                or "address already in use" in full_error_text
+            )
+        ):
             print("\n🔌 **Port Conflict (Port 3306 Already in Use)**\n")
             print("Another service is using the MySQL port.\n")
 
@@ -168,7 +195,9 @@ class ErrorRecoveryGuide:
             print("\n🛠️ **Solutions:**")
             print("  1. **Stop conflicting service** (if safe to do so)")
             print("  2. **Use different port** with: --db-port 3307")
-            print("  3. **Remove existing container**: docker rm -f spyglass-db")
+            print(
+                "  3. **Remove existing container**: docker rm -f spyglass-db"
+            )
 
         else:
             print("\n🐳 **General Docker Issue**\n")
@@ -180,7 +209,9 @@ class ErrorRecoveryGuide:
             print("\n📧 **If problem persists:**")
             print(f"  → Report issue with this error: {error}")
 
-    def _handle_conda_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_conda_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle Conda/environment related errors."""
         self.ui.print_header("Conda Environment Troubleshooting")
 
@@ -191,16 +222,24 @@ class ErrorRecoveryGuide:
             print("Conda or Mamba package manager is required.\n")
 
             print("📥 **Install Options:**")
-            print("  1. **Miniforge (Recommended)**: https://github.com/conda-forge/miniforge")
-            print("  2. **Miniconda**: https://docs.conda.io/en/latest/miniconda.html")
-            print("  3. **Anaconda**: https://www.anaconda.com/products/distribution")
+            print(
+                "  1. **Miniforge (Recommended)**: https://github.com/conda-forge/miniforge"
+            )
+            print(
+                "  2. **Miniconda**: https://docs.conda.io/en/latest/miniconda.html"
+            )
+            print(
+                "  3. **Anaconda**: https://www.anaconda.com/products/distribution"
+            )
 
             print("\n✅ **After Installation:**")
             print("  1. Restart your terminal")
             print("  2. Verify with: conda --version")
             print("  3. Run setup again")
 
-        elif "environment" in error_msg and ("exists" in error_msg or "already" in error_msg):
+        elif "environment" in error_msg and (
+            "exists" in error_msg or "already" in error_msg
+        ):
             print("\n🔄 **Environment Already Exists**\n")
             print("A conda environment with this name already exists.\n")
 
@@ -248,7 +287,9 @@ class ErrorRecoveryGuide:
             print("  3. Update conda: conda update conda")
             print("  4. Clear cache: conda clean --all")
 
-    def _handle_python_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_python_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle Python-related errors."""
         self.ui.print_header("Python Environment Troubleshooting")
 
@@ -288,7 +329,9 @@ class ErrorRecoveryGuide:
             print("\n🛠️ **Fix Version Issue:**")
             print("  → Recreate environment with correct Python version")
 
-    def _handle_network_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_network_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle network-related errors."""
         self.ui.print_header("Network Troubleshooting")
 
@@ -306,7 +349,9 @@ class ErrorRecoveryGuide:
         print("  3. **Firewall**: Check firewall allows conda/docker")
         print("  4. **DNS Issues**: Try using different DNS (8.8.8.8)")
 
-    def _handle_permissions_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_permissions_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle permission-related errors."""
         self.ui.print_header("Permissions Troubleshooting")
 
@@ -329,7 +374,9 @@ class ErrorRecoveryGuide:
         print("  → Install in user directory (avoid system directories)")
         print("  → Use virtual environments")
 
-    def _handle_validation_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_validation_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle validation-specific errors."""
         self.ui.print_header("Validation Error Recovery")
 
@@ -341,13 +388,17 @@ class ErrorRecoveryGuide:
 
             print("🔍 **Check Database Status:**")
             print("  1. Docker container running: docker ps")
-            print("  2. Database accessible: docker exec spyglass-db mysql -uroot -ptutorial -e 'SHOW DATABASES;'")
+            print(
+                "  2. Database accessible: docker exec spyglass-db mysql -uroot -ptutorial -e 'SHOW DATABASES;'"
+            )
             print("  3. Port available: telnet localhost 3306")
 
             print("\n🛠️ **Fix Database Issues:**")
             print("  1. **Restart container**: docker restart spyglass-db")
             print("  2. **Check logs**: docker logs spyglass-db")
-            print("  3. **Recreate database**: python scripts/quickstart.py --trial")
+            print(
+                "  3. **Recreate database**: python scripts/quickstart.py --trial"
+            )
 
         elif "import" in error_msg:
             print("\n📦 **Package Import Failed**\n")
@@ -356,18 +407,24 @@ class ErrorRecoveryGuide:
             print("🛠️ **Reinstall Packages:**")
             print("  1. Activate environment: conda activate spyglass")
             print("  2. Reinstall Spyglass: pip install -e .")
-            print("  3. Check imports: python -c 'import spyglass; print(spyglass.__version__)'")
+            print(
+                "  3. Check imports: python -c 'import spyglass; print(spyglass.__version__)'"
+            )
 
         else:
             print("\n⚠️ **Validation Failed**\n")
             print("Some components are not working correctly.\n")
 
             print("🔍 **Debugging Steps:**")
-            print("  1. Run validation with verbose: python scripts/validate_spyglass.py -v")
+            print(
+                "  1. Run validation with verbose: python scripts/validate_spyglass.py -v"
+            )
             print("  2. Check each component individually")
             print("  3. Review error messages for specific issues")
 
-    def _handle_generic_error(self, error: Exception, context: ErrorContext) -> None:
+    def _handle_generic_error(
+        self, error: Exception, context: ErrorContext
+    ) -> None:
         """Handle generic errors."""
         self.ui.print_header("General Troubleshooting")
 
@@ -389,10 +446,12 @@ class ErrorRecoveryGuide:
         print(f"     → System: {platform.system()} {platform.release()}")
 
 
-def create_error_context(category: ErrorCategory,
-                        error_message: str,
-                        command: Optional[str] = None,
-                        file_path: Optional[str] = None) -> ErrorContext:
+def create_error_context(
+    category: ErrorCategory,
+    error_message: str,
+    command: Optional[str] = None,
+    file_path: Optional[str] = None,
+) -> ErrorContext:
     """Create error context with system information."""
     return ErrorContext(
         category=category,
@@ -403,19 +462,23 @@ def create_error_context(category: ErrorCategory,
             "platform": platform.system(),
             "release": platform.release(),
             "python_version": platform.python_version(),
-        }
+        },
     )
 
 
 # Convenience functions for common error scenarios
-def handle_docker_error(ui, error: Exception, command: Optional[str] = None) -> None:
+def handle_docker_error(
+    ui, error: Exception, command: Optional[str] = None
+) -> None:
     """Handle Docker-related errors with recovery guidance."""
     context = create_error_context(ErrorCategory.DOCKER, str(error), command)
     guide = ErrorRecoveryGuide(ui)
     guide.handle_error(error, context)
 
 
-def handle_conda_error(ui, error: Exception, command: Optional[str] = None) -> None:
+def handle_conda_error(
+    ui, error: Exception, command: Optional[str] = None
+) -> None:
     """Handle Conda-related errors with recovery guidance."""
     context = create_error_context(ErrorCategory.CONDA, str(error), command)
     guide = ErrorRecoveryGuide(ui)
@@ -424,6 +487,8 @@ def handle_conda_error(ui, error: Exception, command: Optional[str] = None) -> N
 
 def handle_validation_error(ui, error: Exception, validation_step: str) -> None:
     """Handle validation errors with specific recovery guidance."""
-    context = create_error_context(ErrorCategory.VALIDATION, str(error), validation_step)
+    context = create_error_context(
+        ErrorCategory.VALIDATION, str(error), validation_step
+    )
     guide = ErrorRecoveryGuide(ui)
     guide.handle_error(error, context)
