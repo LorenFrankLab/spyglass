@@ -1875,10 +1875,23 @@ try:
     # Import and use SpyglassConfig
     from spyglass.settings import SpyglassConfig
 
-    # Create SpyglassConfig instance (without test_mode)
-    config = SpyglassConfig(base_dir="{self.config.base_dir}")
+    # Check if config file already exists in the user's chosen directory
+    import datajoint as dj
+    config_path = Path(".") / dj.settings.LOCALCONFIG  # Current dir after chdir to config_dir
+    full_config_path = config_path.resolve()
 
-    # Save configuration
+    if config_path.exists():
+        print("Updating existing configuration file:")
+        print("  " + str(full_config_path))
+        print("→ Previous settings will be overwritten with new database connection")
+    else:
+        print("Creating new configuration file:")
+        print("  " + str(full_config_path))
+
+    # Create SpyglassConfig instance with test_mode to avoid interactive prompts
+    config = SpyglassConfig(base_dir="{self.config.base_dir}", test_mode=True)
+
+    # Save configuration (test_mode=True prevents interactive prompts)
     config.save_dj_config(
         save_method="local",
         base_dir="{self.config.base_dir}",
