@@ -31,7 +31,7 @@ import argparse
 import time
 import json
 from pathlib import Path
-from typing import Optional, List, Tuple, Callable, Iterator
+from typing import Optional, List, Tuple, Callable, Iterator, Dict
 from dataclasses import dataclass, replace
 from enum import Enum
 import getpass
@@ -140,6 +140,10 @@ class SetupConfig:
         Whether to auto-accept prompts without user input
     install_type_specified : bool
         Whether install_type was explicitly specified via CLI
+    external_database : Optional[Dict]
+        External database configuration for lab members
+    include_sample_data : bool
+        Whether to include sample data for trial users
     """
 
     install_type: InstallType = InstallType.MINIMAL
@@ -152,6 +156,8 @@ class SetupConfig:
     db_port: int = 3306
     auto_yes: bool = False
     install_type_specified: bool = False
+    external_database: Optional[Dict] = None
+    include_sample_data: bool = False
 
 
 # Using standard library functions directly - no unnecessary wrappers
@@ -1346,6 +1352,33 @@ class QuickstartOrchestrator:
 
     def _setup_database(self) -> None:
         """Setup database configuration."""
+        # Check if lab member with external database
+        if hasattr(self.config, 'external_database') and self.config.external_database:
+            self.ui.print_header("Database Configuration")
+            self.ui.print_info("Configuring connection to lab database...")
+
+            # Use external database config provided by lab member onboarding
+            db_config = self.config.external_database
+            host = db_config.get('host', 'localhost')
+            port = db_config.get('port', 3306)
+            user = db_config.get('username', 'root')
+            password = db_config.get('password', '')
+
+            # Create configuration with lab database
+            self.create_config(host, user, password, port)
+            self.ui.print_success("Lab database configuration saved!")
+            return
+
+        # Check if trial user - automatically set up local Docker database
+        if hasattr(self.config, 'include_sample_data') and self.config.include_sample_data:
+            self.ui.print_header("Database Configuration")
+            self.ui.print_info("Setting up local Docker database for trial environment...")
+
+            # Automatically use Docker setup for trial users
+            setup_docker_database(self)
+            return
+
+        # Otherwise use normal database setup flow (admin/legacy users)
         self.ui.print_header("Database Setup")
 
         choice = self.ui.select_database_setup()
@@ -1627,14 +1660,35 @@ def parse_arguments() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python quickstart.py                  # Minimal installation
-  python quickstart.py --full           # Full installation
-  python quickstart.py --pipeline=dlc   # DeepLabCut pipeline
-  python quickstart.py --no-database    # Skip database setup
+  python quickstart.py                  # Interactive persona-based setup
+  python quickstart.py --lab-member     # Lab member joining existing infrastructure
+  python quickstart.py --trial          # Trial setup with everything local
+  python quickstart.py --advanced       # Advanced configuration (all options)
+  python quickstart.py --full           # Full installation (legacy)
+  python quickstart.py --pipeline=dlc   # DeepLabCut pipeline (legacy)
+  python quickstart.py --no-database    # Skip database setup (legacy)
         """
     )
 
-    # Mutually exclusive group for install type
+    # Persona-based setup options (new approach)
+    persona_group = parser.add_mutually_exclusive_group()
+    persona_group.add_argument(
+        "--lab-member",
+        action="store_true",
+        help="Setup for lab members joining existing infrastructure"
+    )
+    persona_group.add_argument(
+        "--trial",
+        action="store_true",
+        help="Trial setup with everything configured locally"
+    )
+    persona_group.add_argument(
+        "--advanced",
+        action="store_true",
+        help="Advanced configuration with full control over all options"
+    )
+
+    # Legacy installation type options (kept for backward compatibility)
     install_group = parser.add_mutually_exclusive_group()
     install_group.add_argument(
         "--minimal",
@@ -1708,24 +1762,89 @@ def main() -> Optional[int]:
     # Select colors based on arguments and terminal
     colors = DisabledColors if args.no_color or not sys.stdout.isatty() else Colors
 
-    # Create configuration with validated base directory
-    try:
-        validated_base_dir = validate_base_dir(Path(args.base_dir))
-    except ValueError as e:
-        print(f"Error: Invalid base directory: {e}")
-        return 1
+    # Import persona modules
+    from ux.user_personas import PersonaOrchestrator, UserPersona
 
-    config = SetupConfig(
-        install_type=InstallType.FULL if args.full else InstallType.MINIMAL,
-        pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
-        setup_database=not args.no_database,
-        run_validation=not args.no_validate,
-        base_dir=validated_base_dir,
-        env_name=args.env_name,
-        db_port=args.db_port,
-        auto_yes=args.yes,
-        install_type_specified=args.full or args.minimal or bool(args.pipeline)
-    )
+    # Create UI for persona orchestrator
+    ui = UserInterface(colors, auto_yes=args.yes)
+
+    # Check if user specified a persona
+    persona_orchestrator = PersonaOrchestrator(ui)
+    persona = persona_orchestrator.detect_persona(args)
+
+    # If no persona detected and no legacy options, ask user
+    if (persona == UserPersona.UNDECIDED and
+        not args.full and not args.minimal and not args.pipeline):
+        persona = persona_orchestrator._ask_user_persona()
+
+    # Run persona-based flow if persona selected
+    if persona != UserPersona.UNDECIDED:
+        result = persona_orchestrator.run_onboarding(persona)
+
+        if result.is_failure:
+            if "cancelled" in result.message.lower() or "alternative" in result.message.lower():
+                return 0  # User cancelled or chose alternative, not an error
+            else:
+                print(f"\nError: {result.message}")
+                return 1
+
+        # Get persona config
+        persona_config = result.value
+
+        # For lab members, handle differently
+        if persona == UserPersona.LAB_MEMBER:
+            # Lab members need special handling for database connection
+            # Create minimal config for environment setup only
+            config = SetupConfig(
+                install_type=InstallType.MINIMAL,
+                setup_database=True,  # We do want database setup, but with external config
+                run_validation=not args.no_validate,
+                base_dir=persona_config.base_dir,
+                env_name=persona_config.env_name,
+                db_port=persona_config.database_config.get('port', 3306) if persona_config.database_config else 3306,
+                auto_yes=args.yes,
+                install_type_specified=True,
+                external_database=persona_config.database_config  # Set directly in constructor
+            )
+
+        elif persona == UserPersona.TRIAL_USER:
+            # Trial users get everything set up locally
+            config = SetupConfig(
+                install_type=InstallType.MINIMAL,
+                setup_database=True,
+                run_validation=True,
+                base_dir=persona_config.base_dir,
+                env_name=persona_config.env_name,
+                db_port=3306,
+                auto_yes=args.yes,
+                install_type_specified=True,
+                include_sample_data=persona_config.include_sample_data
+            )
+
+        elif persona == UserPersona.ADMIN:
+            # Admin falls through to legacy flow
+            pass
+
+    # If no persona or admin selected, use legacy flow
+    if persona == UserPersona.UNDECIDED or persona == UserPersona.ADMIN:
+        # Create configuration with validated base directory
+        try:
+            validated_base_dir = validate_base_dir(Path(args.base_dir))
+        except ValueError as e:
+            print(f"Error: Invalid base directory: {e}")
+            return 1
+
+        config = SetupConfig(
+            install_type=InstallType.FULL if args.full else InstallType.MINIMAL,
+            pipeline=Pipeline.__members__.get(args.pipeline.replace('-', '_').upper()) if args.pipeline else None,
+            setup_database=not args.no_database,
+            run_validation=not args.no_validate,
+            base_dir=validated_base_dir,
+            env_name=args.env_name,
+            db_port=args.db_port,
+            auto_yes=args.yes,
+            install_type_specified=args.full or args.minimal or bool(args.pipeline)
+        )
 
     # Run installer with new architecture
     orchestrator = QuickstartOrchestrator(config, colors)
