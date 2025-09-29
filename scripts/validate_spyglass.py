@@ -426,8 +426,8 @@ class SpyglassValidator:
                 self.add_result(
                     "Database Connection",
                     False,
-                    "DataJoint not installed",
-                    Severity.WARNING
+                    "DataJoint not installed (core dependency missing)",
+                    Severity.ERROR
                 )
                 return
 
