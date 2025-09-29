@@ -521,8 +521,7 @@ class SpyglassValidator:
         # Determine exit code and final message
         if errors > 0:
             print(f"\n{PALETTE.FAIL}{PALETTE.BOLD}❌ Validation FAILED{PALETTE.ENDC}")
-            print("\nPlease address the errors above before proceeding.")
-            print("See https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/")
+            self._provide_error_recovery_guidance()
             return 2
         elif warnings > 0:
             print(f"\n{PALETTE.WARNING}{PALETTE.BOLD}⚠️  Validation PASSED with warnings{PALETTE.ENDC}")
@@ -534,6 +533,78 @@ class SpyglassValidator:
             print("\nSpyglass is properly installed and configured!")
             print("You can start with the tutorials in the notebooks directory.")
             return 0
+
+    def _provide_error_recovery_guidance(self) -> None:
+        """Provide comprehensive error recovery guidance based on validation failures."""
+        print(f"\n{PALETTE.HEADER}{PALETTE.BOLD}🔧 Error Recovery Guide{PALETTE.ENDC}")
+        print("=" * 50)
+
+        # Analyze failed checks to provide targeted guidance
+        failed_checks = [r for r in self.results if not r.passed and r.severity == Severity.ERROR]
+
+        # Categorize failures
+        has_python_errors = any("Python" in r.name for r in failed_checks)
+        has_conda_errors = any("conda" in r.name.lower() or "mamba" in r.name.lower() for r in failed_checks)
+        has_import_errors = any("import" in r.name.lower() or "Spyglass" in r.name for r in failed_checks)
+        has_database_errors = any("database" in r.name.lower() or "connection" in r.name.lower() for r in failed_checks)
+        has_config_errors = any("config" in r.name.lower() or "directories" in r.name.lower() for r in failed_checks)
+
+        print("\n📋 **Based on your validation failures, try these solutions:**\n")
+
+        if has_python_errors:
+            print("🐍 **Python Version Issues:**")
+            print("  → Spyglass requires Python 3.9 or higher")
+            print("  → Create new environment: conda create -n spyglass python=3.11")
+            print("  → Activate environment: conda activate spyglass")
+            print()
+
+        if has_conda_errors:
+            print("📦 **Package Manager Issues:**")
+            print("  → Install Miniforge: https://github.com/conda-forge/miniforge")
+            print("  → Or install Miniconda: https://docs.conda.io/en/latest/miniconda.html")
+            print("  → Update conda: conda update conda")
+            print("  → Try mamba for faster solving: conda install mamba -c conda-forge")
+            print()
+
+        if has_import_errors:
+            print("🔗 **Spyglass Installation Issues:**")
+            print("  → Reinstall Spyglass: pip install -e .")
+            print("  → Check environment: conda activate spyglass")
+            print("  → Install dependencies: conda env create -f environment.yml")
+            print("  → Verify import: python -c 'import spyglass; print(spyglass.__version__)'")
+            print()
+
+        if has_database_errors:
+            print("🗄️ **Database Connection Issues:**")
+            print("  → Check Docker is running: docker ps")
+            print("  → Restart database: docker restart spyglass-db")
+            print("  → Setup database again: python scripts/quickstart.py --trial")
+            print("  → Check config file: cat dj_local_conf.json")
+            print()
+
+        if has_config_errors:
+            print("⚙️ **Configuration Issues:**")
+            print("  → Recreate config: python scripts/quickstart.py")
+            print("  → Check permissions: ls -la dj_local_conf.json")
+            print("  → Verify directories exist and are writable")
+            print()
+
+        print("🆘 **General Recovery Steps:**")
+        print("  1. **Start fresh**: conda deactivate && conda env remove -n spyglass")
+        print("  2. **Full reinstall**: python scripts/quickstart.py --trial")
+        print("  3. **Check logs**: Look for specific error messages above")
+        print("  4. **Get help**: https://github.com/LorenFrankLab/spyglass/issues")
+        print()
+
+        print("📖 **Documentation:**")
+        print("  → Setup guide: https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/")
+        print("  → Troubleshooting: Check the quickstart script for detailed error handling")
+        print()
+
+        print("🔄 **Next Steps:**")
+        print("  1. Address the specific errors listed above")
+        print("  2. Run validation again: python scripts/validate_spyglass.py")
+        print("  3. If issues persist, check GitHub issues or create a new one")
 
 
 def main() -> None:

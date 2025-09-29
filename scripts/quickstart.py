@@ -188,6 +188,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
         build_docker_run_command, build_docker_pull_command,
         build_mysql_ping_command, get_container_info
     )
+    from ux.error_recovery import handle_docker_error, create_error_context, ErrorCategory
 
     orchestrator.ui.print_info("Setting up local Docker database...")
 
@@ -228,7 +229,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
                 subprocess.run(["docker", "start", docker_config.container_name], check=True)
                 orchestrator.ui.print_success("Container started successfully")
             except subprocess.CalledProcessError as e:
-                orchestrator.ui.print_error(f"Failed to start existing container: {e}")
+                handle_docker_error(orchestrator.ui, e, f"docker start {docker_config.container_name}")
                 raise SystemRequirementError("Could not start Docker container")
     else:
         # Pull image using pure function
@@ -239,9 +240,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
             subprocess.run(pull_cmd, check=True)
             orchestrator.ui.print_success("Image pulled successfully")
         except subprocess.CalledProcessError as e:
-            orchestrator.ui.print_error("Failed to pull Docker image")
-            orchestrator.ui.print_info("→ Check your internet connection")
-            orchestrator.ui.print_info("→ Verify Docker has access to Docker Hub")
+            handle_docker_error(orchestrator.ui, e, " ".join(pull_cmd))
             raise SystemRequirementError(f"Docker image pull failed: {e}")
 
         # Create and run container using pure function
@@ -252,10 +251,7 @@ def setup_docker_database(orchestrator: 'QuickstartOrchestrator') -> None:
             subprocess.run(run_cmd, check=True)
             orchestrator.ui.print_success("Container created and started")
         except subprocess.CalledProcessError as e:
-            orchestrator.ui.print_error("Failed to create Docker container")
-            orchestrator.ui.print_info(f"→ Port {docker_config.port} might be in use")
-            orchestrator.ui.print_info(f"→ Try different port: --db-port {docker_config.port + 1}")
-            orchestrator.ui.print_info("→ Check Docker daemon is running properly")
+            handle_docker_error(orchestrator.ui, e, " ".join(run_cmd))
             raise SystemRequirementError(f"Docker container creation failed: {e}")
 
     # Wait for MySQL readiness using pure function
@@ -293,6 +289,8 @@ def setup_existing_database(orchestrator: 'QuickstartOrchestrator') -> None:
 
 def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: str, password: str) -> None:
     """Test database connection before proceeding."""
+    from ux.error_recovery import create_error_context, ErrorCategory, ErrorRecoveryGuide
+
     ui.print_info("Testing database connection...")
 
     try:
@@ -304,7 +302,14 @@ def _test_database_connection(ui: 'UserInterface', host: str, port: int, user: s
         ui.print_warning("PyMySQL not available for connection test")
         ui.print_info("Connection will be tested when DataJoint loads")
     except (ConnectionError, OSError, TimeoutError) as e:
-        ui.print_error(f"Database connection failed: {e}")
+        # Use enhanced error recovery for database connection issues
+        context = create_error_context(
+            ErrorCategory.VALIDATION,
+            f"Database connection to {host}:{port} failed",
+            f"pymysql.connect(host={host}, port={port}, user={user})"
+        )
+        guide = ErrorRecoveryGuide(ui)
+        guide.handle_error(e, context)
         raise DatabaseSetupError(f"Cannot connect to database: {e}") from e
 
 
