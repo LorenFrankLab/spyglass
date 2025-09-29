@@ -480,15 +480,15 @@ class SpyglassValidator:
                     self.add_result(
                         "Database Connection",
                         False,
-                        "Not connected",
-                        Severity.WARNING,
+                        "Not connected (DataJoint core dependency)",
+                        Severity.ERROR,
                     )
             except (ConnectionError, OSError, TimeoutError) as e:
                 self.add_result(
                     "Database Connection",
                     False,
-                    f"Cannot connect: {str(e)}",
-                    Severity.WARNING,
+                    f"Cannot connect (DataJoint core dependency): {str(e)}",
+                    Severity.ERROR,
                 )
 
     def _check_spyglass_tables(self) -> None:
