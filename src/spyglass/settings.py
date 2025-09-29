@@ -162,7 +162,9 @@ class SpyglassConfig:
 
         # Log when supplied base_dir causes environment variable overrides to be ignored
         if self.supplied_base_dir:
-            logger.info("Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides")
+            logger.info(
+                "Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides"
+            )
 
         if resolved_base:
             base_path = Path(resolved_base).expanduser().resolve()
@@ -401,7 +403,9 @@ class SpyglassConfig:
         if output_filename:
             save_method = "custom"
             path = Path(output_filename).expanduser()  # Expand ~
-            filepath = path if path.is_absolute() else path.resolve()  # Get canonical path
+            filepath = (
+                path if path.is_absolute() else path.resolve()
+            )  # Resolve relative paths and symlinks
             filepath.parent.mkdir(exist_ok=True, parents=True)
             filepath = (
                 filepath.with_suffix(".json")  # ensure suffix, default json
@@ -428,8 +432,12 @@ class SpyglassConfig:
 
         user_warn = (
             f"Replace existing file? {filepath.resolve()}\n\t"
-            + "\n\t".join([f"{k}: {v if k != 'database.password' else '***'}"
-                          for k, v in dj.config._conf.items()])
+            + "\n\t".join(
+                [
+                    f"{k}: {v if k != 'database.password' else '***'}"
+                    for k, v in dj.config._conf.items()
+                ]
+            )
             + "\n"
         )
 
@@ -511,7 +519,9 @@ class SpyglassConfig:
                     "project": self.moseq_project_dir,
                     "video": self.moseq_video_dir,
                 },
-                "kachery_zone": os.environ.get("KACHERY_ZONE", "franklab.default"),
+                "kachery_zone": os.environ.get(
+                    "KACHERY_ZONE", "franklab.default"
+                ),
             }
         }
 
