@@ -500,7 +500,9 @@ def create_conda_environment(env_file: str, env_name: str, force: bool = False):
             )
             if response.lower() not in ["y", "yes"]:
                 print_success(f"Using existing environment '{env_name}'")
-                print("  Package installation will continue (updates if needed)")
+                print(
+                    "  Package installation will continue (updates if needed)"
+                )
                 print("  To use a different name, run with: --env-name <name>")
                 return  # Skip environment creation, use existing
 
@@ -1578,7 +1580,9 @@ def run_installation(args) -> None:
     print("Next steps:")
     print(f"  1. Activate environment: conda activate {args.env_name}")
     print("  2. Start tutorial:       jupyter notebook notebooks/")
-    print("  3. View documentation:   https://lorenfranklab.github.io/spyglass/")
+    print(
+        "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
+    )
 
 
 def main():
