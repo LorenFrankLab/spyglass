@@ -190,7 +190,9 @@ def check_spyglass_config() -> None:
         print(f"  Base directory: {config.base_dir}")
 
         if not config.base_dir.exists():
-            print("  Note: Base directory will be created on first use")
+            print("  Status: Will be created on first use")
+        else:
+            print("  Status: Ready")
     except Exception as e:
         print(f"⚠ SpyglassConfig warning: {e}")
         print("  This may not be a critical issue")
