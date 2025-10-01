@@ -67,6 +67,20 @@ def get_required_python_version() -> tuple:
     --------
     >>> major, minor = get_required_python_version()
     >>> print(f"Requires Python {major}.{minor}+")
+
+    Notes
+    -----
+    INTENTIONAL DUPLICATION: This function is duplicated in both install.py
+    and validate.py because validate.py must work standalone before Spyglass
+    is installed. Both scripts are designed to run independently without
+    importing from each other to avoid path/module complexity.
+
+    If you modify this function, you MUST update it in both files:
+    - scripts/install.py
+    - scripts/validate.py (this file)
+
+    Future: Consider extracting to scripts/_shared.py if the installer
+    becomes a package, but for now standalone scripts are simpler.
     """
     try:
         import tomllib  # Python 3.11+

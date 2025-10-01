@@ -99,6 +99,20 @@ def get_required_python_version() -> Tuple[int, int]:
 
     This ensures single source of truth for version requirements.
     Falls back to (3, 9) if parsing fails.
+
+    Notes
+    -----
+    INTENTIONAL DUPLICATION: This function is duplicated in both install.py
+    and validate.py because validate.py must work standalone before Spyglass
+    is installed. Both scripts are designed to run independently without
+    importing from each other to avoid path/module complexity.
+
+    If you modify this function, you MUST update it in both files:
+    - scripts/install.py (this file)
+    - scripts/validate.py
+
+    Future: Consider extracting to scripts/_shared.py if the installer
+    becomes a package, but for now standalone scripts are simpler.
     """
     try:
         import tomllib  # Python 3.11+
@@ -749,11 +763,62 @@ def create_database_config(
     print_success(f"Configuration saved to {config_file}")
 
 
+def validate_hostname(hostname: str) -> bool:
+    """Validate hostname format to prevent common typos.
+
+    Performs basic validation to catch obvious errors like spaces,
+    control characters, multiple consecutive dots, or invalid length.
+
+    Parameters
+    ----------
+    hostname : str
+        Hostname or IP address to validate
+
+    Returns
+    -------
+    bool
+        True if hostname appears valid, False otherwise
+
+    Examples
+    --------
+    >>> validate_hostname("localhost")
+    True
+    >>> validate_hostname("db.example.com")
+    True
+    >>> validate_hostname("host with spaces")
+    False
+    >>> validate_hostname("..invalid")
+    False
+
+    Notes
+    -----
+    This is intentionally permissive - only catches obvious typos.
+    DNS resolution will be the final validation.
+    """
+    if not hostname:
+        return False
+
+    # Reject hostnames with whitespace or control characters
+    if any(c.isspace() or ord(c) < 32 for c in hostname):
+        return False
+
+    # Reject obvious typos (multiple dots, leading/trailing dots)
+    if hostname.startswith(".") or hostname.endswith(".") or ".." in hostname:
+        return False
+
+    # Check length (DNS hostname max is 253 characters)
+    if len(hostname) > 253:
+        return False
+
+    return True
+
+
 def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     """Prompt user for remote database connection details.
 
     Interactively asks for host, port, user, and password. Uses getpass
     for secure password input. Automatically enables TLS for remote hosts.
+    Validates hostname format to prevent typos.
 
     Parameters
     ----------
@@ -777,6 +842,12 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
     try:
         host = input("  Host [localhost]: ").strip() or "localhost"
+
+        # Validate hostname format
+        if not validate_hostname(host):
+            print_error(f"Invalid hostname: {host}")
+            print("  Hostname cannot contain spaces or invalid characters")
+            return None
         port_str = input("  Port [3306]: ").strip() or "3306"
         user = input("  User [root]: ").strip() or "root"
 
@@ -1203,6 +1274,12 @@ def setup_database_remote(
     else:
         # Non-interactive mode - use provided parameters
         import os
+
+        # Validate hostname format
+        if not validate_hostname(host):
+            print_error(f"Invalid hostname: {host}")
+            print("  Hostname cannot contain spaces or invalid characters")
+            return False
 
         # Check environment variable for password if not provided
         if password is None:
