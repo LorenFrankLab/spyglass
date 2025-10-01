@@ -67,25 +67,65 @@ Documentation can be found at -
 
 ### Quick Start (Recommended)
 
-Get up and running in 5 minutes with our automated installer:
+Get started with Spyglass in 5 minutes using our automated installer:
 
 ```bash
 # Clone the repository
 git clone https://github.com/LorenFrankLab/spyglass.git
 cd spyglass
 
-# Run quickstart
-python scripts/quickstart.py
+# Run automated installer
+python scripts/install.py
+
+# Activate environment
+conda activate spyglass
 ```
 
-See [QUICKSTART.md](QUICKSTART.md) for detailed options and troubleshooting.
+The installer will:
+- ✅ Create conda environment with all dependencies
+- ✅ Set up local MySQL database (Docker) or connect to remote
+- ✅ Validate installation
+- ✅ Provide clear next steps
 
-### Full Installation Guide
+**Installation Options:**
+```bash
+# Minimal installation (recommended for new users)
+python scripts/install.py --minimal
 
-For manual installation and advanced configuration options see -
-[https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+# Full installation (all features)
+python scripts/install.py --full
 
-Typical installation time is: 5-10 minutes
+# With Docker database
+python scripts/install.py --docker
+
+# Connect to remote database
+python scripts/install.py --remote
+
+# Non-interactive with environment variables
+export SPYGLASS_BASE_DIR=/path/to/data
+python scripts/install.py --minimal --docker
+
+# Non-interactive remote database setup
+python scripts/install.py --remote \
+  --db-host db.lab.edu \
+  --db-user myuser \
+  --db-password mysecret
+
+# Or use environment variable for password
+export SPYGLASS_DB_PASSWORD=mysecret
+python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
+```
+
+**Troubleshooting:**
+- See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues
+- Run `python scripts/validate.py` to check your installation
+- For database help, see [docs/DATABASE.md](docs/DATABASE.md)
+
+### Manual Installation
+
+For manual installation and advanced configuration:
+- [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+- [Database Setup Guide](docs/DATABASE.md)
 
 ## Tutorials
 

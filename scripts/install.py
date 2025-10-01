@@ -87,8 +87,8 @@ def show_progress_message(operation: str, estimated_minutes: int) -> None:
     print_step(operation)
     print(f"  Estimated time: ~{estimated_minutes} minute(s)")
     print("  This may take a while - please be patient...")
-    if estimated_minutes > 5:
-        print("  Tip: This is a good time for a coffee break ☕")
+    if estimated_minutes > 10:
+        print("  Tip: This is a good time for a coffee break")
 
 
 def get_required_python_version() -> Tuple[int, int]:
@@ -124,14 +124,67 @@ def get_required_python_version() -> Tuple[int, int]:
     return (3, 9)  # Safe fallback
 
 
-def check_prerequisites():
-    """Check system prerequisites.
+def check_disk_space(required_gb: int, path: Path) -> Tuple[bool, int]:
+    """Check available disk space at given path.
 
-    Reads Python version requirement from pyproject.toml to maintain
-    single source of truth.
+    Walks up directory tree to find existing parent if path doesn't
+    exist yet, then checks available disk space.
 
-    Raises:
-        RuntimeError: If prerequisites are not met
+    Parameters
+    ----------
+    required_gb : int
+        Required disk space in gigabytes
+    path : pathlib.Path
+        Path to check. If doesn't exist, checks nearest existing parent.
+
+    Returns
+    -------
+    sufficient : bool
+        True if available space >= required space
+    available_gb : int
+        Available disk space in gigabytes
+
+    Examples
+    --------
+    >>> sufficient, available = check_disk_space(10, Path("/tmp"))
+    >>> if sufficient:
+    ...     print(f"OK: {available} GB available")
+    """
+    # Find existing path to check
+    check_path = path
+    while not check_path.exists() and check_path != check_path.parent:
+        check_path = check_path.parent
+
+    # Get disk usage
+    usage = shutil.disk_usage(check_path)
+    available_gb = usage.free / (1024**3)
+
+    return available_gb >= required_gb, int(available_gb)
+
+
+def check_prerequisites(
+    install_type: str = "minimal", base_dir: Optional[Path] = None
+):
+    """Check system prerequisites before installation.
+
+    Verifies Python version, conda/mamba availability, and sufficient
+    disk space for the selected installation type.
+
+    Parameters
+    ----------
+    install_type : str, optional
+        Installation type - either 'minimal' or 'full' (default: 'minimal')
+    base_dir : pathlib.Path, optional
+        Base directory where Spyglass data will be stored
+
+    Raises
+    ------
+    RuntimeError
+        If prerequisites are not met (insufficient disk space, etc.)
+
+    Examples
+    --------
+    >>> check_prerequisites("minimal", Path("/tmp/spyglass_data"))
     """
     print_step("Checking prerequisites...")
 
@@ -155,6 +208,25 @@ def check_prerequisites():
         print_warning("Git not found (recommended for development)")
     else:
         print_success("Git available")
+
+    # Disk space check (if base_dir provided)
+    if base_dir:
+        # Add buffer: minimal needs ~10GB (8 + 2), full needs ~25GB (18 + 7)
+        required_space = {"minimal": 10, "full": 25}
+        required_gb = required_space.get(install_type, 10)
+
+        sufficient, available_gb = check_disk_space(required_gb, base_dir)
+
+        if sufficient:
+            print_success(
+                f"Disk space: {available_gb} GB available (need {required_gb} GB)"
+            )
+        else:
+            print_error("Insufficient disk space!")
+            print(f"  Available: {available_gb} GB")
+            print(f"  Required:  {required_gb} GB")
+            print("  Please free up space or choose a different location")
+            raise RuntimeError("Insufficient disk space")
 
 
 def get_conda_command() -> str:
@@ -749,10 +821,53 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         return None
 
 
+def get_database_options() -> list:
+    """Get available database options based on system capabilities.
+
+    Checks Docker availability and returns appropriate menu options.
+
+    Parameters
+    ----------
+    None
+
+    Returns
+    -------
+    list of tuple
+        List of (number, name, status, description) tuples for menu display
+
+    Examples
+    --------
+    >>> options = get_database_options()
+    >>> for num, name, status, desc in options:
+    ...     print(f"{num}. {name} - {status}")
+    """
+    options = []
+
+    # Check Docker availability
+    docker_available = is_docker_available_inline()
+
+    if docker_available:
+        options.append(
+            ("1", "Docker", "✓ Available", "Quick setup for local development")
+        )
+    else:
+        options.append(
+            ("1", "Docker", "✗ Not available", "Requires Docker installation")
+        )
+
+    options.append(
+        ("2", "Remote", "✓ Available", "Connect to existing lab/cloud database")
+    )
+    options.append(("3", "Skip", "✓ Available", "Configure manually later"))
+
+    return options, docker_available
+
+
 def prompt_database_setup() -> str:
     """Ask user about database setup preference.
 
-    Displays menu of database setup options and prompts user to choose.
+    Displays menu of database setup options with availability status
+    and prompts user to choose.
 
     Parameters
     ----------
@@ -770,24 +885,51 @@ def prompt_database_setup() -> str:
     >>> if choice == "docker":
     ...     setup_database_docker()
     """
-    print("\nDatabase setup:")
-    print("  1. Docker (local MySQL container)")
-    print("  2. Remote (connect to existing database)")
-    print("  3. Skip (configure later)")
+    print("\n" + "=" * 60)
+    print("Database Setup")
+    print("=" * 60)
+
+    options, docker_available = get_database_options()
+
+    print("\nOptions:")
+    for num, name, status, description in options:
+        # Color status based on availability
+        status_color = COLORS["green"] if "✓" in status else COLORS["red"]
+        print(f"  {num}. {name:15} {status_color}{status}{COLORS['reset']}")
+        print(f"      {description}")
+
+    # If Docker not available, guide user
+    if not docker_available:
+        print(f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker is not available")
+        print("  To enable Docker option:")
+        print("    1. Install Docker: https://docs.docker.com/get-docker/")
+        print("    2. Start Docker Desktop")
+        print("    3. Re-run installer")
+
+    # Get valid choices
+    valid_choices = ["2", "3"]  # Always available
+    if docker_available:
+        valid_choices.insert(0, "1")
 
     while True:
-        choice = input("\nChoice [1-3]: ").strip()
+        choice = input(f"\nChoice [{'/'.join(valid_choices)}]: ").strip()
+
         if choice == "1":
-            return "docker"
+            if docker_available:
+                return "docker"
+            else:
+                print_error(
+                    "Docker is not available. Please choose option 2 or 3"
+                )
         elif choice == "2":
             return "remote"
         elif choice == "3":
             return "skip"
         else:
-            print_error("Please enter 1, 2, or 3")
+            print_error(f"Please enter {' or '.join(valid_choices)}")
 
 
-def setup_database_docker() -> bool:
+def setup_database_docker() -> Tuple[bool, str]:
     """Set up local Docker database.
 
     Checks Docker availability, starts MySQL container, waits for readiness,
@@ -800,8 +942,10 @@ def setup_database_docker() -> bool:
 
     Returns
     -------
-    bool
+    success : bool
         True if database setup succeeded, False otherwise
+    reason : str
+        Reason for failure or "success"
 
     Notes
     -----
@@ -810,17 +954,15 @@ def setup_database_docker() -> bool:
 
     Examples
     --------
-    >>> if setup_database_docker():
+    >>> success, reason = setup_database_docker()
+    >>> if success:
     ...     print("Database ready")
     """
     print_step("Setting up Docker database...")
 
     # Check Docker availability (inline, no imports)
     if not is_docker_available_inline():
-        print_warning("Docker not available")
-        print("  Install from: https://docs.docker.com/get-docker/")
-        print("  Or choose option 2 to connect to remote database")
-        return False
+        return False, "docker_unavailable"
 
     try:
         # Start container (inline docker commands)
@@ -840,12 +982,10 @@ def setup_database_docker() -> bool:
             use_tls=False,
         )
 
-        return True
+        return True, "success"
 
     except Exception as e:
-        print_error(f"Database setup failed: {e}")
-        print("  You can configure manually later")
-        return False
+        return False, str(e)
 
 
 def test_database_connection(
@@ -920,15 +1060,126 @@ def test_database_connection(
         return False, error_msg
 
 
-def setup_database_remote() -> bool:
-    """Set up remote database connection.
+def handle_database_setup_interactive() -> None:
+    """Interactive database setup with retry logic.
 
-    Prompts for connection details, tests the connection, and creates
-    configuration file if connection succeeds.
+    Allows user to try different database options if one fails,
+    without restarting the entire installation.
 
     Parameters
     ----------
     None
+
+    Returns
+    -------
+    None
+    """
+    while True:
+        db_choice = prompt_database_setup()
+
+        if db_choice == "docker":
+            success, reason = setup_database_docker()
+            if success:
+                break
+            else:
+                print_error("Docker setup failed")
+                if reason == "docker_unavailable":
+                    print("\nDocker is not available.")
+                    print("  Option 1: Install Docker and restart")
+                    print("  Option 2: Choose remote database")
+                    print("  Option 3: Skip for now")
+                else:
+                    print(f"  Error: {reason}")
+
+                retry = input("\nTry different option? [Y/n]: ").strip().lower()
+                if retry in ["n", "no"]:
+                    print_warning("Skipping database setup")
+                    print(
+                        "  Configure later: python scripts/install.py --docker"
+                    )
+                    print("  Or manually: see docs/DATABASE.md")
+                    break
+                # Loop continues to show menu again
+
+        elif db_choice == "remote":
+            success = setup_database_remote()
+            if success:
+                break
+            # If remote setup returns False (cancelled), loop to menu
+
+        else:  # skip
+            print_warning("Skipping database setup")
+            print("  Configure later: python scripts/install.py --docker")
+            print("  Or manually: see docs/DATABASE.md")
+            break
+
+
+def handle_database_setup_cli(
+    db_type: str,
+    db_host: Optional[str] = None,
+    db_port: Optional[int] = None,
+    db_user: Optional[str] = None,
+    db_password: Optional[str] = None,
+) -> None:
+    """Handle database setup from CLI arguments.
+
+    Parameters
+    ----------
+    db_type : str
+        Either "docker" or "remote"
+    db_host : str, optional
+        Database host for remote connection
+    db_port : int, optional
+        Database port for remote connection
+    db_user : str, optional
+        Database user for remote connection
+    db_password : str, optional
+        Database password for remote connection
+
+    Returns
+    -------
+    None
+    """
+    if db_type == "docker":
+        success, reason = setup_database_docker()
+        if not success:
+            print_error("Docker setup failed")
+            if reason == "docker_unavailable":
+                print_warning("Docker not available")
+                print("  Install from: https://docs.docker.com/get-docker/")
+            else:
+                print_error(f"Error: {reason}")
+            print("  You can configure manually later")
+    elif db_type == "remote":
+        success = setup_database_remote(
+            host=db_host, port=db_port, user=db_user, password=db_password
+        )
+        if not success:
+            print_warning("Remote database setup cancelled")
+            print("  You can configure manually later")
+
+
+def setup_database_remote(
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    user: Optional[str] = None,
+    password: Optional[str] = None,
+) -> bool:
+    """Set up remote database connection.
+
+    Prompts for connection details (if not provided), tests the connection,
+    and creates configuration file if connection succeeds.
+
+    Parameters
+    ----------
+    host : str, optional
+        Database host (prompts if not provided)
+    port : int, optional
+        Database port (prompts if not provided)
+    user : str, optional
+        Database user (prompts if not provided)
+    password : str, optional
+        Database password (prompts if not provided, checks env var)
 
     Returns
     -------
@@ -939,12 +1190,48 @@ def setup_database_remote() -> bool:
     --------
     >>> if setup_database_remote():
     ...     print("Remote database configured")
+    >>> if setup_database_remote(host="db.example.com", user="myuser"):
+    ...     print("Non-interactive setup succeeded")
     """
     print_step("Setting up remote database connection...")
 
-    config = prompt_remote_database_config()
-    if config is None:
-        return False
+    # If any parameters are missing, prompt interactively
+    if host is None or user is None or password is None:
+        config = prompt_remote_database_config()
+        if config is None:
+            return False
+    else:
+        # Non-interactive mode - use provided parameters
+        import os
+
+        # Check environment variable for password if not provided
+        if password is None:
+            password = os.environ.get("SPYGLASS_DB_PASSWORD")
+            if password is None:
+                print_error(
+                    "Password required: use --db-password or SPYGLASS_DB_PASSWORD env var"
+                )
+                return False
+
+        # Use defaults for optional parameters
+        if port is None:
+            port = 3306
+
+        # Determine TLS based on host
+        localhost_addresses = ("localhost", "127.0.0.1", "::1")
+        use_tls = host not in localhost_addresses
+
+        config = {
+            "host": host,
+            "port": port,
+            "user": user,
+            "password": password,
+            "use_tls": use_tls,
+        }
+
+        print(f"  Connecting to {host}:{port} as {user}")
+        if use_tls:
+            print("  TLS: enabled")
 
     # Test connection before saving
     success, error = test_database_connection(**config)
@@ -1022,11 +1309,12 @@ def run_installation(args) -> None:
     Notes
     -----
     CRITICAL ORDER:
-    1. Check prerequisites (no spyglass imports)
-    2. Create conda environment (no spyglass imports)
-    3. Install spyglass package (pip install -e .)
-    4. Setup database (inline code, NO spyglass imports)
-    5. Validate (runs IN the new environment, CAN import spyglass)
+    1. Get base directory (for disk space check)
+    2. Check prerequisites including disk space (no spyglass imports)
+    3. Create conda environment (no spyglass imports)
+    4. Install spyglass package (pip install -e .)
+    5. Setup database (inline code, NO spyglass imports)
+    6. Validate (runs IN the new environment, CAN import spyglass)
     """
     print(f"\n{COLORS['blue']}{'='*60}{COLORS['reset']}")
     print(f"{COLORS['blue']}  Spyglass Installation{COLORS['reset']}")
@@ -1042,14 +1330,13 @@ def run_installation(args) -> None:
     else:
         env_file, install_type = prompt_install_type()
 
-    # 1. Check prerequisites (no spyglass imports)
-    check_prerequisites()
+    # 1. Get base directory first (CLI arg > env var > prompt)
+    base_dir = get_base_directory(args.base_dir)
 
-    # 1b. Get base directory (CLI arg > env var > prompt)
-    # Note: base_dir will be used for disk space check in Phase 2
-    base_dir = get_base_directory(args.base_dir)  # noqa: F841
+    # 2. Check prerequisites with disk space validation (no spyglass imports)
+    check_prerequisites(install_type, base_dir)
 
-    # 2. Create environment (no spyglass imports)
+    # 3. Create environment (no spyglass imports)
     create_conda_environment(env_file, args.env_name, force=args.force)
 
     # 3. Install package (pip install makes spyglass available)
@@ -1060,21 +1347,23 @@ def run_installation(args) -> None:
     #    because docker operations are self-contained
     if args.docker:
         # Docker explicitly requested via CLI
-        setup_database_docker()
+        handle_database_setup_cli("docker")
     elif args.remote:
         # Remote database explicitly requested via CLI
-        setup_database_remote()
+        # Support non-interactive mode with CLI args or env vars
+        import os
+
+        db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
+        handle_database_setup_cli(
+            "remote",
+            db_host=args.db_host,
+            db_port=args.db_port,
+            db_user=args.db_user,
+            db_password=db_password,
+        )
     else:
-        # Interactive prompt for database setup
-        db_choice = prompt_database_setup()
-        if db_choice == "docker":
-            setup_database_docker()
-        elif db_choice == "remote":
-            setup_database_remote()
-        else:
-            print_warning("Skipping database setup")
-            print("  Configure later with: python scripts/install.py --docker")
-            print("  Or manually: see docs/DATABASE.md")
+        # Interactive prompt with retry logic
+        handle_database_setup_interactive()
 
     # 5. Validation (runs in new environment, CAN import spyglass)
     if not args.skip_validation:
@@ -1121,6 +1410,20 @@ Environment Variables:
         "--remote",
         action="store_true",
         help="Connect to remote database (interactive)",
+    )
+    parser.add_argument("--db-host", help="Database host (for --remote)")
+    parser.add_argument(
+        "--db-port",
+        type=int,
+        default=3306,
+        help="Database port (default: 3306)",
+    )
+    parser.add_argument(
+        "--db-user", default="root", help="Database user (default: root)"
+    )
+    parser.add_argument(
+        "--db-password",
+        help="Database password (or use SPYGLASS_DB_PASSWORD env var)",
     )
     parser.add_argument(
         "--skip-validation", action="store_true", help="Skip validation checks"

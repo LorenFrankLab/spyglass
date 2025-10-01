@@ -227,32 +227,60 @@ def main() -> None:
     print("  Spyglass Installation Validation")
     print("=" * 60 + "\n")
 
-    checks = [
+    # Critical checks (must pass)
+    critical_checks = [
         ("Python version", check_python_version),
         ("Conda/Mamba", check_conda),
         ("Spyglass import", check_spyglass_import),
+    ]
+
+    # Optional checks (warnings only)
+    optional_checks = [
         ("SpyglassConfig", check_spyglass_config),
         ("Database connection", check_database),
     ]
 
-    failed = []
-    for name, check_fn in checks:
+    critical_failed = []
+    warnings = []
+
+    # Run critical checks
+    print("Critical Checks:")
+    for name, check_fn in critical_checks:
         try:
             check_fn()
         except Exception as e:
             print(f"✗ {name}: {e}")
-            failed.append(name)
+            critical_failed.append(name)
 
+    # Run optional checks
+    print("\nOptional Checks:")
+    for name, check_fn in optional_checks:
+        try:
+            check_fn()
+        except Exception as e:
+            print(f"⚠ {name}: {e}")
+            warnings.append(name)
+
+    # Summary
     print("\n" + "=" * 60)
-    if failed:
-        print(f"✗ {len(failed)} check(s) failed")
+    if critical_failed:
+        print("✗ Validation failed - installation incomplete")
         print("=" * 60 + "\n")
-        print("Failed checks:", ", ".join(failed))
-        print("\nSee docs/TROUBLESHOOTING.md for help")
+        print("Failed checks:", ", ".join(critical_failed))
+        print("\nThese issues must be fixed before using Spyglass.")
+        print("See docs/TROUBLESHOOTING.md for help")
         sys.exit(1)
+    elif warnings:
+        print("⚠ Validation passed with warnings")
+        print("=" * 60 + "\n")
+        print("Warnings:", ", ".join(warnings))
+        print("\nSpyglass is installed but optional features may not work.")
+        print("See docs/TROUBLESHOOTING.md for configuration help")
+        sys.exit(0)  # Exit 0 since installation is functional
     else:
         print("✅ All checks passed!")
         print("=" * 60 + "\n")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

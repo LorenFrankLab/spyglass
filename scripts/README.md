@@ -54,7 +54,11 @@ python scripts/install.py
 - `--minimal` - Install minimal dependencies only (~5 min, ~8 GB)
 - `--full` - Install all dependencies (~15 min, ~18 GB)
 - `--docker` - Set up local Docker database
-- `--remote` - Connect to remote database (interactive prompts)
+- `--remote` - Connect to remote database (interactive or with CLI args)
+- `--db-host HOST` - Database host for remote setup (non-interactive)
+- `--db-port PORT` - Database port (default: 3306)
+- `--db-user USER` - Database user (default: root)
+- `--db-password PASS` - Database password (or use SPYGLASS_DB_PASSWORD env var)
 - `--skip-validation` - Skip validation checks after installation
 - `--env-name NAME` - Custom conda environment name (default: spyglass)
 - `--base-dir PATH` - Base directory for data storage
@@ -131,7 +135,7 @@ This creates a container named `spyglass-db` with:
 
 ### Option 2: Remote Database
 
-Connect to an existing remote MySQL database:
+**Interactive mode:**
 
 ```bash
 python scripts/install.py --remote
@@ -144,8 +148,25 @@ You'll be prompted to enter:
 - Password (hidden input)
 - TLS settings (automatically enabled for non-localhost hosts)
 
+**Non-interactive mode (for automation/CI/CD):**
+
+```bash
+# Using CLI arguments
+python scripts/install.py --remote \
+  --db-host db.lab.edu \
+  --db-user myuser \
+  --db-password mysecret
+
+# Using environment variable for password (recommended)
+export SPYGLASS_DB_PASSWORD=mysecret
+python scripts/install.py --remote \
+  --db-host db.lab.edu \
+  --db-user myuser
+```
+
 **Security Notes:**
-- Passwords are hidden during input (using `getpass`)
+- Passwords are hidden during interactive input (using `getpass`)
+- For automation, use `SPYGLASS_DB_PASSWORD` env var instead of `--db-password`
 - TLS is automatically enabled for remote hosts
 - Configuration is saved to `~/.datajoint_config.json`
 - Use `--force` to overwrite existing configuration
