@@ -43,6 +43,7 @@ import all foreign key references.
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
+    - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
 - Spikesorting
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
