@@ -109,10 +109,17 @@ def pytest_configure(config):
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
 
+    # Check if docker module is available before using DockerMySQLManager
+    try:
+        import docker as _docker_check
+        docker_available = True
+    except ImportError:
+        docker_available = False
+
     SERVER = DockerMySQLManager(
         restart=TEARDOWN,
         shutdown=TEARDOWN,
-        null_server=config.option.no_docker,
+        null_server=config.option.no_docker or not docker_available,
         verbose=VERBOSE,
     )
 

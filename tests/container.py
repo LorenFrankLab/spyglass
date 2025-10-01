@@ -2,8 +2,12 @@ import atexit
 import time
 
 import datajoint as dj
-import docker
 from datajoint import logger
+
+try:
+    import docker
+except ImportError:
+    docker = None
 
 
 class DockerMySQLManager:
@@ -46,7 +50,7 @@ class DockerMySQLManager:
         self.mysql_version = mysql_version
         self.container_name = container_name
         self.port = port or "330" + self.mysql_version[0]
-        self.client = None if null_server else docker.from_env()
+        self.client = None if (null_server or docker is None) else docker.from_env()
         self.null_server = null_server
         self.password = "tutorial"
         self.user = "root"
@@ -63,7 +67,7 @@ class DockerMySQLManager:
             self.start()
 
     @property
-    def container(self) -> docker.models.containers.Container:
+    def container(self):
         if self.null_server:
             return self.container_name
         return self.client.containers.get(self.container_name)
@@ -75,7 +79,7 @@ class DockerMySQLManager:
         try:
             self.container.reload()
             return self.container.status
-        except docker.errors.NotFound:
+        except Exception:  # docker.errors.NotFound if docker is available
             return None
 
     @property
@@ -85,7 +89,7 @@ class DockerMySQLManager:
         try:
             self.container.reload()
             return self.container.health
-        except docker.errors.NotFound:
+        except Exception:  # docker.errors.NotFound if docker is available
             return None
 
     @property
