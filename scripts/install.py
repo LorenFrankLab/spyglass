@@ -813,6 +813,77 @@ def validate_hostname(hostname: str) -> bool:
     return True
 
 
+def is_port_available(host: str, port: int) -> Tuple[bool, str]:
+    """Check if port is available or reachable.
+
+    For localhost: Checks if port is free (available for binding)
+    For remote hosts: Checks if port is reachable (something listening)
+
+    Parameters
+    ----------
+    host : str
+        Hostname or IP address to check
+    port : int
+        Port number to check
+
+    Returns
+    -------
+    available : bool
+        True if port is available/reachable, False if blocked/in-use
+    message : str
+        Description of port status
+
+    Examples
+    --------
+    >>> available, msg = is_port_available("localhost", 3306)
+    >>> if not available:
+    ...     print(f"Port issue: {msg}")
+
+    Notes
+    -----
+    The interpretation differs for localhost vs remote:
+    - localhost: False = port in use (good for remote, bad for Docker)
+    - remote: False = port unreachable (bad - firewall/wrong port)
+    """
+    import socket
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(1)  # 1 second timeout
+            result = sock.connect_ex((host, port))
+
+            # For localhost, we want the port to be FREE (not in use)
+            # For remote, we want the port to be IN USE (something listening)
+            localhost_addresses = ("localhost", "127.0.0.1", "::1")
+
+            if host in localhost_addresses:
+                # Checking if local port is free for Docker/services
+                if result == 0:
+                    # Port is in use
+                    return False, f"Port {port} is already in use on {host}"
+                else:
+                    # Port is free
+                    return True, f"Port {port} is available on {host}"
+            else:
+                # Checking if remote port is reachable
+                if result == 0:
+                    # Port is reachable (good!)
+                    return True, f"Port {port} is reachable on {host}"
+                else:
+                    # Port is not reachable
+                    return (
+                        False,
+                        f"Cannot reach {host}:{port} (firewall/wrong port?)",
+                    )
+
+    except socket.gaierror:
+        # DNS resolution failed
+        return False, f"Cannot resolve hostname: {host}"
+    except socket.error as e:
+        # Other socket errors
+        return False, f"Socket error: {e}"
+
+
 def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     """Prompt user for remote database connection details.
 
@@ -865,8 +936,30 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print_error(f"Invalid port: {e}")
             return None
 
-        # Determine TLS based on host (use TLS for non-localhost)
+        # Check if port is reachable
+        print(f"  Testing connection to {host}:{port}...")
+        port_reachable, port_msg = is_port_available(host, port)
+
         localhost_addresses = ("localhost", "127.0.0.1", "::1")
+        if host not in localhost_addresses and not port_reachable:
+            # Remote host, port not reachable
+            print_warning(port_msg)
+            print("\n  Possible causes:")
+            print("    • Wrong port number (MySQL usually uses 3306)")
+            print("    • Firewall blocking connections")
+            print("    • Database server not running")
+            print("    • Wrong hostname")
+            print("\n  Common MySQL ports:")
+            print("    • Standard MySQL: 3306")
+            print("    • SSH tunnel: Check your tunnel configuration")
+
+            retry = input("\n  Continue anyway? [y/N]: ").strip().lower()
+            if retry not in ["y", "yes"]:
+                return None
+        elif port_reachable:
+            print("  ✓ Port is reachable")
+
+        # Determine TLS based on host (use TLS for non-localhost)
         use_tls = host not in localhost_addresses
 
         if use_tls:
@@ -1034,6 +1127,26 @@ def setup_database_docker() -> Tuple[bool, str]:
     # Check Docker availability (inline, no imports)
     if not is_docker_available_inline():
         return False, "docker_unavailable"
+
+    # Check if port 3306 is available
+    port_available, port_msg = is_port_available("localhost", 3306)
+    if not port_available:
+        print_error(port_msg)
+        print("\n  Something else is using port 3306. Common causes:")
+        print("    • MySQL/MariaDB already running")
+        print("    • Another Docker container using this port")
+        print("    • PostgreSQL or other database on default port")
+        print("\n  Solutions:")
+        print("    1. Stop the existing service:")
+        print("       sudo systemctl stop mysql")
+        print("       # or: sudo service mysql stop")
+        print("    2. Find what's using the port:")
+        print("       sudo lsof -i :3306")
+        print("       sudo netstat -tulpn | grep 3306")
+        print("    3. Remove conflicting Docker container:")
+        print("       docker ps | grep 3306")
+        print("       docker stop <container-name>")
+        return False, "port_in_use"
 
     try:
         # Start container (inline docker commands)
@@ -1294,8 +1407,19 @@ def setup_database_remote(
         if port is None:
             port = 3306
 
-        # Determine TLS based on host
+        # Check if port is reachable (for remote hosts only)
         localhost_addresses = ("localhost", "127.0.0.1", "::1")
+        if host not in localhost_addresses:
+            print(f"  Testing connection to {host}:{port}...")
+            port_reachable, port_msg = is_port_available(host, port)
+            if not port_reachable:
+                print_warning(port_msg)
+                print("  Port may be blocked by firewall or wrong port number")
+                print("  Continuing anyway (connection test will verify)...")
+            else:
+                print("  ✓ Port is reachable")
+
+        # Determine TLS based on host
         use_tls = host not in localhost_addresses
 
         config = {
