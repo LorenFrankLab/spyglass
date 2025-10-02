@@ -36,13 +36,20 @@ class Subject(SpyglassIngestion, dj.Manual):
         return pynwb.file.Subject
 
     @staticmethod
-    def standardized_sex_string(subject):
+    def standardized_sex_string(subject, warn=True):
         """Takes subject.sex and returns 'M', 'F', or 'U'."""
-        sex_field = getattr(subject, "sex", "U")
+        sex_field = getattr(subject, "sex", "U") or "U"
         if (sex := sex_field[0].upper()) in ("M", "F", "U"):
             return sex
-        else:
+        elif warn:
             logger.info(
                 f"Unrecognized sex identifier {sex_field}, setting to 'U'"
             )
         return "U"
+
+    def _adjust_key_for_entry(self, key):
+        """Fill in any NULL values in the key with defaults."""
+        # Avoids triggering 'accept_divergence' on reinsert
+        ret = key.copy()
+        ret["sex"] = self.standardized_sex_string(key, warn=False)
+        return super()._adjust_key_for_entry(ret)

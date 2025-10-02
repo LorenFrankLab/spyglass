@@ -98,9 +98,13 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
             replace in the NWB file.
         """
         config = config or dict()
-        entries = super().insert_from_nwbfile(
-            nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
-        )[self]
+        entries = (
+            super()
+            .insert_from_nwbfile(
+                nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
+            )
+            .get(self, [])
+        )
         return entries
 
     @classmethod
@@ -386,6 +390,13 @@ class Probe(SpyglassIngestion, dj.Manual):
         @staticmethod
         def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank):
             return int(shank_nwb_obj.name)
+
+        def _adjust_key_for_entry(self, key):
+            """Adjust key to ensure correct types/formats."""
+            # Avoids triggering 'accept_divergence' on reinsert
+            ret = key.copy()
+            ret["probe_shank"] = int(key.get("probe_shank", -1))
+            return ret
 
     class Electrode(SpyglassIngestion, dj.Part):
         definition = """

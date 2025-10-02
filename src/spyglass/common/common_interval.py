@@ -235,10 +235,9 @@ class IntervalList(SpyglassIngestion, dj.Manual):
             return match.fetch(as_dict=True)[0] if match else None
 
         def sk_match(new, old):
-            return (
-                np.array_equal(new["valid_times"], old["valid_times"])
-                and new["pipeline"] == old["pipeline"]
-            )
+            return np.array_equal(
+                new["valid_times"], old["valid_times"]
+            ) and new.get("pipeline", "") == old.get("pipeline", "")
 
         basic_inserts, need_update = [], []
         for row in inserts:

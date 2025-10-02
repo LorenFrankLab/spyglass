@@ -7,6 +7,7 @@ from typing import List, Union
 import pynwb
 
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
+from spyglass.common.common_nwbfile import schema as nwbfile_schema
 from spyglass.settings import debug_mode, raw_dir
 from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
@@ -40,6 +41,8 @@ def insert_sessions(
         nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:
+        nwb_file_name = str(nwb_file_name)  # in case it's a Path object
+
         if "/" in nwb_file_name:
             nwb_file_name = nwb_file_name.split("/")[-1]
 
@@ -65,7 +68,7 @@ def insert_sessions(
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
-        query = Nwbfile() & {"nwb_file_name": nwb_file_name}
+        query = Nwbfile() & {"nwb_file_name": out_nwb_file_name}
         file_exists = bool(query)
         if file_exists and not reinsert:
             warnings.warn(
@@ -77,7 +80,7 @@ def insert_sessions(
             logger.info(
                 f"Reinserting data from {nwb_file_name}: {out_nwb_file_name}"
             )
-            query.delete()
+            query.delete(safemode=False)
 
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to

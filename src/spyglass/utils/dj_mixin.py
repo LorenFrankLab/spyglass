@@ -1146,6 +1146,16 @@ class SpyglassIngestion(SpyglassMixin):
 
         return matching_objects
 
+    def _insert_logline(self, nwb_file_name, n_entries, table):
+        """Log line for insert_from_nwbfile."""
+
+        # String formatting permits either SpyglassMixin or FreeTable objects
+        camel = to_camel_case(  # table name, using Master.Part
+            table.full_table_name.split(".")[-1].replace("__", ".")
+        ).strip("`")
+
+        logger.info(f"{nwb_file_name} inserts {n_entries} into {camel}")
+
     def insert_from_nwbfile(
         self,
         nwb_file_name: str,
@@ -1167,7 +1177,10 @@ class SpyglassIngestion(SpyglassMixin):
         from spyglass.common.common_nwbfile import Nwbfile
 
         nwb_key = {"nwb_file_name": nwb_file_name}
-        nwb_file = (Nwbfile & nwb_key).fetch_nwb()[0]
+        if not (query := Nwbfile & nwb_key):
+            raise ValueError(f"NWB file {nwb_file_name} not found in database.")
+
+        nwb_file = query.fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
 
         # compile list of table entries from all objects in this file
@@ -1196,32 +1209,77 @@ class SpyglassIngestion(SpyglassMixin):
             entries.update(self.generate_entries_from_config(config))
             # TODO handle for part tables
 
+        # Remove tables with no entries - if all entries 'None', skip table
+        # Motivated by nwb with no Institution, results in nulled fk subj ref
+        null_keys = []
         for table, table_entries in entries.items():
-            tbl_name = to_camel_case(
-                table.full_table_name.split(".")[-1]
-            ).strip("`")
-            n_entries = len(table_entries)
-            logger.info(f"{nwb_file_name} inserts {n_entries} into {tbl_name}")
+            # Allow children to adjust keys before comparing
+            adjusted_entries = self._adjust_keys_for_entries(table_entries)
+            # Remove None entries
+            actual_entries = [v for v in adjusted_entries if v is not None]
+            if not any(actual_entries):
+                null_keys.append(table)  # mark for removal from dict
+            else:
+                entries[table] = actual_entries
+        for table in null_keys:
+            self._insert_logline(nwb_file_name, 0, table)
+            _ = entries.pop(table)
 
         if entries is None or len(entries) == 0:
             return dict()
 
         # validate that new entries are consistent with existing entries
         if self._expected_duplicates:
-            if isinstance(entries, list):
-                raise RuntimeError("TODO: this is no longer the case, right?")
             self.validate_duplicates(entries)
 
         # run insertions
         if not dry_run:
-            for table, table_entries in entries.items():
-                table.insert(
-                    table_entries,
-                    skip_duplicates=self._expected_duplicates,
-                    allow_direct_insert=True,
-                )
+            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
 
         return entries
+
+    def _run_nwbfile_insert(self, entries: dict, nwb_file_name: str = None):
+        """Run insert on compiled Dict[TableObject, inserts]."""
+
+        def expect_dupes(tbl):
+            """Allow table to override self._expected_duplicates."""
+            # Implemented to default to self for FreeTable instances
+            return (
+                getattr(table, "_expected_duplicates", None)
+                or self._expected_duplicates
+            )
+
+        for table, table_entries in entries.items():
+            table.insert(
+                table_entries,
+                skip_duplicates=expect_dupes(table),
+                # skip_duplicates=True,  # TODO: revert before merge
+                allow_direct_insert=True,
+            )
+            # Logging
+            self._insert_logline(nwb_file_name, len(table_entries), table)
+
+    def _key_has_required_attrs(self, key):
+        """Check that all non-nullable attributes are present in the key."""
+        for attr in self.heading.attributes.values():
+            if attr.nullable or attr.autoincrement or attr.default is not None:
+                continue  # skip nullable, autoincrement, or default val attrs
+            if attr.name not in key or key.get(attr.name) is None:
+                return False
+        return True
+
+    def _adjust_key_for_entry(self, key):
+        """Passthrough. Allows children to adjust keys before comparing."""
+        # Motivated by Subject.sex: comparing None to "U" should be equal
+        # Without this step, reinsert triggers accept_divergence prompt
+        # By default, checks that all non-nullable keys present
+        if not self._key_has_required_attrs(key):
+            return None
+        return key
+
+    def _adjust_keys_for_entries(self, keys: List[dict]) -> List[dict]:
+        """Passthrough. Allows children to adjust keys before comparing."""
+        return [self._adjust_key_for_entry(key) for key in keys]
 
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
@@ -1234,7 +1292,8 @@ class SpyglassIngestion(SpyglassMixin):
         """
         for table, table_entries in entry_dict.items():
             for entry in table_entries:
-                self.validate1_duplicate(table, entry)
+                adjusted_entry = self._adjust_key_for_entry(entry)
+                self.validate1_duplicate(table, adjusted_entry)
 
     def validate1_duplicate(self, tbl, new_key):
         """If matching primary key, check for consistency in secondary keys.

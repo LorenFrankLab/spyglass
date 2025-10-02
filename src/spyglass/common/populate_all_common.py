@@ -66,7 +66,7 @@ def log_insert_error(
             **error_constants,
             table=table.__name__,
             error_type=type(err).__name__,
-            error_message=str(err),
+            error_message=str(err)[:255],  # limit to 255 chars
             error_raw=str(err),
         )
     )
@@ -124,7 +124,6 @@ def single_transaction_make(
                 key_source = parents[0].proj()
                 for parent in parents[1:]:
                     key_source *= parent.proj()
-                print(f"KS {key_source}")
 
             table_name = to_camel_case(table.table_name)
             if table_name == "PositionSource":
@@ -133,19 +132,18 @@ def single_transaction_make(
             if table_name in ["ImportedPose", "ImportedLFP"]:
                 key_source = Nwbfile()
 
-            for pop_key in (key_source & file_restr).fetch("KEY"):
+            query = key_source & file_restr
+            for pop_key in query.fetch("KEY"):
                 try:
-                    print(f"Making {table.__name__} for {pop_key}...")
                     table().make(pop_key)
                 except Exception as err:
-                    print(f"Error in {table.__name__} for {pop_key}: {err}")
                     if raise_err:
                         raise err
                     log_insert_error(
                         table=table, err=err, error_constants=error_constants
                     )
-            if table.__name__ in ["VideoFile", "TaskEpoch"]:
-                __import__("pdb").set_trace()
+            # if table_name in ["TaskEpoch"]:
+            #     __import__("pdb").set_trace()
 
 
 def populate_all_common(
@@ -181,31 +179,32 @@ def populate_all_common(
         nwb_file_name=nwb_file_name,
     )
 
-    table_lists = [
+    table_lists: List[List[dj.Table]] = [
+        # Tables that can be inserted in a single transaction
         [
-            Institution,
-            Lab,
-            LabMember,
-            LabTeam,
-            Subject,
-            DataAcquisitionDeviceAmplifier,
-            DataAcquisitionDeviceSystem,
-            DataAcquisitionDevice,
-            CameraDevice,
-            ProbeType,
-            Probe,
-            Probe.Shank,
-            Probe.Electrode,
+            Institution,  # Parent node
+            Lab,  # Parent node
+            LabMember,  # Parent node
+            LabTeam,  # Parent node
+            Subject,  # Parent node
+            CameraDevice,  # Parent node
+            ProbeType,  # Parent node
+            DataAcquisitionDeviceAmplifier,  # Parent node
+            DataAcquisitionDeviceSystem,  # Parent node
+            DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
         ],
-        [  # Tables that can be inserted in a single transaction
-            Session,
-            Session.Experimenter,
-            Session.DataAcquisitionDevice,
+        [
+            Probe,  # Depends on ProbeType, DataAcquisitionDevice
+            Probe.Shank,  # Depends on Probe
+            Probe.Electrode,  # Depends on Probe
+            Session,  # Depends on Subject, Institution, Lab
+            Session.Experimenter,  # Depends on Session
+            Session.DataAcquisitionDevice,  # Depends on Sess, DataAcq*Device
             ElectrodeGroup,  # Depends on Session
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session
             DIOEvents,  # Depends on Session
-            TaskEpoch,  # Depends on Session
+            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
             ImportedSpikeSorting,  # Depends on Session
             SensorData,  # Depends on Session
             IntervalList,  # Depends on Session

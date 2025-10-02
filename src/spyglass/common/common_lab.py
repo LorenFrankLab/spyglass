@@ -58,7 +58,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
             logger.info("No experimenter metadata found.\n")
-            return list()
+            return dict()
 
         entries = []
         for experimenter in experimenter_list:
@@ -181,6 +181,10 @@ class LabTeam(SpyglassIngestion, dj.Manual):
     @classmethod
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=dict()):
         experimenter_list = nwb_obj.experimenter
+        if not experimenter_list:
+            logger.info("No experimenter metadata found for LabTeam.\n")
+            return dict()
+
         team_entries = []
         team_member_entries = []
         for experimenter in experimenter_list:
@@ -291,6 +295,13 @@ class Institution(SpyglassIngestion, dj.Manual):
     def _source_nwb_object_type(self):
         return pynwb.NWBFile
 
+    def _adjust_key_for_entry(self, key):
+        """Ensure that institution_name is not None."""
+        # Prevents attempted insert when nwbfile.institution is None
+        if not key.get("institution_name", None):
+            return None
+        return key
+
 
 @schema
 class Lab(SpyglassIngestion, dj.Manual):
@@ -332,13 +343,18 @@ class Lab(SpyglassIngestion, dj.Manual):
         lab_name : string
             The name of the lab found in the NWB or config file, or None.
         """
-        insert_entries = super().insert_from_nwbfile(
-            nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
-        )[self]
+        insert_entries = (
+            super()
+            .insert_from_nwbfile(
+                nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
+            )
+            .get(self)
+        )
         if not insert_entries:
             logger.info("No lab metadata found.\n")
+            return dict()
         if len(insert_entries) > 1:
-            logger.info(
+            logger.info(  # CB: why not?
                 "Multiple lab entries not allowed. Using the first entry only."
             )
             insert_entries = insert_entries[:1]
