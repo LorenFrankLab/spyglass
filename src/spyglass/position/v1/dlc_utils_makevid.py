@@ -111,7 +111,6 @@ class VideoMaker:
         self.timeout = 30 if test_mode else 300
 
         self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
-        self.ffmpeg_log_args = ["-hide_banner"]
 
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
@@ -510,9 +509,10 @@ class VideoMaker:
         extracted = len(list(self.temp_dir.glob("orig_*.png")))
         logger.debug(f"Extracted  frames: {start_frame}, len: {extracted}")
 
-        if extracted < (end_frame - start_frame - 1):
+        frame_diff = end_frame - start_frame + 1  # may be less than batch size
+        if extracted < frame_diff:
             logger.warning(
-                f"Could not extract frames: {extracted} / {self.batch_size-1}"
+                f"Could not extract frames: {extracted} / {frame_diff}"
             )
             one_err = "\n".join(str(ret.stderr).split("\\")[-3:-1])
             logger.debug(f"\nExtract Error: {one_err}")
