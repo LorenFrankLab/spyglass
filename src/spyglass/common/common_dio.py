@@ -77,7 +77,6 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
                     f"No timestamps found for DIO event {event_series.name}"
                 )
                 continue
-            print(f"aa {event_series.name}")
             dio_inserts.append(
                 dict(
                     base_key,
