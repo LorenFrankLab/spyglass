@@ -103,7 +103,6 @@ def single_transaction_make(
             table_config = config.get(config_name, dict())
 
             if isinstance(table(), SpyglassIngestion):
-                print(f"ING {config_name}")
                 try:
                     table().insert_from_nwbfile(
                         nwb_file_name, config=table_config
@@ -204,10 +203,10 @@ def populate_all_common(
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session
             DIOEvents,  # Depends on Session
-            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
             ImportedSpikeSorting,  # Depends on Session
             SensorData,  # Depends on Session
             IntervalList,  # Depends on Session
+            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
             # NwbfileKachery, # Not used by default
         ],
         [  # Tables that depend on above transaction
