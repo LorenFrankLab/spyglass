@@ -448,10 +448,6 @@ def update_analysis_for_dandi_standard(
     file_name = filepath.split("/")[-1]
     # edit the file
     try:
-        float16_datasets = find_float16_datasets(
-            filepath
-        )  # check for invalid float16 datasets
-        tables_missing_id = find_dynamic_tables_missing_id(filepath)
         with h5py.File(filepath, "a") as file:
             # add file_name attribute to general/source_script if missing
             if ("general/source_script" in file) and (
@@ -519,6 +515,7 @@ def update_analysis_for_dandi_standard(
                 file["/general/experimenter"][:] = new_experimenter_value
 
             # convert any float16 datasets to float32
+            float16_datasets = find_float16_datasets(file)
             if float16_datasets:
                 logger.info(
                     f"Converting {len(float16_datasets)} float16 datasets to float32"
@@ -528,6 +525,7 @@ def update_analysis_for_dandi_standard(
                         file, dset_path, target_dtype="float32"
                     )
             # add id column to dynamic tables if missing
+            tables_missing_id = find_dynamic_tables_missing_id(file)
             if tables_missing_id:
                 logger.info(
                     f"Adding missing id columns to {len(tables_missing_id)} "
@@ -535,6 +533,7 @@ def update_analysis_for_dandi_standard(
                 )
                 for table_path in tables_missing_id:
                     add_id_column_to_table(file, table_path)
+
     except BlockingIOError as e:
         ExportErrorLog().insert1(
             {
@@ -629,7 +628,7 @@ def make_file_obj_id_unique(nwb_path: str):
     """
     from spyglass.common.common_lab import LabMember  # noqa: F401
 
-    print(f"Making unique object_id for {nwb_path}")
+    logger.info(f"Making unique object_id for {nwb_path}")
     LabMember().check_admin_privilege(
         error_message="Admin permissions required to edit existing analysis files"
     )

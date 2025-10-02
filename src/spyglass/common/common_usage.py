@@ -15,7 +15,7 @@ from pynwb import NWBHDF5IO
 from tqdm import tqdm
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
-from spyglass.settings import test_mode
+from spyglass.settings import debug_mode, test_mode
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
 from spyglass.utils.dj_graph import RestrGraph
 from spyglass.utils.dj_helper_fn import (
@@ -163,21 +163,73 @@ class ExportSelection(SpyglassMixin, dj.Manual):
     #       before actually exporting anything, which is more associated with
     #       Selection
 
-    def _list_raw_files(self, key: dict) -> list[str]:
-        """Return a list of unique nwb file names for a given restriction/key."""
+    def _list_raw_files(
+        self, key: dict, included_nwb_files: list[str] = None
+    ) -> list[str]:
+        """Return a list of unique nwb file names for a given restriction/key.
+
+        If included_nwb_files is provided, only returns raw files
+        that are in that list.
+
+        Parameters
+        ----------
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+        included_nwb_files : list, optional
+            A whitelist of nwb files to include in the export. Default None applies
+            no whitelist restriction.
+
+        Returns
+        -------
+        list[str]
+            List of unique nwb file names.
+        """
         file_table = self * self.File & key
-        return list(
+        files = list(
             {
                 *AnalysisNwbfile.join(file_table, log_export=False).fetch(
                     "nwb_file_name"
                 )
             }
         )
+        if included_nwb_files is None:
+            return files
+        return [x for x in files if x in included_nwb_files]
 
-    def _list_analysis_files(self, key: dict) -> list[str]:
-        """Return a list of unique analysis file names for a given restriction/key."""
+    def _list_analysis_files(
+        self, key: dict, included_nwb_files: list[str] = None
+    ) -> list[str]:
+        """Return a list of unique analysis file names for a given restriction/key.
+        If included_nwb_files is provided, only returns analysis files
+        that are derivatives of those raw files.
+
+        Parameters
+        ----------
+        key : dict
+            Any valid restriction key for ExportSelection.Table
+        included_nwb_files : list, optional
+            A whitelist of nwb files to include in the export. Default None applies
+            no whitelist restriction.
+        Returns
+        -------
+        list[str]
+            List of unique analysis file names.
+
+        """
         file_table = self * self.File & key
-        return list(file_table.fetch("analysis_file_name"))
+        files = list(file_table.fetch("analysis_file_name"))
+        if included_nwb_files is None:
+            return files
+        return [
+            x
+            for x in files
+            if any(
+                [
+                    nwb_file_name.split("_.nwb")[0] in x
+                    for nwb_file_name in included_nwb_files
+                ]
+            )
+        ]
 
     def list_file_paths(self, key: dict, as_dict=True) -> list[str]:
         """Return a list of unique file paths for a given restriction/key.
@@ -325,7 +377,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
 
         # Restrict the graph to only include entries stemming from the
         # included nwb files
-        logger.info("Generating restriction graph of included nwb files")
+        logger.debug("Generating restriction graph of included nwb files")
         nwb_restr = make_condition(
             Nwbfile(),
             [f"nwb_file_name = '{f}'" for f in included_nwb_files],
@@ -342,23 +394,12 @@ class ExportSelection(SpyglassMixin, dj.Manual):
             include_files=True,
             direction="down",
         )
-        logger.info("Intersecting with export restriction graph")
+        logger.debug("Intersecting with export restriction graph")
         restr_graph = restr_graph & whitelist_graph
-        raw_files_to_add = [
-            f
-            for f in ExportSelection()._list_raw_files(key)
-            if f in included_nwb_files
-        ]
-        analysis_files_to_add = [
-            f
-            for f in ExportSelection()._list_analysis_files(key)
-            if any(
-                [
-                    nwb_file_name.split("_.nwb")[0] in f
-                    for nwb_file_name in included_nwb_files
-                ]
-            )
-        ]
+        raw_files_to_add = self._list_raw_files(key, included_nwb_files)
+        analysis_files_to_add = self._list_analysis_files(
+            key, included_nwb_files
+        )
         restr_graph = self._add_externals_to_restr_graph(
             restr_graph,
             key,
@@ -414,6 +455,9 @@ class Export(SpyglassMixin, dj.Computed):
     included_nwb_file_names = null: mediumblob   # list of nwb files included in export
     """
 
+    _nwb_whitelist_paper_cache = dict()
+    _n_file_link_processes = 1
+
     # In order to get a many-to-one relationship btwn Selection and Export,
     # we ignore all but the last export_id. If more exports are added above,
     # generating a new output will overwrite the old ones.
@@ -442,18 +486,30 @@ class Export(SpyglassMixin, dj.Computed):
         included_nwb_files=None,
         n_processes=1,
     ):
-        """Populate Export for a given paper_id."""
+        """Populate Export for a given paper_id.
+
+        Parameters
+        ----------
+        paper_id : str or dict
+            The paper_id to populate Export for. If dict, must contain key "paper_id".
+        included_nwb_files : list, optional
+            A whitelist of nwb files to include in the export. Default None applies
+            no whitelist restriction.
+        n_processes : int, optional
+            The number of processes to use for checking linked nwb files.
+            Default 1 (no multiprocessing).
+        """
         self.load_shared_schemas()
         if isinstance(paper_id, dict):
             paper_id = paper_id.get("paper_id")
-        global INCLUDED_NWB_FILES
-        INCLUDED_NWB_FILES = included_nwb_files  # store in global variable
-        global N_PROCESSES
+
+        self._nwb_whitelist_paper_cache[paper_id] = included_nwb_files
         if n_processes < 1:
             n_processes = 1
         elif n_processes > cpu_count():
             n_processes = cpu_count()
-        N_PROCESSES = n_processes
+        self._n_file_link_processes = n_processes
+
         self.populate(
             {
                 **ExportSelection().paper_export_id(paper_id),
@@ -462,13 +518,11 @@ class Export(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Populate Export table with the latest export for a given paper."""
-        logger.info(f"Populating Export for {key}")
+        logger.debug(f"Populating Export for {key}")
         paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
         query = ExportSelection & paper_key
 
-        included_nwb_files = INCLUDED_NWB_FILES
-        # included_nwb_files = INCLUDED_NWB_FILES.copy()
-        # INCLUDED_NWB_FILES = None  # reset global variable
+        included_nwb_files = self._nwb_whitelist_paper_cache.get(paper_id, None)
 
         # Null insertion if export_id is not the maximum for the paper
         all_export_ids = ExportSelection()._max_export_id(paper_key, True)
@@ -492,9 +546,9 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
                 (self.Table & id_dict).delete_quick()
 
-        logger.info(f"Generating export_id {key['export_id']}")
+        logger.debug(f"Generating export_id {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(
-            paper_key, included_nwb_files=included_nwb_files, verbose=True
+            paper_key, included_nwb_files=included_nwb_files, verbose=debug_mode
         )
         # Original plus upstream files
         file_paths = {
@@ -515,11 +569,11 @@ class Export(SpyglassMixin, dj.Computed):
             }
 
         unlinked_files = set()
-        if N_PROCESSES == 1:
+        if self._n_file_link_processes == 1:
             for file in tqdm(file_paths, desc="Checking linked nwb files"):
                 unlinked_files.update(get_unlinked_files(file))
         else:
-            with Pool(processes=N_PROCESSES) as pool:
+            with Pool(processes=self._n_file_link_processes) as pool:
                 results = list(
                     tqdm(
                         pool.map(get_unlinked_files, file_paths),

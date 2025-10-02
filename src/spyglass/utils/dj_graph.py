@@ -17,6 +17,7 @@ import pandas as pd
 from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
+from datajoint.expression import QueryExpression
 from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
@@ -248,27 +249,38 @@ class AbstractGraph(ABC):
         return self._get_node(ensure_names(table)).get("restr")
 
     @staticmethod
-    def _coerce_to_condition(ft, r):
-        from datajoint.expression import QueryExpression
+    def _coerce_to_condition(ft: FreeTable, r: Any) -> str | QueryExpression:
+        """Coerce restriction to a valid condition.
 
-        if isinstance(r, QueryExpression):
-            print("conditional")
-            return r.proj(*ft.primary_key)  # keep relational
+        If r is a QueryExpression, project to primary key to keep relational. This saves
+        on database requests while propagating restrictions. Otherwise, returns a
+
+        Parameters
+        ----------
+        ft : FreeTable
+            The FreeTable to apply the restriction to.
+        r : Any
+            The restriction to apply. Can be a string, dict, list, or QueryExpression.
+
+        Returns
+        -------
+        str | QueryExpression
+            The restriction as a string or QueryExpression.
+        """
+
         if isinstance(r, str):
             return r
-        # dict/list → condition (fallback)
-        from datajoint.condition import make_condition
+        if isinstance(r, QueryExpression):
+            return r.proj(*ft.primary_key)  # keep relational
 
+        # dict/list → condition (fallback)
         return make_condition(ft, r, set())
 
-    def _set_restr(self, table, restriction, replace=False):
+    def _set_restr(
+        self, table, restriction, replace=False
+    ) -> str | QueryExpression:
         """Add restriction to graph node. If one exists, merge with new."""
         ft = self._get_ft(table)
-        # restriction = (  # Convert to condition if list or dict
-        #     make_condition(ft, restriction, set())
-        #     if not isinstance(restriction, str)
-        #     else restriction
-        # )
         restriction = self._coerce_to_condition(ft, restriction)
         existing = self._get_restr(table)
 
@@ -962,7 +974,7 @@ class RestrGraph(AbstractGraph):
         for table in graph1_df.table_name:
             if table not in graph2_df.table_name.values:
                 continue
-            ft = FreeTable(dj.conn(), table)
+            ft = self._get_ft(table)
             intersect_restriction = ft & dj.AndList(
                 [
                     graph1_df[graph1_df.table_name == table][

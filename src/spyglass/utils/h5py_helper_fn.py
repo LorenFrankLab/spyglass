@@ -7,6 +7,8 @@ from typing import List, Optional
 import h5py
 import numpy as np
 
+from spyglass.utils.logging import logger
+
 
 def is_float16_dtype(
     dt: np.dtype, *, include_subarray_base: bool = False
@@ -56,7 +58,7 @@ def is_float16_dtype(
 
 
 def find_float16_datasets(
-    file_path: str,
+    file: h5py.File,
     *,
     include_dimension_scales: bool = False,
     include_subarray_base: bool = False,
@@ -65,8 +67,8 @@ def find_float16_datasets(
 
     Parameters
     ----------
-    file_path : str
-        Path to the HDF5/NWB file.
+    file : h5py.File
+        Open HDF5 file handle.
     include_dimension_scales : bool, optional
         If False (default), skip datasets that are HDF5 dimension scales
         (CLASS='DIMENSION_SCALE').
@@ -100,14 +102,16 @@ def find_float16_datasets(
         path = f"/{name}" if not name.startswith("/") else name
         hits.append(path)
 
-    with h5py.File(file_path, "r") as f:
-        f.visititems(_visit)
+    file.visititems(_visit)
 
     return hits
 
 
 def convert_dataset_type(file: h5py.File, dataset_path: str, target_dtype: str):
-    """Convert a dataset to a different dtype 'in place' (-ish).
+    """Convert a dataset to a different dtype.
+
+    Operation is in-place for the nwb file. The dataset itself is deleted and
+    recreated with the same name, data, and attributes, but with the new dtype.
 
     Parameters
     ----------
@@ -142,7 +146,7 @@ def convert_dataset_type(file: h5py.File, dataset_path: str, target_dtype: str):
         new_dset.attrs[k] = v
 
 
-def find_dynamic_tables_missing_id(nwb_path: str | Path) -> List[str]:
+def find_dynamic_tables_missing_id(file: h5py.File) -> List[str]:
     """Return DynamicTable paths that do not contain an 'id' dataset.
 
     The check is intentionally minimal:
@@ -152,8 +156,8 @@ def find_dynamic_tables_missing_id(nwb_path: str | Path) -> List[str]:
 
     Parameters
     ----------
-    nwb_path : str | Path
-        Path to the NWB (HDF5) file.
+    file : h5py.File
+        Open HDF5 file handle.
 
     Returns
     -------
@@ -166,7 +170,6 @@ def find_dynamic_tables_missing_id(nwb_path: str | Path) -> List[str]:
     A group is detected as a DynamicTable if its attribute
     ``neurodata_type`` equals ``"DynamicTable"`` (bytes or str).
     """
-    nwb_path = Path(nwb_path)
 
     def _attr_str(obj: h5py.Group, key: str) -> Optional[str]:
         if key not in obj.attrs:
@@ -178,17 +181,15 @@ def find_dynamic_tables_missing_id(nwb_path: str | Path) -> List[str]:
 
     bad_paths: List[str] = []
 
-    with h5py.File(nwb_path, "r") as f:
+    def _visitor(name: str, obj) -> None:
+        if isinstance(obj, h5py.Group):
+            ndt = _attr_str(obj, "neurodata_type")
+            if ndt == "DynamicTable":
+                # Minimal check: only presence of 'id' key
+                if "id" not in obj.keys():
+                    bad_paths.append(f"/{name}")
 
-        def _visitor(name: str, obj) -> None:
-            if isinstance(obj, h5py.Group):
-                ndt = _attr_str(obj, "neurodata_type")
-                if ndt == "DynamicTable":
-                    # Minimal check: only presence of 'id' key
-                    if "id" not in obj.keys():
-                        bad_paths.append(f"/{name}")
-
-        f.visititems(_visitor)
+    file.visititems(_visitor)
 
     bad_paths.sort()
     return bad_paths
@@ -226,7 +227,7 @@ def add_id_column_to_table(file: h5py.File, dataset_path: str):
         )
 
     if "id" in obj.keys():
-        print(
+        logger.info(
             f"'id' column already exists in '{dataset_path}'. No action taken."
         )
         return
