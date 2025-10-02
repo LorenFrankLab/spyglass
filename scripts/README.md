@@ -118,12 +118,17 @@ Note: DeepLabCut, Moseq, and Decoding require separate installation.
 
 The installer supports three database setup options:
 
-### Option 1: Docker (Recommended for Local Development)
+### Option 1: Docker Compose (Recommended for Local Development)
 
-Automatically set up a local MySQL database using Docker:
+Automatically set up a local MySQL database using Docker Compose:
 
 ```bash
-python scripts/install.py --docker
+python scripts/install.py --docker  # Auto-uses Compose
+```
+
+Or directly:
+```bash
+docker compose up -d
 ```
 
 This creates a container named `spyglass-db` with:
@@ -132,6 +137,22 @@ This creates a container named `spyglass-db` with:
 - User: root
 - Password: tutorial
 - TLS: Disabled
+- Persistent storage via Docker volume
+
+**Benefits:**
+- One-command setup
+- Infrastructure as code (version controlled)
+- Easy to customize via `.env` file
+- Built-in health checks
+
+**Customization:**
+```bash
+# Create .env file to customize settings
+cp .env.example .env
+nano .env  # Edit MYSQL_PORT, MYSQL_ROOT_PASSWORD, etc.
+```
+
+See `docker-compose.yml` and `.env.example` in the repository root.
 
 ### Option 2: Remote Database
 
@@ -179,12 +200,14 @@ Without flags, the installer presents an interactive menu:
 python scripts/install.py
 
 Database setup:
-  1. Docker (local MySQL container)
-  2. Remote (connect to existing database)
-  3. Skip (configure later)
+  1. Docker Compose (Recommended) - One-command setup
+  2. Remote - Connect to existing database
+  3. Skip - Configure later
 
 Choice [1-3]:
 ```
+
+The installer will auto-detect if Docker Compose is available and recommend it.
 
 ### Option 4: Manual Setup
 

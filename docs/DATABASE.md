@@ -4,12 +4,12 @@ Spyglass requires a MySQL database backend for storing experimental data and ana
 
 ## Quick Start (Recommended)
 
-The easiest way to set up a database is using the installer:
+The easiest way to set up a database is using the installer with Docker Compose:
 
 ```bash
 cd spyglass
 python scripts/install.py
-# Choose option 1 (Docker) when prompted
+# Choose option 1 (Docker Compose) when prompted
 ```
 
 This automatically:
@@ -18,20 +18,27 @@ This automatically:
 - Waits for MySQL to be ready
 - Creates configuration file with credentials
 
+**Or use Docker Compose directly:**
+```bash
+cd spyglass
+docker compose up -d
+```
+
 ## Setup Options
 
-### Option 1: Docker (Recommended for Local Development)
+### Option 1: Docker Compose (Recommended for Local Development)
 
 **Pros:**
-- Quick setup (2-3 minutes)
-- Isolated from system
-- Easy to reset/remove
-- Same environment across platforms
+- One-command setup (~2 minutes)
+- Infrastructure as code (version controlled)
+- Easy to customize via .env file
+- Industry-standard tool
+- Persistent data storage
+- Health checks built-in
 
 **Cons:**
-- Requires Docker Desktop
+- Requires Docker Desktop with Compose plugin
 - Uses system resources when running
-- Not suitable for production
 
 #### Prerequisites
 
@@ -42,83 +49,93 @@ This automatically:
 
 2. **Start Docker Desktop** and ensure it's running
 
+3. **Verify Compose is available:**
+   ```bash
+   docker compose version
+   # Should show: Docker Compose version v2.x.x
+   ```
+
 #### Setup
 
 **Using installer (recommended):**
 ```bash
-python scripts/install.py --docker
+python scripts/install.py --docker  # Will auto-detect and use Compose
 ```
 
-**Manual setup:**
+**Using Docker Compose directly:**
 ```bash
-# Pull MySQL image
-docker pull datajoint/mysql:8.0
-
-# Create and start container
-docker run -d \
-  --name spyglass-db \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=tutorial \
-  datajoint/mysql:8.0
-
-# Wait for MySQL to be ready
-docker exec spyglass-db mysqladmin -uroot -ptutorial ping
-
-# Create DataJoint config
-cat > ~/.datajoint_config.json << EOF
-{
-  "database.host": "localhost",
-  "database.port": 3306,
-  "database.user": "root",
-  "database.password": "tutorial",
-  "database.use_tls": false
-}
-EOF
+# From spyglass repository root
+docker compose up -d
 ```
+
+The default configuration uses:
+- Port: 3306
+- Password: tutorial
+- Container name: spyglass-db
+- Persistent storage: spyglass-db-data volume
+
+#### Customization (Optional)
+
+Create a `.env` file to customize settings:
+
+```bash
+# Copy example
+cp .env.example .env
+
+# Edit settings
+nano .env
+```
+
+Available options:
+```bash
+# Change port if 3306 is in use
+MYSQL_PORT=3307
+
+# Change root password (for production)
+MYSQL_ROOT_PASSWORD=your-secure-password
+
+# Use different MySQL version
+MYSQL_IMAGE=datajoint/mysql:8.4
+```
+
+**Important:** If you change port or password, update your DataJoint config accordingly.
 
 #### Management
 
-**Start/stop container:**
+**Start/stop services:**
 ```bash
 # Start
-docker start spyglass-db
+docker compose up -d
 
-# Stop
-docker stop spyglass-db
+# Stop (keeps data)
+docker compose stop
 
-# Check status
-docker ps -a | grep spyglass-db
+# Stop and remove containers (keeps data)
+docker compose down
+
+# Stop and remove everything including data
+docker compose down -v  # WARNING: Deletes all data!
 ```
 
 **View logs:**
 ```bash
-docker logs spyglass-db
+docker compose logs mysql
+docker compose logs -f mysql  # Follow mode
+```
+
+**Check status:**
+```bash
+docker compose ps
 ```
 
 **Access MySQL shell:**
 ```bash
-docker exec -it spyglass-db mysql -uroot -ptutorial
+docker compose exec mysql mysql -uroot -ptutorial
 ```
 
-**Reset database:**
+**Restart services:**
 ```bash
-# WARNING: This deletes all data!
-docker rm -f spyglass-db
-# Then create new container with setup commands above
-```
-
-**Persistent data (optional):**
-```bash
-# Create volume for persistent storage
-docker volume create spyglass-data
-
-# Run with volume mount
-docker run -d \
-  --name spyglass-db \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=tutorial \
-  -v spyglass-data:/var/lib/mysql \
-  datajoint/mysql:8.0
+docker compose restart
 ```
 
 ### Option 2: Remote Database (Lab/Cloud Setup)

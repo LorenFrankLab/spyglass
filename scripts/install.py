@@ -602,76 +602,64 @@ def is_docker_available_inline() -> bool:
         return False
 
 
-def start_docker_container_inline() -> None:
-    """Start Docker container (inline, no imports).
-
-    Creates or starts spyglass-db MySQL container with default credentials.
-
-    Parameters
-    ----------
-    None
+def is_docker_compose_available_inline() -> bool:
+    """Check if Docker Compose is installed (inline, no imports).
 
     Returns
     -------
-    None
-
-    Raises
-    ------
-    subprocess.CalledProcessError
-        If docker commands fail
+    bool
+        True if 'docker compose' command is available, False otherwise
 
     Notes
     -----
     This is self-contained because spyglass isn't installed yet.
+    Checks for modern 'docker compose' (not legacy 'docker-compose').
     """
-    container_name = "spyglass-db"
-    image = "datajoint/mysql:8.0"
-    port = 3306
-
-    # Check if container already exists
-    result = subprocess.run(
-        ["docker", "ps", "-a", "--format", "{{.Names}}"],
-        capture_output=True,
-        text=True,
-    )
-
-    if container_name in result.stdout:
-        # Start existing container
-        print_step("Starting existing container...")
-        subprocess.run(["docker", "start", container_name], check=True)
-    else:
-        # Pull image first (better UX - shows progress)
-        show_progress_message(f"Pulling Docker image {image}", 2)
-        subprocess.run(["docker", "pull", image], check=True)
-
-        # Create and start new container
-        print_step("Creating container...")
-        subprocess.run(
-            [
-                "docker",
-                "run",
-                "-d",
-                "--name",
-                container_name,
-                "-p",
-                f"{port}:3306",
-                "-e",
-                "MYSQL_ROOT_PASSWORD=tutorial",
-                image,
-            ],
-            check=True,
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            timeout=5,
         )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 
-def wait_for_mysql_inline(timeout: int = 60) -> None:
-    """Wait for MySQL to be ready (inline, no imports).
+def get_compose_command_inline() -> list[str]:
+    """Get the appropriate Docker Compose command (inline, no imports).
 
-    Polls MySQL container until it responds to ping or timeout occurs.
+    Returns
+    -------
+    list[str]
+        Command prefix for Docker Compose (e.g., ['docker', 'compose'])
+
+    Notes
+    -----
+    This is self-contained because spyglass isn't installed yet.
+    Always returns modern 'docker compose' format.
+    """
+    return ["docker", "compose"]
+
+
+def generate_env_file_inline(
+    mysql_port: int = 3306,
+    mysql_password: str = "tutorial",
+    mysql_image: str = "datajoint/mysql:8.0",
+    env_path: str = ".env",
+) -> None:
+    """Generate .env file for Docker Compose (inline, no imports).
 
     Parameters
     ----------
-    timeout : int, optional
-        Maximum time to wait in seconds (default: 60)
+    mysql_port : int, optional
+        MySQL port number (default: 3306)
+    mysql_password : str, optional
+        MySQL root password (default: 'tutorial')
+    mysql_image : str, optional
+        Docker image to use (default: 'datajoint/mysql:8.0')
+    env_path : str, optional
+        Path to write .env file (default: '.env')
 
     Returns
     -------
@@ -679,50 +667,64 @@ def wait_for_mysql_inline(timeout: int = 60) -> None:
 
     Raises
     ------
-    TimeoutError
-        If MySQL does not become ready within timeout period
+    OSError
+        If file cannot be written
 
     Notes
     -----
     This is self-contained because spyglass isn't installed yet.
+    Only writes non-default values to keep .env file minimal.
     """
-    import time
+    env_lines = ["# Spyglass Docker Compose Configuration", ""]
 
-    container_name = "spyglass-db"
-    print_step("Waiting for MySQL to be ready...")
-    print("  Checking connection", end="", flush=True)
+    # Only write non-default values
+    if mysql_password != "tutorial":
+        env_lines.append(f"MYSQL_ROOT_PASSWORD={mysql_password}")
+    if mysql_port != 3306:
+        env_lines.append(f"MYSQL_PORT={mysql_port}")
+    if mysql_image != "datajoint/mysql:8.0":
+        env_lines.append(f"MYSQL_IMAGE={mysql_image}")
 
-    for attempt in range(timeout // 2):
-        try:
-            result = subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    container_name,
-                    "mysqladmin",
-                    "-uroot",
-                    "-ptutorial",
-                    "ping",
-                ],
-                capture_output=True,
-                timeout=5,
-            )
+    # If all defaults, don't create file (compose will use defaults)
+    if len(env_lines) == 2:  # Only header lines
+        return
 
-            if result.returncode == 0:
-                print()  # New line after dots
-                return  # Success!
+    with open(env_path, "w") as f:
+        f.write("\n".join(env_lines) + "\n")
 
-        except subprocess.TimeoutExpired:
-            pass
 
-        if attempt < (timeout // 2) - 1:
-            print(".", end="", flush=True)
-            time.sleep(2)
+def validate_env_file_inline(env_path: str = ".env") -> bool:
+    """Validate .env file exists and is readable (inline, no imports).
 
-    print()  # New line after dots
-    raise TimeoutError(
-        "MySQL did not become ready. Try:\n" "  docker logs spyglass-db"
-    )
+    Parameters
+    ----------
+    env_path : str, optional
+        Path to .env file (default: '.env')
+
+    Returns
+    -------
+    bool
+        True if file exists and is readable (or doesn't exist, which is OK),
+        False if file exists but has issues
+
+    Notes
+    -----
+    This is self-contained because spyglass isn't installed yet.
+    Missing .env file is NOT an error (defaults will be used).
+    """
+    import os
+
+    # Missing .env is fine - compose uses defaults
+    if not os.path.exists(env_path):
+        return True
+
+    # If it exists, make sure it's readable
+    try:
+        with open(env_path, "r") as f:
+            f.read()
+        return True
+    except (OSError, PermissionError):
+        return False
 
 
 def create_database_config(
@@ -991,7 +993,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 def get_database_options() -> list:
     """Get available database options based on system capabilities.
 
-    Checks Docker availability and returns appropriate menu options.
+    Checks Docker Compose availability and returns menu options.
 
     Parameters
     ----------
@@ -999,27 +1001,39 @@ def get_database_options() -> list:
 
     Returns
     -------
-    list of tuple
+    options : list of tuple
         List of (number, name, status, description) tuples for menu display
+    compose_available : bool
+        True if Docker Compose is available
 
     Examples
     --------
-    >>> options = get_database_options()
+    >>> options, compose_avail = get_database_options()
     >>> for num, name, status, desc in options:
     ...     print(f"{num}. {name} - {status}")
     """
     options = []
 
-    # Check Docker availability
-    docker_available = is_docker_available_inline()
+    # Check Docker Compose availability
+    compose_available = is_docker_compose_available_inline()
 
-    if docker_available:
+    if compose_available:
         options.append(
-            ("1", "Docker", "✓ Available", "Quick setup for local development")
+            (
+                "1",
+                "Docker Compose",
+                "✓ Available (Recommended)",
+                "One-command setup with docker-compose.yml",
+            )
         )
     else:
         options.append(
-            ("1", "Docker", "✗ Not available", "Requires Docker installation")
+            (
+                "1",
+                "Docker Compose",
+                "✗ Not available",
+                "Requires Docker with Compose plugin",
+            )
         )
 
     options.append(
@@ -1027,7 +1041,7 @@ def get_database_options() -> list:
     )
     options.append(("3", "Skip", "✓ Available", "Configure manually later"))
 
-    return options, docker_available
+    return options, compose_available
 
 
 def prompt_database_setup() -> str:
@@ -1043,51 +1057,54 @@ def prompt_database_setup() -> str:
     Returns
     -------
     str
-        One of: 'docker' (local Docker database), 'remote' (existing database),
+        One of: 'compose' (Docker Compose), 'remote' (existing database),
         or 'skip' (configure later)
 
     Examples
     --------
     >>> choice = prompt_database_setup()
-    >>> if choice == "docker":
-    ...     setup_database_docker()
+    >>> if choice == "compose":
+    ...     setup_database_compose()
     """
     print("\n" + "=" * 60)
     print("Database Setup")
     print("=" * 60)
 
-    options, docker_available = get_database_options()
+    options, compose_available = get_database_options()
 
     print("\nOptions:")
     for num, name, status, description in options:
         # Color status based on availability
         status_color = COLORS["green"] if "✓" in status else COLORS["red"]
-        print(f"  {num}. {name:15} {status_color}{status}{COLORS['reset']}")
+        print(f"  {num}. {name:20} {status_color}{status}{COLORS['reset']}")
         print(f"      {description}")
 
-    # If Docker not available, guide user
-    if not docker_available:
-        print(f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker is not available")
-        print("  To enable Docker option:")
-        print("    1. Install Docker: https://docs.docker.com/get-docker/")
+    # If Docker Compose not available, guide user
+    if not compose_available:
+        print(
+            f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker Compose is not available"
+        )
+        print("  To enable Docker Compose:")
+        print(
+            "    1. Install Docker Desktop: https://docs.docker.com/get-docker/"
+        )
         print("    2. Start Docker Desktop")
-        print("    3. Re-run installer")
+        print("    3. Verify: docker compose version")
+        print("    4. Re-run installer")
 
     # Get valid choices
-    valid_choices = ["2", "3"]  # Always available
-    if docker_available:
+    valid_choices = ["2", "3"]  # Remote and Skip always available
+    if compose_available:
         valid_choices.insert(0, "1")
 
     while True:
         choice = input(f"\nChoice [{'/'.join(valid_choices)}]: ").strip()
 
         if choice == "1":
-            if docker_available:
-                return "docker"
+            if compose_available:
+                return "compose"
             else:
-                print_error(
-                    "Docker is not available. Please choose option 2 or 3"
-                )
+                print_error("Docker Compose is not available")
         elif choice == "2":
             return "remote"
         elif choice == "3":
@@ -1096,16 +1113,37 @@ def prompt_database_setup() -> str:
             print_error(f"Please enter {' or '.join(valid_choices)}")
 
 
-def setup_database_docker() -> Tuple[bool, str]:
-    """Set up local Docker database.
+def cleanup_failed_compose_setup_inline() -> None:
+    """Clean up after failed Docker Compose setup (inline, no imports).
 
-    Checks Docker availability, starts MySQL container, waits for readiness,
-    and creates configuration file. Uses inline docker commands since
-    spyglass package is not yet installed.
+    Stops and removes containers created by Docker Compose if setup fails.
+    This ensures a clean state for retry attempts.
 
-    Parameters
-    ----------
+    Returns
+    -------
     None
+
+    Notes
+    -----
+    This is self-contained because spyglass isn't installed yet.
+    Silently handles errors - cleanup is best-effort.
+    """
+    try:
+        compose_cmd = get_compose_command_inline()
+        subprocess.run(
+            compose_cmd + ["down", "-v"],
+            capture_output=True,
+            timeout=30,
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass  # Best-effort cleanup
+
+
+def setup_database_compose() -> Tuple[bool, str]:
+    """Set up database using Docker Compose.
+
+    Checks Docker Compose availability, generates .env if needed,
+    starts services, waits for readiness, and creates configuration file.
 
     Returns
     -------
@@ -1117,61 +1155,157 @@ def setup_database_docker() -> Tuple[bool, str]:
     Notes
     -----
     This function cannot import from spyglass because spyglass hasn't been
-    installed yet. All docker operations must be inline.
+    installed yet. All operations must be inline.
+
+    Uses docker-compose.yml in repository root for configuration.
+    Creates .env file only if non-default values are needed.
 
     Examples
     --------
-    >>> success, reason = setup_database_docker()
+    >>> success, reason = setup_database_compose()
     >>> if success:
     ...     print("Database ready")
     """
-    print_step("Setting up Docker database...")
+    import time
 
-    # Check Docker availability (inline, no imports)
-    if not is_docker_available_inline():
-        return False, "docker_unavailable"
+    print_step("Setting up database with Docker Compose...")
+
+    # Check Docker Compose availability
+    if not is_docker_compose_available_inline():
+        return False, "compose_unavailable"
 
     # Check if port 3306 is available
-    port_available, port_msg = is_port_available("localhost", 3306)
+    port = 3306  # Default port (could be customized via .env)
+    port_available, port_msg = is_port_available("localhost", port)
     if not port_available:
         print_error(port_msg)
-        print("\n  Something else is using port 3306. Common causes:")
-        print("    • MySQL/MariaDB already running")
-        print("    • Another Docker container using this port")
-        print("    • PostgreSQL or other database on default port")
-        print("\n  Solutions:")
+        print("\n  Port 3306 is already in use. Solutions:")
         print("    1. Stop the existing service:")
         print("       sudo systemctl stop mysql")
-        print("       # or: sudo service mysql stop")
-        print("    2. Find what's using the port:")
+        print("    2. Use a different port:")
+        print("       Create .env file with: MYSQL_PORT=3307")
+        print("       (and update DataJoint config to match)")
+        print("    3. Find what's using the port:")
         print("       sudo lsof -i :3306")
-        print("       sudo netstat -tulpn | grep 3306")
-        print("    3. Remove conflicting Docker container:")
-        print("       docker ps | grep 3306")
-        print("       docker stop <container-name>")
         return False, "port_in_use"
 
     try:
-        # Start container (inline docker commands)
-        start_docker_container_inline()
-        print_success("Database container started")
+        # Generate .env file (only if customizations needed)
+        # For now, use all defaults - no .env file needed
+        # Future: could prompt for port/password customization
+        generate_env_file_inline()
 
-        # Wait for MySQL readiness
-        wait_for_mysql_inline()
-        print_success("MySQL is ready")
+        # Validate .env if it exists
+        if not validate_env_file_inline():
+            return False, "env_file_invalid"
+
+        # Get compose command
+        compose_cmd = get_compose_command_inline()
+
+        # Pull images first (better UX - shows progress)
+        show_progress_message("Pulling Docker images", 2)
+        result = subprocess.run(
+            compose_cmd + ["pull"],
+            capture_output=True,
+            timeout=300,  # 5 minutes for image pull
+        )
+        if result.returncode != 0:
+            print_error(f"Failed to pull images: {result.stderr.decode()}")
+            return False, "pull_failed"
+
+        # Start services
+        print_step("Starting services...")
+        result = subprocess.run(
+            compose_cmd + ["up", "-d"],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            error_msg = result.stderr.decode()
+            print_error(f"Failed to start services: {error_msg}")
+            cleanup_failed_compose_setup_inline()
+            return False, "start_failed"
+
+        print_success("Services started")
+
+        # Wait for MySQL readiness using health check
+        print_step("Waiting for MySQL to be ready...")
+        print("  Checking connection", end="", flush=True)
+
+        for attempt in range(30):  # 60 seconds max
+            try:
+                # Check if service is healthy
+                result = subprocess.run(
+                    compose_cmd + ["ps", "--format", "json"],
+                    capture_output=True,
+                    timeout=5,
+                )
+
+                if result.returncode == 0:
+                    # Parse JSON output to check health
+                    import json
+
+                    try:
+                        services = json.loads(result.stdout.decode())
+                        # Handle both single dict and list of dicts
+                        if isinstance(services, dict):
+                            services = [services]
+
+                        mysql_service = next(
+                            (
+                                s
+                                for s in services
+                                if "mysql" in s.get("Service", "")
+                            ),
+                            None,
+                        )
+
+                        if mysql_service and "healthy" in mysql_service.get(
+                            "Health", ""
+                        ):
+                            print()  # New line after dots
+                            print_success("MySQL is ready")
+                            break
+                    except (json.JSONDecodeError, StopIteration):
+                        pass
+
+            except subprocess.TimeoutExpired:
+                pass
+
+            if attempt < 29:
+                print(".", end="", flush=True)
+                time.sleep(2)
+        else:
+            # Timeout - provide debug info
+            print()
+            print_error("MySQL did not become ready within 60 seconds")
+            print("\n  Check logs:")
+            print("    docker compose logs mysql")
+            cleanup_failed_compose_setup_inline()
+            return False, "timeout"
 
         # Create configuration file (local Docker defaults)
         create_database_config(
             host="localhost",
-            port=3306,
+            port=port,
             user="root",
-            password="tutorial",
+            password="tutorial",  # Default from .env.example
             use_tls=False,
         )
 
         return True, "success"
 
+    except subprocess.CalledProcessError as e:
+        print_error(f"Docker Compose command failed: {e}")
+        cleanup_failed_compose_setup_inline()
+        return False, str(e)
+    except subprocess.TimeoutExpired:
+        print_error("Docker Compose command timed out")
+        cleanup_failed_compose_setup_inline()
+        return False, "timeout"
     except Exception as e:
+        print_error(f"Unexpected error: {e}")
+        cleanup_failed_compose_setup_inline()
         return False, str(e)
 
 
@@ -1264,15 +1398,15 @@ def handle_database_setup_interactive() -> None:
     while True:
         db_choice = prompt_database_setup()
 
-        if db_choice == "docker":
-            success, reason = setup_database_docker()
+        if db_choice == "compose":
+            success, reason = setup_database_compose()
             if success:
                 break
             else:
-                print_error("Docker setup failed")
-                if reason == "docker_unavailable":
-                    print("\nDocker is not available.")
-                    print("  Option 1: Install Docker and restart")
+                print_error("Docker Compose setup failed")
+                if reason == "compose_unavailable":
+                    print("\nDocker Compose is not available.")
+                    print("  Option 1: Install Docker Desktop and restart")
                     print("  Option 2: Choose remote database")
                     print("  Option 3: Skip for now")
                 else:
@@ -1281,9 +1415,7 @@ def handle_database_setup_interactive() -> None:
                 retry = input("\nTry different option? [Y/n]: ").strip().lower()
                 if retry in ["n", "no"]:
                     print_warning("Skipping database setup")
-                    print(
-                        "  Configure later: python scripts/install.py --docker"
-                    )
+                    print("  Configure later: docker compose up -d")
                     print("  Or manually: see docs/DATABASE.md")
                     break
                 # Loop continues to show menu again
@@ -1296,7 +1428,7 @@ def handle_database_setup_interactive() -> None:
 
         else:  # skip
             print_warning("Skipping database setup")
-            print("  Configure later: python scripts/install.py --docker")
+            print("  Configure later: docker compose up -d")
             print("  Or manually: see docs/DATABASE.md")
             break
 
@@ -1313,7 +1445,7 @@ def handle_database_setup_cli(
     Parameters
     ----------
     db_type : str
-        Either "docker" or "remote"
+        One of: "compose", "docker" (alias for compose), or "remote"
     db_host : str, optional
         Database host for remote connection
     db_port : int, optional
@@ -1327,12 +1459,16 @@ def handle_database_setup_cli(
     -------
     None
     """
+    # Treat 'docker' as alias for 'compose' for backward compatibility
     if db_type == "docker":
-        success, reason = setup_database_docker()
+        db_type = "compose"
+
+    if db_type == "compose":
+        success, reason = setup_database_compose()
         if not success:
-            print_error("Docker setup failed")
-            if reason == "docker_unavailable":
-                print_warning("Docker not available")
+            print_error("Docker Compose setup failed")
+            if reason == "compose_unavailable":
+                print_warning("Docker Compose not available")
                 print("  Install from: https://docs.docker.com/get-docker/")
             else:
                 print_error(f"Error: {reason}")
