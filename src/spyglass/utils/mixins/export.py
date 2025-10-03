@@ -130,6 +130,54 @@ class ExportMixin:
             logger.warning("Export not in progress.")
         del self.export_id
 
+    # --------------------------- Utility Functions ---------------------------
+
+    def _is_projected(self):
+        """Check if name projection has occurred in table"""
+        for attr in self.heading.attributes.values():
+            if attr.attribute_expression is not None:
+                return True
+        return False
+
+    def undo_projection(self, table_to_undo=None):
+        if table_to_undo is None:
+            table_to_undo = self
+        assert set(
+            [attr.name for attr in table_to_undo.heading.attributes.values()]
+        ) <= set(
+            [attr.name for attr in self.heading.attributes.values()]
+        ), "table_to_undo must be a projection of table"
+
+        anti_alias_dict = {
+            attr.attribute_expression.strip("`"): attr.name
+            for attr in self.heading.attributes.values()
+            if attr.attribute_expression is not None
+        }
+        if len(anti_alias_dict) == 0:
+            return table_to_undo
+        return table_to_undo.proj(**anti_alias_dict)
+
+    def _get_restricted_entries(self, restricted_table):
+        """Get set of keys for restricted table entries
+
+        Keys apply to original table definition
+
+        Parameters
+        ----------
+        restricted_table : Table
+            Table restricted to the entries to log
+
+        Returns
+        -------
+        List[dict]
+            List of keys for restricted table entries
+        """
+        if not self._is_projected():
+            return restricted_table.fetch("KEY", log_export=False)
+
+        # The restricted, projected table is a FreeTable, log_export keyword not relevant
+        return (self.undo_projection(restricted_table)).fetch("KEY")
+
     # ------------------------------- Log Fetch -------------------------------
 
     def _called_funcs(self):
@@ -168,7 +216,7 @@ class ExportMixin:
         return ret
 
     def _log_fetch(self, restriction=None, *args, **kwargs):
-        """Log fetch for export."""
+        """Logs the fetch for export."""
         if (
             not self.export_id
             or self.database == "common_usage"
@@ -203,20 +251,87 @@ class ExportMixin:
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
 
-        if isinstance(restr_str, str) and "SELECT" in restr_str:
-            raise RuntimeError(
-                "Export cannot handle subquery restrictions. Please submit a "
-                + "bug report on GitHub with the code you ran and this"
-                + f"restriction:\n\t{restr_str}"
+        if not (
+            isinstance(restr_str, str)
+            and (
+                (len(restr_str) > 2048)
+                or "SELECT" in restr_str
+                or self._is_projected()
+            )
+        ):
+            self._insert_log(restr_str)
+            return
+
+        if "SELECT" in restr_str:
+            logger.debug(
+                "Restriction contains subquery. Exporting entry restrictions instead"
             )
 
-        if isinstance(restr_str, str) and len(restr_str) > 2048:
+        else:
+            # handle excessive restrictions caused by long OR list of dicts
+            logger.debug(
+                f"Restriction too long ({len(restr_str)} > 2048)."
+                + "Attempting to chunk restriction by subsets of entry keys."
+            )
+        # get list of entry keys
+        restricted_table = (
+            self.restrict(restriction, log_export=False)
+            if restriction
+            else self
+        )
+        if len(restricted_table) == 0:
+            # No export entry needed if no selected entries
+            return
+
+        restricted_entries = self._get_restricted_entries(restricted_table)
+        self._insert_entries_log(restricted_entries)
+        return
+
+    def _insert_entries_log(self, entries):
+        """Inserts table access log given list of entry keys.
+
+        If the restriction string exceeds 2048 characters, the entries
+        are chunked into smaller groups to fit within the limit.
+        Parameters
+        ----------
+        entries : List[dict]
+            List of keys for restricted table entries
+        Returns
+        -------
+        None
+        """
+        all_entries_restr_str = make_condition(
+            self.undo_projection(), entries, set()
+        )
+        if len(all_entries_restr_str) <= 2048:
+            self._insert_log(all_entries_restr_str)
+            return
+
+        if len(entries) == 1:
+            raise RuntimeError(
+                "Single entry restriction exceeds 2048 characters.\n\t"
+                + f"Restriction: {all_entries_restr_str}"
+            )
+        chunk_size = max(
+            int(2048 // (len(all_entries_restr_str) / len(entries)) - 1),
+            1,
+        )
+        for i in range(len(entries) // chunk_size + 1):
+            chunk_entries = entries[i * chunk_size : (i + 1) * chunk_size]
+            if not chunk_entries:
+                break
+            self._insert_log(chunk_entries)
+        return
+
+    def _insert_log(self, restr_str):
+        """Executes insert log entry for export table and restriction."""
+
+        if len(restr_str) > 2048:
             raise RuntimeError(
                 "Export cannot handle restrictions > 2048.\n\t"
                 + "If required, please open an issue on GitHub.\n\t"
                 + f"Restriction: {restr_str}"
             )
-
         if isinstance(restr_str, str):
             restr_str = bash_escape_sql(restr_str, add_newline=False)
 
@@ -247,7 +362,7 @@ class ExportMixin:
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
+        fnames_str = "('" + "', '".join(fnames) + "')"  # log AnalysisFile table
         table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
 
     def _run_join(self, **kwargs):
@@ -268,8 +383,8 @@ class ExportMixin:
         for table in table_list:  # log separate for unique pks
             if isinstance(table, type) and issubclass(table, Table):
                 table = table()  # adapted from dj.declare.compile_foreign_key
-            for r in joined.fetch(*table.primary_key, as_dict=True):
-                table._log_fetch(restriction=r)
+            restr = joined.fetch(*table.primary_key, as_dict=True)
+            table._log_fetch(restriction=restr)
 
     def _run_with_log(self, method, *args, log_export=True, **kwargs):
         """Run method, log fetch, and return result.
@@ -292,10 +407,6 @@ class ExportMixin:
                 self._run_join(**kwargs)
             else:
                 restr = kwargs.get("restriction")
-                if isinstance(restr, QueryExpression) and getattr(
-                    restr, "restriction"  # if table, try to get restriction
-                ):
-                    restr = restr.restriction
                 self._log_fetch(restriction=restr)
             logger.debug(f"Export: {self._called_funcs()}")
 
@@ -323,12 +434,13 @@ class ExportMixin:
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, log_export=None):
         """Log restrict for export."""
         if not self.export_id:
             return super().restrict(restriction)
 
-        log_export = "fetch_nwb" not in self._called_funcs()
+        if log_export is None:
+            log_export = "fetch_nwb" not in self._called_funcs()
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
         else:  # Only combine if both are restricting

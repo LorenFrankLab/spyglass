@@ -169,16 +169,6 @@ class PositionSource(SpyglassMixin, dj.Manual):
 
 @schema
 class RawPosition(SpyglassMixin, dj.Imported):
-    """
-
-    Notes
-    -----
-    The position timestamps come from: .pos_cameraHWSync.dat.
-    If PTP is not used, the position timestamps are inferred by finding the
-    closest timestamps from the neural recording via the trodes time.
-
-    """
-
     definition = """
     -> PositionSource
     """
