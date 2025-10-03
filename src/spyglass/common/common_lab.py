@@ -295,12 +295,10 @@ class Institution(SpyglassIngestion, dj.Manual):
     def _source_nwb_object_type(self):
         return pynwb.NWBFile
 
-    def _adjust_key_for_entry(self, key):
+    def _adjust_keys_for_entry(self, keys):
         """Ensure that institution_name is not None."""
         # Prevents attempted insert when nwbfile.institution is None
-        if not key.get("institution_name", None):
-            return None
-        return key
+        return [k for k in keys if key.get("institution_name", None)]
 
 
 @schema

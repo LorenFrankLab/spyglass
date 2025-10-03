@@ -1,3 +1,4 @@
+import inspect
 import os
 import sys
 from abc import abstractmethod
@@ -5,7 +6,7 @@ from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
 from time import time
-from typing import Any, Callable, Dict, List, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeAlias, Union
 
 import datajoint as dj
 from datajoint.errors import DataJointError
@@ -1016,6 +1017,12 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
         restricted.delete(*args, **kwargs)
 
 
+IngestionEntries: TypeAlias = Dict["SpyglassIngestion", List[dict]]
+# How SpyglassIngestion handles generated entries from NWB objects
+# Dict keys are SpyglassIngestion table classes, or FreeTable Table objects
+# Values are lists of dicts to insert into those tables
+
+
 class SpyglassIngestion(SpyglassMixin):
     """A mixin for Spyglass tables that ingest data from NWB files.
 
@@ -1026,6 +1033,13 @@ class SpyglassIngestion(SpyglassMixin):
         keys with inserted, entries and allows for skipping duplicates on insert
     _prompt_insert : bool
         If true, prompts user before inserting new table entries from NWB file.
+    _only_ingest_first : bool
+        If true, only ingests the first matching NWB object from the file.
+    _source_nwb_object_name : str, optional
+        If set, only ingests NWB objects with this name. Useful for
+        distinguishing between multiple objects of the same type. E.g.
+        BehavioralEvents named 'behavioral_events' vs 'analog' or 'video'
+        objects of the same type ingested by DIOEvents table.
     table_key_to_obj_attr : Dict[str, Dict[str, Union[str, Callable]]]
         A dict of dicts mapping table keys to NWB object attributes.
     _source_nwb_object_type : Type
@@ -1036,6 +1050,8 @@ class SpyglassIngestion(SpyglassMixin):
 
     _expected_duplicates = False
     _prompt_insert = False
+    _only_ingest_first = False
+    _source_nwb_object_name = None  # Optional filter on object name
 
     @property
     def table_key_to_obj_attr(
@@ -1073,25 +1089,30 @@ class SpyglassIngestion(SpyglassMixin):
 
     def generate_entries_from_config(
         self, config: dict, base_key=None
-    ) -> List[dict]:
+    ) -> IngestionEntries:
         """Generates a list of table entries from a config dictionary."""
 
         base_key = base_key or dict()
         self_entries = config.get(self.camel_name, [])
-        ret = self._config_entries(self, base_key, self_entries)
+        entries = self._config_entries(self, base_key, self_entries)
 
         for part in self.parts(as_objects=True):
             camel_part = to_camel_case(part.full_table_name.split("__")[-1])
             part_entries = config.get(camel_part, [])
             if len(part_entries) == 0:
                 continue
-            ret.update(self._config_entries(part, base_key, part_entries))
-        return ret
+            entries[part] = self._config_entries(part, base_key, part_entries)
+
+        return entries
 
     def generate_entries_from_nwb_object(
         self, nwb_obj, base_key=None
-    ) -> Dict["SpyglassIngestion", List[dict]]:
-        """Generates a list of table entries from an NWB object."""
+    ) -> IngestionEntries:
+        """Generates a list of table entries from an NWB object.
+
+        If generating entries for multiple tables, ensure the parent entry is
+        returned before the child in the IngestionEntries dict.
+        """
         base_key = base_key or dict()
         base_key = base_key.copy()  # avoid modifying original
 
@@ -1144,17 +1165,29 @@ class SpyglassIngestion(SpyglassMixin):
             if isinstance(obj, self._source_nwb_object_type)
         ]
 
+        if self._source_nwb_object_name:
+            matching_objects = [
+                obj
+                for obj in matching_objects
+                if getattr(obj, "name", None) == self._source_nwb_object_name
+            ]
+
         return matching_objects
 
     def _insert_logline(self, nwb_file_name, n_entries, table):
         """Log line for insert_from_nwbfile."""
 
         # String formatting permits either SpyglassMixin or FreeTable objects
-        camel = to_camel_case(  # table name, using Master.Part
-            table.full_table_name.split(".")[-1].replace("__", ".")
-        ).strip("`")
+        def _camel(s):
+            return to_camel_case(s.split(".")[-1].replace("__", ".")).strip("`")
 
-        logger.info(f"{nwb_file_name} inserts {n_entries} into {camel}")
+        this_tbl = _camel(table.full_table_name)
+        self_tbl = _camel(self.full_table_name)
+
+        suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
+        logger.info(
+            f"{nwb_file_name} inserts {n_entries} into {this_tbl}{suffix}"
+        )
 
     def insert_from_nwbfile(
         self,
@@ -1193,38 +1226,29 @@ class SpyglassIngestion(SpyglassMixin):
             if len(fetched_objs) > 0
             else dict()
         )
-        next_objs = fetched_objs[1:] if len(fetched_objs) > 1 else []
-        for nwb_obj in fetched_objs[1:]:
-            obj_entries = self.generate_entries_from_nwb_object(
-                nwb_obj,
-                base_entry.copy(),
-            )
-            if isinstance(entries, list):
-                raise RuntimeError("TODO: this is no longer the case, right?")
-                # entries.extend(obj_entries)
-            for table, table_entries in obj_entries.items():
-                entries[table].extend(table_entries)
+        if not self._only_ingest_first:
+            next_objs = fetched_objs[1:] if len(fetched_objs) > 1 else []
+            for nwb_obj in fetched_objs[1:]:
+                obj_entries = self.generate_entries_from_nwb_object(
+                    nwb_obj,
+                    base_entry.copy(),
+                )
+                for table, table_entries in obj_entries.items():
+                    entries[table].extend(table_entries)
 
         if config:
-            entries.update(self.generate_entries_from_config(config))
-            # TODO handle for part tables
+            config_entries = self.generate_entries_from_config(config)
+            for table, table_entries in config_entries.items():
+                if table in entries:
+                    entries[table].extend(table_entries)
+                else:
+                    entries[table] = table_entries
 
         # Remove tables with no entries - if all entries 'None', skip table
         # Motivated by nwb with no Institution, results in nulled fk subj ref
-        null_keys = []
-        for table, table_entries in entries.items():
-            # Allow children to adjust keys before comparing
-            adjusted_entries = self._adjust_keys_for_entries(table_entries)
-            # Remove None entries
-            actual_entries = [v for v in adjusted_entries if v is not None]
-            if not any(actual_entries):
-                null_keys.append(table)  # mark for removal from dict
-            else:
-                entries[table] = actual_entries
-        for table in null_keys:
-            self._insert_logline(nwb_file_name, 0, table)
-            _ = entries.pop(table)
-
+        debug_backup = entries.copy()
+        _ = debug_backup  # Intentionally kept for debugging
+        entries = self._adjust_entries(entries)
         if entries is None or len(entries) == 0:
             return dict()
 
@@ -1238,7 +1262,9 @@ class SpyglassIngestion(SpyglassMixin):
 
         return entries
 
-    def _run_nwbfile_insert(self, entries: dict, nwb_file_name: str = None):
+    def _run_nwbfile_insert(
+        self, entries: IngestionEntries, nwb_file_name: str = None
+    ) -> None:
         """Run insert on compiled Dict[TableObject, inserts]."""
 
         def expect_dupes(tbl):
@@ -1249,6 +1275,8 @@ class SpyglassIngestion(SpyglassMixin):
                 or self._expected_duplicates
             )
 
+        # An integrity here probably means a parallel insert was dropped
+        # check debug_backup in parent func for entries that were dropped
         for table, table_entries in entries.items():
             table.insert(
                 table_entries,
@@ -1256,7 +1284,6 @@ class SpyglassIngestion(SpyglassMixin):
                 # skip_duplicates=True,  # TODO: revert before merge
                 allow_direct_insert=True,
             )
-            # Logging
             self._insert_logline(nwb_file_name, len(table_entries), table)
 
     def _key_has_required_attrs(self, key):
@@ -1268,18 +1295,52 @@ class SpyglassIngestion(SpyglassMixin):
                 return False
         return True
 
-    def _adjust_key_for_entry(self, key):
+    def _adjust_keys_for_entry(self, keys: List[dict]) -> List[dict]:
         """Passthrough. Allows children to adjust keys before comparing."""
         # Motivated by Subject.sex: comparing None to "U" should be equal
         # Without this step, reinsert triggers accept_divergence prompt
         # By default, checks that all non-nullable keys present
-        if not self._key_has_required_attrs(key):
-            return None
-        return key
+        return [key for key in keys if self._key_has_required_attrs(key)]
 
-    def _adjust_keys_for_entries(self, keys: List[dict]) -> List[dict]:
-        """Passthrough. Allows children to adjust keys before comparing."""
-        return [self._adjust_key_for_entry(key) for key in keys]
+    def _remove_null_from_dicts(self, d: dict) -> dict:
+        """Remove keys with None values from a dictionary."""
+        # Fallback if FreeTable does not implement _adjust_keys_for_entry
+        # May error on part table with nullable or default keys
+        return {k: v for k, v in d.items() if v not in [None, ""]}
+
+    def _adjust_entries(
+        self, entries: IngestionEntries
+    ) -> Optional[IngestionEntries]:
+        """Run _adjust_key for each table in planned entries.
+
+        Given a Dict[TableObject, List[dict]], with planned entries values,
+        run each table's _adjust_keys_for_entry function on the list of dicts.
+        Removes invalid/null entries and tables with no valid entries.
+        """
+
+        null_keys = []
+
+        for table, table_entries in entries.items():
+            # ensure instanced
+            tbl = table() if inspect.isclass(table) else table
+
+            # Allow children to adjust keys before comparing
+            # Provide backup for FreeTable instances
+            adjust_func = getattr(
+                tbl, "_adjust_keys_for_entry", self._remove_null_from_dicts
+            )
+            adjusted_entries = adjust_func(table_entries)
+
+            if not any(adjusted_entries):
+                null_keys.append(table)  # mark for removal from dict
+            else:
+                entries[table] = adjusted_entries
+
+        for table in null_keys:
+            self._insert_logline(nwb_file_name, 0, table)
+            _ = entries.pop(table)
+
+        return entries if len(entries) > 0 else None
 
     def validate_duplicates(self, entry_dict: Dict[dj.Table, List[dict]]):
         """Validate new entries against existing entries in the database.
@@ -1292,7 +1353,7 @@ class SpyglassIngestion(SpyglassMixin):
         """
         for table, table_entries in entry_dict.items():
             for entry in table_entries:
-                adjusted_entry = self._adjust_key_for_entry(entry)
+                adjusted_entry = self._adjust_keys_for_entry(entry)
                 self.validate1_duplicate(table, adjusted_entry)
 
     def validate1_duplicate(self, tbl, new_key):

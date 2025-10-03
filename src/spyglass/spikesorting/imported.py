@@ -85,7 +85,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         # Call the new SpyglassIngestion method
         from spyglass.common.common_usage import ActivityLog
 
-        ActivityLog.deprecate_log(
+        ActivityLog().deprecate_log(
             self, "ImportedSpikesorting.make", alt="insert_from_nwbfile"
         )
 
