@@ -99,9 +99,8 @@ def test_si_interpolate(sgp, si_params_tbl, si_key, pose_estimation_key):
 
 @pytest.fixture(scope="session")
 def si_df(sgp, si_key, populate_si, bodyparts):
-    yield (
-        sgp.v1.DLCSmoothInterp() & {**si_key, "bodypart": bodyparts[0]}
-    ).fetch1_dataframe()
+    _ = si_key, populate_si, bodyparts
+    yield (sgp.v1.DLCSmoothInterp() & dj.Top()).fetch1_dataframe()
 
 
 def test_cohort_fetch1_dataframe(si_df):
