@@ -7,8 +7,8 @@ These utilities are used by:
 3. NOT for the installer (installer uses inline code to avoid circular dependency)
 """
 
-import subprocess
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass
 from typing import Optional

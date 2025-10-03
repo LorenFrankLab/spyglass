@@ -15,7 +15,7 @@ Exit codes:
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Callable
+from typing import Callable, NamedTuple
 
 # Exit codes
 EXIT_SUCCESS = 0
