@@ -12,8 +12,33 @@ Exit codes:
     1 - One or more checks failed
 """
 
+import re
 import sys
 from pathlib import Path
+from typing import NamedTuple, Callable
+
+# Exit codes
+EXIT_SUCCESS = 0
+EXIT_FAILURE = 1
+
+
+class Check(NamedTuple):
+    """Represents a validation check to run.
+
+    Attributes
+    ----------
+    name : str
+        Human-readable name of the check
+    func : Callable[[], None]
+        Function to execute for this check
+    critical : bool
+        If True, failure causes validation to fail (default: True)
+        If False, failure only produces warning
+    """
+
+    name: str
+    func: Callable[[], None]
+    critical: bool = True
 
 
 def check_python_version() -> None:
@@ -48,7 +73,7 @@ def check_python_version() -> None:
     )
 
 
-def get_required_python_version() -> tuple:
+def get_required_python_version() -> tuple[int, int]:
     """Get required Python version from pyproject.toml.
 
     This ensures single source of truth for version requirements.
@@ -92,13 +117,11 @@ def get_required_python_version() -> tuple:
 
     try:
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject_path, "rb") as f:
+        with pyproject_path.open("rb") as f:
             data = tomllib.load(f)
 
         # Parse ">=3.9,<3.13" format
         requires_python = data["project"]["requires-python"]
-        import re
-
         match = re.search(r">=(\d+)\.(\d+)", requires_python)
         if match:
             return (int(match.group(1)), int(match.group(2)))
@@ -243,17 +266,13 @@ def main() -> None:
     print("  Spyglass Installation Validation")
     print("=" * 60 + "\n")
 
-    # Critical checks (must pass)
-    critical_checks = [
-        ("Python version", check_python_version),
-        ("Conda/Mamba", check_conda),
-        ("Spyglass import", check_spyglass_import),
-    ]
-
-    # Optional checks (warnings only)
-    optional_checks = [
-        ("SpyglassConfig", check_spyglass_config),
-        ("Database connection", check_database),
+    # Define all validation checks
+    checks = [
+        Check("Python version", check_python_version, critical=True),
+        Check("Conda/Mamba", check_conda, critical=True),
+        Check("Spyglass import", check_spyglass_import, critical=True),
+        Check("SpyglassConfig", check_spyglass_config, critical=False),
+        Check("Database connection", check_database, critical=False),
     ]
 
     critical_failed = []
@@ -261,21 +280,25 @@ def main() -> None:
 
     # Run critical checks
     print("Critical Checks:")
-    for name, check_fn in critical_checks:
+    for check in checks:
+        if not check.critical:
+            continue
         try:
-            check_fn()
+            check.func()
         except Exception as e:
-            print(f"✗ {name}: {e}")
-            critical_failed.append(name)
+            print(f"✗ {check.name}: {e}")
+            critical_failed.append(check.name)
 
     # Run optional checks
     print("\nOptional Checks:")
-    for name, check_fn in optional_checks:
+    for check in checks:
+        if check.critical:
+            continue
         try:
-            check_fn()
+            check.func()
         except Exception as e:
-            print(f"⚠ {name}: {e}")
-            warnings.append(name)
+            print(f"⚠ {check.name}: {e}")
+            warnings.append(check.name)
 
     # Summary
     print("\n" + "=" * 60)
@@ -285,18 +308,18 @@ def main() -> None:
         print("Failed checks:", ", ".join(critical_failed))
         print("\nThese issues must be fixed before using Spyglass.")
         print("See docs/TROUBLESHOOTING.md for help")
-        sys.exit(1)
+        sys.exit(EXIT_FAILURE)
     elif warnings:
         print("⚠ Validation passed with warnings")
         print("=" * 60 + "\n")
         print("Warnings:", ", ".join(warnings))
         print("\nSpyglass is installed but optional features may not work.")
         print("See docs/TROUBLESHOOTING.md for configuration help")
-        sys.exit(0)  # Exit 0 since installation is functional
+        sys.exit(EXIT_SUCCESS)  # Exit 0 since installation is functional
     else:
         print("✅ All checks passed!")
         print("=" * 60 + "\n")
-        sys.exit(0)
+        sys.exit(EXIT_SUCCESS)
 
 
 if __name__ == "__main__":

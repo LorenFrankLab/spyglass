@@ -23,11 +23,11 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
-import shutil
 from pathlib import Path
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 # Color codes for cross-platform output
 COLORS = (
@@ -42,24 +42,93 @@ COLORS = (
     else {k: "" for k in ["green", "yellow", "red", "blue", "reset"]}
 )
 
+# System constants
+BYTES_PER_GB = 1024**3
+LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
 
-def print_step(msg: str):
-    """Print installation step."""
+# Disk space requirements (GB)
+DISK_SPACE_REQUIREMENTS = {
+    "minimal": 10,
+    "full": 25,
+}
+
+# MySQL health check configuration
+MYSQL_HEALTH_CHECK_INTERVAL = 2  # seconds
+MYSQL_HEALTH_CHECK_ATTEMPTS = 30  # 60 seconds total
+MYSQL_HEALTH_CHECK_TIMEOUT = (
+    MYSQL_HEALTH_CHECK_ATTEMPTS * MYSQL_HEALTH_CHECK_INTERVAL
+)
+
+# Docker configuration
+DOCKER_IMAGE_PULL_TIMEOUT = 300  # 5 minutes
+DOCKER_STARTUP_TIMEOUT = 60  # 1 minute
+DEFAULT_MYSQL_PORT = 3306
+DEFAULT_MYSQL_PASSWORD = "tutorial"
+
+
+# Named tuple for database menu options
+class DatabaseOption(NamedTuple):
+    """Represents a database setup option in the menu.
+
+    Attributes
+    ----------
+    number : str
+        Menu option number (e.g., "1", "2")
+    name : str
+        Short name of option (e.g., "Docker", "Remote")
+    status : str
+        Availability status with icon (e.g., "✓ Available", "✗ Not available")
+    description : str
+        Detailed description for user
+    """
+
+    number: str
+    name: str
+    status: str
+    description: str
+
+
+def print_step(msg: str) -> None:
+    """Print installation step message.
+
+    Parameters
+    ----------
+    msg : str
+        Message to display
+    """
     print(f"{COLORS['blue']}▶{COLORS['reset']} {msg}")
 
 
-def print_success(msg: str):
-    """Print success message."""
+def print_success(msg: str) -> None:
+    """Print success message.
+
+    Parameters
+    ----------
+    msg : str
+        Success message to display
+    """
     print(f"{COLORS['green']}✓{COLORS['reset']} {msg}")
 
 
-def print_warning(msg: str):
-    """Print warning message."""
+def print_warning(msg: str) -> None:
+    """Print warning message.
+
+    Parameters
+    ----------
+    msg : str
+        Warning message to display
+    """
     print(f"{COLORS['yellow']}⚠{COLORS['reset']} {msg}")
 
 
-def print_error(msg: str):
-    """Print error message."""
+def print_error(msg: str) -> None:
+    """Print error message.
+
+    Parameters
+    ----------
+    msg : str
+        Error message to display
+    """
     print(f"{COLORS['red']}✗{COLORS['reset']} {msg}")
 
 
@@ -94,14 +163,15 @@ def show_progress_message(operation: str, estimated_minutes: int) -> None:
 def get_required_python_version() -> Tuple[int, int]:
     """Get required Python version from pyproject.toml.
 
-    Returns:
-        Tuple of (major, minor) version
-
-    This ensures single source of truth for version requirements.
-    Falls back to (3, 9) if parsing fails.
+    Returns
+    -------
+    tuple of int
+        Tuple of (major, minor) version. Falls back to (3, 9) if parsing fails.
 
     Notes
     -----
+    This ensures single source of truth for version requirements.
+
     INTENTIONAL DUPLICATION: This function is duplicated in both install.py
     and validate.py because validate.py must work standalone before Spyglass
     is installed. Both scripts are designed to run independently without
@@ -124,7 +194,7 @@ def get_required_python_version() -> Tuple[int, int]:
 
     try:
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
-        with open(pyproject_path, "rb") as f:
+        with pyproject_path.open("rb") as f:
             data = tomllib.load(f)
 
         # Parse ">=3.9,<3.13" format
@@ -171,14 +241,14 @@ def check_disk_space(required_gb: int, path: Path) -> Tuple[bool, int]:
 
     # Get disk usage
     usage = shutil.disk_usage(check_path)
-    available_gb = usage.free / (1024**3)
+    available_gb = usage.free / BYTES_PER_GB
 
     return available_gb >= required_gb, int(available_gb)
 
 
 def check_prerequisites(
     install_type: str = "minimal", base_dir: Optional[Path] = None
-):
+) -> None:
     """Check system prerequisites before installation.
 
     Verifies Python version, conda/mamba availability, and sufficient
@@ -458,28 +528,42 @@ def prompt_install_type() -> Tuple[str, str]:
     print("\nNote: DeepLabCut, Moseq, and some decoding features")
     print("      require separate installation (see docs)")
 
+    # Map choices to (env_file, install_type)
+    choice_map = {
+        "1": ("environment-min.yml", "minimal"),
+        "2": ("environment.yml", "full"),
+    }
+
     while True:
         choice = input("\nChoice [1-2]: ").strip()
-        if choice == "1":
-            print_success("Selected: Minimal installation")
-            return "environment-min.yml", "minimal"
-        elif choice == "2":
-            print_success("Selected: Full installation")
-            return "environment.yml", "full"
-        else:
+
+        if choice not in choice_map:
             print_error("Please enter 1 or 2")
+            continue
+
+        env_file, install_type = choice_map[choice]
+        print_success(f"Selected: {install_type.capitalize()} installation")
+        return env_file, install_type
 
 
-def create_conda_environment(env_file: str, env_name: str, force: bool = False):
+def create_conda_environment(
+    env_file: str, env_name: str, force: bool = False
+) -> None:
     """Create conda environment from file.
 
-    Args:
-        env_file: Path to environment.yml
-        env_name: Name for the environment
-        force: If True, overwrite existing environment without prompting
+    Parameters
+    ----------
+    env_file : str
+        Path to environment.yml file
+    env_name : str
+        Name for the environment
+    force : bool, optional
+        If True, overwrite existing environment without prompting (default: False)
 
-    Raises:
-        RuntimeError: If environment creation fails
+    Raises
+    ------
+    RuntimeError
+        If environment creation fails
     """
     # Estimate time based on environment type
     estimated_time = 5 if "min" in env_file else 15
@@ -551,11 +635,13 @@ def create_conda_environment(env_file: str, env_name: str, force: bool = False):
         ) from e
 
 
-def install_spyglass_package(env_name: str):
+def install_spyglass_package(env_name: str) -> None:
     """Install spyglass package in development mode.
 
-    Args:
-        env_name: Name of the conda environment
+    Parameters
+    ----------
+    env_name : str
+        Name of the conda environment
     """
     show_progress_message("Installing spyglass package", 1)
 
@@ -689,7 +775,8 @@ def generate_env_file_inline(
     if len(env_lines) == 2:  # Only header lines
         return
 
-    with open(env_path, "w") as f:
+    env_path_obj = Path(env_path)
+    with env_path_obj.open("w") as f:
         f.write("\n".join(env_lines) + "\n")
 
 
@@ -720,7 +807,8 @@ def validate_env_file_inline(env_path: str = ".env") -> bool:
 
     # If it exists, make sure it's readable
     try:
-        with open(env_path, "r") as f:
+        env_path_obj = Path(env_path)
+        with env_path_obj.open("r") as f:
             f.read()
         return True
     except (OSError, PermissionError):
@@ -733,16 +821,24 @@ def create_database_config(
     user: str = "root",
     password: str = "tutorial",
     use_tls: bool = False,
-):
+) -> None:
     """Create DataJoint configuration file.
 
-    Args:
-        host: Database host
-        port: Database port
-        user: Database user
-        password: Database password
-        use_tls: Whether to use TLS/SSL
+    Parameters
+    ----------
+    host : str, optional
+        Database host (default: "localhost")
+    port : int, optional
+        Database port (default: 3306)
+    user : str, optional
+        Database user (default: "root")
+    password : str, optional
+        Database password (default: "tutorial")
+    use_tls : bool, optional
+        Whether to use TLS/SSL (default: False)
 
+    Notes
+    -----
     Uses JSON for safety (no code injection vulnerability).
     """
     # Use JSON for safety (no code injection)
@@ -762,7 +858,7 @@ def create_database_config(
             print_warning("Keeping existing configuration")
             return
 
-    with open(config_file, "w") as f:
+    with config_file.open("w") as f:
         json.dump(dj_config, f, indent=2)
 
     print_success(f"Configuration saved to {config_file}")
@@ -859,9 +955,8 @@ def is_port_available(host: str, port: int) -> Tuple[bool, str]:
 
             # For localhost, we want the port to be FREE (not in use)
             # For remote, we want the port to be IN USE (something listening)
-            localhost_addresses = ("localhost", "127.0.0.1", "::1")
 
-            if host in localhost_addresses:
+            if host in LOCALHOST_ADDRESSES:
                 # Checking if local port is free for Docker/services
                 if result == 0:
                     # Port is in use
@@ -945,8 +1040,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         print(f"  Testing connection to {host}:{port}...")
         port_reachable, port_msg = is_port_available(host, port)
 
-        localhost_addresses = ("localhost", "127.0.0.1", "::1")
-        if host not in localhost_addresses and not port_reachable:
+        if host not in LOCALHOST_ADDRESSES and not port_reachable:
             # Remote host, port not reachable
             print_warning(port_msg)
             print("\n  Possible causes:")
@@ -965,7 +1059,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print("  ✓ Port is reachable")
 
         # Determine TLS based on host (use TLS for non-localhost)
-        use_tls = host not in localhost_addresses
+        use_tls = host not in LOCALHOST_ADDRESSES
 
         if use_tls:
             print_warning(f"TLS will be enabled for remote host '{host}'")
@@ -990,7 +1084,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_database_options() -> list:
+def get_database_options() -> Tuple[list[DatabaseOption], bool]:
     """Get available database options based on system capabilities.
 
     Checks Docker Compose availability and returns menu options.
@@ -1001,16 +1095,16 @@ def get_database_options() -> list:
 
     Returns
     -------
-    options : list of tuple
-        List of (number, name, status, description) tuples for menu display
+    options : list of DatabaseOption
+        List of database option objects for menu display
     compose_available : bool
         True if Docker Compose is available
 
     Examples
     --------
     >>> options, compose_avail = get_database_options()
-    >>> for num, name, status, desc in options:
-    ...     print(f"{num}. {name} - {status}")
+    >>> for opt in options:
+    ...     print(f"{opt.number}. {opt.name} - {opt.status}")
     """
     options = []
 
@@ -1019,27 +1113,39 @@ def get_database_options() -> list:
 
     if compose_available:
         options.append(
-            (
-                "1",
-                "Docker Compose",
-                "✓ Available (Recommended)",
-                "One-command setup with docker-compose.yml",
+            DatabaseOption(
+                number="1",
+                name="Docker",
+                status="✓ Available (Recommended)",
+                description="Automatic local database setup",
             )
         )
     else:
         options.append(
-            (
-                "1",
-                "Docker Compose",
-                "✗ Not available",
-                "Requires Docker with Compose plugin",
+            DatabaseOption(
+                number="1",
+                name="Docker",
+                status="✗ Not available",
+                description="Requires Docker Desktop",
             )
         )
 
     options.append(
-        ("2", "Remote", "✓ Available", "Connect to existing lab/cloud database")
+        DatabaseOption(
+            number="2",
+            name="Remote",
+            status="✓ Available",
+            description="Connect to existing lab/cloud database",
+        )
     )
-    options.append(("3", "Skip", "✓ Available", "Configure manually later"))
+    options.append(
+        DatabaseOption(
+            number="3",
+            name="Skip",
+            status="✓ Available",
+            description="Configure manually later",
+        )
+    )
 
     return options, compose_available
 
@@ -1073,24 +1179,31 @@ def prompt_database_setup() -> str:
     options, compose_available = get_database_options()
 
     print("\nOptions:")
-    for num, name, status, description in options:
+    for opt in options:
         # Color status based on availability
-        status_color = COLORS["green"] if "✓" in status else COLORS["red"]
-        print(f"  {num}. {name:20} {status_color}{status}{COLORS['reset']}")
-        print(f"      {description}")
-
-    # If Docker Compose not available, guide user
-    if not compose_available:
+        status_color = COLORS["green"] if "✓" in opt.status else COLORS["red"]
         print(
-            f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker Compose is not available"
+            f"  {opt.number}. {opt.name:20} {status_color}{opt.status}{COLORS['reset']}"
         )
-        print("  To enable Docker Compose:")
+        print(f"      {opt.description}")
+
+    # If Docker not available, guide user
+    if not compose_available:
+        print(f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker is not available")
+        print("  To enable Docker setup:")
         print(
             "    1. Install Docker Desktop: https://docs.docker.com/get-docker/"
         )
         print("    2. Start Docker Desktop")
         print("    3. Verify: docker compose version")
         print("    4. Re-run installer")
+
+    # Map choices to actions
+    choice_map = {
+        "1": "compose",
+        "2": "remote",
+        "3": "skip",
+    }
 
     # Get valid choices
     valid_choices = ["2", "3"]  # Remote and Skip always available
@@ -1100,17 +1213,16 @@ def prompt_database_setup() -> str:
     while True:
         choice = input(f"\nChoice [{'/'.join(valid_choices)}]: ").strip()
 
-        if choice == "1":
-            if compose_available:
-                return "compose"
-            else:
-                print_error("Docker Compose is not available")
-        elif choice == "2":
-            return "remote"
-        elif choice == "3":
-            return "skip"
-        else:
+        if choice not in choice_map:
             print_error(f"Please enter {' or '.join(valid_choices)}")
+            continue
+
+        # Handle Docker unavailability
+        if choice == "1" and not compose_available:
+            print_error("Docker is not available")
+            continue
+
+        return choice_map[choice]
 
 
 def cleanup_failed_compose_setup_inline() -> None:
@@ -1180,14 +1292,46 @@ def setup_database_compose() -> Tuple[bool, str]:
     if not port_available:
         print_error(port_msg)
         print("\n  Port 3306 is already in use. Solutions:")
-        print("    1. Stop the existing service:")
-        print("       sudo systemctl stop mysql")
-        print("    2. Use a different port:")
+
+        # Platform-specific guidance
+        if sys.platform == "darwin":  # macOS
+            print("    1. Stop existing MySQL (if installed):")
+            print("       brew services stop mysql")
+            print(
+                "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist"
+            )
+            print("    2. Find what's using the port:")
+            print("       lsof -i :3306")
+        elif sys.platform.startswith("linux"):  # Linux
+            print("    1. Stop existing MySQL service:")
+            print("       sudo systemctl stop mysql")
+            print("       # or: sudo service mysql stop")
+            print("    2. Find what's using the port:")
+            print("       sudo lsof -i :3306")
+            print("       # or: sudo netstat -tulpn | grep 3306")
+        elif sys.platform == "win32":  # Windows
+            print("    1. Stop existing MySQL service:")
+            print("       net stop MySQL")
+            print("       # or use Services app (services.msc)")
+            print("    2. Find what's using the port:")
+            print("       netstat -ano | findstr :3306")
+
+        print("    Alternative: Use a different port:")
         print("       Create .env file with: MYSQL_PORT=3307")
         print("       (and update DataJoint config to match)")
-        print("    3. Find what's using the port:")
-        print("       sudo lsof -i :3306")
         return False, "port_in_use"
+
+    # Show what will happen
+    print("\n" + "=" * 60)
+    print("Docker Database Setup")
+    print("=" * 60)
+    print("\nThis will:")
+    print("  • Download MySQL 8.0 Docker image (~200 MB)")
+    print("  • Create a container named 'spyglass-db'")
+    print("  • Start MySQL on localhost:3306")
+    print("  • Save credentials to ~/.datajoint_config.json")
+    print("\nEstimated time: 2-3 minutes")
+    print("=" * 60)
 
     try:
         # Generate .env file (only if customizations needed)
@@ -1266,7 +1410,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                             print()  # New line after dots
                             print_success("MySQL is ready")
                             break
-                    except (json.JSONDecodeError, StopIteration):
+                    except json.JSONDecodeError:
                         pass
 
             except subprocess.TimeoutExpired:
@@ -1284,14 +1428,41 @@ def setup_database_compose() -> Tuple[bool, str]:
             cleanup_failed_compose_setup_inline()
             return False, "timeout"
 
-        # Create configuration file (local Docker defaults)
+        # Read actual port/password from .env if it exists
+        import os
+
+        actual_port = port
+        actual_password = "tutorial"
+
+        env_path = Path(".env")
+        if env_path.exists():
+            # Parse .env file to check for custom values
+            try:
+                with env_path.open("r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith("MYSQL_PORT="):
+                            actual_port = int(line.split("=", 1)[1])
+                        elif line.startswith("MYSQL_ROOT_PASSWORD="):
+                            actual_password = line.split("=", 1)[1]
+            except (OSError, ValueError):
+                pass  # Use defaults if .env parsing fails
+
+        # Create configuration file matching .env values
         create_database_config(
             host="localhost",
-            port=port,
+            port=actual_port,
             user="root",
-            password="tutorial",  # Default from .env.example
+            password=actual_password,
             use_tls=False,
         )
+
+        # Warn if .env exists with custom values
+        if os.path.exists(".env"):
+            print_warning(
+                "Using custom settings from .env file. "
+                "DataJoint config updated to match."
+            )
 
         return True, "success"
 
@@ -1403,9 +1574,9 @@ def handle_database_setup_interactive() -> None:
             if success:
                 break
             else:
-                print_error("Docker Compose setup failed")
+                print_error("Docker setup failed")
                 if reason == "compose_unavailable":
-                    print("\nDocker Compose is not available.")
+                    print("\nDocker is not available.")
                     print("  Option 1: Install Docker Desktop and restart")
                     print("  Option 2: Choose remote database")
                     print("  Option 3: Skip for now")
@@ -1466,9 +1637,9 @@ def handle_database_setup_cli(
     if db_type == "compose":
         success, reason = setup_database_compose()
         if not success:
-            print_error("Docker Compose setup failed")
+            print_error("Docker setup failed")
             if reason == "compose_unavailable":
-                print_warning("Docker Compose not available")
+                print_warning("Docker not available")
                 print("  Install from: https://docs.docker.com/get-docker/")
             else:
                 print_error(f"Error: {reason}")
@@ -1547,8 +1718,7 @@ def setup_database_remote(
             port = 3306
 
         # Check if port is reachable (for remote hosts only)
-        localhost_addresses = ("localhost", "127.0.0.1", "::1")
-        if host not in localhost_addresses:
+        if host not in LOCALHOST_ADDRESSES:
             print(f"  Testing connection to {host}:{port}...")
             port_reachable, port_msg = is_port_available(host, port)
             if not port_reachable:
@@ -1559,7 +1729,7 @@ def setup_database_remote(
                 print("  ✓ Port is reachable")
 
         # Determine TLS based on host
-        use_tls = host not in localhost_addresses
+        use_tls = host not in LOCALHOST_ADDRESSES
 
         config = {
             "host": host,
@@ -1574,7 +1744,7 @@ def setup_database_remote(
             print("  TLS: enabled")
 
     # Test connection before saving
-    success, error = test_database_connection(**config)
+    success, _error = test_database_connection(**config)
 
     if not success:
         print("\nConnection test failed. Common issues:")
@@ -1721,8 +1891,11 @@ def run_installation(args) -> None:
     )
 
 
-def main():
-    """Main entry point."""
+def main() -> None:
+    """Main entry point for Spyglass installer.
+
+    Parses command-line arguments and runs the installation process.
+    """
     parser = argparse.ArgumentParser(
         description="Install Spyglass in one command",
         formatter_class=argparse.RawDescriptionHelpFormatter,

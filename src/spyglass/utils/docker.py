@@ -27,7 +27,9 @@ class DockerConfig:
 def is_docker_available() -> bool:
     """Check if Docker is installed and daemon is running.
 
-    Returns:
+    Returns
+    -------
+    bool
         True if Docker is available, False otherwise
     """
     if not shutil.which("docker"):
@@ -48,10 +50,14 @@ def is_docker_available() -> bool:
 def container_exists(container_name: str) -> bool:
     """Check if a Docker container exists.
 
-    Args:
-        container_name: Name of the container to check
+    Parameters
+    ----------
+    container_name : str
+        Name of the container to check
 
-    Returns:
+    Returns
+    -------
+    bool
         True if container exists, False otherwise
     """
     result = subprocess.run(
@@ -65,11 +71,15 @@ def container_exists(container_name: str) -> bool:
 def start_database_container(config: Optional[DockerConfig] = None) -> None:
     """Start MySQL database container.
 
-    Args:
-        config: Docker configuration (uses defaults if None)
+    Parameters
+    ----------
+    config : DockerConfig, optional
+        Docker configuration. Uses defaults if None.
 
-    Raises:
-        RuntimeError: If Docker is not available or container fails to start
+    Raises
+    ------
+    RuntimeError
+        If Docker is not available or container fails to start
     """
     if config is None:
         config = DockerConfig()
@@ -112,15 +122,22 @@ def start_database_container(config: Optional[DockerConfig] = None) -> None:
     wait_for_mysql(config)
 
 
-def wait_for_mysql(config: Optional[DockerConfig] = None, timeout: int = 60) -> None:
+def wait_for_mysql(
+    config: Optional[DockerConfig] = None, timeout: int = 60
+) -> None:
     """Wait for MySQL to be ready to accept connections.
 
-    Args:
-        config: Docker configuration (uses defaults if None)
-        timeout: Maximum time to wait in seconds
+    Parameters
+    ----------
+    config : DockerConfig, optional
+        Docker configuration. Uses defaults if None.
+    timeout : int, optional
+        Maximum time to wait in seconds (default: 60)
 
-    Raises:
-        TimeoutError: If MySQL does not become ready within timeout
+    Raises
+    ------
+    TimeoutError
+        If MySQL does not become ready within timeout
     """
     if config is None:
         config = DockerConfig()
@@ -133,9 +150,10 @@ def wait_for_mysql(config: Optional[DockerConfig] = None, timeout: int = 60) -> 
                     "exec",
                     config.container_name,
                     "mysqladmin",
-                    "-uroot",
-                    f"-p{config.password}",
                     "ping",
+                    "-h",
+                    "localhost",
+                    "--silent",
                 ],
                 capture_output=True,
                 timeout=5,
@@ -159,8 +177,10 @@ def wait_for_mysql(config: Optional[DockerConfig] = None, timeout: int = 60) -> 
 def stop_database_container(config: Optional[DockerConfig] = None) -> None:
     """Stop MySQL database container.
 
-    Args:
-        config: Docker configuration (uses defaults if None)
+    Parameters
+    ----------
+    config : DockerConfig, optional
+        Docker configuration. Uses defaults if None.
     """
     if config is None:
         config = DockerConfig()
