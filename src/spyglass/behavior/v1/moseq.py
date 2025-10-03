@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
+from typing import Dict, List
 
 import datajoint as dj
 import keypoint_moseq as kpms
+import numpy as np
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
@@ -108,17 +110,61 @@ class MoseqModel(SpyglassMixin, dj.Computed):
     model_name = "": varchar(255)
     """
 
-    def make(self, key):
-        """Method to train a model and insert the resulting model into the MoseqModel table
+    # Make method trains a model and inserts it into the table
+
+    def make_fetch(self, key: dict) -> List:  # TODO: test
+        """Fetch data relevant to model training.
 
         Parameters
         ----------
         key : dict
             key to a single MoseqModelSelection table entry
         """
-        model_params = (MoseqModelParams & key).fetch1("model_params")
-        model_name = self._make_model_name(key)
+        model_params = (MoseqModelParams & key).fetch1("model_params")  # FETCH
+        model_name = self._make_model_name(key)  # FETCH
+        video_paths = (PoseGroup & key).fetch_video_paths()  # FETCH
+        bodyparts = (PoseGroup & key).fetch1("bodyparts")  # FETCH
+        coordinates, confidences = PoseGroup().fetch_pose_datasets(
+            key, format_for_moseq=True
+        )
 
+        model, epochs_trained = None, None
+        initial_model_key = model_params.get("initial_model", None)
+        if initial_model_key is not None:
+            # begin training from an existing model
+            query = MoseqModel & initial_model_key
+            if not query:
+                raise ValueError(
+                    f"Initial model: {initial_model_key} not found"
+                )
+            model = query.fetch_model()
+            epochs_trained = query.fetch1("epochs_trained")
+
+        return [
+            model_params,
+            model_name,
+            video_paths,
+            bodyparts,
+            coordinates,
+            confidences,
+            initial_model_key,
+            model,
+            epochs_trained,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        model_params: dict,
+        model_name: str,
+        video_paths: List[Path],
+        bodyparts: List[str],
+        coordinates: Dict[str, np.ndarray],
+        confidences: Dict[str, np.ndarray],
+        initial_model_key: dict,
+        model: Optional[dict] = None,
+        epochs_trained: Optional[int] = None,
+    ):
         # set up the project and config
         project_dir, video_dir = moseq_project_dir, moseq_video_dir
         project_dir = os.path.join(project_dir, model_name)
@@ -126,7 +172,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         # os.makedirs(project_dir, exist_ok=True)
         os.makedirs(video_dir, exist_ok=True)
         # make symlinks to the videos in a single directory
-        video_paths = (PoseGroup & key).fetch_video_paths()
         for video in video_paths:
             destination = os.path.join(video_dir, os.path.basename(video))
             if os.path.exists(destination):
@@ -135,7 +180,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
                 os.remove(destination)  # remove if it's a broken symlink
             os.symlink(video, destination)
 
-        bodyparts = (PoseGroup & key).fetch1("bodyparts")
         kpms.setup_project(
             str(project_dir),
             video_dir=str(video_dir),
@@ -149,9 +193,6 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         config = kpms.load_config(project_dir)
 
         # fetch the data and format it for moseq
-        coordinates, confidences = PoseGroup().fetch_pose_datasets(
-            key, format_for_moseq=True
-        )
         data, metadata = kpms.format_data(coordinates, confidences, **config)
 
         # either initialize a new model or load an existing one
@@ -162,21 +203,12 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             )
             epochs_trained = model_params["num_ar_iters"]
 
-        else:
-            # begin training from an existing model
-            query = MoseqModel & initial_model_key
-            if not query:
-                raise ValueError(
-                    f"Initial model: {initial_model_key} not found"
-                )
-            model = query.fetch_model()
-            epochs_trained = query.fetch1("epochs_trained")
-
         # update the hyperparameters
         kappa = model_params["kappa"]
         model = kpms.update_hypparams(model, kappa=kappa)
         # run fitting on the complete model
         num_epochs = model_params["num_epochs"]
+        total_epochs_trained = (epochs_trained or 0) + num_epochs
         model = kpms.fit_model(
             model,
             data,
@@ -185,18 +217,23 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             model_name,
             ar_only=False,
             start_iter=epochs_trained,
-            num_iters=epochs_trained + num_epochs,
+            num_iters=total_epochs_trained,
         )[0]
         # reindex syllables by frequency
         kpms.reindex_syllables_in_checkpoint(project_dir, model_name)
-        self.insert1(
+
+        key.update(
             {
-                **key,
                 "project_dir": project_dir,
-                "epochs_trained": num_epochs + epochs_trained,
+                "epochs_trained": total_epochs_trained,
                 "model_name": model_name,
             }
         )
+
+        return key
+
+    def make_insert(self, key: dict):
+        self.insert1(key)
 
     def _make_model_name(self, key: dict):
         # make a unique model name based on the key
