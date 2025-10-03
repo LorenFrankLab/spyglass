@@ -112,6 +112,7 @@ def pytest_configure(config):
     # Check if docker module is available before using DockerMySQLManager
     try:
         import docker as _docker_check
+
         docker_available = True
     except ImportError:
         docker_available = False

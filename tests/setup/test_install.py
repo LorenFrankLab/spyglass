@@ -3,7 +3,7 @@
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, mock_open
+from unittest.mock import Mock, mock_open, patch
 
 import pytest
 
@@ -13,9 +13,9 @@ sys.path.insert(0, str(scripts_dir))
 
 from install import (
     check_prerequisites,
+    get_base_directory,
     get_conda_command,
     get_required_python_version,
-    get_base_directory,
     is_docker_available_inline,
 )
 
@@ -97,7 +97,9 @@ class TestIsDockerAvailableInline:
         """Test returns False when docker daemon not running."""
         with patch("shutil.which", return_value="/usr/bin/docker"):
             with patch("subprocess.run") as mock_run:
-                mock_run.side_effect = subprocess.CalledProcessError(1, "docker")
+                mock_run.side_effect = subprocess.CalledProcessError(
+                    1, "docker"
+                )
                 assert is_docker_available_inline() is False
 
     def test_returns_true_when_docker_available(self):
@@ -159,13 +161,20 @@ class TestDockerUtilities:
 
     def test_docker_module_exists(self):
         """Test that docker utilities module exists."""
-        docker_module = Path(__file__).parent.parent.parent / "src" / "spyglass" / "utils" / "docker.py"
+        docker_module = (
+            Path(__file__).parent.parent.parent
+            / "src"
+            / "spyglass"
+            / "utils"
+            / "docker.py"
+        )
         assert docker_module.exists()
 
     def test_docker_module_imports(self):
         """Test that docker utilities can be imported."""
         try:
             from spyglass.utils import docker
+
             assert hasattr(docker, "DockerConfig")
             assert hasattr(docker, "is_docker_available")
             assert hasattr(docker, "start_database_container")
