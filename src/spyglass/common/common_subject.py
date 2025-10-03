@@ -52,6 +52,6 @@ class Subject(SpyglassIngestion, dj.Manual):
         # Avoids triggering 'accept_divergence' on reinsert
         adjusted = []
         for key in keys.copy():
-            key["sex"] = self.standardized(key, warn=False)
+            key["sex"] = self.standardized_sex_string(key, warn=False)
             adjusted.append(key)
         return super()._adjust_keys_for_entry(adjusted)

@@ -27,16 +27,12 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _source_nwb_object_name = "behavioral_events"
 
     @property
     def _source_nwb_object_type(self):
         """The _source_nwb_object_type property."""
         return pynwb.behavior.BehavioralEvents
-
-    @property
-    def _source_nwb_object_name(self):
-        """Restrict event objects to those with this name"""
-        return "behavioral_events"
 
     def generate_entries_from_nwb_object(
         self, nwb_obj, base_key=None
@@ -108,7 +104,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         """Make function to populate the table. For backward compatibility"""
         from spyglass.common.common_usage import ActivityLog
 
-        ActivityLog.deprecate_log(
+        ActivityLog().deprecate_log(
             self, "DIOEvents.make", alt="insert_from_nwbfile"
         )
 

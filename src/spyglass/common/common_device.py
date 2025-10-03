@@ -391,12 +391,14 @@ class Probe(SpyglassIngestion, dj.Manual):
         def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank):
             return int(shank_nwb_obj.name)
 
-        def _adjust_key_for_entry(self, key):
+        def _adjust_keys_for_entry(self, keys):
             """Adjust key to ensure correct types/formats."""
             # Avoids triggering 'accept_divergence' on reinsert
-            ret = key.copy()
-            ret["probe_shank"] = int(key.get("probe_shank", -1))
-            return ret
+            adjusted = []
+            for key in keys.copy():
+                key["probe_shank"] = int(key.get("probe_shank", -1))
+                adjusted.append(key)
+            return adjusted
 
     class Electrode(SpyglassIngestion, dj.Part):
         definition = """

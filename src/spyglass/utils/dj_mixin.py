@@ -1174,15 +1174,17 @@ class SpyglassIngestion(SpyglassMixin):
 
         return matching_objects
 
-    def _insert_logline(self, nwb_file_name, n_entries, table):
+    def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
         """Log line for insert_from_nwbfile."""
 
         # String formatting permits either SpyglassMixin or FreeTable objects
-        def _camel(s):
+        def _camel(tbl=None):
+            if tbl is None:
+                return ""
+            s = getattr(tbl, "full_table_name", str(tbl))
             return to_camel_case(s.split(".")[-1].replace("__", ".")).strip("`")
 
-        this_tbl = _camel(table.full_table_name)
-        self_tbl = _camel(self.full_table_name)
+        this_tbl, self_tbl = _camel(table), _camel(self)
 
         suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
         logger.info(
@@ -1248,7 +1250,7 @@ class SpyglassIngestion(SpyglassMixin):
         # Motivated by nwb with no Institution, results in nulled fk subj ref
         debug_backup = entries.copy()
         _ = debug_backup  # Intentionally kept for debugging
-        entries = self._adjust_entries(entries)
+        entries = self._adjust_entries(entries, nwb_file_name=nwb_file_name)
         if entries is None or len(entries) == 0:
             return dict()
 
@@ -1309,7 +1311,7 @@ class SpyglassIngestion(SpyglassMixin):
         return {k: v for k, v in d.items() if v not in [None, ""]}
 
     def _adjust_entries(
-        self, entries: IngestionEntries
+        self, entries: IngestionEntries, nwb_file_name: str = None
     ) -> Optional[IngestionEntries]:
         """Run _adjust_key for each table in planned entries.
 
@@ -1352,9 +1354,8 @@ class SpyglassIngestion(SpyglassMixin):
             entries in the database.
         """
         for table, table_entries in entry_dict.items():
-            for entry in table_entries:
-                adjusted_entry = self._adjust_keys_for_entry(entry)
-                self.validate1_duplicate(table, adjusted_entry)
+            for entry in self._adjust_keys_for_entry(table_entries):
+                self.validate1_duplicate(table, entry)
 
     def validate1_duplicate(self, tbl, new_key):
         """If matching primary key, check for consistency in secondary keys.
