@@ -222,18 +222,16 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         # reindex syllables by frequency
         kpms.reindex_syllables_in_checkpoint(project_dir, model_name)
 
-        key.update(
-            {
-                "project_dir": project_dir,
-                "epochs_trained": total_epochs_trained,
-                "model_name": model_name,
-            }
-        )
+        secondary_key = {
+            "project_dir": project_dir,
+            "epochs_trained": total_epochs_trained,
+            "model_name": model_name,
+        }
 
-        return key
+        return [secondary_key]
 
-    def make_insert(self, key: dict):
-        self.insert1(key)
+    def make_insert(self, key: dict, secondary_key: dict = None):
+        self.insert1(dict(key, **secondary_key))
 
     def _make_model_name(self, key: dict):
         # make a unique model name based on the key
