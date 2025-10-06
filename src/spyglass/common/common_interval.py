@@ -8,10 +8,10 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from pynwb import NWBFile
+import pynwb
 
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_interval")
@@ -20,7 +20,7 @@ schema = dj.schema("common_interval")
 
 
 @schema
-class IntervalList(SpyglassMixin, dj.Manual):
+class IntervalList(SpyglassIngestion, dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
@@ -32,48 +32,30 @@ class IntervalList(SpyglassMixin, dj.Manual):
 
     # See #630, #664. Excessive key length.
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf: NWBFile, *, nwb_file_name: str):
-        """Add each entry in the NWB file epochs table to the IntervalList.
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.epoch.TimeIntervals
 
-        The interval list name for each epoch is set to the first tag for the
-        epoch. If the epoch has no tags, then 'interval_x' will be used as the
-        interval list name, where x is the index (0-indexed) of the epoch in the
-        epochs table. The start time and stop time of the epoch are stored in
-        the valid_times field as a numpy array of [start time, stop time] for
-        each epoch.
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": self.interval_name_from_tags,
+                "valid_times": self.interval_from_start_stop_time,
+            }
+        }
 
-        Parameters
-        ----------
-        nwbf : pynwb.NWBFile
-            The source NWB file object.
-        nwb_file_name : str
-            The file name of the NWB file, used as a primary key to the Session
-            table.
-        """
-        if nwbf.epochs is None:
-            logger.info("No epochs found in NWB file.")
-            return
+    @staticmethod
+    def interval_name_from_tags(epoch_row):
+        return (
+            epoch_row.tags[0]
+            if epoch_row.tags
+            else f"interval_{epoch_row.name}"
+        )
 
-        epochs = nwbf.epochs.to_dataframe()
-
-        # Create a list of dictionaries to insert
-        epoch_inserts = epochs.apply(
-            lambda epoch_data: {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": (
-                    epoch_data.tags[0]
-                    if epoch_data.tags
-                    else f"interval_{epoch_data.name}"
-                ),
-                "valid_times": np.asarray(
-                    [[epoch_data.start_time, epoch_data.stop_time]]
-                ),
-            },
-            axis=1,
-        ).tolist()
-
-        cls.insert(epoch_inserts, skip_duplicates=True)
+    @staticmethod
+    def interval_from_start_stop_time(epoch_row):
+        return np.asarray([[epoch_row.start_time, epoch_row.stop_time]])
 
     def fetch_interval(self):
         """Fetch interval list object for a given key."""
