@@ -352,7 +352,7 @@ class Lab(SpyglassIngestion, dj.Manual):
             logger.info("No lab metadata found.\n")
             return dict()
         if len(insert_entries) > 1:
-            logger.info(  # CB: why not?
+            logger.info(
                 "Multiple lab entries not allowed. Using the first entry only."
             )
             insert_entries = insert_entries[:1]
