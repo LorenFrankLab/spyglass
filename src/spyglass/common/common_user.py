@@ -135,8 +135,14 @@ class UserEnvironment(dj.Manual):
                 (?P<ver>                            # Version
                     \d+(?:\.\d+)*                   # Major.Minor.Patch
                     (?:                             # Suffixes
-                        (?:a|b|rc|\.post)\d+|
-                        dev\d*|\+dfsg|\+ds|\+ubuntu\d+(?:\.\d+)*
+                        (?P<alpha>a\d+)|            # Alpha release (a1, a2, ...)
+                        (?P<beta>b\d+)|             # Beta release (b1, b2, ...)
+                        (?P<rc>rc\d+)|              # Release candidate (rc1, rc2, ...)
+                        (?P<post>\.post\d+)|        # Post-release (.post1, .post2, ...)
+                        (?P<dev>dev\d*)|            # Developmental release (dev, dev1, ...)
+                        (?P<dfsg>\+dfsg)|           # Debian Free Software Guidelines (+dfsg)
+                        (?P<ds>\+ds)|               # Debian Source (+ds)
+                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*) # Ubuntu-specific (+ubuntu1.2)
                     )
                 ?)
             $""",

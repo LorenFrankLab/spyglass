@@ -1225,7 +1225,7 @@ class SpyglassIngestion(SpyglassMixin):
                 nwb_obj=fetched_objs[0],
                 base_key=base_entry.copy(),
             )
-            if len(fetched_objs) > 0
+            if fetched_objs
             else dict()
         )
         if not self._only_ingest_first:
@@ -1283,7 +1283,6 @@ class SpyglassIngestion(SpyglassMixin):
             table.insert(
                 table_entries,
                 skip_duplicates=expect_dupes(table),
-                # skip_duplicates=True,  # TODO: revert before merge
                 allow_direct_insert=True,
             )
             self._insert_logline(nwb_file_name, len(table_entries), table)
