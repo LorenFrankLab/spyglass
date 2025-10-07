@@ -1230,7 +1230,7 @@ class SpyglassIngestion(SpyglassMixin):
         )
         if not self._only_ingest_first:
             next_objs = fetched_objs[1:] if len(fetched_objs) > 1 else []
-            for nwb_obj in fetched_objs[1:]:
+            for nwb_obj in next_objs:
                 obj_entries = self.generate_entries_from_nwb_object(
                     nwb_obj,
                     base_entry.copy(),
