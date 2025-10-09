@@ -159,7 +159,7 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
     _parallel_make = True
 
     @classmethod
-    def insert_selection(cls, key: dict):
+    def insert_selection(cls, key: dict) -> Union[dict, List[dict]]:
         """Insert a row into SpikeSortingRecordingSelection with an
         automatically generated unique recording ID as the sole primary key.
 
@@ -171,6 +171,9 @@ class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
 
         Returns
         -------
+        key : dict or list of dicts
+            The input key with an added recording_id field.
+            If the row already exists, returns the existing row(s) instead.
             primary key of SpikeSortingRecordingSelection table
         """
         query = cls & key

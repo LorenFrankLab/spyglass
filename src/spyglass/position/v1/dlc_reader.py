@@ -62,7 +62,9 @@ class PoseEstimation:  # Note: simplifying to require only project path
             "shuffle": int(shuffle),
             "snapshotindex": self.yml["snapshotindex"],
             "trainingsetindex": np.where(yml_frac == pkl_frac)[0][0],
-            "training_iteration": int(self.pkl["Scorer"].split("_")[-1]),
+            "training_iteration": int(
+                self.pkl["Scorer"].split("_")[-1].replace("best-", "")
+            ),
         }
 
         self.fps = self.pkl["fps"]
