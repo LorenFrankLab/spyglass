@@ -420,7 +420,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
                 timestamps = video_obj.timestamps
                 these_times = valid_times.contains(timestamps)
-                if not len(these_times > 0.9 * len(timestamps)):
+                if not len(these_times) > (0.9 * len(timestamps)):
                     continue
 
                 nwb_cam_device = video_obj.device.name
