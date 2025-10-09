@@ -513,7 +513,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     ) -> None:
         """If successfully recomputed, delete files for a given restriction."""
         query = self & "matched=1" & restriction
-        file_names = query.fetch("analysis_file_name")
+        file_names = query.fetch("nwb_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
             file_names
@@ -528,8 +528,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         for key in query.proj():
             old, new = self._get_paths(key)
-            new.unlink(missing_ok=True)
-            old.unlink(missing_ok=True)
+            logger.info(f"Deleting old: {old}, new: {new}")
+            shutil_rmtree(old, ignore_errors=True)
+            shutil_rmtree(new, ignore_errors=True)
 
     def delete(self, *args, **kwargs) -> None:
         """Delete recompute attempts when deleting rows."""
