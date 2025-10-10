@@ -37,6 +37,7 @@ import all foreign key references.
 - Common
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Ensure `AnalysisNwbfile.get_abs_path` always returns same type #1429
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
