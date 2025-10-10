@@ -231,10 +231,13 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         **kwargs : dict
             Additional keyword arguments to pass to `insert`.
         """
-        if not isinstance(inserts, list):
+        if not inserts:  # No data to insert
+            return
+        if not isinstance(inserts, (list, tuple)):  # Table.insert1 makes tuple
             inserts = [inserts]
         if not isinstance(inserts[0], dict):
-            raise ValueError("Input must be a list of dictionaries.")
+            self.super_insert(inserts, **kwargs)  # fallback
+            return
 
         pk = self.heading.primary_key
 
@@ -255,7 +258,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
             elif existing and not sk_match(row, existing):  # diff sk, update
                 need_update.append(row)
 
-        self.insert(basic_inserts, **kwargs)
+        self.super_insert(basic_inserts, **kwargs)
 
         if update:
             for row in need_update:
