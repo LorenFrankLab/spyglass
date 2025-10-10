@@ -393,7 +393,7 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                 & f"filepath LIKE '%{analysis_nwb_file_name}'"
             )
             if len(query) == 1:  # Else try the standard way
-                return Path(analysis_dir) / query.fetch1("filepath")
+                return str(Path(analysis_dir) / query.fetch1("filepath"))
             logger.warning(
                 f"Found {len(query)} files for: {analysis_nwb_file_name}"
             )
