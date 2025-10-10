@@ -29,6 +29,7 @@ import all foreign key references.
 ### Infrastructure
 
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
 
 ### Pipelines
 
