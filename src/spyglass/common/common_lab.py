@@ -1,5 +1,7 @@
 """Schema for institution, lab team/name/members. Session-independent."""
 
+from typing import Dict
+
 import datajoint as dj
 import pynwb
 
@@ -49,13 +51,14 @@ class LabMember(SpyglassIngestion, dj.Manual):
         return pynwb.NWBFile
 
     def generate_entries_from_nwb_object(
-        self, nwb_obj: pynwb.NWBFile, base_key=dict()
-    ):
-        """Override SpyglassIngestion method to make entry for each experimenter."""
+        self, nwb_obj: pynwb.NWBFile, base_key=None
+    ) -> Dict["SpyglassIngestion", list]:
+        """Override SpyglassIngestion to make entry for each experimenter."""
+        base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
             logger.info("No experimenter metadata found.\n")
-            return list()
+            return dict()
 
         entries = []
         for experimenter in experimenter_list:
@@ -68,7 +71,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
                     **base_key,
                 }
             )
-        return entries
+        return {self: entries}
 
     @classmethod
     def insert_from_name(cls, full_name):
@@ -178,6 +181,10 @@ class LabTeam(SpyglassIngestion, dj.Manual):
     @classmethod
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=dict()):
         experimenter_list = nwb_obj.experimenter
+        if not experimenter_list:
+            logger.info("No experimenter metadata found for LabTeam.\n")
+            return dict()
+
         team_entries = []
         team_member_entries = []
         for experimenter in experimenter_list:
@@ -188,7 +195,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
                 team_name=full_name,
                 team_members=[f"{last}, {first}"],
                 team_description="personal team",
-                execute_inserts=False,
+                dry_run=True,
             )
             team_entries.append(team_i)
             team_member_entries.extend(entry_i)
@@ -222,7 +229,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         team_name: str,
         team_members: list,
         team_description: str = "",
-        execute_inserts=True,
+        dry_run: bool = False,
     ):
         """Create a new team with a list of team members.
 
@@ -236,9 +243,9 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             The full names of the lab members that are part of the team.
         team_description: str
             The description of the team.
-        execute_inserts: bool
-            If True, execute the inserts. If False, return the dicts to be
-            inserted.
+        dry_run : bool
+            If True, do not insert into the database, just return the
+            dictionaries that would be inserted.
         """
         labteam_dict = {
             "team_name": team_name,
@@ -247,14 +254,14 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
         member_list = []
         for team_member in team_members:
-            if execute_inserts:
+            if not dry_run:
                 LabMember.insert_from_name(team_member)
             member_dict = {"lab_member_name": decompose_name(team_member)[0]}
             query = (LabMember.LabMemberInfo() & member_dict).fetch(
                 "google_user_name"
             )
             if not query:
-                logger.info(
+                logger.warning(
                     "To help manage permissions in LabMemberInfo, please add "
                     + f"Google user ID for {team_member}"
                 )
@@ -266,7 +273,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             # clear cache for this member
             _ = cls._shared_teams.pop(team_member, None)
 
-        if not execute_inserts:
+        if dry_run:
             return labteam_dict, member_list
         cls.insert1(labteam_dict, skip_duplicates=True)
         cls.LabTeamMember.insert(member_list, skip_duplicates=True)
@@ -288,12 +295,19 @@ class Institution(SpyglassIngestion, dj.Manual):
     def _source_nwb_object_type(self):
         return pynwb.NWBFile
 
+    def _adjust_keys_for_entry(self, keys):
+        """Ensure that institution_name is not None."""
+        # Prevents attempted insert when nwbfile.institution is None
+        return [k for k in keys if k.get("institution_name", None)]
+
 
 @schema
 class Lab(SpyglassIngestion, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """
+
+    _expected_duplicates = True
 
     @property
     def table_key_to_obj_attr(self):
@@ -304,7 +318,10 @@ class Lab(SpyglassIngestion, dj.Manual):
         return pynwb.NWBFile
 
     def insert_from_nwbfile(
-        self, nwb_file_name: str, config: dict = None, execute_inserts=True
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        dry_run=False,
     ):
         """Insert lab name information from an NWB file.
 
@@ -315,23 +332,31 @@ class Lab(SpyglassIngestion, dj.Manual):
         config : dict
             Dictionary read from a user-defined YAML file containing values to
             replace in the NWB file.
+        dry_run : bool
+            If True, do not insert into the database, just return the
+            dictionaries that would be inserted.
 
         Returns
         -------
         lab_name : string
             The name of the lab found in the NWB or config file, or None.
         """
-        insert_entries = super().insert_from_nwbfile(
-            nwb_file_name, config, execute_inserts=False
+        insert_entries = (
+            super()
+            .insert_from_nwbfile(
+                nwb_file_name=nwb_file_name, config=config, dry_run=dry_run
+            )
+            .get(self)
         )
         if not insert_entries:
             logger.info("No lab metadata found.\n")
+            return dict()
         if len(insert_entries) > 1:
             logger.info(
                 "Multiple lab entries not allowed. Using the first entry only."
             )
             insert_entries = insert_entries[:1]
-        if execute_inserts:
+        if not dry_run:
             self.insert(insert_entries, skip_duplicates=True)
         return insert_entries
 

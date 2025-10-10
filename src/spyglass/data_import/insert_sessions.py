@@ -7,6 +7,7 @@ from typing import List, Union
 import pynwb
 
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
+from spyglass.common.common_nwbfile import schema as nwbfile_schema
 from spyglass.settings import debug_mode, raw_dir
 from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
@@ -16,9 +17,9 @@ def insert_sessions(
     nwb_file_names: Union[str, List[str]],
     rollback_on_fail: bool = False,
     raise_err: bool = False,
+    reinsert: bool = False,
 ):
-    """
-    Populate the dj database with new sessions.
+    """Populate the database with new sessions.
 
     Parameters
     ----------
@@ -31,12 +32,17 @@ def insert_sessions(
         If True, undo all inserts if an error occurs. Default is False.
     raise_err : bool, optional
         If True, raise an error if an error occurs. Default is False.
+    reinsert : bool, optional
+        If True and the nwb file already exists in the Nwbfile table,
+        reinsert the data. Default is False.
     """
 
     if not isinstance(nwb_file_names, list):
         nwb_file_names = [nwb_file_names]
 
     for nwb_file_name in nwb_file_names:
+        nwb_file_name = str(nwb_file_name)  # in case it's a Path object
+
         if "/" in nwb_file_name:
             nwb_file_name = nwb_file_name.split("/")[-1]
 
@@ -62,12 +68,19 @@ def insert_sessions(
         out_nwb_file_name = get_nwb_copy_filename(nwb_file_abs_path.name)
 
         # Check whether the file already exists in the Nwbfile table
-        if len(Nwbfile() & {"nwb_file_name": out_nwb_file_name}):
+        query = Nwbfile() & {"nwb_file_name": out_nwb_file_name}
+        file_exists = bool(query)
+        if file_exists and not reinsert:
             warnings.warn(
                 f"Cannot insert data from {nwb_file_name}: {out_nwb_file_name}"
                 + " is already in Nwbfile table."
             )
             continue
+        elif file_exists and reinsert:
+            logger.info(
+                f"Reinserting data from {nwb_file_name}: {out_nwb_file_name}"
+            )
+            query.delete(safemode=False)
 
         # Make a copy of the NWB file that ends with '_'.
         # This has everything except the raw data but has a link to
@@ -81,7 +94,9 @@ def insert_sessions(
         )
 
 
-def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
+def copy_nwb_link_raw_ephys(
+    nwb_file_name, out_nwb_file_name, keep_existing=False
+):
     """Copies an NWB file with a link to raw ephys data.
 
     Parameters
@@ -90,6 +105,8 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
         The name of the NWB file to be copied.
     out_nwb_file_name : str
         The name of the new NWB file with the link to raw ephys data.
+    keep_existing : bool, optional
+        If True, will not overwrite an existing file. Default is False.
 
     Returns
     -------
@@ -111,7 +128,7 @@ def copy_nwb_link_raw_ephys(nwb_file_name, out_nwb_file_name):
     )
 
     if os.path.exists(out_nwb_file_abs_path):
-        if debug_mode:
+        if debug_mode or keep_existing:
             return out_nwb_file_abs_path
         logger.warning(
             f"Output file exists, will be overwritten: {out_nwb_file_abs_path}"

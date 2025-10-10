@@ -1,3 +1,5 @@
+from typing import Dict, List
+
 import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,14 +10,14 @@ from spyglass.common.common_ephys import Raw
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema("common_dio")
 
 
 @schema
-class DIOEvents(SpyglassMixin, dj.Imported):
+class DIOEvents(SpyglassIngestion, dj.Imported):
     definition = """
     -> Session
     dio_event_name: varchar(80)   # the name assigned to this DIO event
@@ -25,64 +27,89 @@ class DIOEvents(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _source_nwb_object_name = "behavioral_events"
 
-    def make(self, key):
-        """Make without transaction
+    @property
+    def _source_nwb_object_type(self):
+        """The _source_nwb_object_type property."""
+        return pynwb.behavior.BehavioralEvents
 
-        Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
+    def generate_entries_from_nwb_object(
+        self, nwb_obj, base_key=None
+    ) -> Dict["SpyglassIngestion", List[dict]]:
+        """Generate entries from nwb object.
 
-        behav_events = get_data_interface(
-            nwbf, "behavioral_events", pynwb.behavior.BehavioralEvents
-        )
-        if behav_events is None:
-            logger.warning(
-                "No conforming behavioral events data interface found in "
-                + f"{nwb_file_name}\n"
-            )
-            return  # See #849
+        Parameters
+        ----------
+        nwb_obj : pynwb.NWBFile
+            The NWB file object.
+        base_key : dict, optional
+            The base key to use for the entries, by default None
+
+        Returns
+        -------
+        Dict[SpyglassIngestion, List[dict]]
+            A dictionary with the table class as the key and a list of entries
+            as the value.
+        """
+        base_key = base_key or dict()
+        nwb_file_name = base_key.get("nwb_file_name", None)
+        if not nwb_file_name:
+            raise ValueError("nwb_file_name must be provided in base_key")
 
         # Times for these events correspond to the valid times for the raw data
         # If no raw data found, create a default interval list named
         # "dio data valid times"
+        interval_list_name = "dio data valid times"
         if raw_query := (Raw() & {"nwb_file_name": nwb_file_name}):
-            key["interval_list_name"] = (raw_query).fetch1("interval_list_name")
-        else:
-            key["interval_list_name"] = "dio data valid times"
+            interval_list_name = (raw_query).fetch1("interval_list_name")
 
         dio_inserts = []
         time_range_list = []
-        for event_series in behav_events.time_series.values():
+        for event_series in nwb_obj.time_series.values():
             timestamps = event_series.get_timestamps()
             if len(timestamps) == 0:  # Can be either np array or HDMF5 dataset
                 logger.warning(
-                    f"No timestamps found for DIO event {event_series.name} "
-                    + f"in {nwb_file_name}. Skipping."
+                    f"No timestamps found for DIO event {event_series.name}"
                 )
                 continue
-            key["dio_event_name"] = event_series.name
-            key["dio_object_id"] = event_series.object_id
-            dio_inserts.append(key.copy())
+            dio_inserts.append(
+                dict(
+                    base_key,
+                    interval_list_name=interval_list_name,
+                    dio_event_name=event_series.name,
+                    dio_object_id=event_series.object_id,
+                )
+            )
             time_range_list.extend([timestamps[0], timestamps[-1]])
 
-        if key["interval_list_name"] == "dio data valid times":
-            # insert a default interval list for DIO events if no raw data
-            interval_key = {
-                "nwb_file_name": nwb_file_name,
-                "interval_list_name": key["interval_list_name"],
-                "valid_times": np.array(
-                    [[np.min(time_range_list), np.max(time_range_list)]]
-                ),
-            }
-            IntervalList.insert1(interval_key)
+        interval_key = []
+        if not raw_query:
+            interval_key.append(
+                dict(
+                    nwb_file_name=nwb_file_name,
+                    interval_list_name=interval_list_name,
+                    valid_times=np.array(
+                        [[np.min(time_range_list), np.max(time_range_list)]]
+                    ),
+                )
+            )
 
-        self.insert(
-            dio_inserts,
-            skip_duplicates=True,
-            allow_direct_insert=True,
+        return {
+            IntervalList: interval_key,
+            DIOEvents: dio_inserts,
+        }
+
+    def make(self, key):
+        """Make function to populate the table. For backward compatibility"""
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            self, "DIOEvents.make", alt="insert_from_nwbfile"
         )
+
+        # Call the new SpyglassIngestion method
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def plot_all_dio_events(self, return_fig=False):
         """Plot all DIO events in the session.

@@ -207,6 +207,14 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         if return_fig:
             return fig
 
+    def insert(self, *args, **kwargs):
+        """Insert with cautious insert by default."""
+        self.cautious_insert(*args, **kwargs)
+
+    def super_insert(self, *args, **kwargs):
+        """Insert without cautious insert."""
+        super().insert(*args, **kwargs)
+
     def cautious_insert(self, inserts, update=False, **kwargs):
         """On existing primary key, check secondary key and update if needed.
 
@@ -223,22 +231,24 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         **kwargs : dict
             Additional keyword arguments to pass to `insert`.
         """
-        if not isinstance(inserts, list):
+        if not inserts:  # No data to insert
+            return
+        if not isinstance(inserts, (list, tuple)):  # Table.insert1 makes tuple
             inserts = [inserts]
         if not isinstance(inserts[0], dict):
-            raise ValueError("Input must be a list of dictionaries.")
+            self.super_insert(inserts, **kwargs)  # fallback
+            return
 
         pk = self.heading.primary_key
 
         def pk_match(row):
-            match = self & {k: v for k, v in row.items() if k in pk}
+            match = self & {k: str(v) for k, v in row.items() if k in pk}
             return match.fetch(as_dict=True)[0] if match else None
 
         def sk_match(new, old):
-            return (
-                np.array_equal(new["valid_times"], old["valid_times"])
-                and new["pipeline"] == old["pipeline"]
-            )
+            return np.array_equal(
+                new["valid_times"], old["valid_times"]
+            ) and new.get("pipeline", "") == old.get("pipeline", "")
 
         basic_inserts, need_update = [], []
         for row in inserts:
@@ -248,7 +258,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
             elif existing and not sk_match(row, existing):  # diff sk, update
                 need_update.append(row)
 
-        self.insert(basic_inserts, **kwargs)
+        self.super_insert(basic_inserts, **kwargs)
 
         if update:
             for row in need_update:
