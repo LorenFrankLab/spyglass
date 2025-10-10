@@ -70,8 +70,8 @@ class Session(SpyglassMixin, dj.Imported):
             - IntervalList
         """
         # These imports must go here to avoid cyclic dependencies
-        # from .common_task import Task, TaskEpoch
         from .common_interval import IntervalList
+        from .common_task_rec import TaskRecording, TaskRecordingTypes
 
         # from .common_ephys import Unit
 
@@ -112,6 +112,9 @@ class Session(SpyglassMixin, dj.Imported):
 
         logger.info("Session populates Populate Probe...")
         Probe.insert_from_nwbfile(nwbf, config)
+
+        logger.info("Session populates TaskRecording...")
+        TaskRecordingTypes().insert_from_nwbfile(nwbf)
 
         Session().insert1(
             {
