@@ -242,7 +242,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         pk = self.heading.primary_key
 
         def pk_match(row):
-            match = self & {k: v for k, v in row.items() if k in pk}
+            match = self & {k: str(v) for k, v in row.items() if k in pk}
             return match.fetch(as_dict=True)[0] if match else None
 
         def sk_match(new, old):
