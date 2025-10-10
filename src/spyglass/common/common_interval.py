@@ -207,9 +207,13 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         if return_fig:
             return fig
 
-    # TODO: override insert with cautious_insert?
-    # would allow SpyglassIngestion Raw to use cautious_insert
-    # Can add 'super_insert' to bypass when needed
+    def insert(self, *args, **kwargs):
+        """Insert with cautious insert by default."""
+        self.cautious_insert(*args, **kwargs)
+
+    def super_insert(self, *args, **kwargs):
+        """Insert without cautious insert."""
+        super().insert(*args, **kwargs)
 
     def cautious_insert(self, inserts, update=False, **kwargs):
         """On existing primary key, check secondary key and update if needed.

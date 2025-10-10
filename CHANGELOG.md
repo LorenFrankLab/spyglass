@@ -20,7 +20,11 @@ When altering tables, import all foreign key references.
 
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1419
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+
+### Common
+
+- Change `IntervalList.insert` to `cautious_insert` #1423
 
 ### Decoding
 
