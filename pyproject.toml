@@ -44,6 +44,7 @@ dependencies = [
     # "ghostipy", # removed from list bc M1 users need to install pyfftw first
     "hdmf>=3.4.6",
     "ipympl",
+    "kachery-cloud",
     "matplotlib",
     "ndx_franklab_novela>=0.1.0",
     "ndx-pose",
