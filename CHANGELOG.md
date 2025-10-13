@@ -25,6 +25,7 @@ import all foreign key references.
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
+- Fix typo in VideoFile.make #1427
 
 ### Infrastructure
 
