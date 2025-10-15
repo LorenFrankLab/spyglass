@@ -12,14 +12,14 @@ from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
-from spyglass.utils.logging import logger
+from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.sql_helper_fn import bash_escape_sql
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
-class ExportMixin:
+class ExportMixin(BaseMixin):
 
     _export_cache = defaultdict(set)
 
@@ -113,7 +113,9 @@ class ExportMixin:
     def _start_export(self, paper_id, analysis_id):
         """Start export process."""
         if self.export_id:
-            logger.info(f"Export {self.export_id} in progress. Starting new.")
+            self._logger.info(
+                f"Export {self.export_id} in progress. Starting new."
+            )
             self._stop_export(warn=False)
 
         self.export_id = self._export_table.insert1_return_pk(
@@ -127,7 +129,7 @@ class ExportMixin:
     def _stop_export(self, warn=True):
         """End export process."""
         if not self.export_id and warn:
-            logger.warning("Export not in progress.")
+            self._logger.warning("Export not in progress.")
         del self.export_id
 
     # ------------------------------- Log Fetch -------------------------------
@@ -234,13 +236,15 @@ class ExportMixin:
         restr_logline = restr_str.replace("AND", "\n\tAND").replace(
             "OR", "\n\tOR"
         )
-        logger.debug(f"\nTable: {self.full_table_name}\nRestr: {restr_logline}")
+        self._logger.debug(
+            f"\nTable: {self.full_table_name}\nRestr: {restr_logline}"
+        )
 
     def _log_fetch_nwb(self, table, table_attr):
         """Log fetch_nwb for export table."""
         tbl_pk = "analysis_file_name"
         fnames = self.fetch(tbl_pk, log_export=True)
-        logger.debug(
+        self._logger.debug(
             f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
         )
         self._export_table.File.insert(
@@ -262,7 +266,7 @@ class ExportMixin:
         if hasattr(other, "_log_fetch"):  # Check if other has mixin
             table_list.append(other)  # can other._log_fetch
         else:
-            logger.warning(f"Cannot export log join for\n{other}")
+            self._logger.warning(f"Cannot export log join for\n{other}")
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
@@ -297,7 +301,7 @@ class ExportMixin:
                 ):
                     restr = restr.restriction
                 self._log_fetch(restriction=restr)
-            logger.debug(f"Export: {self._called_funcs()}")
+            self._logger.debug(f"Export: {self._called_funcs()}")
 
         return ret
 
