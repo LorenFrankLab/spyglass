@@ -29,6 +29,7 @@ from spyglass.utils.dj_helper_fn import (
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins import (
+    AnalysisMixin,
     CautiousDeleteMixin,
     ExportMixin,
     FetchMixin,
@@ -136,3 +137,42 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
             restricted = self & restriction
 
         restricted.delete(*args, **kwargs)
+
+
+class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
+    """Mixin for Spyglass Analysis tables."""
+
+    def __init__(self, *args, **kwargs):
+        """Initialize SpyglassAnalysis.
+
+        Enforces ...
+        - Database conforms to `{prefix}_nwbfile` naming convention
+        - Table conforms to AnalysisNwbfile class name
+        - Exact definition match for master AnalysisNwbfile table
+        - Inserts into AnalysisRegistry on declaration
+        """
+
+        # if self.is_declared:
+        #     return
+
+        user_prefix = dj.config.get("custom", dict()).get("database_prefix")
+        prefix, suffix = None, None
+        if self.database:
+            prefix, suffix = self.database.split("_", 1)
+
+        if prefix == "common":
+            print("Skipping common prefix check")  # TODO: remove
+        elif prefix != user_prefix:
+            raise ValueError(
+                f"Schema prefix {prefix} does not match "
+                + f"configured prefix: {user_prefix}"
+            )
+        if suffix != "nwbfile":
+            raise ValueError(
+                "Analysis requires {prefix}_nwbfile schema, "
+                + f"found: {self.database}"
+            )
+
+        self._register_table()
+
+        __import__("pdb").set_trace()
