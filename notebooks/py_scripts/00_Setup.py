@@ -442,7 +442,7 @@ database_host = "address like: 'localhost' or 'lmf-db.cin.ucsf.edu'"
 
 dj.config.update(
     {
-        "database.host": "lmf-db.cin.ucsf.edu",
+        "database.host": database_host,
         "database.user": username,
         "database.password": initial_password,
         "database.port": 3306,
