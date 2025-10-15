@@ -8,6 +8,7 @@ import pynwb
 import spikeinterface as si
 import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
+from spikeinterface.extractors import NwbRecordingExtractor
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
@@ -236,10 +237,9 @@ class MetricCuration(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
-    _use_transaction, _allow_insert = False, True
     _waves_cache = {}  # Cache waveforms for burst merge
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate MetricCuration table.
 
         1. Fetches...
@@ -247,16 +247,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             - Metric parameters from MetricParameters
             - Label and merge parameters from MetricCurationParameters
             - Sorting ID and curation ID from MetricCurationSelection
-        2. Loads the recording and sorting from CurationV1.
-        3. Optionally whitens the recording with spikeinterface
-        4. Extracts waveforms from the recording based on the sorting.
-        5. Optionally computes quality metrics for the units.
-        6. Applies curation based on the metrics, computing labels and merge
-            groups.
-        7. Saves the waveforms, metrics, labels, and merge groups to an
-            analysis NWB file and inserts into MetricCuration table.
         """
-        # FETCH
         upstream = (
             SpikeSortingSelection
             * WaveformParameters
@@ -266,12 +257,40 @@ class MetricCuration(SpyglassMixin, dj.Computed):
             & key
         ).fetch1()
 
+        return [upstream]
+
+    def make_compute(self, key, upstream):
+        """Runs computation to populate MetricCuration table.
+
+        Parameters
+        ----------
+        key : dict
+            primary key to MetricCurationSelection
+        upstream : dict
+            output of make_fetch
+
+        1. Loads the recording and sorting from CurationV1.
+        2. Optionally whitens the recording with spikeinterface
+        3. Extracts waveforms from the recording based on the sorting.
+        4. Optionally computes quality metrics for the units.
+        5. Applies curation based on the metrics, computing labels and merge
+            groups.
+        6. Saves the waveforms, metrics, labels, and merge groups to an
+            analysis NWB file.
+        """
         nwb_file_name = upstream["nwb_file_name"]
         metric_params = upstream["metric_params"]
         label_params = upstream["label_params"]
         merge_params = upstream["merge_params"]
 
         # DO
+        # NOTE: fetching waveform does query upstream tables for keys to find
+        # the right Analysis file. May cause errors if DJ decides to enforce
+        # strict tripartite separation of make_fetch and make_compute.
+        # Cannot pass recording and sorting here because dj's deepdiff hasher
+        # cannot handle these objects.
+        # TODO: refactor upstream to allow for passing of keys to avoid fetch,
+        # only fetching data from disk here.
         logger.info("Extracting waveforms...")
         waveforms = self.get_waveforms(key)
 
@@ -293,19 +312,22 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
         logger.info("Saving to NWB...")
-        (
-            key["analysis_file_name"],
-            key["object_id"],
-        ) = _write_metric_curation_to_nwb(
+        analysis_file_name, object_id = _write_metric_curation_to_nwb(
             nwb_file_name, waveforms, metrics, labels, merge_groups
         )
 
-        # INSERT
-        AnalysisNwbfile().add(
-            nwb_file_name,
-            key["analysis_file_name"],
+        return [nwb_file_name, analysis_file_name, object_id]
+
+    def make_insert(self, key, nwb_file_name, analysis_file_name, object_id):
+        """Inserts a new row into MetricCuration."""
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        self.insert1(
+            dict(
+                key,
+                analysis_file_name=analysis_file_name,
+                object_id=object_id,
+            )
         )
-        self.insert1(key)
 
     def get_waveforms(
         self, key: dict, overwrite: bool = True, fetch_all: bool = False
