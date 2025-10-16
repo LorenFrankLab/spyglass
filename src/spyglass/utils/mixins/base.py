@@ -5,8 +5,9 @@ from functools import cached_property
 
 class BaseMixin:
 
+    @classmethod
     @cached_property
-    def _logger(self):
+    def _logger(cls):
         """Lazy import of logger to avoid circular imports.
 
         Used by ...

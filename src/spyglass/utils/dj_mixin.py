@@ -35,15 +35,17 @@ from spyglass.utils.mixins import (
     FetchMixin,
     HelperMixin,
     PopulateMixin,
+    RestrictByMixin,
 )
 
 
 class SpyglassMixin(
-    ExportMixin,
     CautiousDeleteMixin,
-    HelperMixin,
+    ExportMixin,
     FetchMixin,
+    HelperMixin,
     PopulateMixin,
+    RestrictByMixin,
 ):
     """Mixin for Spyglass DataJoint tables.
 
@@ -82,6 +84,7 @@ class SpyglassMixin(
         if self.database and self.database.split("_")[0] not in [
             *SHARED_MODULES,
             dj.config["database.user"],
+            dj.config.get("custom", dict()).get("database.prefix"),
             "temp",
             "test",
         ]:
@@ -152,8 +155,8 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         - Inserts into AnalysisRegistry on declaration
         """
 
-        # if self.is_declared:
-        #     return
+        if self.is_declared:
+            return
 
         user_prefix = dj.config.get("custom", dict()).get("database.prefix")
 
@@ -162,7 +165,9 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
             prefix, suffix = self.database.split("_", 1)
 
         if prefix == "common":
-            print("Skipping common prefix check")  # TODO: remove
+            self._logger.debug(
+                f"Skipping prefix check for common schema: {self.database}"
+            )
         elif prefix != user_prefix:
             raise ValueError(
                 f"Schema prefix {prefix} does not match "
@@ -176,5 +181,3 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
         self.definition = self._enforced_definition
         self._register_table()
-
-        __import__("pdb").set_trace()
