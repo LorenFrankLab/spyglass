@@ -66,6 +66,11 @@ class AnalysisMixin(BaseMixin):
 
         return Nwbfile
 
+    @cached_property
+    def _ext_tbl(self) -> Table:
+        """Return the external table for this schema."""
+        return self.heading.table_info["context"].external["analysis"]
+
     def create(
         self,
         nwb_file_name: str,
@@ -286,10 +291,7 @@ class AnalysisMixin(BaseMixin):
             The absolute path for the given file name.
         """
         if from_schema:  # Skips checksum check
-            query = (
-                schema.external["analysis"]
-                & f"filepath LIKE '%{analysis_nwb_file_name}'"
-            )
+            query = self._ext_tbl & f"filepath LIKE '%{analysis_nwb_file_name}'"
             if len(query) == 1:  # Else try the standard way
                 return Path(analysis_dir) / query.fetch1("filepath")
             self._logger.warning(
@@ -442,12 +444,11 @@ class AnalysisMixin(BaseMixin):
                 "UserEnvironment table for mismatched dependencies.",
             )
 
-        external_tbl = schema.external["analysis"]
         file_path = (
             Path(self.__get_analysis_file_dir(analysis_file_name))
             / analysis_file_name
         )
-        key = (external_tbl & f"filepath = '{file_path}'").fetch1()
+        key = (self._ext_tbl & f"filepath = '{file_path}'").fetch1()
         abs_path = Path(analysis_dir) / file_path
         key.update(
             {
@@ -456,7 +457,7 @@ class AnalysisMixin(BaseMixin):
             }
         )
 
-        external_tbl.update1(key)
+        self._ext_tbl.update1(key)
 
     def add_units(
         self,
@@ -710,7 +711,7 @@ class AnalysisMixin(BaseMixin):
         delete_files : bool, optional
             Whether the original files should be deleted (default False).
         """
-        schema.external["analysis"].delete(delete_external_files=delete_files)
+        self._ext_tbl.delete(delete_external_files=delete_files)
 
     @staticmethod
     def cleanup():

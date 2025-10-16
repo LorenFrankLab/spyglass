@@ -17,7 +17,7 @@ from pynwb.core import ScratchData
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import AnalysisMixin, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -149,7 +149,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 
 @schema
-class AnalysisNwbfile(SpyglassMixin, dj.Manual):
+class AnalysisNwbfile(AnalysisMixin, dj.Manual):
     definition = """
     # Table for NWB files that contain results of analysis.
     analysis_file_name: varchar(64)                # name of the file
@@ -175,3 +175,67 @@ class AnalysisRegistry(dj.Manual):
     created_at = CURRENT_TIMESTAMP: timestamp  # when registered
     created_by : varchar(32)                   # who registered
     """
+
+    def insert1(self, key: Union[str, dict], **kwargs) -> None:
+        """Auto-add created_by if not provided.
+
+        Parameters
+        ----------
+        key : str or dict
+            The full_table_name as a string or a dict with the key
+            'full_table_name'.
+        kwargs : additional arguments to pass to insert1.
+        """
+
+        if isinstance(key, str):
+            key = {"full_table_name": key}
+
+        if self & dict(full_table_name=key["full_table_name"]):
+            logger.debug(f"Entry already exists: {key['full_table_name']}")
+            return
+
+        if "created_by" not in key:
+            key["created_by"] = dj.config["database.user"]
+
+        full_name = key["full_table_name"]
+        if dj.utils.get_master(full_name) is not None:
+            self._logger.error(
+                f"Table is a part. Please drop this table: {full_name}"
+            )
+            dj.FreeTable(full_name).drop()
+
+        super().insert1(key, **kwargs)
+
+    def get_class(self, key: Union[str, Dict]) -> Optional[type]:
+        """Return the class object for the given full_table_name.
+
+        Parameters
+        ----------
+        key : str or dict
+            The full_table_name as a string or a dict with the key
+            'full_table_name'.
+
+        Returns
+        -------
+        class_obj : type or None
+            The class object for the given full_table_name, or None.
+        """
+        if isinstance(key, str):
+            key = {"full_table_name": key}
+
+        if not (self & key):
+            logger.warning(f"Entry not found: {key['full_table_name']}")
+            return None
+
+        full_name = key["full_table_name"]
+        camel_name = dj.utils.to_camel_case(full_name.split(".")[-1])
+
+        return type(
+            camel_name,
+            (AnalysisMixin, dj.FreeTable),
+            {
+                "__init__": lambda self: dj.FreeTable.__init__(
+                    self, self.connection, full_name
+                )
+            },
+        )

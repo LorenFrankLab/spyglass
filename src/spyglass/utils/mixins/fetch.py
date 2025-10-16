@@ -3,6 +3,8 @@
 from functools import cached_property
 from typing import Optional, Tuple, Type, Union
 
+from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
+
 try:
     import pynapple  # noqa F401
 except (ImportError, ModuleNotFoundError):
