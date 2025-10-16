@@ -59,7 +59,7 @@ from spyglass.common.common_position import (
     PositionVideo,
     TrackGraph,
 )
-from spyglass.common.common_region import BrainRegion
+from spyglass.common.common_region import BrainCoordinateSystem, BrainRegion
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
 from spyglass.common.common_subject import Subject
