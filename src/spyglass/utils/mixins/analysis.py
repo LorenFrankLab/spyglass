@@ -24,8 +24,9 @@ from packaging.version import parse as version_parse
 from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 
+# Only differs from the master AnalysisNwbfile in adding 'Custom' to heading
 ENFORCED_DEFINITION = """
-# Table for NWB files that contain results of analysis.
+# Custom table for NWB files that contain results of analysis.
 analysis_file_name: varchar(64)                # name of the file
 ---
 -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
@@ -35,6 +36,25 @@ analysis_parameters = NULL: blob               # additional relevant parameters.
                                                # that span multiple NWB files
 INDEX (analysis_file_abs_path)
 """
+
+# define the fields that should be kept in AnalysisNWBFiles
+NWB_KEEP_FIELDS = (
+    "devices",
+    "electrode_groups",
+    "electrodes",
+    "experiment_description",
+    "experimenter",
+    "file_create_date",
+    "identifier",
+    "intervals",
+    "institution",
+    "lab",
+    "session_description",
+    "session_id",
+    "session_start_time",
+    "subject",
+    "timestamps_reference_time",
+)
 
 
 class AnalysisMixin(BaseMixin):
@@ -50,15 +70,15 @@ class AnalysisMixin(BaseMixin):
     def _register_table(self) -> None:
         from spyglass.common.common_nwbfile import AnalysisRegistry
 
-        this_insert = dict(
-            table_name=self.full_table_name,
-            created_by=dj.config["database.user"],
-        )
-
-        if not self & this_insert:
-            AnalysisRegistry().insert1(this_insert)
+        AnalysisRegistry().insert1(self.full_table_name)
 
     # --------------------------- NWB file management -------------------------
+
+    @cached_property
+    def _analysis_dir(self) -> str:
+        from spyglass.settings import analysis_dir
+
+        return analysis_dir
 
     @cached_property
     def _nwb_table(self) -> Table:
@@ -69,7 +89,7 @@ class AnalysisMixin(BaseMixin):
     @cached_property
     def _ext_tbl(self) -> Table:
         """Return the external table for this schema."""
-        return self.heading.table_info["context"].external["analysis"]
+        return self.heading.table_info["context"]["schema"].external["analysis"]
 
     def create(
         self,
@@ -100,7 +120,7 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abspath = self._nwb_table.get_abs_path(nwb_file_name)
         alter_source_script = False
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
@@ -136,13 +156,13 @@ class AnalysisMixin(BaseMixin):
             if not recompute_file_name:
                 self._logger.info(f"Writing new NWB file {analysis_file_name}")
 
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
+            analysis_file_abs_path = self.get_abs_path(
                 analysis_file_name, from_schema=bool(recompute_file_name)
             )
 
             if alternate_dir:  # override the default analysis_dir for recompute
                 relative = Path(analysis_file_abs_path).relative_to(
-                    analysis_dir
+                    self._analysis_dir
                 )
                 analysis_file_abs_path = Path(alternate_dir) / relative
 
@@ -187,27 +207,68 @@ class AnalysisMixin(BaseMixin):
 
     @classmethod
     def __get_new_file_name(cls, nwb_file_name: str) -> str:
-        # each file ends with a random string of 10 digits, so we generate that
-        # string and redo if by some miracle it's already there
-        file_in_table = True
-        while file_in_table:
-            analysis_file_name = (
-                os.path.splitext(nwb_file_name)[0]
-                + "".join(
-                    random.choices(string.ascii_uppercase + string.digits, k=10)
-                )
-                + ".nwb"
-            )
-            file_in_table = AnalysisNwbfile & {
-                "analysis_file_name": analysis_file_name
-            }
+        """Generate a new unique file name based on the original NWB file name.
 
-        return analysis_file_name
+        Adds a random string of 10 uppercase letters and digits to the base
+        name of the original NWB file. Ensures that the new file name is not
+        already in this table and that the file does not already exist in the
+        analysis directory.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the original NWB file.
+
+        Returns
+        -------
+        analysis_file_name : str
+            The name of the new NWB file.
+        """
+        str_options = string.ascii_uppercase + string.digits
+
+        file_in_table = True
+        file_exist = True
+
+        while file_in_table and file_exist:
+            rand_str = "".join(random.choices(str_options, k=10))
+            fname = os.path.splitext(nwb_file_name)[0] + rand_str + ".nwb"
+            file_dict = dict(analysis_file_name=fname)
+            file_in_table = self & file_dict
+            file_exist = self._get_analysis_path(fname).exists()
+
+        return fname
 
     @classmethod
-    def __get_analysis_file_dir(cls, analysis_file_name: str) -> str:
+    def __get_analysis_file_dir(cls, fname: str) -> str:
         """Strip off final underscore and remaining chars, return the result."""
-        return analysis_file_name[0 : analysis_file_name.rfind("_")]
+        return fname[0 : fname.rfind("_")]
+
+    @classmethod
+    def __get_file_parent(cls, fname: str, relative=True) -> Path:
+        """Get the parent dir name for an analysis NWB file."""
+        return Path(self._analysis_dir) / self.__get_analysis_file_dir(fname)
+
+    @classmethod
+    def __get_analysis_path(cls, fname: str, relative: bool = False) -> Path:
+        """Get the path for an analysis NWB file.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        relative : bool, optional
+            If true, return the path relative to analysis_dir. Defaults False.
+
+
+        Returns
+        -------
+        path : str
+            The path for the analysis NWB file.
+        """
+        abs_path = self.__get_file_parent(fname) / fname
+        return (
+            abs_path.relative_to(self._analysis_dir) if relative else abs_path
+        )
 
     @classmethod
     def copy(cls, nwb_file_name: str):
@@ -226,21 +287,19 @@ class AnalysisMixin(BaseMixin):
         analysis_file_name : str
             The name of the new NWB file.
         """
-        nwb_file_abspath = AnalysisNwbfile.get_abs_path(nwb_file_name)
+        nwb_file_abspath = cls().get_abs_path(nwb_file_name)
 
         with pynwb.NWBHDF5IO(
             path=nwb_file_abspath, mode="r", load_namespaces=True
         ) as io:
             nwbf = io.read()
             # get the current number of analysis files related to this nwb file
-            query = AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
+            query = cls & {"analysis_file_name": nwb_file_name}
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
             self._logger.info(f"Writing new NWB file {analysis_file_name}...")
-            analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-                analysis_file_name
-            )
+            analysis_file_abs_path = cls().get_abs_path(analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(
                 path=analysis_file_abs_path, mode="w", manager=io.manager
@@ -250,7 +309,7 @@ class AnalysisMixin(BaseMixin):
         return analysis_file_name
 
     def add(self, nwb_file_name: str, analysis_file_name: str) -> None:
-        """Add the specified file to AnalysisNWBfile table.
+        """Add the specified file to table.
 
         Parameters
         ----------
@@ -263,9 +322,7 @@ class AnalysisMixin(BaseMixin):
             "nwb_file_name": nwb_file_name,
             "analysis_file_name": analysis_file_name,
             "analysis_file_description": "",
-            "analysis_file_abs_path": AnalysisNwbfile.get_abs_path(
-                analysis_file_name
-            ),
+            "analysis_file_abs_path": self.get_abs_path(analysis_file_name),
         }
         self.insert1(key)
 
@@ -280,7 +337,7 @@ class AnalysisMixin(BaseMixin):
         Parameters
         ----------
         analysis_nwb_file_name : str
-            The name of the NWB file in AnalysisNwbfile.
+            The name of the NWB file in this table.
         from_schema : bool, optional
             If true, get the file path from the schema externals table, skipping
             checksum and file existence checks. Defaults to False.
@@ -291,9 +348,11 @@ class AnalysisMixin(BaseMixin):
             The absolute path for the given file name.
         """
         if from_schema:  # Skips checksum check
-            query = self._ext_tbl & f"filepath LIKE '%{analysis_nwb_file_name}'"
+            query = (
+                cls()._ext_tbl & f"filepath LIKE '%{analysis_nwb_file_name}'"
+            )
             if len(query) == 1:  # Else try the standard way
-                return Path(analysis_dir) / query.fetch1("filepath")
+                return Path(cls()._analysis_dir) / query.fetch1("filepath")
             self._logger.warning(
                 f"Found {len(query)} files for: {analysis_nwb_file_name}"
             )
@@ -301,11 +360,9 @@ class AnalysisMixin(BaseMixin):
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
         if cls & file_key:
-            try:
-                # runs if file exists locally
-                return (cls & file_key).fetch1(
-                    "analysis_file_abs_path", log_export=False
-                )
+            try:  # runs if file exists locally
+                # NOTE: removed log_export bc false and no longer in MRO
+                return (cls & file_key).fetch1("analysis_file_abs_path")
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message
@@ -313,15 +370,15 @@ class AnalysisMixin(BaseMixin):
 
         # File not in database, define what it should be
         # see if the file exists and is stored in the base analysis dir
-        test_path = f"{analysis_dir}/{analysis_nwb_file_name}"
+        test_path = f"{cls._analysis_dir}/{analysis_nwb_file_name}"
 
-        if os.path.exists(test_path):
+        if Path(test_path).exists():
             return test_path
         else:
             # use the new path
             analysis_file_base_path = Path(
-                analysis_dir
-            ) / AnalysisNwbfile.__get_analysis_file_dir(analysis_nwb_file_name)
+                cls._analysis_dir
+            ) / self.__get_analysis_file_dir(analysis_nwb_file_name)
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
             return str(analysis_file_base_path / analysis_nwb_file_name)
@@ -371,12 +428,14 @@ class AnalysisMixin(BaseMixin):
             if nwb_object.name in nwbf.scratch:
                 raise ValueError(
                     f"Object with name '{nwb_object.name}' already exists in "
-                    + f"{analysis_file_name}. Please pass a different name argument "
-                    + "to AnalysisNwbfile.add_nwb_object()."
+                    + f"{analysis_file_name}. Please pass a different name "
+                    + "argument to AnalysisNwbfile.add_nwb_object()."
                 )
             nwbf.add_scratch(nwb_object)
             io.write(nwbf)
             return nwb_object.object_id
+
+    # -------------------------------- Hashing --------------------------------
 
     def get_hash(
         self,
@@ -444,12 +503,9 @@ class AnalysisMixin(BaseMixin):
                 "UserEnvironment table for mismatched dependencies.",
             )
 
-        file_path = (
-            Path(self.__get_analysis_file_dir(analysis_file_name))
-            / analysis_file_name
-        )
-        key = (self._ext_tbl & f"filepath = '{file_path}'").fetch1()
-        abs_path = Path(analysis_dir) / file_path
+        file_path = self.__get_analysis_path(analysis_file_name, relative=True)
+        key = (self._ext_tbl & f"filepath = '{str(file_path)}'").fetch1()
+        abs_path = Path(self._analysis_dir) / file_path
         key.update(
             {
                 "contents_hash": dj.hash.uuid_from_file(abs_path),
@@ -458,6 +514,8 @@ class AnalysisMixin(BaseMixin):
         )
 
         self._ext_tbl.update1(key)
+
+    # ------------------------------ Ephys Data ------------------------------
 
     def add_units(
         self,
@@ -699,6 +757,8 @@ class AnalysisMixin(BaseMixin):
         nwbf = get_nwb_file(cls.get_abs_path(analysis_file_name))
         return get_electrode_indices(nwbf.electrodes, electrode_ids)
 
+    # ------------------------------ Maintenance ------------------------------
+
     @staticmethod
     def cleanup_external(delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
@@ -713,15 +773,14 @@ class AnalysisMixin(BaseMixin):
         """
         self._ext_tbl.delete(delete_external_files=delete_files)
 
-    @staticmethod
-    def cleanup():
-        """Clean up orphaned AnalysisNwbfile entries and external files."""
-        child_tables = get_child_tables(AnalysisNwbfile)
-        (AnalysisNwbfile - child_tables).delete_quick()
+    def cleanup(self):
+        """Clean up orphaned entries and external files."""
+        child_tables = get_child_tables(self)
+        (self - child_tables).delete_quick()
 
         # a separate external files clean up required - this is to be done
         # during times when no other transactions are in progress.
-        AnalysisNwbfile.cleanup_external(delete_files=True)
+        self.cleanup_external(delete_files=True)
 
     def log(self, *args, **kwargs):
         """Null log method. Revert to _disabled_log to turn back on."""

@@ -155,7 +155,8 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         # if self.is_declared:
         #     return
 
-        user_prefix = dj.config.get("custom", dict()).get("database_prefix")
+        user_prefix = dj.config.get("custom", dict()).get("database.prefix")
+
         prefix, suffix = None, None
         if self.database:
             prefix, suffix = self.database.split("_", 1)
@@ -173,6 +174,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
                 + f"found: {self.database}"
             )
 
+        self.definition = self._enforced_definition
         self._register_table()
 
         __import__("pdb").set_trace()

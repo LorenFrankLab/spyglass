@@ -24,25 +24,6 @@ from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
 schema = dj.schema("common_nwbfile")
 
-# define the fields that should be kept in AnalysisNWBFiles
-NWB_KEEP_FIELDS = (
-    "devices",
-    "electrode_groups",
-    "electrodes",
-    "experiment_description",
-    "experimenter",
-    "file_create_date",
-    "identifier",
-    "intervals",
-    "institution",
-    "lab",
-    "session_description",
-    "session_id",
-    "session_start_time",
-    "subject",
-    "timestamps_reference_time",
-)
-
 
 @schema
 class Nwbfile(SpyglassMixin, dj.Manual):
@@ -198,11 +179,11 @@ class AnalysisRegistry(dj.Manual):
             key["created_by"] = dj.config["database.user"]
 
         full_name = key["full_table_name"]
-        if dj.utils.get_master(full_name) is not None:
-            self._logger.error(
+        if dj.utils.get_master(full_name) != "":
+            logger.error(
                 f"Table is a part. Please drop this table: {full_name}"
             )
-            dj.FreeTable(full_name).drop()
+            dj.FreeTable(dj.conn(), full_name).drop()
 
         super().insert1(key, **kwargs)
 
