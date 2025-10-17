@@ -95,6 +95,9 @@ class SpyglassMixin(
                 + self.full_table_name
             )
 
+        if self.definition.count("AnalysisNwbfile") > 1:
+            raise ValueError("Cannot fk-ref more than one 'AnalysisNwbfile'")
+
     def get_params_blob_from_key(self, key: dict, default="default") -> dict:
         """Get params blob from table using key, assuming 1 primary key.
 

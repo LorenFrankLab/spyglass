@@ -1,6 +1,7 @@
 """Common mixin classes for Spyglass topic-specific mixins."""
 
 from functools import cached_property
+from re import match as re_match
 
 
 class BaseMixin:

@@ -130,25 +130,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 
 @schema
-class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
-    definition = """
-    # Table for NWB files that contain results of analysis.
-    analysis_file_name: varchar(64)                # name of the file
-    ---
-    -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
-    analysis_file_abs_path: filepath@analysis      # the full path to the file
-    analysis_file_description = "": varchar(2000)  # an optional description of this analysis
-    analysis_parameters = NULL: blob               # additional relevant parameters. Currently used only for analyses
-                                                   # that span multiple NWB files
-    INDEX (analysis_file_abs_path)
-    """
-    # NOTE the INDEX above is implicit from filepath@...
-    # above but needs to be explicit so that alter() can work
-
-    # See #630, #664. Excessive key length.
-
-
-@schema
 class AnalysisRegistry(dj.Manual):
     definition = """
     full_table_name: varchar(128)  # full table name of the analysis
@@ -213,10 +194,29 @@ class AnalysisRegistry(dj.Manual):
 
         return type(
             camel_name,
-            (AnalysisMixin, dj.FreeTable),
+            (SpyglassAnalysis, dj.FreeTable),
             {
                 "__init__": lambda self: dj.FreeTable.__init__(
-                    self, self.connection, full_name
+                    self, dj.conn(), full_name
                 )
             },
         )
+
+
+@schema
+class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
+    definition = """
+    # Table for NWB files that contain results of analysis.
+    analysis_file_name: varchar(64)                # name of the file
+    ---
+    -> Nwbfile                                     # name of the parent NWB file. Used for naming and metadata copy
+    analysis_file_abs_path: filepath@analysis      # the full path to the file
+    analysis_file_description = "": varchar(2000)  # an optional description of this analysis
+    analysis_parameters = NULL: blob               # additional relevant parameters. Currently used only for analyses
+                                                   # that span multiple NWB files
+    INDEX (analysis_file_abs_path)
+    """
+    # NOTE the INDEX above is implicit from filepath@...
+    # above but needs to be explicit so that alter() can work
+
+    # See #630, #664. Excessive key length.

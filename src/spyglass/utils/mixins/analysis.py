@@ -77,6 +77,12 @@ class AnalysisMixin(BaseMixin):
 
         AnalysisRegistry().insert1(self.full_table_name)
 
+    def _copy_to_master(self, file_names: list = None) -> None:
+        """Copy entries from this custom table to the master AnalysisNwbfile."""
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+        AnalysisNwbfile().insert(self.fetch(as_dict=True), skip_duplicates=True)
+
     # --------------------------- NWB file management -------------------------
 
     @cached_property
@@ -374,8 +380,9 @@ class AnalysisMixin(BaseMixin):
         file_key = {"analysis_file_name": analysis_nwb_file_name}
         if cls & file_key:
             try:  # runs if file exists locally
-                # NOTE: removed log_export bc false and no longer in MRO
-                return (cls & file_key).fetch1("analysis_file_abs_path")
+                return (cls & file_key).fetch1(
+                    "analysis_file_abs_path", log_export=False
+                )
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message

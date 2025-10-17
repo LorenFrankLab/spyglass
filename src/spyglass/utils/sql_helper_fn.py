@@ -44,7 +44,6 @@ class SQLDumpHelper:
 
         return export_dir
 
-    @classmethod
     @cached_property
     def _logger(cls):
         """Lazy load logger."""

@@ -163,6 +163,8 @@ class ExportMixin(FetchMixin):
             or not FETCH_LOG_FLAG.get()
         ):
             return
+        elif isinstance(restriction, Top):
+            raise RuntimeError("Cannot log fetch with Top() restriction.")
 
         banned = [
             "head",  # Prevents on Table().head() call
@@ -226,13 +228,56 @@ class ExportMixin(FetchMixin):
             f"\nTable: {self.full_table_name}\nRestr: {restr_logline}"
         )
 
+    @property
+    def _custom_analysis_parent(self):
+        """Check for custom AnalysisNwbfile parent table.
+
+        Returns
+        -------
+        custom_analysis_parent : str or None
+            Custom AnalysisNwbfile parent table if exists, else None.
+        """
+        this_name = self.full_table_name
+
+        custom_parent = [
+            p
+            for p in self.parents()
+            if p.endswith("nwbfile`.`analysis_nwbfile`")
+            and not p.startswith("`common_")
+        ]
+        if not custom_parent:
+            return None
+
+        if len(custom_parent) > 1:
+            raise RuntimeError(
+                f"Multiple AnalysisNwbfile parents found for "
+                f"{this_name}: {custom_parent}"
+            )
+
+        from spyglass.common.common_nwbfile import AnalysisRegistry
+
+        return AnalysisRegistry().get_class(custom_parent[0])()
+
     def _log_fetch_nwb(self, table, table_attr):
-        """Log fetch_nwb for export table."""
+        """Log fetch_nwb for export table.
+
+        For custom AnalysisNwbfile tables, copy entries to master table
+        to maintain referential integrity in ExportSelection.File.
+        """
+
+        this_name = self.full_table_name
         tbl_pk = "analysis_file_name"
         fnames = self.fetch(tbl_pk, log_export=True)
         self._logger.debug(
-            f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
+            f"Export: fetch_nwb\nTable:{this_name},\nFiles: {fnames}"
         )
+
+        if custom_parent := self._custom_analysis_parent:
+            f_dict = [{tbl_pk: fname} for fname in fnames]
+            restr_parent = custom_parent.restrict(f_dict, log_export=False)
+            restr_parent._copy_to_master()
+
+        # Insert into ExportSelection.File (FK now guaranteed valid)
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
@@ -257,6 +302,7 @@ class ExportMixin(FetchMixin):
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
             if isinstance(table, type) and issubclass(table, Table):
+                # instancing table if class
                 table = table()  # adapted from dj.declare.compile_foreign_key
             for r in joined.fetch(*table.primary_key, as_dict=True):
                 table._log_fetch(restriction=r)
@@ -313,9 +359,9 @@ class ExportMixin(FetchMixin):
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, log_export=True):  # NOTE: added param
         """Log restrict for export."""
-        if not self.export_id:
+        if not self.export_id or log_export is False:
             return super().restrict(restriction)
 
         log_export = "fetch_nwb" not in self._called_funcs()
