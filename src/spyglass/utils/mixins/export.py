@@ -12,14 +12,18 @@ from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
-from spyglass.utils.mixins.base import BaseMixin
+from spyglass.utils.mixins.fetch import FetchMixin
 from spyglass.utils.sql_helper_fn import bash_escape_sql
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
-class ExportMixin(BaseMixin):
+class ExportMixin(FetchMixin):
+    """Mixin for DataJoint tables to support export logging.
+
+    Uses FetchMixin._log_fetch to log fetch calls to an Export table.
+    """
 
     _export_cache = defaultdict(set)
 

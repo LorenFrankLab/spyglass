@@ -97,7 +97,7 @@ def pytest_addoption(parser):
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
         action="store",
-        default=None,
+        default="spyglass-pytest",
         dest="container_name",
         help="Docker container name for MySQL server.",
     )

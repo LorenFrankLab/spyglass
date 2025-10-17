@@ -234,15 +234,20 @@ class AnalysisMixin(BaseMixin):
         """
         str_options = string.ascii_uppercase + string.digits
 
-        file_in_table = True
-        file_exist = True
+        file_in_table = True  # file exists, may not be on disk
+        file_exist = True  # file exists on disk, may be in different table
 
-        while file_in_table and file_exist:
+        while file_in_table or file_exist:
             rand_str = "".join(random.choices(str_options, k=10))
             fname = os.path.splitext(nwb_file_name)[0] + rand_str + ".nwb"
             file_dict = dict(analysis_file_name=fname)
             file_in_table = cls & file_dict
             file_exist = cls.__get_analysis_path(fname).exists()
+
+        # create the empty file to reserve the name before returning
+        # conflict if 2 users create the same file name at the same time in
+        # different AnalysisNwbfile instances
+        cls.__get_analysis_path(fname).touch()
 
         return fname
 

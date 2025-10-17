@@ -32,7 +32,6 @@ from spyglass.utils.mixins import (
     AnalysisMixin,
     CautiousDeleteMixin,
     ExportMixin,
-    FetchMixin,
     HelperMixin,
     PopulateMixin,
     RestrictByMixin,
@@ -41,8 +40,7 @@ from spyglass.utils.mixins import (
 
 class SpyglassMixin(
     CautiousDeleteMixin,
-    ExportMixin,
-    FetchMixin,
+    ExportMixin,  # -> FetchMixin -> BaseMixin
     HelperMixin,
     PopulateMixin,
     RestrictByMixin,
@@ -149,7 +147,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         """Initialize SpyglassAnalysis.
 
         Enforces ...
-        - Database conforms to `{prefix}_nwbfile` naming convention
+        - Database conforms to `{prefix}_nwbfile` naming convention, one '_'
         - Table conforms to AnalysisNwbfile class name
         - Exact definition match for master AnalysisNwbfile table
         - Inserts into AnalysisRegistry on declaration
@@ -160,9 +158,15 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
         user_prefix = dj.config.get("custom", dict()).get("database.prefix")
 
-        prefix, suffix = None, None
-        if self.database:
-            prefix, suffix = self.database.split("_", 1)
+        if not self.database:
+            raise ValueError("Database must be set for Analysis tables")
+
+        if self.database.count("_") != 1:
+            raise ValueError(
+                f"Must be exactly 1 '_' in schema name, found: {self.database}"
+            )
+
+        prefix, suffix = self.database.split("_", 1)
 
         if prefix == "common":
             self._logger.debug(

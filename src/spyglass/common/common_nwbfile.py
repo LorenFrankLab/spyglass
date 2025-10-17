@@ -130,7 +130,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 
 @schema
-class AnalysisNwbfile(AnalysisMixin, dj.Manual):
+class AnalysisNwbfile(SpyglassMixin, dj.Manual):
     definition = """
     # Table for NWB files that contain results of analysis.
     analysis_file_name: varchar(64)                # name of the file
