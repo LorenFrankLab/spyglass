@@ -5,9 +5,8 @@ from functools import cached_property
 
 class BaseMixin:
 
-    @classmethod
     @cached_property
-    def _logger(cls):
+    def _logger(self):
         """Lazy import of logger to avoid circular imports.
 
         Used by ...
@@ -35,3 +34,40 @@ class BaseMixin:
         from spyglass.utils.dj_graph import TableChain
 
         return [TableChain, RestrGraph]
+
+    @cached_property
+    def _test_mode(self) -> bool:
+        """Return True if in test mode.
+
+        Avoids circular import. Prevents prompt on delete.
+
+        Used by ...
+        - BaseMixin._spyglass_version
+        - HelpersMixin
+        """
+        from spyglass.settings import test_mode
+
+        return test_mode
+
+    @cached_property
+    def _spyglass_version(self):
+        """Get Spyglass version.
+
+        Used by ...
+        - ExportMixin
+        - AnalysisMixin
+        """
+        from spyglass import __version__ as sg_version
+
+        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
+
+        if self._test_mode:
+            return ret[:16] if len(ret) > 16 else ret
+
+        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
+            raise ValueError(
+                f"Spyglass version issues. Expected #.#.#, Got {ret}."
+                + "Please try running `hatch build` from your spyglass dir."
+            )
+
+        return ret

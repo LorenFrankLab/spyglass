@@ -15,6 +15,7 @@ from pandas import DataFrame
 from spyglass.utils.dj_helper_fn import (
     _quick_get_analysis_path,
     bytes_to_human_readable,
+    get_child_tables,
 )
 from spyglass.utils.mixins.base import BaseMixin
 
@@ -127,15 +128,6 @@ class HelperMixin(BaseMixin):
                 f"Found {len(self & key)} entries"
             )
 
-    @cached_property
-    def _test_mode(self) -> bool:
-        """Return True if in test mode.
-
-        Avoids circular import. Prevents prompt on delete."""
-        from spyglass.settings import test_mode
-
-        return test_mode
-
     def load_shared_schemas(self, additional_prefixes: list = None) -> None:
         """Load shared schemas to include in graph traversal.
 
@@ -144,6 +136,8 @@ class HelperMixin(BaseMixin):
         additional_prefixes : list, optional
             Additional prefixes to load. Default None.
         """
+        from spyglass.utils.database_settings import SHARED_MODULES
+
         all_shared = [
             *SHARED_MODULES,
             dj.config["database.user"],

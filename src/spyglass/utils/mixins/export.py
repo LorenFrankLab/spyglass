@@ -25,24 +25,6 @@ class ExportMixin(BaseMixin):
 
     # ------------------------------ Version Info -----------------------------
 
-    @cached_property
-    def _spyglass_version(self):
-        """Get Spyglass version."""
-        from spyglass import __version__ as sg_version
-
-        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
-
-        if self._test_mode:
-            return ret[:16] if len(ret) > 16 else ret
-
-        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
-            raise ValueError(
-                f"Spyglass version issues. Expected #.#.#, Got {ret}."
-                + "Please try running `hatch build` from your spyglass dir."
-            )
-
-        return ret
-
     def compare_versions(
         self, version: str, other: str = None, msg: str = None
     ) -> None:
