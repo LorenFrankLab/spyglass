@@ -548,6 +548,7 @@ def _resolve_external_table(
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
+    # TODO: Permit user-analysis tables, dynamically determine schema
     external_table = common_schema.external[location]
     external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
     external_key.update(
