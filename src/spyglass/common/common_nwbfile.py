@@ -17,7 +17,7 @@ from pynwb.core import ScratchData
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
-from spyglass.utils import AnalysisMixin, SpyglassMixin, logger
+from spyglass.utils import SpyglassAnalysis, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
@@ -130,7 +130,7 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 
 @schema
-class AnalysisNwbfile(SpyglassMixin, dj.Manual):
+class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     definition = """
     # Table for NWB files that contain results of analysis.
     analysis_file_name: varchar(64)                # name of the file
