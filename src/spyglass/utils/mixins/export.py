@@ -264,6 +264,7 @@ class ExportMixin(FetchMixin):
         For custom AnalysisNwbfile tables, copy entries to master table
         to maintain referential integrity in ExportSelection.File.
         """
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
 
         this_name = self.full_table_name
         tbl_pk = "analysis_file_name"
@@ -272,7 +273,17 @@ class ExportMixin(FetchMixin):
             f"Export: fetch_nwb\nTable:{this_name},\nFiles: {fnames}"
         )
 
-        if custom_parent := self._custom_analysis_parent:
+        # Check if this table is itself a custom AnalysisNwbfile table
+        is_custom_analysis = (
+            this_name.endswith("_nwbfile`.`analysis_nwbfile`")
+            and this_name != AnalysisNwbfile().full_table_name
+        )
+
+        if is_custom_analysis:
+            # Self is custom AnalysisNwbfile, copy to master
+            self._copy_to_master()
+        elif custom_parent := self._custom_analysis_parent:
+            # Self has a custom AnalysisNwbfile parent, copy parent entries
             f_dict = [{tbl_pk: fname} for fname in fnames]
             restr_parent = custom_parent.restrict(f_dict, log_export=False)
             restr_parent._copy_to_master()

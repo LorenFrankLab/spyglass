@@ -60,7 +60,17 @@ class FetchMixin(BaseMixin):
         table, tbl_attr = self._nwb_table_tuple
 
         log_export = kwargs.pop("log_export", True)
-        if log_export and self.export_id and "analysis" in tbl_attr:
+        # Check if either:
+        # 1. tbl_attr contains "analysis" (table references AnalysisNwbfile)
+        # 2. self is itself an AnalysisNwbfile table (custom or master)
+        is_analysis_table = self.full_table_name.endswith(
+            "_nwbfile`.`analysis_nwbfile`"
+        )
+        if (
+            log_export
+            and self.export_id
+            and ("analysis" in tbl_attr or is_analysis_table)
+        ):
             self._log_fetch_nwb(table, tbl_attr)
 
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)

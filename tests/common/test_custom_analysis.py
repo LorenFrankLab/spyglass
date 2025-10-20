@@ -70,7 +70,7 @@ def master_analysis_table(common_nwbfile):
 
 
 @pytest.fixture(scope="module")
-def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
+def custom_analysis_tables(custom_config, dj_conn, common_nwbfile):
     """Create and return a custom AnalysisNwbfile table.
 
     This fixture dynamically creates a table following the factory pattern.
@@ -84,12 +84,29 @@ def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
 
     # Make Nwbfile available in the schema context for foreign key resolution
     Nwbfile = common_nwbfile.Nwbfile
+    _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
 
     @schema
     class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         definition = """This definition is managed by SpyglassAnalysis"""
 
-    yield AnalysisNwbfile()
+    @schema
+    class CustomDownstream(dj.Manual):
+        definition = """
+        foreign_id: int auto_increment
+        -> AnalysisNwbfile
+        """
+
+        def insert_by_name(self, fname):
+            super().insert1(dict(analysis_file_name=fname))
+
+    yield AnalysisNwbfile(), CustomDownstream()
+
+
+@pytest.fixture(scope="module")
+def custom_analysis_table(custom_analysis_tables):
+    """Return the custom AnalysisNwbfile table instance."""
+    return custom_analysis_tables[0]
 
 
 @pytest.fixture(scope="module")
@@ -347,27 +364,21 @@ class TestFileOperations:
             name
         )
 
-        # Test 1: Same seed generates same filename when table is empty
+        # Test 1: Same seed generates different file bc file now exists
         random.seed(42)
         cust_file = get_new_file(cust_tbl, fname)
 
         random.seed(42)
         mast_file = get_new_file(mast_tbl, fname)
 
-        assert cust_file == mast_file, "Same seed should generate match"
+        assert cust_file != mast_file, "Same seed should not match"
 
-        # Test 2: Creating a file should prevent that name from being reused
-        # Create the file in the expected location
+        # Test 2: Grabbing a file name means it exists on disk as empty file
         file_dir = base_dir / "analysis" / fname.split("_")[0]
         file_dir.mkdir(parents=True, exist_ok=True)
         file_path = file_dir / cust_file
-        file_path.touch()
 
-        # Now, should get different filename because file exists
-        random.seed(42)
-        new_file = get_new_file(mast_tbl, fname)
-
-        assert new_file != cust_file, "Should not reuse existing filename"
+        assert file_path.exists(), "File created when got file name"
 
         if file_path.exists():
             file_path.unlink()
@@ -446,62 +457,68 @@ class TestCleanupAndRegistry:
     def test_orphan_detection_across_tables(
         self,
         analysis_registry,
-        custom_analysis_table,
+        custom_analysis_tables,
         mini_copy_name,
         base_dir,
         teardown,
+        common,
     ):
-        """Test that orphan detection can find files across all registered tables.
+        """Test orphan detection across all registered tables.
+
+        Case 1: File is created, but not added to analysis table (null).
+        Case 2: File is created and added, but no downstream fk-ref (orphan).
+        Case 3: File is created, added, and has downstream fk-ref (valid).
+        Case 4: Valid file is copied to master table without downstream fk-ref
+               (export master-orphan, but custom valid).
 
         This test verifies that the cleanup system can identify orphaned files
         even when they're tracked in different AnalysisNwbfile tables.
 
-        NOTE: This test currently passes because it only verifies file existence.
-        The actual orphan detection logic (commented below) is not implemented yet.
-        Do NOT remove @pytest.mark.xfail until find_orphans() method is implemented.
+        Case 4 is relevant for ExportSelection.File usecase
         """
-        # Create files in multiple tables
-        custom_file = custom_analysis_table.create(mini_copy_name)
 
-        # Don't register it - making it an orphan
-        custom_path = Path(custom_analysis_table.get_abs_path(custom_file))
+        master_analysis_table = common.common_nwbfile.AnalysisNwbfile()
+        custom_analysis_table, downstream = custom_analysis_tables
 
-        downstream = Mock()  # Simulate downstream references
+        # Case 1: Create null file
+        null_file = custom_analysis_table.create(mini_copy_name)
+        null_fp = custom_analysis_table.get_abs_path(null_file)
 
-        try:
-            # TODO: use `cleanup()` logic to find orphans
-            # Simulate orphan detection across all registered tables
-            # insert table entries without downstream fk-references
-            all_orphans = []
-            for table_name in analysis_registry.fetch("full_table_name"):
-                table_class = analysis_registry.get_class(table_name)
-                table_instance = table_class()  # Get instance
-                first = table_instance.create(mini_copy_name)  # create file
-                second = table_instance.add(
-                    mini_copy_name, first
-                )  # register file
-                # TODO: add fixture for table downstream references
-                downstream.insert(first)
-                third = table_instance.create(
-                    mini_copy_name
-                )  # create another file
-                fourth = table_instance.add(mini_copy_name, third)  # register it
-                table_instance.cleanup()
+        # Case 2: Create orphan file
+        orph_file = custom_analysis_table.create(mini_copy_name)
+        orph_fp = custom_analysis_table.get_abs_path(orph_file)
+        custom_analysis_table.add(mini_copy_name, orph_file)
 
-                table_instance.cleanup()
+        # Case 3: Create valid file with downstream reference
+        valid_file = custom_analysis_table.create(mini_copy_name)
+        valid_fp = custom_analysis_table.get_abs_path(valid_file)
+        custom_analysis_table.add(mini_copy_name, valid_file)
+        downstream.insert_by_name(valid_file)
 
-                assert not Path(
-                    fourth
-                ).exists(), "Cleanup should remove unreferenced files"
+        # Case 4: Create valid file, copy to master table without downstream
+        export_file = custom_analysis_table.create(mini_copy_name)
+        export_fp = custom_analysis_table.get_abs_path(export_file)
+        custom_analysis_table.add(mini_copy_name, export_file)
+        downstream.insert_by_name(export_file)
+        custom_analysis_table._copy_to_master(export_file)
 
-        finally:
-            if teardown and custom_path.exists():
-                custom_path.unlink()
+        # TODO: use `cleanup()` logic to find orphans
+        # Simulate orphan detection across all registered tables
+        # insert table entries without downstream fk-references
+        master_analysis_table.cleanup()
+
+        assert not Path(null_fp).exists(), "Null file should be deleted"
+
+        has_orph = custom_analysis_table.file_like(orph_file)
+        assert not bool(has_orph), "Orphan should be detected"
+        assert not Path(orph_fp).exists(), "Orphan file should be deleted"
+        assert Path(valid_fp).exists(), "Valid file should remain"
+        assert Path(export_fp).exists(), "Exported valid file should remain"
 
     def test_registry_entry_has_metadata(
         self, analysis_registry, custom_analysis_table
     ):
-        """Test that registry entries include metadata (created_at, created_by)."""
+        """Test that registry entries include metadata."""
         full_name = custom_analysis_table.full_table_name
         entry = (analysis_registry & {"full_table_name": full_name}).fetch1()
 

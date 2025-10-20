@@ -81,7 +81,21 @@ class AnalysisMixin(BaseMixin):
         """Copy entries from this custom table to the master AnalysisNwbfile."""
         from spyglass.common.common_nwbfile import AnalysisNwbfile
 
-        AnalysisNwbfile().insert(self.fetch(as_dict=True), skip_duplicates=True)
+        if isinstance(file_names, str):
+            file_names = [file_names, "fake_entry_to_avoid_error"]
+        if isinstance(file_names, list) and len(file_names) == 1:
+            file_names.append("fake_entry_to_avoid_error")
+
+        entries = (
+            self
+            if file_names is None
+            else self & f"analysis_file_name in {tuple(file_names)}"
+        ).fetch(as_dict=True)
+
+        if not entries:
+            return  # nothing to copy
+
+        AnalysisNwbfile().insert(entries, skip_duplicates=True)
 
     # --------------------------- NWB file management -------------------------
 
@@ -103,7 +117,10 @@ class AnalysisMixin(BaseMixin):
     @cached_property
     def _ext_tbl(self) -> Table:
         """Return the external table for this schema."""
-        return self.heading.table_info["context"]["schema"].external["analysis"]
+        context = self.heading.table_info.get("context")
+        # Fallback for FreeTable null context
+        schema = context.get("schema") if context else dj.Schema(self.database)
+        return schema.external["analysis"]
 
     def create(
         self,
@@ -247,7 +264,7 @@ class AnalysisMixin(BaseMixin):
             rand_str = "".join(random.choices(str_options, k=10))
             fname = os.path.splitext(nwb_file_name)[0] + rand_str + ".nwb"
             file_dict = dict(analysis_file_name=fname)
-            file_in_table = cls & file_dict
+            file_in_table = bool(cls() & file_dict)
             file_exist = cls.__get_analysis_path(fname).exists()
 
         # create the empty file to reserve the name before returning
@@ -378,11 +395,10 @@ class AnalysisMixin(BaseMixin):
 
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
-        if cls & file_key:
+        query = cls() & file_key
+        if bool(query):
             try:  # runs if file exists locally
-                return (cls & file_key).fetch1(
-                    "analysis_file_abs_path", log_export=False
-                )
+                return query.fetch1("analysis_file_abs_path", log_export=False)
             except FileNotFoundError as e:
                 # file exists in database but not locally
                 # parse the intended path from the error message
@@ -779,6 +795,13 @@ class AnalysisMixin(BaseMixin):
 
     # ------------------------------ Maintenance ------------------------------
 
+    @cached_property
+    def _child_tables(self) -> list:
+        """Return a list of child tables for this table."""
+        # NOTE: caching could cause issues if run during high-traffic times.
+        # Only run during maintenance windows.
+        return get_child_tables(self)
+
     def cleanup_external(self, delete_files=False):
         """Remove the filepath entries for NWB files that are not in use.
 
@@ -792,14 +815,17 @@ class AnalysisMixin(BaseMixin):
         """
         self._ext_tbl.delete(delete_external_files=delete_files)
 
-    def cleanup(self):
+    def get_orphans(self):
         """Clean up orphaned entries and external files."""
-        child_tables = get_child_tables(self)
-        (self - child_tables).delete_quick()
+        return self - self._child_tables
 
-        # a separate external files clean up required - this is to be done
-        # during times when no other transactions are in progress.
-        self.cleanup_external(delete_files=True)
+    def delete_orphans(self):
+        """Delete orphaned entries and external files."""
+        orphans = self.get_orphans()
+        if not orphans:
+            return
+        self._logger.info(f"Deleting {len(orphans)} orphaned entries...")
+        orphans.delete_quick()
 
     def log(self, *args, **kwargs):
         """Null log method. Revert to _disabled_log to turn back on."""

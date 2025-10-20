@@ -167,8 +167,9 @@ def tests_export_selection_max_id(gen_export_selection, export_tbls):
 @pytest.fixture(scope="session")
 def populate_export(export_tbls, gen_export_selection):
     _, Export = export_tbls
-    Export.populate_paper(**gen_export_selection)
-    key = (Export & gen_export_selection).fetch("export_id", as_dict=True)
+    paper_key = {"paper_id": gen_export_selection["paper_id"]}
+    Export.populate_paper(**paper_key)
+    key = (Export & paper_key).fetch("export_id", as_dict=True)
 
     yield (Export.Table & key), (Export.File & key)
 
