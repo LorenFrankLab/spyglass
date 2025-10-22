@@ -44,7 +44,7 @@ class FetchMixin(BaseMixin):
                 )
             if (
                 len(analysis_parents) == 1
-                and get_prefix(analysis_parents[1]) != "common"
+                and get_prefix(analysis_parents[0]) != "common"
             ):
                 this_prefix = get_prefix(analysis_parents[0])
                 AnalysisNwbfile = AnalysisRegistry().get_class(this_prefix)
