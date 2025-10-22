@@ -199,16 +199,47 @@ class AnalysisRegistry(dj.Manual):
         if "created_by" not in key:
             key["created_by"] = dj.config["database.user"]
 
-        full_name = key["full_table_name"]
-        if dj.utils.get_master(full_name) != "":
-            logger.error(
-                f"Table is a part. Please drop this table: {full_name}"
-            )
-            dj.FreeTable(dj.conn(), full_name).drop()
-
         super().insert1(key, **kwargs)
 
     # ---------------- Spawn analysis classes from table names ----------------
+
+    @staticmethod
+    def _parse_table_name(
+        full_table_name: str,
+    ) -> tuple[str, str, str, str]:
+        """Parse full table name into components.
+
+        Extracts database, table name, prefix, and suffix from a full table name.
+
+        Parameters
+        ----------
+        full_table_name : str
+            Full table name in format `database`.`table_name`
+            where database follows {prefix}_{suffix} convention.
+
+        Returns
+        -------
+        database : str
+            The database name (e.g., "testuser_nwbfile")
+        table_name : str
+            The table name (e.g., "analysis_nwbfile")
+        prefix : str
+            The database prefix before last underscore (e.g., "testuser")
+        suffix : str
+            The database suffix after last underscore (e.g., "nwbfile")
+
+        Example
+        -------
+        >>> table_name = "`user_nwbfile`.`analysis_nwbfile`"
+        >>> AnalysisRegistry._parse_table_name(table_name)
+        ('user_nwbfile', 'analysis_nwbfile', 'user', 'nwbfile')
+        """
+        # Remove backticks and split into database and table
+        database, table_name = full_table_name.replace("`", "").split(".")
+        # Split database into prefix and suffix at last underscore
+        prefix, suffix = database.rsplit("_", 1)
+
+        return database, table_name, prefix, suffix
 
     def _is_valid_entry(
         self, full_table_name: str, raise_err: bool = True
@@ -229,8 +260,9 @@ class AnalysisRegistry(dj.Manual):
 
 
         """
-        database, table_name = full_table_name.replace("`", "").split(".")
-        prefix, suffix = database.rsplit("_", 1)
+        database, table_name, prefix, suffix = self._parse_table_name(
+            full_table_name
+        )
 
         err = None
 
@@ -314,14 +346,61 @@ class AnalysisRegistry(dj.Manual):
             if self._is_valid_entry(key["full_table_name"], raise_err=False)
         ]
 
+    def get_externals(
+        self, store: str = "analysis"
+    ) -> List[dj.external.ExternalTable]:
+        """Return external table objects for all registered analysis schemas.
+
+        External tables are used to manage externally stored files (e.g., on S3).
+        Each custom AnalysisNwbfile schema has a corresponding external table
+        named `{prefix}_nwbfile`.`~external_analysis`.
+
+        Used for updating externals after file surgeries or migrations.
+
+        Parameters
+        ----------
+        store : str, optional
+            The external store name to use. Default is "analysis".
+            This should match a configured store in dj.config['stores'].
+
+        Returns
+        -------
+        externals : list of dj.external.ExternalTable
+            A list of ExternalTable objects for all registered schemas.
+
+        Example
+        -------
+        >>> from spyglass.common import AnalysisRegistry
+        >>> registry = AnalysisRegistry()
+        >>> externals = registry.get_externals()
+        >>> for ext in externals:
+        ...     print(ext.database)
+        """
+        externals = []
+        ExtTable = dj.external.ExternalTable
+        ext_kwargs = dict(connection=dj.conn(), store=store)
+
+        # Get unique database prefixes from registered tables
+        databases = set()
+        for entry in self.fetch(as_dict=True):
+            full_name = entry["full_table_name"]
+            if self._is_valid_entry(full_name, raise_err=False):
+                databases.add(self._parse_table_name(full_name)[0])
+
+        # Create ExternalTable for each database
+        for database in sorted(databases):
+            exernals.append(ExtTable(**ext_kwargs, database=database))
+
+        return externals
+
     # ------------------ Blocking inserts during maintenance ------------------
 
     def _get_block_info(self, table: str) -> str:
         """Parse table name to get database and trigger name."""
         _ = self._is_valid_entry(table, raise_err=True)
 
-        database = table.replace("`", "").split(".")[0]
-        prefix, suffix = database.rsplit("_", 1)
+        # Extract database and prefix using helper method
+        database, _, prefix, _ = self._parse_table_name(table)
 
         return database, f"{prefix}_block_inserts"
 

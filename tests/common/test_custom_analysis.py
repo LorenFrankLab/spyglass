@@ -669,6 +669,42 @@ class TestCleanupAndRegistry:
         assert "created_by" in entry
         assert entry["created_by"] is not None
 
+    def test_get_externals(
+        self, analysis_registry, custom_analysis_table, master_analysis_table
+    ):
+        """Test AnalysisRegistry.get_externals() returns ExternalTable objects.
+
+        Verifies that get_externals() can:
+        1. Discover all registered analysis schemas
+        2. Create ExternalTable objects for each schema
+        3. Return valid ExternalTable instances with correct database names
+        """
+        # Get external tables for all registered schemas
+        externals = analysis_registry.get_externals()
+
+        # Should return a list
+        assert isinstance(externals, list)
+
+        # Should have at least one external (for custom table schema)
+        assert len(externals) > 0
+
+        # Each item should be an ExternalTable instance
+        for ext in externals:
+            assert isinstance(ext, dj.external.ExternalTable)
+            # Should have a database attribute
+            assert hasattr(ext, "database")
+            # Database should end with _nwbfile
+            assert ext.database.endswith("_nwbfile")
+
+        # Get database names from externals
+        external_dbs = {ext.database for ext in externals}
+
+        # Extract database from custom table
+        custom_db = custom_analysis_table.database
+
+        # Custom table's database should have an external
+        assert custom_db in external_dbs
+
 
 # ========================== INTEGRATION TESTS ================================
 

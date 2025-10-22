@@ -209,6 +209,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         - Database conforms to `{prefix}_nwbfile` naming convention, one '_'
         - Table conforms to AnalysisNwbfile class name
         - Exact definition match for master AnalysisNwbfile table
+        - Not a part table (part tables cannot be AnalysisNwbfile)
         - Inserts into AnalysisRegistry on declaration
         """
 
@@ -240,6 +241,14 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
             raise ValueError(
                 "Analysis requires {prefix}_nwbfile schema, "
                 + f"found: {self.database}"
+            )
+
+        # Check if this is a part table (part tables cannot be AnalysisNwbfile)
+        full_name = self.full_table_name
+        if dj.utils.get_master(full_name) != "":
+            raise ValueError(
+                f"AnalysisNwbfile cannot be a part table: {full_name}. "
+                "Part tables are not allowed to inherit from SpyglassAnalysis."
             )
 
         self.definition = self._enforced_definition

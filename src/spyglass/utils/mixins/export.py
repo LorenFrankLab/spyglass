@@ -164,7 +164,10 @@ class ExportMixin(FetchMixin):
         ):
             return
         elif isinstance(restriction, Top):
-            raise RuntimeError("Cannot log fetch with Top() restriction.")
+            raise RuntimeError(
+                "Cannot log fetch with Top() restriction."
+                "\nUse a specific restriction."
+            )
 
         banned = [
             "head",  # Prevents on Table().head() call
