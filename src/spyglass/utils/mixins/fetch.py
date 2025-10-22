@@ -30,6 +30,10 @@ class FetchMixin(BaseMixin):
 
         # ---------- Overwrite AnalysisNwbfile if using a custom one ----------
         if not attr_val:
+
+            def get_prefix(name: str) -> str:
+                return name.split("_")[0].strip("`")
+
             analysis_parents = [
                 p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
             ]
@@ -40,8 +44,9 @@ class FetchMixin(BaseMixin):
                 )
             if (
                 len(analysis_parents) == 1
-                and analysis_parents[0].split("_")[0].strip("`") != "common"
+                and get_prefix(analysis_parents[1]) != "common"
             ):
+                this_prefix = get_prefix(analysis_parents[0])
                 AnalysisNwbfile = AnalysisRegistry().get_class(this_prefix)
         # --------------------------------------------------------------------
 
