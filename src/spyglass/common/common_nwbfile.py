@@ -24,6 +24,7 @@ from spyglass.utils.dj_helper_fn import get_child_tables
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
+# A trigger is a DB object that is automatically executed when INSERT occurs
 SQL_TRIGGER_QUERY = """
 SELECT COUNT(*)
 FROM information_schema.TRIGGERS
@@ -381,17 +382,18 @@ class AnalysisRegistry(dj.Manual):
         ext_kwargs = dict(connection=dj.conn(), store=store)
 
         # Get unique database prefixes from registered tables
-        databases = set()
-        for entry in self.fetch(as_dict=True):
-            full_name = entry["full_table_name"]
-            if self._is_valid_entry(full_name, raise_err=False):
-                databases.add(self._parse_table_name(full_name)[0])
+        databases = set(
+            [
+                self._parse_table_name(tbl_name)[0]
+                for tbl_name in self.fetch("full_table_name")
+                if self._is_valid_entry(tbl_name, raise_err=False)
+            ]
+        )
 
-        # Create ExternalTable for each database
-        for database in sorted(databases):
-            externals.append(ExtTable(**ext_kwargs, database=database))
-
-        return externals
+        return [  # Create ExternalTable for each database
+            ExtTable(**ext_kwargs, database=database)
+            for database in sorted(databases)
+        ]
 
     # ------------------ Blocking inserts during maintenance ------------------
 

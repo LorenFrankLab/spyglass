@@ -1,13 +1,8 @@
 """Tests for custom AnalysisNwbfile factory pattern (Issue #1434).
 
-This test module covers the verification strategy outlined in TASK0_NOTES.md:
 1. Table Declaration - SpyglassAnalysis enforcement
 2. File Operations - create, add, add_nwb_object, add_units
-3. (Skipped - item 3 was lock contention, removed from numbering)
-4. Cleanup and Orphan Detection - AnalysisRegistry functionality
-
-Tests marked with @pytest.mark.xfail are expected to fail until full
-implementation is complete.
+3. Cleanup and Orphan Detection - AnalysisRegistry functionality
 """
 
 import os
