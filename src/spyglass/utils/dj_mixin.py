@@ -67,18 +67,31 @@ class SpyglassMixin(
         raised. `force_permission` can be set to True to bypass permission check.
     """
 
-    # _nwb_table = None # NWBFile table class, defined at the table level
+    # Class-level set to track validated tables by full_table_name
+    _fk_validated = set()
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassMixin.
 
         Checks that schema prefix is in SHARED_MODULES.
+        Validates that table doesn't have multiple AnalysisNwbfile foreign keys.
         """
         # Uncomment to force Spyglass version check. See #439
         # _ = self._has_updated_sg_version
 
+        # Check for multiple AnalysisNwbfile FKs on first instantiation only
+        # Cannot use parents check during table declaration
+        # Use class-level set to ensure validation happens once per table
+        if (
+            self.is_declared
+            and self.full_table_name not in SpyglassMixin._fk_validated
+            and hasattr(self, "parents")
+        ):
+            self._validate_analysis_nwbfile_fks()
+
         if self.is_declared:
-            return
+            return  # Skip further checks after declaration
+
         if self.database and self.database.split("_")[0] not in [
             *SHARED_MODULES,
             dj.config["database.user"],
@@ -95,8 +108,33 @@ class SpyglassMixin(
                 + self.full_table_name
             )
 
-        if self.definition.count("AnalysisNwbfile") > 1:
-            raise ValueError("Cannot fk-ref more than one 'AnalysisNwbfile'")
+    def _validate_analysis_nwbfile_fks(self):
+        """Ensure table doesn't reference multiple AnalysisNwbfile tables.
+
+        Tables should only have one foreign key to an AnalysisNwbfile table
+        (either the master common.AnalysisNwbfile or a custom one).
+        Having multiple references creates ambiguity for fetch_nwb() and export.
+
+        Raises
+        ------
+        ValueError
+            If table has more than one AnalysisNwbfile foreign key reference.
+        """
+        # Find all parents that are AnalysisNwbfile tables, reserved suffix.
+        analysis_fks = [
+            p
+            for p in self.parents()
+            if p.endswith("_nwbfile`.`analysis_nwbfile`")
+        ]
+
+        if len(analysis_fks) > 1:
+            raise ValueError(
+                "Tables cannot have cannot have multiple AnalysisNwbfiles: "
+                f"\n{self.full_table_name} - {analysis_fks}"
+                "\nThis tables must be dropped and re-created without one"
+            )
+
+        SpyglassMixin._fk_validated.add(self.full_table_name)
 
     def get_params_blob_from_key(self, key: dict, default="default") -> dict:
         """Get params blob from table using key, assuming 1 primary key.
