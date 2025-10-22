@@ -579,7 +579,7 @@ class AnalysisMixin(BaseMixin):
         if hash != new_hash:
             Path(file_path).unlink()  # remove mismatched file
             raise ValueError(
-                f"Checksum mismatch for analysis file '{analysis_file_name}'."
+                f"Checksum mismatch for analysis file '{file_path}'."
                 HASH_ERROR_MSG
             )
 
