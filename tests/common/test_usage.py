@@ -47,6 +47,7 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
 
         table = AnalysisNwbfile()
         downstream = CustomDownstream()
+        table.delete(safemode=False)  # Clean slate
         analysis_file_name = table.create(mini_copy_name)
         table.add(mini_copy_name, analysis_file_name)
         downstream.insert_by_name(analysis_file_name)
@@ -212,10 +213,8 @@ def populate_export(export_tbls, gen_export_selection):
 def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
-    assert (
-        len(file) == 5
-    ), "Export files not captured correctly (expected 4 standard + 1 custom)"
-    assert len(table) == 40, "Export tables not captured correctly"
+    assert len(file) == 5, "Export files not captured correctly"
+    assert len(table) == 41, "Export tables not captured correctly"
 
 
 def test_invalid_export_id(export_tbls):

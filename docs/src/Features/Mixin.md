@@ -49,6 +49,13 @@ should be fetched from `Nwbfile` or an analysis file should be fetched from
 `AnalysisNwbfile`. If neither is foreign-key-referenced, the function will refer
 to a `_nwb_table` attribute.
 
+**Custom Analysis File Tables**: Spyglass supports individualized
+`AnalysisNwbfile` tables to address transaction lock contention in multi-team
+environments. The `fetch_nwb()` method automatically detects whether your table
+references the master `AnalysisNwbfile` table or a custom team-specific table
+and fetches from the appropriate location. See [Custom Analysis Tables](../ForDevelopers/Management.md#custom-analysis-tables)
+for details on using custom analysis file tables.
+
 ## Long-Distance Restrictions
 
 In complicated pipelines like Spyglass, there are often tables that 'bury' their

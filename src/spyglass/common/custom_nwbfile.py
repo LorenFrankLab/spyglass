@@ -5,7 +5,9 @@ import datajoint as dj
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.utils.dj_mixin import SpyglassAnalysis
 
-user_prefix = dj.config.get("custom", {}).get("database.prefix")
+user_prefix = dj.config.get("custom", {}).get(
+    "database.prefix"
+) or dj.config.get("database.user")
 
 if not user_prefix:
     sys.exit(

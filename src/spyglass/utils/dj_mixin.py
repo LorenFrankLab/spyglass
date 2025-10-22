@@ -182,7 +182,25 @@ class SpyglassMixinPart(SpyglassMixin, dj.Part):
 
 
 class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
-    """Mixin for Spyglass Analysis tables."""
+    """Mixin for custom AnalysisNwbfile tables.
+
+    Provides automatic definition enforcement, schema validation, and registry
+    integration for team-specific AnalysisNwbfile tables. This mixin enables
+    transaction lock isolation by allowing teams to create their own analysis
+    file tables in separate schemas.
+
+    Usage:
+        Users should import the pre-configured table from custom_nwbfile.
+        By default, it uses database.user as the prefix:
+
+        from spyglass.common.custom_nwbfile import AnalysisNwbfile
+        # Schema "{username}_nwbfile" is created automatically
+        # Uses database.user as prefix (or custom database.prefix if set)
+
+    See Also:
+        spyglass.common.custom_nwbfile for the pre-configured table.
+        docs/src/ForDevelopers/CustomAnalysisFiles.md for comprehensive guide.
+    """
 
     def __init__(self, *args, **kwargs):
         """Initialize SpyglassAnalysis.

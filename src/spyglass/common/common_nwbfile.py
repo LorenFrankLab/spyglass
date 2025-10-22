@@ -150,6 +150,26 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
 @schema
 class AnalysisRegistry(dj.Manual):
+    """Central registry tracking all custom AnalysisNwbfile tables.
+
+    This table maintains a record of all team-specific AnalysisNwbfile tables
+    to enable coordinated cleanup, export operations, and cross-table queries.
+    Tables are auto-registered when declared via SpyglassAnalysis mixin.
+
+    Key Methods:
+        get_class(prefix) - Get AnalysisNwbfile class for a specific team prefix
+        get_all_classes() - Get all registered AnalysisNwbfile classes
+        get_tracked_files() - Get all files tracked across all custom tables
+
+    Usage:
+        from spyglass.common import AnalysisRegistry
+
+        # View all registered tables
+        AnalysisRegistry().fetch()
+
+        # Get a specific team's table
+        MyTeamAnalysis = AnalysisRegistry().get_class("myteam")
+    """
     definition = """
     full_table_name: varchar(128)  # full table name of the analysis
     ---
@@ -481,15 +501,35 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return to_delete, tracked
 
     def cleanup(self) -> None:
-        """Clean up this table and all custom analysis tables.
+        """Clean up master and all custom AnalysisNwbfile tables.
 
-        1. For each custom analysis table...
-            a. Delete custom orphans.
-            b. Deletions for unused externals entries.
-            c. Remove any remaining entries from master orphans.
-        2. Delete remaining master orphans.
-        3. Run externals queue.
-        4. Delete all empty files because getting file names now runs touch.
+        Removes orphaned analysis files across both master and custom tables.
+        A file is considered orphaned if it has no downstream foreign key
+        references. This method coordinates cleanup across all registered
+        custom AnalysisNwbfile tables to prevent premature deletion.
+
+        Process:
+            1. For each custom analysis table:
+               a. Delete orphaned entries (no downstream references)
+               b. Clean up unused external file entries
+               c. Remove valid entries from master orphan list
+            2. Delete remaining master orphans
+            3. Clean up master external entries
+            4. Delete empty files (0 bytes)
+
+        Example:
+            from spyglass.common import AnalysisNwbfile
+
+            # Run cleanup across all tables
+            AnalysisNwbfile().cleanup()
+
+        Note:
+            This is a destructive operation. Ensure you have backups before
+            running cleanup on production databases. File deletions cannot
+            be undone.
+
+        See Also:
+            docs/src/ForDevelopers/Management.md for detailed cleanup guide.
         """
         logger.info("Analysis cleanup")
         registry = AnalysisRegistry()

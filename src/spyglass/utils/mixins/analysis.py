@@ -62,6 +62,22 @@ NWB_KEEP_FIELDS = (
 
 
 class AnalysisMixin(BaseMixin):
+    """Provides analysis file management for AnalysisNwbfile tables.
+
+    This mixin provides core functionality for both master and custom
+    AnalysisNwbfile tables including file creation, NWB object management,
+    cleanup/orphan detection, and export integration (copy-to-master).
+
+    Key Methods:
+        create() - Create new analysis file with unique suffix
+        add() - Add NWB object to analysis file
+        get_file_path() - Get absolute path to analysis file
+        cleanup() - Remove orphaned files across all custom tables
+        _copy_to_master() - Copy entries to master table during export
+
+    This mixin is used by SpyglassAnalysis for custom tables and directly
+    inherited by the master AnalysisNwbfile table.
+    """
 
     _creation_times = {}
     _cached_analysis_dir = None
