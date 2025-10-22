@@ -129,7 +129,7 @@ class SpyglassMixin(
 
         if len(analysis_fks) > 1:
             raise ValueError(
-                "Tables cannot have cannot have multiple AnalysisNwbfiles: "
+                "Tables cannot have multiple AnalysisNwbfiles: "
                 f"\n{self.full_table_name} - {analysis_fks}"
                 "\nThis tables must be dropped and re-created without one"
             )

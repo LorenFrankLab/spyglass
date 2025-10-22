@@ -145,12 +145,9 @@ def mock_create(monkeypatch):
 
 
 @pytest.fixture(scope="module")
-def temp_analysis_file(
-    mini_copy_name, custom_analysis_table, teardown, mock_create
-):
+def temp_analysis_file(mini_copy_name, custom_analysis_table, teardown):
     """Create a temporary analysis file for testing."""
     # Create the file
-    mock_create(custom_analysis_table)
     analysis_file_name = custom_analysis_table.create(mini_copy_name)
 
     yield analysis_file_name
