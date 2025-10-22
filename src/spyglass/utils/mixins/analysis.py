@@ -62,8 +62,8 @@ NWB_KEEP_FIELDS = (
 
 HASH_ERROR_MSG = (
     "WHAT: The recomputed file contents don't match the expected hash.\n"
-    f"Expected hash: {hash}\n"
-    f"Actual hash:   {new_hash}\n\n"
+    "Expected hash: {hash}\n"
+    "Actual hash:   {new_hash}\n\n"
     "WHY: This usually happens when:\n"
     "- Analysis code changed between runs (non-deterministic behavior)\n"
     "- Package versions differ (check environment with UserEnvironment table)\n"
@@ -73,9 +73,10 @@ HASH_ERROR_MSG = (
     "1. Ensure analysis code is deterministic (set random seeds)\n"
     "2. Check environment matches: (UserEnvironment & 'user=YOU').fetch()\n"
     "3. If legitimate change, delete old entry and recompute\n\n"
-    f"NOTE: Mismatched file at '{file_path}' was deleted automatically.\n\n"
+    "NOTE: Mismatched file at '{file_path}' was deleted automatically.\n\n"
     "See: docs/troubleshooting.md#checksum-mismatch"
 )
+
 
 class AnalysisMixin(BaseMixin):
     """Provides analysis file management for AnalysisNwbfile tables.
@@ -580,7 +581,9 @@ class AnalysisMixin(BaseMixin):
             Path(file_path).unlink()  # remove mismatched file
             raise ValueError(
                 f"Checksum mismatch for analysis file '{file_path}'."
-                HASH_ERROR_MSG
+                + HASH_ERROR_MSG.format(
+                    hash=hash, new_hash=new_hash, file_path=file_path
+                )
             )
 
         file_path = self.__get_analysis_path(analysis_file_name, relative=True)
