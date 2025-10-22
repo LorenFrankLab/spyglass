@@ -109,29 +109,64 @@ def custom_analysis_table(custom_analysis_tables):
     return custom_analysis_tables[0]
 
 
+@pytest.fixture
+def mock_create(monkeypatch):
+    """Fixture to mock create() method for faster testing.
+
+    Replaces the full NWB file copy with a simple text file write.
+    This speeds up tests by ~10x without affecting test logic.
+
+    Usage:
+        def test_something(custom_analysis_table, mock_create):
+            mock_create(custom_analysis_table)
+            # Now create() will use the fast mock
+            file = custom_analysis_table.create(nwb_file_name)
+    """
+
+    def _mock_create(table):
+        """Apply mock to a given AnalysisNwbfile table."""
+        original_create = table.create
+
+        def mock_create_impl(nwb_file_name, **kwargs):
+            # Get the new file name using private method
+            new_file_name = table._AnalysisMixin__get_new_file_name(
+                nwb_file_name
+            )
+            # Just write a simple file instead of copying full NWB
+            file_path = Path(table.get_abs_path(new_file_name))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("test")
+            return new_file_name
+
+        monkeypatch.setattr(table, "create", mock_create_impl)
+        return original_create  # Return in case test needs to restore
+
+    return _mock_create
+
+
 @pytest.fixture(scope="module")
-def temp_analysis_file(mini_copy_name, custom_analysis_table, teardown):
+def temp_analysis_file(
+    mini_copy_name, custom_analysis_table, teardown, mock_create
+):
     """Create a temporary analysis file for testing."""
     # Create the file
+    mock_create(custom_analysis_table)
     analysis_file_name = custom_analysis_table.create(mini_copy_name)
 
     yield analysis_file_name
 
     # Cleanup
     if teardown:
-        try:
-            file_path = custom_analysis_table.get_abs_path(analysis_file_name)
-            if Path(file_path).exists():
-                Path(file_path).unlink()
-        except Exception:
-            pass
+        file_path = custom_analysis_table.get_abs_path(analysis_file_name)
+        if Path(file_path).exists():
+            Path(file_path).unlink()
 
 
 # ========================= 1. TABLE DECLARATION TESTS =========================
 
 
 class TestTableDeclaration:
-    """Test table declaration and SpyglassAnalysis enforcement (Item 1)."""
+    """Test table declaration and SpyglassAnalysis enforcement."""
 
     def test_custom_table_created(self, custom_analysis_table):
         """Test that custom AnalysisNwbfile table can be created."""
@@ -213,7 +248,7 @@ class TestTableDeclaration:
 
 
 class TestFileOperations:
-    """Test file operations (Item 2): create, add, helper methods."""
+    """Test file operations: create, add, helper methods."""
 
     def test_create_analysis_file(self, custom_analysis_table, mini_copy_name):
         """Test creating an analysis file."""
@@ -391,39 +426,143 @@ class TestFileOperations:
         original_file = custom_analysis_table.create(mini_copy_name)
         custom_analysis_table.add(mini_copy_name, original_file)
 
-        try:
-            # Copy the file
-            copied_file = custom_analysis_table.copy(original_file)
+        # Copy the file
+        copied_file = custom_analysis_table.copy(original_file)
 
-            assert copied_file is not None
-            assert copied_file != original_file
-            assert copied_file.endswith(".nwb")
+        assert copied_file is not None
+        assert copied_file != original_file
+        assert copied_file.endswith(".nwb")
 
-            # Verify copy exists on disk
+        # Verify copy exists on disk
+        copy_path = custom_analysis_table.get_abs_path(copied_file)
+        assert Path(copy_path).exists()
+
+        # Note: copied file is NOT automatically registered
+        query = custom_analysis_table & {"analysis_file_name": copied_file}
+        assert len(query) == 0
+
+        if teardown:
+            (
+                custom_analysis_table & {"analysis_file_name": original_file}
+            ).delete_quick()
             copy_path = custom_analysis_table.get_abs_path(copied_file)
-            assert Path(copy_path).exists()
+            if Path(copy_path).exists():
+                Path(copy_path).unlink()
 
-            # Note: copied file is NOT automatically registered
-            query = custom_analysis_table & {"analysis_file_name": copied_file}
-            assert len(query) == 0
+    def test_filename_collision_db_registered_file_missing(
+        self, mini_copy_name, custom_analysis_table, monkeypatch, teardown
+    ):
+        """Test filename collision when file is in DB but missing from disk.
+
+        Simulates Kachery/Dandi scenario where file is registered but not local.
+        __get_new_file_name should detect the DB entry even if file doesn't exist.
+        """
+        # Create and register a file
+        analysis_file_name = custom_analysis_table.create(mini_copy_name)
+        custom_analysis_table.add(mini_copy_name, analysis_file_name)
+
+        # Simulate Kachery/Dandi: delete local file but keep DB entry
+        file_path = custom_analysis_table.get_abs_path(analysis_file_name)
+        if Path(file_path).exists():
+            Path(file_path).unlink()
+
+        # Verify file is in DB but not on disk
+        f_dict = dict(analysis_file_name=analysis_file_name)
+        assert len(custom_analysis_table & f_dict) == 1
+        assert not Path(file_path).exists()
+
+        # Mock random.choices to return same suffix as existing file
+        existing_suffix = analysis_file_name.replace(
+            mini_copy_name.replace(".nwb", ""), ""
+        ).replace(".nwb", "")
+
+        def mock_choices(population, k):
+            return list(existing_suffix)
+
+        monkeypatch.setattr("random.choices", mock_choices)
+
+        # Try to create a new file - should get different name due to DB check
+        new_file_name = custom_analysis_table.create(mini_copy_name)
+
+        # Verify we got a DIFFERENT filename (collision avoided)
+        assert new_file_name != analysis_file_name, (
+            f"Collision! Got same filename {new_file_name} even though "
+            f"{analysis_file_name} exists in DB"
+        )
+
+        if teardown:
+            (custom_analysis_table & f_dict).delete_quick()
+
+    def test_filename_collision_reservation_file_exists(
+        self, mini_copy_name, custom_analysis_table, monkeypatch, teardown
+    ):
+        """Test filename collision with existing reservation file.
+
+        Tests that __get_new_file_name detects files on disk even if not in DB.
+        """
+        # Mock random.choices to return a predictable suffix
+        test_suffix = "TESTABCD12"
+
+        call_count = [0]
+
+        def mock_choices(population, k):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                # First call: return test suffix (will collide)
+                return list(test_suffix)
+            else:
+                # Subsequent calls: return different suffix
+                return list(f"DIFF{call_count[0]:06d}")
+
+        monkeypatch.setattr("random.choices", mock_choices)
+
+        # Manually create a reservation file with the test suffix
+        base_name = mini_copy_name.replace(".nwb", "")
+        collision_file = f"{base_name}{test_suffix}.nwb"
+        reservation_path = custom_analysis_table.get_abs_path(collision_file)
+        reservation_path = Path(reservation_path)
+        reservation_path.parent.mkdir(parents=True, exist_ok=True)
+        reservation_path.touch()
+
+        try:
+            # Verify reservation file exists but not in DB
+            assert reservation_path.exists()
+            assert (
+                len(
+                    custom_analysis_table
+                    & {"analysis_file_name": collision_file}
+                )
+                == 0
+            )
+
+            # Try to create a new file - should detect disk collision
+            new_file_name = custom_analysis_table.create(mini_copy_name)
+
+            # Verify we got a DIFFERENT filename (collision avoided)
+            assert new_file_name != collision_file, (
+                f"Collision! Got same filename {new_file_name} even though "
+                f"reservation file {collision_file} exists on disk"
+            )
+
+            # Verify the loop tried multiple times
+            assert (
+                call_count[0] >= 2
+            ), "Should have retried after detecting collision"
 
         finally:
             if teardown:
-                # Cleanup original
-                (
-                    custom_analysis_table
-                    & {"analysis_file_name": original_file}
-                ).delete_quick()
-                # Cleanup copy (file only, not in DB)
+                # Cleanup
+                if reservation_path.exists():
+                    reservation_path.unlink()
                 try:
-                    copy_path = custom_analysis_table.get_abs_path(copied_file)
-                    if Path(copy_path).exists():
-                        Path(copy_path).unlink()
+                    new_path = custom_analysis_table.get_abs_path(new_file_name)
+                    if Path(new_path).exists():
+                        Path(new_path).unlink()
                 except Exception:
                     pass
 
 
-# ==================== 4. CLEANUP AND ORPHAN DETECTION TESTS ====================
+# ==================== 4. CLEANUP AND ORPHAN DETECTION TESTS ===================
 
 
 class TestCleanupAndRegistry:
@@ -462,6 +601,7 @@ class TestCleanupAndRegistry:
         base_dir,
         teardown,
         common,
+        mock_create,
     ):
         """Test orphan detection across all registered tables.
 
@@ -480,62 +620,43 @@ class TestCleanupAndRegistry:
         master_table = common.common_nwbfile.AnalysisNwbfile()
         custom_table, downstream = custom_analysis_tables
 
-        # Mock create() to just write 'test' to a file instead of full NWB copy
-        # This significantly speeds up the test (10x faster)
-        original_create = custom_table.create
+        # Use mock_create fixture for fast file creation
+        mock_create(custom_table)
 
-        def mock_create(nwb_file_name, **kwargs):
-            # Get the new file name using private method
-            new_file_name = custom_table._AnalysisMixin__get_new_file_name(
-                nwb_file_name
-            )
-            # Just write a simple file
-            file_path = Path(custom_table.get_abs_path(new_file_name))
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text("test")
-            return new_file_name
+        # Case 1: Create null file
+        null_file = custom_table.create(mini_copy_name)
+        null_fp = custom_table.get_abs_path(null_file)
 
-        custom_table.create = mock_create
+        # Case 2: Create orphan file
+        orph_file = custom_table.create(mini_copy_name)
+        orph_fp = custom_table.get_abs_path(orph_file)
+        custom_table.add(mini_copy_name, orph_file)
 
-        try:
-            # Case 1: Create null file
-            null_file = custom_table.create(mini_copy_name)
-            null_fp = custom_table.get_abs_path(null_file)
+        # Case 3: Create valid file with downstream reference
+        valid_file = custom_table.create(mini_copy_name)
+        valid_fp = custom_table.get_abs_path(valid_file)
+        custom_table.add(mini_copy_name, valid_file)
+        downstream.insert_by_name(valid_file)
 
-            # Case 2: Create orphan file
-            orph_file = custom_table.create(mini_copy_name)
-            orph_fp = custom_table.get_abs_path(orph_file)
-            custom_table.add(mini_copy_name, orph_file)
+        # Case 4: Create valid file, copy to master table without downstream
+        export_file = custom_table.create(mini_copy_name)
+        export_fp = custom_table.get_abs_path(export_file)
+        custom_table.add(mini_copy_name, export_file)
+        downstream.insert_by_name(export_file)
+        custom_table._copy_to_master(export_file)
 
-            # Case 3: Create valid file with downstream reference
-            valid_file = custom_table.create(mini_copy_name)
-            valid_fp = custom_table.get_abs_path(valid_file)
-            custom_table.add(mini_copy_name, valid_file)
-            downstream.insert_by_name(valid_file)
+        # TODO: use `cleanup()` logic to find orphans
+        # Simulate orphan detection across all registered tables
+        # insert table entries without downstream fk-references
+        master_table.cleanup()
 
-            # Case 4: Create valid file, copy to master table without downstream
-            export_file = custom_table.create(mini_copy_name)
-            export_fp = custom_table.get_abs_path(export_file)
-            custom_table.add(mini_copy_name, export_file)
-            downstream.insert_by_name(export_file)
-            custom_table._copy_to_master(export_file)
+        assert not Path(null_fp).exists(), "Null file should be deleted"
 
-            # TODO: use `cleanup()` logic to find orphans
-            # Simulate orphan detection across all registered tables
-            # insert table entries without downstream fk-references
-            master_table.cleanup()
-
-            assert not Path(null_fp).exists(), "Null file should be deleted"
-
-            has_orph = custom_table.file_like(orph_file)
-            assert not bool(has_orph), "Orphan should be detected"
-            assert not Path(orph_fp).exists(), "Orphan file should be deleted"
-            assert Path(valid_fp).exists(), "Valid file should remain"
-            assert Path(export_fp).exists(), "Exported valid file should remain"
-
-        finally:
-            # Restore original create method
-            custom_table.create = original_create
+        has_orph = custom_table.file_like(orph_file)
+        assert not bool(has_orph), "Orphan should be detected"
+        assert not Path(orph_fp).exists(), "Orphan file should be deleted"
+        assert Path(valid_fp).exists(), "Valid file should remain"
+        assert Path(export_fp).exists(), "Exported valid file should remain"
 
     def test_registry_entry_has_metadata(
         self, analysis_registry, custom_analysis_table
@@ -598,7 +719,13 @@ class TestIntegration:
                 file_path.unlink()
 
     def test_multiple_tables_isolation(
-        self, mini_copy_name, custom_config, dj_conn, teardown, common
+        self,
+        mini_copy_name,
+        custom_config,
+        dj_conn,
+        teardown,
+        common,
+        mock_create,
     ):
         """Test that multiple custom tables can coexist without conflicts.
 
@@ -627,48 +754,41 @@ class TestIntegration:
         class AnalysisNwbfile2(SpyglassAnalysis, dj.Manual):
             definition = """This definition is managed by SpyglassAnalysis"""
 
-        try:
-            # Create files in both tables
-            file1 = AnalysisNwbfile1().create(mini_copy_name)
-            file2 = AnalysisNwbfile2().create(mini_copy_name)
+        # Use mock_create for fast file creation
+        mock_create(AnalysisNwbfile1())
+        mock_create(AnalysisNwbfile2())
 
-            # Files should be independent
-            assert file1 != file2
+        # Create files in both tables
+        file1 = AnalysisNwbfile1().create(mini_copy_name)
+        file2 = AnalysisNwbfile2().create(mini_copy_name)
 
-            # Register both
-            AnalysisNwbfile1().add(mini_copy_name, file1)
-            AnalysisNwbfile2().add(mini_copy_name, file2)
+        # Files should be independent
+        assert file1 != file2
 
-            # Both should be in their respective tables
-            assert len(AnalysisNwbfile1() & {"analysis_file_name": file1}) == 1
-            assert len(AnalysisNwbfile2() & {"analysis_file_name": file2}) == 1
+        # Register both
+        AnalysisNwbfile1().add(mini_copy_name, file1)
+        AnalysisNwbfile2().add(mini_copy_name, file2)
 
-            # Should not be in each other's tables
-            assert len(AnalysisNwbfile1() & {"analysis_file_name": file2}) == 0
-            assert len(AnalysisNwbfile2() & {"analysis_file_name": file1}) == 0
+        # Both should be in their respective tables
+        f_dict1 = {"analysis_file_name": file1}
+        f_dict2 = {"analysis_file_name": file2}
+        assert len(AnalysisNwbfile1() & f_dict1) == 1
+        assert len(AnalysisNwbfile2() & f_dict2) == 1
 
-        finally:
-            # Always cleanup registry entries (even if teardown=False)
-            # to prevent polluting subsequent tests
-            from spyglass.common.common_nwbfile import AnalysisRegistry
+        # Should not be in each other's tables
+        assert len(AnalysisNwbfile1() & f_dict2) == 0
+        assert len(AnalysisNwbfile2() & f_dict1) == 0
 
-            registry = AnalysisRegistry()
-            for table_name in [
-                AnalysisNwbfile1.full_table_name,
-                AnalysisNwbfile2.full_table_name,
-            ]:
-                try:
-                    (registry & {"full_table_name": table_name}).delete_quick()
-                except Exception:
-                    pass
+        # Always cleanup registry entries (even if teardown=False)
+        from spyglass.common.common_nwbfile import AnalysisRegistry
 
-            # Restore original config
-            dj.config["custom"]["database.prefix"] = original
+        names = tuple(
+            AnalysisNwbfile1.full_table_name, AnalysisNwbfile2.full_table_name
+        )
+        (AnalysisRegistry & f"full_table_name IN {names}").delete_quick()
 
-            if teardown:
-                # Cleanup data
-                try:
-                    AnalysisNwbfile1().delete_quick()
-                    AnalysisNwbfile2().delete_quick()
-                except Exception:
-                    pass
+        # Restore original config
+        dj.config["custom"]["database.prefix"] = original
+
+        AnalysisNwbfile1().delete_quick()
+        AnalysisNwbfile2().delete_quick()

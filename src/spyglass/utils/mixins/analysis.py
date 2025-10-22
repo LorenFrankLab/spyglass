@@ -295,10 +295,11 @@ class AnalysisMixin(BaseMixin):
             file_in_table = bool(cls() & file_dict)
             file_exist = cls.__get_analysis_path(fname).exists()
 
-        # create the empty file to reserve the name before returning
-        # conflict if 2 users create the same file name at the same time in
-        # different AnalysisNwbfile instances
-        cls.__get_analysis_path(fname).touch()
+        # Create the empty file to reserve the name before returning
+        # Avoids conflicts from multiple AnalysisNwbfile instances
+        reservation_path = cls.__get_analysis_path(fname)
+        reservation_path.parent.mkdir(parents=True, exist_ok=True)
+        reservation_path.touch()
 
         return fname
 
