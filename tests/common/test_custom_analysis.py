@@ -704,7 +704,7 @@ class TestIntegration:
         from spyglass.common.common_nwbfile import AnalysisRegistry
 
         names = tuple(
-            AnalysisNwbfile1.full_table_name, AnalysisNwbfile2.full_table_name
+            (AnalysisNwbfile1.full_table_name, AnalysisNwbfile2.full_table_name)
         )
         (AnalysisRegistry & f"full_table_name IN {names}").delete_quick()
 
