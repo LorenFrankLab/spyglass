@@ -21,9 +21,12 @@ class FetchMixin(BaseMixin):
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
         from spyglass.common.common_nwbfile import (  # noqa F401
-            AnalysisNwbfile,
+            AnalysisRegistry,
             Nwbfile,
         )
+
+        this_prefix = self.full_table_name.lsplit("_")[0].strip("`")
+        AnalysisNwbfile = AnalysisRegistry().get_class(prefix)
 
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
@@ -60,18 +63,16 @@ class FetchMixin(BaseMixin):
         table, tbl_attr = self._nwb_table_tuple
 
         log_export = kwargs.pop("log_export", True)
-        # Check if either:
-        # 1. tbl_attr contains "analysis" (table references AnalysisNwbfile)
-        # 2. self is itself an AnalysisNwbfile table (custom or master)
+        is_export = log_export and self.export_id
+
+        if is_export and ("analysis" in tbl_attr):
+            self._log_fetch_nwb(table, tbl_attr)
+
         is_analysis_table = self.full_table_name.endswith(
             "_nwbfile`.`analysis_nwbfile`"
         )
-        if (
-            log_export
-            and self.export_id
-            and ("analysis" in tbl_attr or is_analysis_table)
-        ):
-            self._log_fetch_nwb(table, tbl_attr)
+        if is_export and is_analysis_table:
+            self._copy_to_master()
 
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 

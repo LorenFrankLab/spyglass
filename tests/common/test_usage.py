@@ -104,7 +104,9 @@ def test_export_selection_files(gen_export_selection, export_tbls):
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
 
     len_fi = len(ExportSelection * ExportSelection.File & paper_key)
-    assert len_fi == 3, "Selection files not captured correctly (expected 2 standard + 1 custom)"
+    assert (
+        len_fi == 3
+    ), "Selection files not captured correctly (expected 2 standard + 1 custom)"
 
 
 def test_export_selection_tables(gen_export_selection, export_tbls):
@@ -176,11 +178,13 @@ def populate_export(export_tbls, gen_export_selection):
     Export.super_delete(warn=False, safemode=False)
 
 
-def test_export_populate(populate_export):
+def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
-    assert len(file) == 5, "Export files not captured correctly (expected 4 standard + 1 custom)"
-    assert len(table) == 39, "Export tables not captured correctly"
+    assert (
+        len(file) == 5
+    ), "Export files not captured correctly (expected 4 standard + 1 custom)"
+    assert len(table) == 40, "Export tables not captured correctly"
 
 
 def test_invalid_export_id(export_tbls):
@@ -211,23 +215,22 @@ def test_custom_analysis_copy_to_master(gen_export_selection, common):
     """
     custom_table = gen_export_selection["custom_table"]
     custom_file = gen_export_selection["custom_file"]
+    custom_dict = {"analysis_file_name": custom_file}
     master_table = common.common_nwbfile.AnalysisNwbfile()
 
     # Verify custom entry exists
-    custom_entry = custom_table & {"analysis_file_name": custom_file}
+    custom_entry = custom_table & custom_dict
     assert len(custom_entry) == 1, "Custom table entry not found"
 
     # Verify entry was copied to master table
-    master_entry = master_table & {"analysis_file_name": custom_file}
+    master_entry = master_table & custom_dict
     assert len(master_entry) == 1, "Entry not copied to master AnalysisNwbfile"
 
     # Verify the copied entry has correct data
     custom_data = custom_entry.fetch1()
     master_data = master_entry.fetch1()
 
-    assert custom_data["analysis_file_name"] == master_data["analysis_file_name"]
-    assert custom_data["nwb_file_name"] == master_data["nwb_file_name"]
-    assert custom_data["analysis_file_abs_path"] == master_data["analysis_file_abs_path"]
+    assert custom_data == master_data, "Data mismatch in copied AnalysisNwbfile"
 
 
 def test_custom_analysis_in_export(gen_export_selection, populate_export):

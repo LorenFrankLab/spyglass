@@ -477,43 +477,65 @@ class TestCleanupAndRegistry:
         Case 4 is relevant for ExportSelection.File usecase
         """
 
-        master_analysis_table = common.common_nwbfile.AnalysisNwbfile()
-        custom_analysis_table, downstream = custom_analysis_tables
+        master_table = common.common_nwbfile.AnalysisNwbfile()
+        custom_table, downstream = custom_analysis_tables
 
-        # Case 1: Create null file
-        null_file = custom_analysis_table.create(mini_copy_name)
-        null_fp = custom_analysis_table.get_abs_path(null_file)
+        # Mock create() to just write 'test' to a file instead of full NWB copy
+        # This significantly speeds up the test (10x faster)
+        original_create = custom_table.create
 
-        # Case 2: Create orphan file
-        orph_file = custom_analysis_table.create(mini_copy_name)
-        orph_fp = custom_analysis_table.get_abs_path(orph_file)
-        custom_analysis_table.add(mini_copy_name, orph_file)
+        def mock_create(nwb_file_name, **kwargs):
+            # Get the new file name using private method
+            new_file_name = custom_table._AnalysisMixin__get_new_file_name(
+                nwb_file_name
+            )
+            # Just write a simple file
+            file_path = Path(custom_table.get_abs_path(new_file_name))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("test")
+            return new_file_name
 
-        # Case 3: Create valid file with downstream reference
-        valid_file = custom_analysis_table.create(mini_copy_name)
-        valid_fp = custom_analysis_table.get_abs_path(valid_file)
-        custom_analysis_table.add(mini_copy_name, valid_file)
-        downstream.insert_by_name(valid_file)
+        custom_table.create = mock_create
 
-        # Case 4: Create valid file, copy to master table without downstream
-        export_file = custom_analysis_table.create(mini_copy_name)
-        export_fp = custom_analysis_table.get_abs_path(export_file)
-        custom_analysis_table.add(mini_copy_name, export_file)
-        downstream.insert_by_name(export_file)
-        custom_analysis_table._copy_to_master(export_file)
+        try:
+            # Case 1: Create null file
+            null_file = custom_table.create(mini_copy_name)
+            null_fp = custom_table.get_abs_path(null_file)
 
-        # TODO: use `cleanup()` logic to find orphans
-        # Simulate orphan detection across all registered tables
-        # insert table entries without downstream fk-references
-        master_analysis_table.cleanup()
+            # Case 2: Create orphan file
+            orph_file = custom_table.create(mini_copy_name)
+            orph_fp = custom_table.get_abs_path(orph_file)
+            custom_table.add(mini_copy_name, orph_file)
 
-        assert not Path(null_fp).exists(), "Null file should be deleted"
+            # Case 3: Create valid file with downstream reference
+            valid_file = custom_table.create(mini_copy_name)
+            valid_fp = custom_table.get_abs_path(valid_file)
+            custom_table.add(mini_copy_name, valid_file)
+            downstream.insert_by_name(valid_file)
 
-        has_orph = custom_analysis_table.file_like(orph_file)
-        assert not bool(has_orph), "Orphan should be detected"
-        assert not Path(orph_fp).exists(), "Orphan file should be deleted"
-        assert Path(valid_fp).exists(), "Valid file should remain"
-        assert Path(export_fp).exists(), "Exported valid file should remain"
+            # Case 4: Create valid file, copy to master table without downstream
+            export_file = custom_table.create(mini_copy_name)
+            export_fp = custom_table.get_abs_path(export_file)
+            custom_table.add(mini_copy_name, export_file)
+            downstream.insert_by_name(export_file)
+            custom_table._copy_to_master(export_file)
+
+            # TODO: use `cleanup()` logic to find orphans
+            # Simulate orphan detection across all registered tables
+            # insert table entries without downstream fk-references
+            master_table.cleanup()
+
+            assert not Path(null_fp).exists(), "Null file should be deleted"
+
+            has_orph = custom_table.file_like(orph_file)
+            assert not bool(has_orph), "Orphan should be detected"
+            assert not Path(orph_fp).exists(), "Orphan file should be deleted"
+            assert Path(valid_fp).exists(), "Valid file should remain"
+            assert Path(export_fp).exists(), "Exported valid file should remain"
+
+        finally:
+            # Restore original create method
+            custom_table.create = original_create
 
     def test_registry_entry_has_metadata(
         self, analysis_registry, custom_analysis_table
@@ -575,33 +597,37 @@ class TestIntegration:
             if file_path.exists():
                 file_path.unlink()
 
-    @pytest.mark.xfail(reason="Multi-table isolation not yet verified")
     def test_multiple_tables_isolation(
-        self, mini_copy_name, custom_config, dj_conn, teardown
+        self, mini_copy_name, custom_config, dj_conn, teardown, common
     ):
-        """Test that multiple custom tables can coexist without conflicts."""
+        """Test that multiple custom tables can coexist without conflicts.
+
+        This test verifies that the factory pattern allows multiple teams
+        to have their own isolated AnalysisNwbfile tables without conflicts.
+        """
         from spyglass.utils.dj_mixin import SpyglassAnalysis
+
+        Nwbfile = common.common_nwbfile.Nwbfile  # For fk resolution
 
         # Create two different custom schemas
         schema1 = dj.schema(f"{custom_config}_nwbfile")
-        schema2 = dj.schema("another_test_nwbfile")
+
+        # Save original config before creating any tables
+        original = dj.config["custom"]["database.prefix"]
 
         @schema1
         class AnalysisNwbfile1(SpyglassAnalysis, dj.Manual):
             definition = """This definition is managed by SpyglassAnalysis"""
 
-        # Set config for second table
-        original = dj.config["custom"]["database.prefix"]
-        dj.config["custom"]["database.prefix"] = "another_test"
+        # Set config for second table (must match schema name prefix)
+        dj.config["custom"]["database.prefix"] = "anothertest"
+        schema2 = dj.schema("anothertest_nwbfile")
+
+        @schema2
+        class AnalysisNwbfile2(SpyglassAnalysis, dj.Manual):
+            definition = """This definition is managed by SpyglassAnalysis"""
 
         try:
-
-            @schema2
-            class AnalysisNwbfile2(SpyglassAnalysis, dj.Manual):
-                definition = (
-                    """This definition is managed by SpyglassAnalysis"""
-                )
-
             # Create files in both tables
             file1 = AnalysisNwbfile1().create(mini_copy_name)
             file2 = AnalysisNwbfile2().create(mini_copy_name)
@@ -622,9 +648,25 @@ class TestIntegration:
             assert len(AnalysisNwbfile2() & {"analysis_file_name": file1}) == 0
 
         finally:
+            # Always cleanup registry entries (even if teardown=False)
+            # to prevent polluting subsequent tests
+            from spyglass.common.common_nwbfile import AnalysisRegistry
+
+            registry = AnalysisRegistry()
+            for table_name in [
+                AnalysisNwbfile1.full_table_name,
+                AnalysisNwbfile2.full_table_name,
+            ]:
+                try:
+                    (registry & {"full_table_name": table_name}).delete_quick()
+                except Exception:
+                    pass
+
+            # Restore original config
             dj.config["custom"]["database.prefix"] = original
+
             if teardown:
-                # Cleanup
+                # Cleanup data
                 try:
                     AnalysisNwbfile1().delete_quick()
                     AnalysisNwbfile2().delete_quick()

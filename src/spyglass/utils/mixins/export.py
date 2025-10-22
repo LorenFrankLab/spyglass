@@ -281,20 +281,38 @@ class ExportMixin(FetchMixin):
 
         if is_custom_analysis:
             # Self is custom AnalysisNwbfile, copy to master
+            self._logger.debug(
+                f"Export: detected custom AnalysisNwbfile table {this_name}"
+            )
             self._copy_to_master()
         elif custom_parent := self._custom_analysis_parent:
             # Self has a custom AnalysisNwbfile parent, copy parent entries
+            parent_name = custom_parent.full_table_name
+            self._logger.info(
+                f"Export: {this_name} has custom parent {parent_name}"
+            )
             f_dict = [{tbl_pk: fname} for fname in fnames]
             restr_parent = custom_parent.restrict(f_dict, log_export=False)
             restr_parent._copy_to_master()
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
+        file_count = len(fnames)
+        self._logger.debug(
+            f"Export: inserting {file_count} files from {this_name}"
+        )
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
-        table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
+        # Log fetch on master AnalysisNwbfile (entries were copied there)
+        if fnames:
+            fnames_str = "('" + "', ".join(fnames) + "')"
+            AnalysisNwbfile()._log_fetch(
+                restriction=f"{tbl_pk} in {fnames_str}"
+            )
+
+        if this_name.startswith("`testexport_"):
+            __import__("pdb").set_trace()
 
     def _run_join(self, **kwargs):
         """Log join for export.

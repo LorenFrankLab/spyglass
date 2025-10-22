@@ -15,6 +15,7 @@ import pynwb
 import spikeinterface as si
 from hdmf.common import DynamicTable
 from pynwb.core import ScratchData
+from tqdm import tqdm
 
 from spyglass import __version__ as sg_version
 from spyglass.settings import analysis_dir, raw_dir
@@ -266,6 +267,8 @@ class AnalysisRegistry(dj.Manual):
         class_obj : type or None
             The class object for the given full_table_name, or None.
         """
+        if isinstance(key, str) and "analysis_nwbfile" not in key:
+            key = f"`{key}_nwbfile`.`analysis_nwbfile`"
         if isinstance(key, str):
             key = {"full_table_name": key}
 
@@ -416,12 +419,12 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
     # See #630, #664. Excessive key length.
 
     def _remove_untracked_files(
-        self, dry_run: bool = True
-    ) -> Union[Set[Path], None]:
+        self, custom_tables: List[SpyglassAnalysis], dry_run: bool = True
+    ) -> tuple[Set[Path], Set[Path]]:
         """Remove analysis files that are empty (0 bytes) or not tracked.
 
         WARNING: This function makes `analysis_dir` a privileged directory and
-        will delete files in it that are not tracked in this schema externals.
+        will delete files in it that are not tracked in ANY schema externals.
 
         NOTE: Subprocess would be faster, but this prioritizes cross-platform
         compatibility.
@@ -430,74 +433,97 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         ----------
         dry_run : bool, optional
             If True, return the files that would be deleted. Defaults to True.
+        custom_tables : list
+            List of custom analysis table instances to check for tracked files.
+            If None, only checks master table. Defaults to None.
+
+        Returns
+        -------
+        tuple[Set[Path], Set[Path]]
+            (files_to_delete, all_files_scanned) - The second set can be reused
+            to avoid re-scanning the directory.
         """
-        tracked = set(
-            [
-                Path(self._analysis_dir) / fp
-                for fp in self._ext_tbl.fetch("filepath")
-            ]
-        )
+
+        def paths_from_external(tbl) -> Set[Path]:
+            return set(
+                [fp[1] for fp in tbl._ext_tbl.fetch_external_paths()]
+            )
+
+        # Collect tracked files from master table, then custom tables
+        tracked = paths_from_external(self)
+        for tbl in custom_tables:
+            tracked.update(paths_from_external(tbl))
 
         to_delete = set()
-        for path in Path(self._analysis_dir).rglob("*.nwb"):
-            if path.is_file() and path.stat().st_size == 0:
+        for path in tqdm(
+            Path(self._analysis_dir).rglob("*.nwb"),
+            desc="Scanning analysis files",
+        ):
+            is_empty_file = path.is_file() and path.stat().st_size == 0
+            is_empty_dir = path.is_dir() and not any(path.iterdir())
+            if is_empty_file or is_empty_dir:
                 to_delete.add(path)
-                continue
-            if path.is_dir() and not any(path.iterdir()):
-                to_delete.add(path)
-                continue
-            if path not in tracked:
+            elif path not in tracked:
                 to_delete.add(path)
 
         if dry_run:
-            return to_delete
+            return to_delete, tracked
 
-        for path in to_delete:
-            try:
-                os.remove(path)
-                self._logger.info(f"Deleted untracked analysis file: {path}")
-            except Exception as e:
-                self._logger.error(f"Error deleting file {path}: {e}")
+        if self._test_mode:  # TODO: remove before production
+            for path in to_delete:
+                try:
+                    path.unlink()
+                except Exception as e:
+                    self._logger.error(f"Error deleting file {path}: {e}")
+        else:
+            self._logger.info(f"would delete {len(to_delete)} untracked files")
+
+        return to_delete, tracked
 
     def cleanup(self) -> None:
         """Clean up this table and all custom analysis tables.
 
-        1. Delete all empty files because getting file names now runs touch.
-        2. For each custom analysis table...
+        1. For each custom analysis table...
             a. Delete custom orphans.
             b. Deletions for unused externals entries.
             c. Remove any remaining entries from master orphans.
-        3. Delete remaining master orphans.
-        4. Run externals queue.
+        2. Delete remaining master orphans.
+        3. Run externals queue.
+        4. Delete all empty files because getting file names now runs touch.
         """
+        logger.info("Analysis cleanup")
         registry = AnalysisRegistry()
         registry.block_new_inserts()
 
-        self._remove_untracked_files(dry_run=False)
-
+        # Get all custom tables first so we can check their tracked files
+        custom_tables = list(registry.all_classes)
+        num_tables = len(custom_tables)
         master_orphans = self.get_orphans().proj()
-        externals_queue = []
 
         try:  # Long try block ensures that we always unblock inserts after
-            for analysis_tbl in registry.all_classes:
-                try:
-                    # Step 2a: Delete orphans from this analysis table.
-                    _ = analysis_tbl.delete_orphans()
-                    # Step 2b: Delete unused externals entries.
-                    _ = analysis_tbl.cleanup_external(delete_files=True)
-                    # Step 2c: Remove entries from master orphans.
+            for i, analysis_tbl in enumerate(custom_tables, start=1):
+                tbl_name = analysis_tbl.full_table_name
+                logger.info(f"  [{i}/{num_tables}] Processing {tbl_name}")
+
+                # Step 1a: Get orphans from this analysis table
+                _ = analysis_tbl.delete_orphans(dry_run=False, safemode=False)
+
+                # Step 1b: Clean up this table's external entries
+                _ = analysis_tbl.cleanup_external()
+
+                # Step 1c: Remove valid entries from master orphans.
+                if bool(analysis_tbl):
                     master_orphans -= analysis_tbl.proj()
-                except Exception as e:
-                    tbl_name = analysis_tbl.full_table_name
-                    self._logger.error(
-                        f"Error cleaning analysis table {tbl_name}: {e}"
-                    )
 
             # Step 3: Delete remaining master orphans.
-            master_orphans.delete_quick()
+            if bool(master_orphans):
+                master_orphans.delete_quick()
 
-            # Step 4: Run externals queue.
-            for func in externals_queue:
-                func(delete_files=True)
+            # Step 4: Clean up master external table entries
+            _ = self.cleanup_external()
+
+            # Remove untracked files, checking both master and custom tables
+            _ = self._remove_untracked_files(custom_tables, dry_run=False)
+
         finally:
             registry.unblock_new_inserts()

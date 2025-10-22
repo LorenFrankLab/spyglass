@@ -97,6 +97,10 @@ class AnalysisMixin(BaseMixin):
 
         AnalysisNwbfile().insert(entries, skip_duplicates=True)
 
+        self._logger.debug(
+            f"Copied entries: {[e['analysis_file_name'] for e in entries]}"
+        )
+
     # --------------------------- NWB file management -------------------------
 
     @cached_property
@@ -795,37 +799,18 @@ class AnalysisMixin(BaseMixin):
 
     # ------------------------------ Maintenance ------------------------------
 
-    @cached_property
-    def _child_tables(self) -> list:
-        """Return a list of child tables for this table."""
-        # NOTE: caching could cause issues if run during high-traffic times.
-        # Only run during maintenance windows.
-        return get_child_tables(self)
-
-    def cleanup_external(self, delete_files=False):
+    def cleanup_external(self):
         """Remove the filepath entries for NWB files that are not in use.
 
-        Does not delete the files themselves unless delete_files=True is
-        specified. Run this after deleting the Nwbfile() entries themselves.
-
-        Parameters
-        ----------
-        delete_files : bool, optional
-            Whether the original files should be deleted (default False).
+        Because an unused file in the master may be in use in a custom table,
+        we never want to delete external files. Instead, the master handles
+        orphan detection and deletion.
         """
-        self._ext_tbl.delete(delete_external_files=delete_files)
+        self._ext_tbl.delete(delete_external_files=False)
 
     def get_orphans(self):
         """Clean up orphaned entries and external files."""
-        return self - self._child_tables
-
-    def delete_orphans(self):
-        """Delete orphaned entries and external files."""
-        orphans = self.get_orphans()
-        if not orphans:
-            return
-        self._logger.info(f"Deleting {len(orphans)} orphaned entries...")
-        orphans.delete_quick()
+        return self - get_child_tables(self)
 
     def log(self, *args, **kwargs):
         """Null log method. Revert to _disabled_log to turn back on."""
