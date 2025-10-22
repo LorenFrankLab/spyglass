@@ -288,7 +288,7 @@ class ExportMixin(FetchMixin):
         elif custom_parent := self._custom_analysis_parent:
             # Self has a custom AnalysisNwbfile parent, copy parent entries
             parent_name = custom_parent.full_table_name
-            self._logger.info(
+            self._logger.debug(
                 f"Export: {this_name} has custom parent {parent_name}"
             )
             f_dict = [{tbl_pk: fname} for fname in fnames]
@@ -296,23 +296,22 @@ class ExportMixin(FetchMixin):
             restr_parent._copy_to_master()
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
-        file_count = len(fnames)
         self._logger.debug(
-            f"Export: inserting {file_count} files from {this_name}"
+            f"Export: inserting {len(fnames)} files from {this_name}"
         )
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        # Log fetch on master AnalysisNwbfile (entries were copied there)
-        if fnames:
-            fnames_str = "('" + "', ".join(fnames) + "')"
-            AnalysisNwbfile()._log_fetch(
-                restriction=f"{tbl_pk} in {fnames_str}"
-            )
 
-        if this_name.startswith("`testexport_"):
-            __import__("pdb").set_trace()
+        # Log fetch on master AnalysisNwbfile (entries were copied there)
+        this_restr = None
+        if len(fnames) == 1:
+            this_restr = f"{tbl_pk} = '{fnames[0]}'"
+        elif len(fnames) > 1:
+            this_restr = f"{tbl_pk} IN {tuple(fnames)}"
+        if this_restr:
+            AnalysisNwbfile()._log_fetch(restriction=this_restr)
 
     def _run_join(self, **kwargs):
         """Log join for export.

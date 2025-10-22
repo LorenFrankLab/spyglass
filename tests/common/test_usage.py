@@ -12,7 +12,8 @@ def export_tbls(common):
 def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
     """Create a custom AnalysisNwbfile table and file for testing."""
     import datajoint as dj
-    from spyglass.utils.dj_mixin import SpyglassAnalysis
+
+    from spyglass.utils.dj_mixin import SpyglassAnalysis, SpyglassMixin
 
     prefix = "testexport"
     original_prefix = dj.config.get("custom", {}).get("database.prefix")
@@ -29,16 +30,36 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
         class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             definition = """This definition is managed by SpyglassAnalysis"""
 
+        @schema
+        class CustomDownstream(SpyglassMixin, dj.Manual):
+            definition = """
+            foreign_id: int auto_increment
+            -> AnalysisNwbfile
+            """
+
+            @property
+            def _nwb_table_tuple(self):
+                """Return tuple of (table, attr) for NWB file access."""
+                return (AnalysisNwbfile, "analysis_file_name")
+
+            def insert_by_name(self, fname):
+                super().insert1(dict(analysis_file_name=fname))
+
         table = AnalysisNwbfile()
+        downstream = CustomDownstream()
         analysis_file_name = table.create(mini_copy_name)
         table.add(mini_copy_name, analysis_file_name)
+        downstream.insert_by_name(analysis_file_name)
 
-        yield table, analysis_file_name
+        yield table, downstream, analysis_file_name
 
         if teardown:
             try:
-                (table & {"analysis_file_name": analysis_file_name}).delete_quick()
+                (
+                    table & {"analysis_file_name": analysis_file_name}
+                ).delete_quick()
                 from pathlib import Path
+
                 file_path = Path(table.get_abs_path(analysis_file_name))
                 if file_path.exists():
                     file_path.unlink()
@@ -67,7 +88,9 @@ def gen_export_selection(
     ExportSelection, _ = export_tbls
     pos_merge, lin_merge = pos_merge_tables
     _ = populate_lfp
-    custom_table, custom_file = custom_analysis_file
+    custom_table, custom_downstream, custom_file = custom_analysis_file
+
+    ExportSelection.delete(safemode=False)
 
     ExportSelection.start_export(paper_id=1, analysis_id=1)
     lfp.v1.LFPV1().fetch_nwb()
@@ -88,12 +111,20 @@ def gen_export_selection(
     ).fetch1("KEY")
     (pos_merge & merge_key).fetch_nwb()
 
-    # NEW: Add custom AnalysisNwbfile to export
-    custom_table.fetch_nwb()
+    ExportSelection.start_export(paper_id=1, analysis_id=5)
+
+    # NEW: Test fetch_nwb on downstream table with custom AnalysisNwbfile parent
+    # This should trigger _copy_to_master and insert into ExportSelection.File
+    custom_downstream.fetch_nwb()
 
     ExportSelection.stop_export()
 
-    yield dict(paper_id=1, custom_table=custom_table, custom_file=custom_file)
+    yield dict(
+        paper_id=1,
+        custom_table=custom_table,
+        custom_downstream=custom_downstream,
+        custom_file=custom_file,
+    )
 
     ExportSelection.stop_export()
     ExportSelection.super_delete(warn=False, safemode=False)

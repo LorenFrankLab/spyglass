@@ -81,16 +81,23 @@ class AnalysisMixin(BaseMixin):
         """Copy entries from this custom table to the master AnalysisNwbfile."""
         from spyglass.common.common_nwbfile import AnalysisNwbfile
 
-        if isinstance(file_names, str):
-            file_names = [file_names, "fake_entry_to_avoid_error"]
-        if isinstance(file_names, list) and len(file_names) == 1:
-            file_names.append("fake_entry_to_avoid_error")
+        # Build restriction based on file_names
+        if file_names is None:
+            restr_table = self
+        else:
+            # Normalize to list
+            if isinstance(file_names, str):
+                file_names = [file_names]
 
-        entries = (
-            self
-            if file_names is None
-            else self & f"analysis_file_name in {tuple(file_names)}"
-        ).fetch(as_dict=True)
+            # Build appropriate restriction for single or multiple files
+            if len(file_names) == 1:
+                restr = f'analysis_file_name = "{file_names[0]}"'
+            else:
+                restr = f"analysis_file_name in {tuple(file_names)}"
+
+            restr_table = self & restr
+
+        entries = restr_table.fetch(as_dict=True)
 
         if not entries:
             return  # nothing to copy
@@ -98,7 +105,8 @@ class AnalysisMixin(BaseMixin):
         AnalysisNwbfile().insert(entries, skip_duplicates=True)
 
         self._logger.debug(
-            f"Copied entries: {[e['analysis_file_name'] for e in entries]}"
+            f"Copied {len(entries)} entries to master: "
+            f"{[e['analysis_file_name'] for e in entries]}"
         )
 
     # --------------------------- NWB file management -------------------------

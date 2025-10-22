@@ -21,19 +21,31 @@ class FetchMixin(BaseMixin):
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
         Implemented as a cached_property to avoid circular imports."""
         from spyglass.common.common_nwbfile import (  # noqa F401
+            AnalysisNwbfile,
             AnalysisRegistry,
             Nwbfile,
         )
 
-        this_prefix = self.full_table_name.lsplit("_")[0].strip("`")
-        AnalysisNwbfile = AnalysisRegistry().get_class(prefix)
+        attr_val = getattr(self, "_nwb_table", None)
 
-        table_dict = {
-            AnalysisNwbfile: "analysis_file_abs_path",
-            Nwbfile: "nwb_file_abs_path",
-        }
+        # ---------- Overwrite AnalysisNwbfile if using a custom one ----------
+        if not attr_val:
+            analysis_parents = [
+                p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
+            ]
+            if len(analysis_parents) > 1:
+                raise ValueError(
+                    f"{self.__class__.__name__} has multiple AnalysisNwbfile "
+                    "parents. This is not permitted."
+                )
+            if (
+                len(analysis_parents) == 1
+                and analysis_parents[0].split("_")[0].strip("`") != "common"
+            ):
+                AnalysisNwbfile = AnalysisRegistry().get_class(this_prefix)
+        # --------------------------------------------------------------------
 
-        resolved = getattr(self, "_nwb_table", None) or (
+        resolved = attr_val or (
             AnalysisNwbfile
             if "-> AnalysisNwbfile" in self.definition
             else Nwbfile if "-> Nwbfile" in self.definition else None
@@ -44,6 +56,11 @@ class FetchMixin(BaseMixin):
                 f"{self.__class__.__name__} does not have a "
                 "(Analysis)Nwbfile foreign key or _nwb_table attribute."
             )
+
+        table_dict = {
+            AnalysisNwbfile: "analysis_file_abs_path",
+            Nwbfile: "nwb_file_abs_path",
+        }
 
         return (
             resolved,
