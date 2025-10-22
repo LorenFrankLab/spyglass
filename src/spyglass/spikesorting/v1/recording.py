@@ -124,7 +124,7 @@ class SortGroup(SpyglassMixin, dj.Manual):
         omit_unitrode : bool
             Optional. If True, groups with only one electrode are skipped. Default True
         delete_existing_entries : bool
-            Optional. If True, exisiting SortGroup entries for this nwbfile are deleted. Default False
+            Optional. If True, existing SortGroup entries for this nwbfile are deleted. Default False
         """
         # Handle existing SortGroup entries
         existing_entries = SortGroup & {"nwb_file_name": nwb_file_name}
@@ -133,7 +133,9 @@ class SortGroup(SpyglassMixin, dj.Manual):
             existing_sort_group_ids = existing_entries.fetch("sort_group_id")
 
             if delete_existing_entries:
-                logger.info(f"Deleting existing SortGroups {existing_sort_group_ids} for {nwb_file_name}")
+                logger.info(
+                    f"Deleting existing SortGroups {existing_sort_group_ids} for {nwb_file_name}"
+                )
                 (SortGroup & {"nwb_file_name": nwb_file_name}).delete()
             else:
                 logger.warning(
@@ -141,7 +143,9 @@ class SortGroup(SpyglassMixin, dj.Manual):
                 )
                 # The user must either specify custom sort_group_ids or delete the existing entries
                 if sort_group_ids is None:
-                    raise ValueError("Must specify `sort_group_ids` if you do not want to delete existing SortGroups.")
+                    raise ValueError(
+                        "Must specify `sort_group_ids` if you do not want to delete existing SortGroups."
+                    )
                 # If we have custom sort_group_ids, make sure they don't conflict with existing entries
                 overlap = set(existing_sort_group_ids) & set(sort_group_ids)
                 if overlap:

@@ -183,7 +183,12 @@ def get_group_by_electrode_table_column(
     electrodes_df = nwbf.electrodes.to_dataframe()
 
     # Verify the column exists in the nwbfile's electrode table
-    if column not in electrodes_df.columns and column not in ("index", "id", "idx", "electrode_id"):
+    if column not in electrodes_df.columns and column not in (
+        "index",
+        "id",
+        "idx",
+        "electrode_id",
+    ):
         valid_cols = list(electrodes_df.columns)
         raise ValueError(
             f"Invalid column '{column}'. \n Must be one of: {valid_cols} "
@@ -221,7 +226,9 @@ def get_group_by_electrode_table_column(
             subset = subset[subset["bad_channel"] == 0]
 
         if subset.empty:
-            logger.warning(f"Omitting group {group_id} (all bad channels or no matches).")
+            logger.warning(
+                f"Omitting group {group_id} (all bad channels or no matches)."
+            )
             continue
 
         # Optionally skip unitrodes
