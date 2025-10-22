@@ -389,7 +389,7 @@ class AnalysisRegistry(dj.Manual):
 
         # Create ExternalTable for each database
         for database in sorted(databases):
-            exernals.append(ExtTable(**ext_kwargs, database=database))
+            externals.append(ExtTable(**ext_kwargs, database=database))
 
         return externals
 
