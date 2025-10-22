@@ -170,6 +170,7 @@ class AnalysisRegistry(dj.Manual):
         # Get a specific team's table
         MyTeamAnalysis = AnalysisRegistry().get_class("myteam")
     """
+
     definition = """
     full_table_name: varchar(128)  # full table name of the analysis
     ---
@@ -465,9 +466,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         """
 
         def paths_from_external(tbl) -> Set[Path]:
-            return set(
-                [fp[1] for fp in tbl._ext_tbl.fetch_external_paths()]
-            )
+            return set([fp[1] for fp in tbl._ext_tbl.fetch_external_paths()])
 
         # Collect tracked files from master table, then custom tables
         tracked = paths_from_external(self)
