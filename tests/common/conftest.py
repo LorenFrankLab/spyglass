@@ -222,6 +222,107 @@ def opto_epoch_dict():
     )
 
 
+@pytest.fixture(scope="module")
+def custom_prefix():
+    """Custom database prefix for testing custom AnalysisNwbfile tables."""
+    yield "testcustom"
+
+
+@pytest.fixture(scope="module")
+def custom_config(dj_conn, custom_prefix):
+    """Set up custom config with database prefix."""
+    import datajoint as dj
+
+    original_prefix = dj.config.get("custom", {}).get("database.prefix")
+
+    if "custom" not in dj.config:
+        dj.config["custom"] = {}
+    dj.config["custom"]["database.prefix"] = custom_prefix
+
+    yield custom_prefix
+
+    # Restore original config
+    if original_prefix:
+        dj.config["custom"]["database.prefix"] = original_prefix
+    elif "database.prefix" in dj.config.get("custom", {}):
+        del dj.config["custom"]["database.prefix"]
+
+
+@pytest.fixture(scope="module")
+def common_nwbfile(common):
+    """Return common nwbfile module."""
+    return common.common_nwbfile
+
+
+@pytest.fixture(scope="module")
+def analysis_registry(common_nwbfile):
+    """Return AnalysisRegistry table."""
+    return common_nwbfile.AnalysisRegistry()
+
+
+@pytest.fixture(scope="module")
+def master_analysis_table(common_nwbfile):
+    """Return master AnalysisNwbfile table for comparison."""
+    return common_nwbfile.AnalysisNwbfile()
+
+
+@pytest.fixture(scope="module")
+def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
+    """Create and return a custom AnalysisNwbfile table.
+
+    This fixture dynamically creates a table following the factory pattern.
+    """
+    import datajoint as dj
+    from spyglass.utils.dj_mixin import SpyglassAnalysis
+
+    prefix = custom_config
+    schema = dj.schema(f"{prefix}_nwbfile")
+
+    # Make Nwbfile available in the schema context for foreign key resolution
+    Nwbfile = common_nwbfile.Nwbfile
+    _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
+
+    @schema
+    class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
+        definition = """This definition is managed by SpyglassAnalysis"""
+
+    yield AnalysisNwbfile()
+
+
+@pytest.fixture
+def mock_create(monkeypatch):
+    """Fixture to mock create() method for faster testing.
+
+    Replaces the full NWB file copy with a simple text file write.
+    This speeds up tests by ~10x without affecting test logic.
+
+    Usage:
+        def test_something(custom_analysis_table, mock_create):
+            mock_create(custom_analysis_table)
+            # Now create() will use the fast mock
+            file = custom_analysis_table.create(nwb_file_name)
+    """
+
+    def _mock_create(table):
+        """Apply mock to a given AnalysisNwbfile table."""
+
+        def mock_create_impl(nwb_file_name, **kwargs):
+            # Get the new file name using private method
+            new_file_name = table._AnalysisMixin__get_new_file_name(
+                nwb_file_name
+            )
+            # Just write a simple file instead of copying full NWB
+            file_path = Path(table.get_abs_path(new_file_name))
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_text("test")
+            return new_file_name
+
+        monkeypatch.setattr(table, "create", mock_create_impl)
+        return table.create  # Return original in case test needs to restore
+
+    return _mock_create
+
+
 @pytest.fixture(scope="function")
 def opto_only_nwb(
     raw_dir,

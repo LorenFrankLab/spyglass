@@ -86,11 +86,16 @@ class AnalysisMixin(BaseMixin):
     cleanup/orphan detection, and export integration (copy-to-master).
 
     Key Methods:
-        create() - Create new analysis file with unique suffix
-        add() - Add NWB object to analysis file
+        build() - RECOMMENDED: Create builder for safe file creation (context manager)
+        create() - Legacy: Create new analysis file with unique suffix
+        add() - Legacy: Register analysis file in table
         get_file_path() - Get absolute path to analysis file
         cleanup() - Remove orphaned files across all custom tables
         _copy_to_master() - Copy entries to master table during export
+
+    The build() method returns an AnalysisFileBuilder context manager that
+    enforces the CREATE → POPULATE → REGISTER lifecycle, preventing common
+    errors like forgetting registration or modifying registered files.
 
     This mixin is used by SpyglassAnalysis for custom tables and directly
     inherited by the master AnalysisNwbfile table.
@@ -407,6 +412,61 @@ class AnalysisMixin(BaseMixin):
             "analysis_file_abs_path": self.get_abs_path(analysis_file_name),
         }
         self.insert1(key)
+
+    def build(self, nwb_file_name: str):
+        """Create a builder for safe analysis file creation.
+
+        Returns context manager that handles CREATE → POPULATE → REGISTER
+        lifecycle with automatic state tracking and error prevention.
+
+        This is the recommended way to create analysis files. The builder:
+        - Automatically registers files on successful exit
+        - Prevents modification of registered files (state checks)
+        - Logs failed files for cleanup on exceptions
+        - Provides clear error messages for invalid operations
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Parent NWB file name
+
+        Returns
+        -------
+        builder : AnalysisFileBuilder
+            Context manager for file lifecycle
+
+        Examples
+        --------
+        Basic usage:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(my_data, "results")
+        ...     file = builder.analysis_file_name
+        # File automatically registered on exit!
+
+        Multiple operations:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     builder.add_nwb_object(position, "position")
+        ...     builder.add_nwb_object(velocity, "velocity")
+        ...     file = builder.analysis_file_name
+
+        Direct I/O for complex cases:
+        >>> with AnalysisNwbfile().build(nwb_file_name) as builder:
+        ...     with builder.open_for_write() as io:
+        ...         nwbf = io.read()
+        ...         nwbf.add_unit(spike_times=times, id=unit_id)
+        ...         io.write(nwbf)
+
+        See Also
+        --------
+        AnalysisFileBuilder : Full API documentation
+        create : Legacy method for file creation
+        add : Legacy method for registration
+        """
+        from spyglass.utils.mixins.analysis_builder import (
+            AnalysisFileBuilder,
+        )
+
+        return AnalysisFileBuilder(self, nwb_file_name)
 
     @classmethod
     def get_abs_path(

@@ -20,61 +20,19 @@ pytestmark = pytest.mark.order("last")
 
 
 # ================================ FIXTURES ===================================
-
-
-@pytest.fixture(scope="module")
-def custom_prefix():
-    """Custom database prefix for testing."""
-    yield "testcustom"
-
-
-@pytest.fixture(scope="module")
-def custom_config(dj_conn, custom_prefix):
-    """Set up custom config with database prefix."""
-    original_prefix = dj.config.get("custom", {}).get("database.prefix")
-
-    if "custom" not in dj.config:
-        dj.config["custom"] = {}
-    dj.config["custom"]["database.prefix"] = custom_prefix
-
-    yield custom_prefix
-
-    # Restore original config
-    if original_prefix:
-        dj.config["custom"]["database.prefix"] = original_prefix
-    elif "database.prefix" in dj.config.get("custom", {}):
-        del dj.config["custom"]["database.prefix"]
-
-
-@pytest.fixture(scope="module")
-def common_nwbfile(common):
-    """Return common nwbfile module."""
-    return common.common_nwbfile
-
-
-@pytest.fixture(scope="module")
-def analysis_registry(common_nwbfile):
-    """Return AnalysisRegistry table."""
-    return common_nwbfile.AnalysisRegistry()
-
-
-@pytest.fixture(scope="module")
-def master_analysis_table(common_nwbfile):
-    """Return master AnalysisNwbfile table for comparison."""
-    return common_nwbfile.AnalysisNwbfile()
+# Common fixtures are now in conftest.py
 
 
 @pytest.fixture(scope="module")
 def custom_analysis_tables(custom_config, dj_conn, common_nwbfile):
-    """Create and return a custom AnalysisNwbfile table.
+    """Create and return custom AnalysisNwbfile table with downstream table.
 
-    This fixture dynamically creates a table following the factory pattern.
+    This fixture extends the base custom_analysis_table fixture from conftest.py
+    by adding a CustomDownstream table for testing FK relationships.
     """
     from spyglass.utils.dj_mixin import SpyglassAnalysis
 
-    prefix = (
-        custom_config  # custom_config fixture yields the prefix string directly
-    )
+    prefix = custom_config
     schema = dj.schema(f"{prefix}_nwbfile")
 
     # Make Nwbfile available in the schema context for foreign key resolution
@@ -96,47 +54,6 @@ def custom_analysis_tables(custom_config, dj_conn, common_nwbfile):
             super().insert1(dict(analysis_file_name=fname))
 
     yield AnalysisNwbfile(), CustomDownstream()
-
-
-@pytest.fixture(scope="module")
-def custom_analysis_table(custom_analysis_tables):
-    """Return the custom AnalysisNwbfile table instance."""
-    return custom_analysis_tables[0]
-
-
-@pytest.fixture
-def mock_create(monkeypatch):
-    """Fixture to mock create() method for faster testing.
-
-    Replaces the full NWB file copy with a simple text file write.
-    This speeds up tests by ~10x without affecting test logic.
-
-    Usage:
-        def test_something(custom_analysis_table, mock_create):
-            mock_create(custom_analysis_table)
-            # Now create() will use the fast mock
-            file = custom_analysis_table.create(nwb_file_name)
-    """
-
-    def _mock_create(table):
-        """Apply mock to a given AnalysisNwbfile table."""
-        original_create = table.create
-
-        def mock_create_impl(nwb_file_name, **kwargs):
-            # Get the new file name using private method
-            new_file_name = table._AnalysisMixin__get_new_file_name(
-                nwb_file_name
-            )
-            # Just write a simple file instead of copying full NWB
-            file_path = Path(table.get_abs_path(new_file_name))
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-            file_path.write_text("test")
-            return new_file_name
-
-        monkeypatch.setattr(table, "create", mock_create_impl)
-        return original_create  # Return in case test needs to restore
-
-    return _mock_create
 
 
 @pytest.fixture(scope="module")
