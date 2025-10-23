@@ -135,7 +135,12 @@ class TestHelperMethods:
     """Test builder helper methods: add_nwb_object, add_units, etc."""
 
     def test_add_nwb_object_before_registration(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test add_nwb_object() works before registration."""
         table = master_analysis_table
@@ -163,7 +168,12 @@ class TestHelperMethods:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_add_units_before_registration(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test add_units() works before registration."""
         table = master_analysis_table
@@ -194,7 +204,12 @@ class TestHelperMethods:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_multiple_helper_calls(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test multiple helper calls in sequence."""
         table = master_analysis_table
@@ -224,7 +239,12 @@ class TestHelperMethods:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_open_for_write_before_registration(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test open_for_write() works before registration."""
         table = master_analysis_table
@@ -404,7 +424,12 @@ class TestExceptionHandling:
                 Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_failed_file_logged_for_cleanup(
-        self, master_analysis_table, mini_copy_name, mock_create, teardown, caplog
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        mock_create,
+        teardown,
+        caplog,
     ):
         """Test that failed files are logged for cleanup detection."""
         table = master_analysis_table
@@ -505,7 +530,12 @@ class TestIntegration:
     """Integration tests with master and custom tables."""
 
     def test_with_master_table(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test builder works with master AnalysisNwbfile table."""
         table = master_analysis_table
@@ -529,7 +559,12 @@ class TestIntegration:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_with_custom_table(
-        self, custom_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        custom_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test builder works with custom AnalysisNwbfile table."""
         table = custom_analysis_table
@@ -553,7 +588,12 @@ class TestIntegration:
             Path(table.get_abs_path(analysis_file)).unlink(missing_ok=True)
 
     def test_full_workflow(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test complete workflow: create → populate → register → fetch."""
         table = master_analysis_table
@@ -591,7 +631,12 @@ class TestIntegration:
             file_path.unlink(missing_ok=True)
 
     def test_with_real_nwb_data(
-        self, master_analysis_table, mini_copy_name, common, load_config, teardown
+        self,
+        master_analysis_table,
+        mini_copy_name,
+        common,
+        load_config,
+        teardown,
     ):
         """Test builder with actual NWB file creation (not mocked)."""
         table = master_analysis_table
