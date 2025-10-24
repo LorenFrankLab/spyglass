@@ -99,7 +99,9 @@ def pop_annotations(spike_v1_group, spike_v1_ua, pop_spikes_group):
 # ============================================================================
 
 
-def create_fake_sorting(n_units=10, n_spikes_per_unit=1000, sampling_frequency=30000):
+def create_fake_sorting(
+    n_units=10, n_spikes_per_unit=1000, sampling_frequency=30000
+):
     """Create fake spike sorting results.
 
     Parameters

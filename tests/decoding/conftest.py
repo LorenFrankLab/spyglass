@@ -614,7 +614,10 @@ def mock_decoder_save():
         import os
         import pickle
 
-        analysis_dir = Path(os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")) / "analysis"
+        analysis_dir = (
+            Path(os.environ.get("SPYGLASS_BASE_DIR", "tests/_data"))
+            / "analysis"
+        )
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
         # Create subdirectory if needed
@@ -623,6 +626,7 @@ def mock_decoder_save():
 
         # Create unique file names
         import uuid
+
         unique_id = str(uuid.uuid4())[:8]
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
