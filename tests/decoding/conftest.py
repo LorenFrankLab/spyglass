@@ -334,6 +334,7 @@ def decode_sel_key(mini_dict, group_name, pos_interval, decode_interval):
 
 @pytest.fixture(scope="session")
 def clusterless_pop(
+    request,  # Add request to access pytest config
     decode_v1,
     decode_sel_key,
     group_name,
@@ -343,7 +344,10 @@ def clusterless_pop(
     teardown,
     decode_merge,
 ):
+    from tests.mock_utils import should_mock, load_mock_data
+
     _ = pop_pos_group, group_unitwave  # ensure populated
+
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
@@ -351,13 +355,27 @@ def clusterless_pop(
         "estimate_decoding_params": False,
     }
 
+    # Insert selection key (required for both real and mock)
     decode_v1.clusterless.ClusterlessDecodingSelection.insert1(
         selection_key,
         skip_duplicates=True,
     )
-    decode_v1.clusterless.ClusterlessDecodingV1.populate(selection_key)
 
-    yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
+    # Check if we should use mock data
+    if should_mock("clusterless_pop", request):
+        # Load and insert mock data instead of running populate()
+        mock_data = load_mock_data("clusterless_pop")
+        table = decode_v1.clusterless.ClusterlessDecodingV1
+
+        # Insert mock rows into table
+        table.insert(mock_data["rows"], skip_duplicates=True)
+
+        # Return real table query with mock data
+        yield table & selection_key
+    else:
+        # Real implementation: run expensive populate()
+        decode_v1.clusterless.ClusterlessDecodingV1.populate(selection_key)
+        yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
         decode_merge.cleanup()

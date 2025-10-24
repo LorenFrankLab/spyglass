@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 
+@pytest.mark.very_slow
 def test_fetch_results(clusterless_pop, result_coordinates):
     results = clusterless_pop.fetch_results()
     assert result_coordinates.issubset(
