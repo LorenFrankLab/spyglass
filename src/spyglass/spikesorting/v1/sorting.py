@@ -194,7 +194,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
         """
-        # FETCH:
+        # FETCH (Spyglass logic - always tested):
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
@@ -220,11 +220,61 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             recording_key["analysis_file_name"]
         )
 
-        # DO:
-        # - load recording
-        # - concatenate artifact removed intervals
-        # - run spike sorting
-        # - save output to NWB file
+        # External dependency - MOCKABLE in tests
+        sorting, timestamps = self._run_spike_sorter(
+            recording_analysis_nwb_file_abs_path=recording_analysis_nwb_file_abs_path,
+            artifact_removed_intervals=artifact_removed_intervals,
+            sorter=sorter,
+            sorter_params=sorter_params,
+        )
+
+        # External I/O - MOCKABLE in tests
+        key["time_of_sort"] = int(time.time())
+        key["analysis_file_name"], key["object_id"] = self._save_sorting_results(
+            sorting=sorting,
+            timestamps=timestamps,
+            artifact_removed_intervals=artifact_removed_intervals,
+            nwb_file_name=(SpikeSortingSelection & key).fetch1("nwb_file_name"),
+        )
+
+        # Database operations (Spyglass logic - always tested)
+        AnalysisNwbfile().add(
+            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
+            key["analysis_file_name"],
+        )
+        self.insert1(key, skip_duplicates=True)
+
+    def _run_spike_sorter(
+        self,
+        recording_analysis_nwb_file_abs_path,
+        artifact_removed_intervals,
+        sorter,
+        sorter_params,
+    ):
+        """Run spike sorting algorithm (external dependency).
+
+        This method wraps all calls to spikeinterface for spike sorting,
+        making it easy to mock in tests for faster execution.
+
+        Parameters
+        ----------
+        recording_analysis_nwb_file_abs_path : str
+            Path to recording NWB file
+        artifact_removed_intervals : np.ndarray
+            Artifact-free time intervals
+        sorter : str
+            Name of spike sorter algorithm
+        sorter_params : dict
+            Parameters for spike sorter
+
+        Returns
+        -------
+        sorting : si.BaseSorting
+            Sorted spike times
+        timestamps : np.ndarray
+            Recording timestamps
+        """
+        # Load recording (spikeinterface)
         recording = se.read_nwb_recording(
             recording_analysis_nwb_file_abs_path, load_time_vector=True
         )
@@ -235,7 +285,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             artifact_removed_intervals, timestamps
         )
 
-        # if the artifact removed intervals do not span the entire time range
+        # Remove artifacts if needed (spikeinterface)
         if (
             (len(artifact_removed_intervals_ind) > 1)
             or (artifact_removed_intervals_ind[0][0] > 0)
@@ -271,6 +321,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 mode="zeros",
             )
 
+        # Run spike sorting (spikeinterface)
         if sorter == "clusterless_thresholder":
             # need to remove tempdir and whiten from sorter_params
             sorter_params.pop("tempdir", None)
@@ -327,23 +378,47 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                     **common_sorter_items,
                     **sorter_params,
                 )
-        key["time_of_sort"] = int(time.time())
+
         sorting = sic.remove_excess_spikes(sorting, recording)
-        key["analysis_file_name"], key["object_id"] = _write_sorting_to_nwb(
+
+        return sorting, timestamps
+
+    def _save_sorting_results(
+        self,
+        sorting,
+        timestamps,
+        artifact_removed_intervals,
+        nwb_file_name,
+    ):
+        """Save sorting results to NWB file (external I/O).
+
+        This method wraps file I/O operations, making it easy to
+        mock in tests to avoid filesystem dependencies.
+
+        Parameters
+        ----------
+        sorting : si.BaseSorting
+            Sorted spike times
+        timestamps : np.ndarray
+            Recording timestamps
+        artifact_removed_intervals : np.ndarray
+            Artifact-free time intervals
+        nwb_file_name : str
+            Name of source NWB file
+
+        Returns
+        -------
+        analysis_file_name : str
+            Name of analysis NWB file
+        object_id : str
+            Object ID in NWB file
+        """
+        return _write_sorting_to_nwb(
             sorting,
             timestamps,
             artifact_removed_intervals,
-            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
+            nwb_file_name,
         )
-
-        # INSERT
-        # - new entry to AnalysisNwbfile
-        # - new entry to SpikeSorting
-        AnalysisNwbfile().add(
-            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
-            key["analysis_file_name"],
-        )
-        self.insert1(key, skip_duplicates=True)
 
     @classmethod
     def get_sorting(cls, key: dict) -> si.BaseSorting:
