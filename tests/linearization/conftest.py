@@ -68,11 +68,22 @@ def mock_linearization():
 def mock_linearization_save():
     """Mock the _save_linearization_results helper for LinearizedPositionV1.
 
-    This mocks file I/O operations (~1s).
+    This mocks file I/O operations (~1s) but still creates the AnalysisNwbfile entry.
     """
+    from spyglass.common import AnalysisNwbfile
 
     def _mock_save(self, linear_position_df, analysis_file_name, nwb_file_name):
-        """Mocked version that skips file I/O."""
+        """Mocked version that creates AnalysisNwbfile entry but skips actual file I/O."""
+        # Create AnalysisNwbfile entry (required for foreign key)
+        nwb_analysis_file = AnalysisNwbfile()
+
+        # Add entry to AnalysisNwbfile table (but don't actually write file)
+        nwb_analysis_file.add(
+            nwb_file_name=nwb_file_name,
+            analysis_file_name=analysis_file_name,
+        )
+
+        # Return fake object_id (skip actual NWB object insertion)
         return "fake_linearized_position_object_id"
 
     return _mock_save

@@ -64,7 +64,7 @@ def test_clusterless_data_processing_mocked(
 
     # Verify results were inserted
     table = decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
-    assert len(table) > 0, "No results inserted"
+    assert table, "No results inserted"
 
     # Verify we can fetch the results
     results = table.fetch_results()
@@ -122,7 +122,7 @@ def test_sorted_spikes_data_processing_mocked(
 
     # Verify results were inserted
     table = decode_v1.sorted_spikes.SortedSpikesDecodingV1 & selection_key
-    assert len(table) > 0, "No results inserted"
+    assert table, "No results inserted"
 
     # Verify we can fetch the results
     results = table.fetch_results()

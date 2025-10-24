@@ -183,15 +183,19 @@ def mock_spike_sorter():
 def mock_sorting_save():
     """Mock the _save_sorting_results helper for SpikeSorting.
 
-    This mocks file I/O operations (~5s).
+    This mocks file I/O operations (~5s) but still creates the AnalysisNwbfile entry.
     """
+    from spyglass.common import AnalysisNwbfile
 
     def _mock_save_results(
         self, sorting, timestamps, artifact_removed_intervals, nwb_file_name
     ):
-        """Mocked version that skips file I/O."""
-        # Return fake paths
-        analysis_file_name = f"{nwb_file_name}_sorting_fake.nwb"
+        """Mocked version that creates AnalysisNwbfile entry but skips actual file I/O."""
+        # Create AnalysisNwbfile entry (required for foreign key)
+        nwb_analysis_file = AnalysisNwbfile()
+        analysis_file_name = nwb_analysis_file.create(nwb_file_name)
+
+        # Return fake file name and object_id (skip actual NWB write operations)
         object_id = "fake_object_id_123"
         return analysis_file_name, object_id
 
