@@ -334,7 +334,6 @@ def decode_sel_key(mini_dict, group_name, pos_interval, decode_interval):
 
 @pytest.fixture(scope="session")
 def clusterless_pop(
-    request,  # Add request to access pytest config
     decode_v1,
     decode_sel_key,
     group_name,
@@ -344,8 +343,6 @@ def clusterless_pop(
     teardown,
     decode_merge,
 ):
-    from tests.mock_utils import should_mock, load_mock_data
-
     _ = pop_pos_group, group_unitwave  # ensure populated
 
     selection_key = {
@@ -355,27 +352,13 @@ def clusterless_pop(
         "estimate_decoding_params": False,
     }
 
-    # Insert selection key (required for both real and mock)
     decode_v1.clusterless.ClusterlessDecodingSelection.insert1(
         selection_key,
         skip_duplicates=True,
     )
+    decode_v1.clusterless.ClusterlessDecodingV1.populate(selection_key)
 
-    # Check if we should use mock data
-    if should_mock("clusterless_pop", request):
-        # Load and insert mock data instead of running populate()
-        mock_data = load_mock_data("clusterless_pop")
-        table = decode_v1.clusterless.ClusterlessDecodingV1
-
-        # Insert mock rows into table
-        table.insert(mock_data["rows"], skip_duplicates=True)
-
-        # Return real table query with mock data
-        yield table & selection_key
-    else:
-        # Real implementation: run expensive populate()
-        decode_v1.clusterless.ClusterlessDecodingV1.populate(selection_key)
-        yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
+    yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
         decode_merge.cleanup()
@@ -490,3 +473,209 @@ def spikes_decoding_estimated(
     spikes.SortedSpikesDecodingV1.populate(selection_key)
 
     yield spikes.SortedSpikesDecodingV1 & selection_key
+
+
+# ============================================================================
+# Mock Helper Functions for Fast Unit Tests
+# ============================================================================
+
+
+def create_fake_classifier():
+    """Create a fake classifier object that mimics non_local_detector output."""
+
+    class FakeClassifier:
+        """Minimal classifier interface for mocking."""
+
+        def __init__(self):
+            # 2 states (e.g., "continuous" and "fragmented")
+            # initial_conditions_: shape (n_states,)
+            self.initial_conditions_ = np.array([0.5, 0.5])
+            # discrete_state_transitions_: shape (n_states, n_states)
+            self.discrete_state_transitions_ = np.array(
+                [[0.9, 0.1], [0.1, 0.9]]
+            )
+
+    return FakeClassifier()
+
+
+def create_fake_decoding_results(n_time=100, n_position_bins=50):
+    """Create fake decoding results that mimic ClusterlessDetector output.
+
+    Parameters
+    ----------
+    n_time : int
+        Number of time points
+    n_position_bins : int
+        Number of position bins
+
+    Returns
+    -------
+    results : xr.Dataset
+        Fake decoding results matching expected structure
+    """
+    import xarray as xr
+
+    time = np.linspace(0, 10, n_time)
+    position_bins = np.linspace(0, 100, n_position_bins)
+
+    # Create realistic-looking posterior probabilities
+    position_mean = n_position_bins // 2
+    position_std = n_position_bins // 10
+
+    posterior = np.zeros((n_time, n_position_bins))
+    for t in range(n_time):
+        # Gaussian-like posterior
+        posterior[t] = np.exp(
+            -((np.arange(n_position_bins) - position_mean) ** 2)
+            / (2 * position_std**2)
+        )
+        posterior[t] /= posterior[t].sum()  # Normalize
+
+    results = xr.Dataset(
+        {
+            "posterior": (["time", "position"], posterior),
+            "likelihood": (["time", "position"], posterior * 0.8),  # Simplified
+        },
+        coords={
+            "time": time,
+            "position": position_bins,
+        },
+    )
+
+    return results
+
+
+# ============================================================================
+# Mock Fixtures for ClusterlessDecodingV1
+# ============================================================================
+
+
+@pytest.fixture
+def mock_clusterless_decoder():
+    """Mock the _run_decoder helper for ClusterlessDecodingV1.
+
+    Returns a function that can be used with monkeypatch to replace
+    the real _run_decoder method.
+    """
+    import xarray as xr
+
+    def _mock_run_decoder(
+        self,
+        key,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        spike_waveform_features,
+        decoding_interval,
+    ):
+        """Mocked version of _run_decoder that returns fake results instantly.
+
+        This mocks the expensive non_local_detector operations (~220s)
+        while preserving all the Spyglass logic in make().
+        """
+        classifier = create_fake_classifier()
+        results = create_fake_decoding_results(
+            n_time=len(position_info), n_position_bins=50
+        )
+
+        # Add metadata (same as real implementation)
+        results["initial_conditions"] = xr.DataArray(
+            classifier.initial_conditions_,
+            name="initial_conditions",
+        )
+        results["discrete_state_transitions"] = xr.DataArray(
+            classifier.discrete_state_transitions_,
+            dims=("states", "states"),
+            name="discrete_state_transitions",
+        )
+
+        return classifier, results
+
+    return _mock_run_decoder
+
+
+@pytest.fixture
+def mock_decoder_save():
+    """Mock the _save_decoder_results helper for ClusterlessDecodingV1.
+
+    Returns a function that can be used with monkeypatch to replace
+    the real _save_decoder_results method.
+    """
+    import tempfile
+    from pathlib import Path
+
+    def _mock_save_results(self, classifier, results, key):
+        """Mocked version of _save_decoder_results that saves fake data quickly.
+
+        This saves actual small files (fast ~1s) so fetch_results() works.
+        """
+        import os
+        import pickle
+
+        analysis_dir = Path(os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")) / "analysis"
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
+
+        # Create subdirectory if needed
+        subdir = analysis_dir / nwb_file_name
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create unique file names
+        import uuid
+        unique_id = str(uuid.uuid4())[:8]
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
+
+        # Actually save the fake results (small files, fast)
+        results.to_netcdf(results_path)
+
+        # Save classifier pickle
+        with open(classifier_path, "wb") as f:
+            pickle.dump(classifier, f)
+
+        return results_path, classifier_path
+
+    return _mock_save_results
+
+
+# ============================================================================
+# Mock Fixtures for SortedSpikesDecodingV1
+# ============================================================================
+
+
+@pytest.fixture
+def mock_sorted_spikes_decoder():
+    """Mock the _run_decoder helper for SortedSpikesDecodingV1."""
+    import xarray as xr
+
+    def _mock_run_decoder(
+        self,
+        key,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        decoding_interval,
+    ):
+        """Mocked version that returns fake results instantly."""
+        classifier = create_fake_classifier()
+        results = create_fake_decoding_results(
+            n_time=len(position_info), n_position_bins=50
+        )
+
+        # Add metadata (same as real implementation)
+        results["initial_conditions"] = xr.DataArray(
+            classifier.initial_conditions_,
+            name="initial_conditions",
+        )
+        results["discrete_state_transitions"] = xr.DataArray(
+            classifier.discrete_state_transitions_,
+            dims=("states", "states"),
+            name="discrete_state_transitions",
+        )
+
+        return classifier, results
+
+    return _mock_run_decoder

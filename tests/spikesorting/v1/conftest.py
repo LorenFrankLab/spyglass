@@ -92,3 +92,105 @@ def pop_annotations(spike_v1_group, spike_v1_ua, pop_spikes_group):
         spike_v1_ua.add_annotation(label_key, skip_duplicates=True)
 
     yield (spike_v1_ua.Annotation & {"annotation": "spike_count"})
+
+
+# ============================================================================
+# Mock Helper Functions
+# ============================================================================
+
+
+def create_fake_sorting(n_units=10, n_spikes_per_unit=1000, sampling_frequency=30000):
+    """Create fake spike sorting results.
+
+    Parameters
+    ----------
+    n_units : int
+        Number of units
+    n_spikes_per_unit : int
+        Average spikes per unit
+    sampling_frequency : float
+        Sampling frequency in Hz
+
+    Returns
+    -------
+    sorting : object
+        Fake sorting object (minimal interface)
+    timestamps : np.ndarray
+        Timestamps array
+    """
+    import numpy as np
+
+    class FakeSorting:
+        """Minimal sorting interface for mocking."""
+
+        def __init__(self, spike_times, unit_ids):
+            self.spike_times = spike_times
+            self.unit_ids = unit_ids
+            self._sampling_frequency = sampling_frequency
+
+        def get_unit_ids(self):
+            return self.unit_ids
+
+        def get_unit_spike_train(self, unit_id):
+            return self.spike_times[unit_id]
+
+        def get_sampling_frequency(self):
+            return self._sampling_frequency
+
+    # Generate fake spike times
+    spike_times = {}
+    for unit_id in range(n_units):
+        # Random spike times across 10 second recording
+        n_spikes = n_spikes_per_unit + np.random.randint(-100, 100)
+        spike_times[unit_id] = np.sort(np.random.rand(n_spikes) * 10)
+
+    timestamps = np.arange(0, 10, 1 / sampling_frequency)
+
+    return FakeSorting(spike_times, list(range(n_units))), timestamps
+
+
+# ============================================================================
+# Mock Fixtures for SpikeSorting
+# ============================================================================
+
+
+@pytest.fixture
+def mock_spike_sorter():
+    """Mock the _run_spike_sorter helper for SpikeSorting.
+
+    This mocks the expensive spikeinterface operations (~90s).
+    """
+
+    def _mock_run_sorter(
+        self,
+        recording_analysis_nwb_file_abs_path,
+        artifact_removed_intervals,
+        sorter,
+        sorter_params,
+    ):
+        """Mocked version that returns fake sorting instantly."""
+        sorting, timestamps = create_fake_sorting(
+            n_units=10, n_spikes_per_unit=1000, sampling_frequency=30000
+        )
+        return sorting, timestamps
+
+    return _mock_run_sorter
+
+
+@pytest.fixture
+def mock_sorting_save():
+    """Mock the _save_sorting_results helper for SpikeSorting.
+
+    This mocks file I/O operations (~5s).
+    """
+
+    def _mock_save_results(
+        self, sorting, timestamps, artifact_removed_intervals, nwb_file_name
+    ):
+        """Mocked version that skips file I/O."""
+        # Return fake paths
+        analysis_file_name = f"{nwb_file_name}_sorting_fake.nwb"
+        object_id = "fake_object_id_123"
+        return analysis_file_name, object_id
+
+    return _mock_save_results

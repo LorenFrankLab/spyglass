@@ -230,11 +230,15 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
         # External I/O - MOCKABLE in tests
         key["time_of_sort"] = int(time.time())
-        key["analysis_file_name"], key["object_id"] = self._save_sorting_results(
-            sorting=sorting,
-            timestamps=timestamps,
-            artifact_removed_intervals=artifact_removed_intervals,
-            nwb_file_name=(SpikeSortingSelection & key).fetch1("nwb_file_name"),
+        key["analysis_file_name"], key["object_id"] = (
+            self._save_sorting_results(
+                sorting=sorting,
+                timestamps=timestamps,
+                artifact_removed_intervals=artifact_removed_intervals,
+                nwb_file_name=(SpikeSortingSelection & key).fetch1(
+                    "nwb_file_name"
+                ),
+            )
         )
 
         # Database operations (Spyglass logic - always tested)
