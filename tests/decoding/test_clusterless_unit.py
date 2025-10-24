@@ -75,7 +75,9 @@ def test_clusterless_data_processing_mocked(
         assert "posterior" in results, "Missing posterior in results"
     else:
         # Entry exists from integration tests - unit test not needed (skip gracefully)
-        pytest.skip("Skipping unit test - entry already validated by integration tests")
+        pytest.skip(
+            "Skipping unit test - entry already validated by integration tests"
+        )
 
 
 def test_sorted_spikes_data_processing_mocked(
@@ -139,4 +141,6 @@ def test_sorted_spikes_data_processing_mocked(
         assert "posterior" in results, "Missing posterior in results"
     else:
         # Entry exists from integration tests - unit test not needed (skip gracefully)
-        pytest.skip("Skipping unit test - entry already validated by integration tests")
+        pytest.skip(
+            "Skipping unit test - entry already validated by integration tests"
+        )

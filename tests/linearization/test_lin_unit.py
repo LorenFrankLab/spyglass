@@ -48,7 +48,9 @@ def test_linearization_logic_mocked(
     lin_v1_table.populate()
 
     # Verify results exist
-    assert lin_v1_table, "LinearizedPositionV1 should have entries after populate"
+    assert (
+        lin_v1_table
+    ), "LinearizedPositionV1 should have entries after populate"
 
     # Verify we can fetch results
     results = lin_v1_table.fetch()
@@ -69,6 +71,9 @@ def test_linearization_logic_mocked(
         assert key in first_result, f"Result should contain {key}"
 
     # Verify object_id is the mocked value
-    assert first_result["linearized_position_object_id"] == "fake_linearized_position_object_id"
+    assert (
+        first_result["linearized_position_object_id"]
+        == "fake_linearized_position_object_id"
+    )
 
     print(f"✅ Mocked linearization test passed ({len(lin_v1_table)} entries)")

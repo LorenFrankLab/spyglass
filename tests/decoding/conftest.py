@@ -491,9 +491,7 @@ class FakeClassifier:
         # initial_conditions_: shape (n_states,)
         self.initial_conditions_ = np.array([0.5, 0.5])
         # discrete_state_transitions_: shape (n_states, n_states)
-        self.discrete_state_transitions_ = np.array(
-            [[0.9, 0.1], [0.1, 0.9]]
-        )
+        self.discrete_state_transitions_ = np.array([[0.9, 0.1], [0.1, 0.9]])
 
 
 def create_fake_classifier():
@@ -655,8 +653,10 @@ def mock_decoder_save():
         # Actually save the fake results (small files, fast)
         # Use engine='netcdf4' for compatibility
         try:
-            results.to_netcdf(results_path, engine='netcdf4')
-            print(f"[MOCK] ✅ Saved netcdf successfully, file exists: {results_path.exists()}")
+            results.to_netcdf(results_path, engine="netcdf4")
+            print(
+                f"[MOCK] ✅ Saved netcdf successfully, file exists: {results_path.exists()}"
+            )
         except Exception as e:
             print(f"[MOCK] ❌ Error saving netcdf: {e}")
             raise
