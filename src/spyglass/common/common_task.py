@@ -177,13 +177,14 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             if not self.is_nwb_task_epoch(task_table):
                 continue
             task_inserts.append(task_table)
-            for task in task_table:
-                key["task_name"] = task.task_name[0]
+            task_df = task_table.to_dataframe()
+            for task in task_df.itertuples(index=False):
+                key["task_name"] = task.task_name
 
                 # get the CameraDevice used for this task (primary key is
                 # camera name so we need to map from ID to name)
 
-                camera_ids = task.camera_id[0]
+                camera_ids = task.camera_id
                 valid_camera_ids = [
                     camera_id
                     for camera_id in camera_ids
@@ -201,7 +202,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     )
                 # Add task environment
                 if hasattr(task, "task_environment"):
-                    key["task_environment"] = task.task_environment[0]
+                    key["task_environment"] = task.task_environment
 
                 # get the interval list for this task, which corresponds to the
                 # matching epoch for the raw data. Users should define more
@@ -210,7 +211,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 session_intervals = (
                     IntervalList() & {"nwb_file_name": nwb_file_name}
                 ).fetch("interval_list_name")
-                for epoch in task.task_epochs[0]:
+                for epoch in task.task_epochs:
                     key["epoch"] = epoch
                     target_interval = self.get_epoch_interval_name(
                         epoch, session_intervals

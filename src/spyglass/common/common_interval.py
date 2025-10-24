@@ -626,8 +626,8 @@ class Interval:
 
         Parameters
         ----------
-        interval_list1 : np.array, (N,2) where N = number of intervals
-        interval_list2 : np.array, (N,2) where N = number of intervals
+        other : Union[Interval, np.array, list, dict]
+            Interval list to intersect with self.
         min_length : float, optional.
             Minimum length of intervals to include, default 0
 
@@ -669,8 +669,8 @@ class Interval:
 
         Parameters
         ----------
-        interval1 : np.array
-        interval2 : np.array
+        other : Union[Interval, np.ndarray]
+            Interval list to union with self.
         """
         interval1 = np.atleast_2d(self.times)
         interval2 = np.atleast_2d(self._extract(other))
@@ -704,7 +704,7 @@ class Interval:
 
     def union(
         self,
-        other: np.ndarray,
+        other: IntervalLike,
         min_length: Optional[float] = 0.0,
         max_length: Optional[float] = 1e10,
     ) -> T:
@@ -712,10 +712,8 @@ class Interval:
 
         Parameters
         ----------
-        interval_list1 : np.ndarray
-            The first interval list [start, stop]
-        interval_list2 : np.ndarray
-            The second interval list [start, stop]
+        other : Union[Interval, np.ndarray]
+            Interval list to union with self.
         min_length : float, optional
             Minimum length of interval for inclusion in output, default 0.0
         max_length : float, optional
@@ -764,8 +762,6 @@ class Interval:
 
         Parameters
         ----------
-        interval_list : numpy array of intervals [start, stop]
-            interval list from IntervalList valid times
         timestamps : numpy array or list
 
         Returns

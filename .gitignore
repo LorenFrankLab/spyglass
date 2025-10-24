@@ -4,6 +4,7 @@ mountainsort4_output/
 .idea/
 mysql_config
 memray*
+root_*.y*ml
 
 # Notebooks
 *.ipynb

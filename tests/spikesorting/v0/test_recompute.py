@@ -93,3 +93,11 @@ def test_get_disk_space(recomp_tbl):
     """Test get_disk_space."""
     space = recomp_tbl.get_disk_space(restr=True)
     assert "Total:" in space, "Disk space retrieval failed"
+
+
+def test_recheck(recomp_tbl, recomp_repop):
+    """Test recheck method."""
+    _ = recomp_repop  # Ensure recompute populated
+    key = recomp_tbl.fetch("KEY")[0]
+    result = recomp_tbl.recheck(key)
+    assert result, "Recheck failed"

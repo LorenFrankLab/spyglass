@@ -4,8 +4,8 @@
 
 ### Release Notes
 
-Running draft to be removed immediately prior to release.
-When altering tables, import all foreign key references.
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
 #
@@ -15,28 +15,40 @@ When altering tables, import all foreign key references.
 
 - Delete extra pyscripts that were renamed # 1363
 - Add note on fetching changes to setup notebook #1371
+- Revise table field docstring heading and `mermaid` diagram generation #1402
 
 ### Infrastructure
 
+- Auto-load within-Spyglass tables for graph operations #1368
+- Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423
 
-### Common
+### Pipelines
 
-- Change `IntervalList.insert` to `cautious_insert` #1423
-
-### Decoding
-
-- Ensure results directory is created if it doesn't exist #1362
-
-### Position
-
-- Ensure video files are properly added to `DLCProject` # 1367
-
-### Spikesorting
-
-- Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
+- Common
+    - Add tables for storing optogenetic experiment information #1312
+    - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Change `IntervalList.insert` to `cautious_insert` #1423
+    - Allow email send on space check success, clean up maintenance logging #1381
+    - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+    - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
+    - Sort `UserEnvironment` dict objects by key for consistency #1380
+    - Fix typo in VideoFile.make #1427
+    - Fix bug in TaskEpoch.make so that it correctly handles multi-row task
+      tables from NWB #1433
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
+    - Fix ingestion nwb files with position objects but no spatial series #1405
+    - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -533,3 +545,4 @@ When altering tables, import all foreign key references.
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6

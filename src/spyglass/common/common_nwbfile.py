@@ -86,24 +86,6 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         ]
 
     @classmethod
-    def _get_file_name(cls, nwb_file_name: str) -> str:
-        """Get valid nwb file name given substring."""
-        query = cls & f'nwb_file_name LIKE "%{nwb_file_name}%"'
-
-        if len(query) == 1:
-            return query.fetch1("nwb_file_name")
-
-        raise ValueError(
-            f"Found {len(query)} matches for {nwb_file_name} in Nwbfile table:"
-            + f" \n{query}"
-        )
-
-    @classmethod
-    def get_file_key(cls, nwb_file_name: str) -> dict:
-        """Return primary key using nwb_file_name substring."""
-        return {"nwb_file_name": cls._get_file_name(nwb_file_name)}
-
-    @classmethod
     def get_abs_path(
         cls, nwb_file_name: str, new_file: bool = False, **kwargs
     ) -> str:
@@ -125,10 +107,17 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         nwb_file_abspath : str
             The absolute path for the given file name.
         """
+        file_path = raw_dir + "/" + nwb_file_name
         if new_file:
-            return raw_dir + "/" + nwb_file_name
+            return file_path
 
-        return raw_dir + "/" + cls._get_file_name(nwb_file_name)
+        query = cls & {"nwb_file_name": nwb_file_name}
+        if len(query) != 1:
+            raise ValueError(
+                f"Could not find 1 entry for {nwb_file_name}:\n{query}"
+            )
+
+        return file_path
 
     @staticmethod
     def add_to_lock(nwb_file_name: str) -> None:
@@ -223,6 +212,14 @@ class AnalysisNwbfile(SpyglassMixin, dj.Manual):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+
+            # pop off optogenetic_epochs if it exists
+            if (
+                "intervals" in nwb_fields
+                and "optogenetic_epochs" in nwbf.intervals
+            ):
+                nwbf.intervals.pop("optogenetic_epochs")
+
             # add the version of spyglass that created this file
             if nwbf.source_script is None:
                 nwbf.source_script = self._logged_env_info()

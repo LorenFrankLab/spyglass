@@ -40,7 +40,7 @@ schema = dj.schema("spikesorting_sorting")
 class SpikeSortingPipelineParameters(SpyglassMixin, dj.Manual):
     """Parameters for the spike sorting pipeline
 
-    Parameters
+    Attributes
     ----------
     pipeline_parameters_name : str
         A name for this set of parameters

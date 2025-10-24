@@ -5,9 +5,9 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.0
 #   kernelspec:
-#     display_name: spyglass-moseq-1
+#     display_name: spyglass2025-moseq-gpu
 #     language: python
 #     name: python3
 # ---
@@ -143,7 +143,7 @@ MoseqModelParams().insert1(
     skip_duplicates=True,
 )
 
-MoseqModelParams()
+MoseqModelParams() & {"model_params_name": model_params_name}
 # -
 
 # To train the model, we link a set of model params with training data in `PoseGroup`
@@ -158,7 +158,7 @@ MoseqModelSelection().insert1(
     skip_duplicates=True,
 )
 
-MoseqModelSelection()
+MoseqModelSelection() & group_key
 # -
 
 # We can then train the model by populating the corresponding `MoseqModel` entry.  This
@@ -181,6 +181,15 @@ trained_model
 
 table = MoseqModel() & model_key
 table.analyze_pca()
+
+# as well as average trajectories for each syllable
+
+table.generate_trajectory_plots()
+
+# And example videos of each syllable. These are saved as mp4 files in the passed `output_dir`
+
+output_dir = "/path/to/save/videos/"
+table.generate_grid_movies(output_dir=output_dir)
 
 # ## Run data through the trained model
 #

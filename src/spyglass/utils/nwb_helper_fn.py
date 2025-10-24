@@ -581,13 +581,16 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     if pos_interface is None:
         return None
 
-    return _get_pos_dict(
+    pos_dict = _get_pos_dict(
         position=pos_interface.spatial_series,
         epoch_groups=_get_epoch_groups(pos_interface),
         session_id=nwbf.session_id,
         verbose=verbose,
         incl_times=incl_times,
     )
+    if len(pos_dict) == 0:
+        return None
+    return pos_dict
 
 
 def get_nwb_copy_filename(nwb_file_name):

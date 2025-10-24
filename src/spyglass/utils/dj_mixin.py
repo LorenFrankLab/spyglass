@@ -26,6 +26,7 @@ from spyglass.utils.dj_helper_fn import (
     bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
+    get_child_tables,
     get_nwb_table,
     populate_pass_function,
 )
@@ -857,6 +858,29 @@ class SpyglassMixin(ExportMixin):
 
         return ret
 
+    def restrict_all(
+        self,
+        restriction: str = True,
+        direction: str = "down",
+        return_graph: bool = False,
+        verbose: bool = False,
+    ) -> List:
+        RestrGraph = self._graph_deps[1]
+        rg = RestrGraph(
+            seed_table=self,
+            leaves=dict(
+                table_name=self.full_table_name,
+                restriction=self.restriction or restriction,
+            ),
+            direction=direction,
+            banned_tables=list(self._banned_search_tables),
+            cascade=True,
+            verbose=verbose,
+        )
+        if return_graph:
+            return rg
+        logger.info(rg.restr_ft)
+
     # ------------------------------ Check locks ------------------------------
 
     def exec_sql_fetchall(self, query):
@@ -997,6 +1021,29 @@ class SpyglassMixin(ExportMixin):
             return total_size
         human_size = bytes_to_human_readable(total_size)
         return human_size
+
+    def delete_orphans(
+        self, dry_run: bool = True, **kwargs
+    ) -> Union[QueryExpression, None]:
+        """Get entries in the table without any child table entries.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If True, return the orphaned entries without deleting them.
+            Default True.
+        **kwargs : dict
+            Passed to datajoint.table.Table.delete if dry_run is False.
+
+        Returns
+        -------
+        QueryExpression, optional
+            If dry_run, a query expression containing the orphaned entries.
+        """
+        orphans = self - get_child_tables(self)
+        if dry_run:
+            return orphans
+        orphans.super_delete(warn=False, **kwargs)
 
 
 class SpyglassMixinPart(SpyglassMixin, dj.Part):
