@@ -27,7 +27,8 @@ class Subject(SpyglassIngestion, dj.Manual):
                 "age": "age",
                 "description": "description",
                 "genotype": "genotype",
-                "species": self.standardized_sex_string,
+                "sex": self.standardized_sex_string,
+                "species": "species",
             }
         }
 

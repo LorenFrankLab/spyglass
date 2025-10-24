@@ -1136,7 +1136,7 @@ class SpyglassIngestion(SpyglassMixin):
                 else getattr(nwb_obj, object_name)
             )
 
-            if obj_ is None:  # CB modified nwb_obj -> obj
+            if obj_ is None:
                 raise ValueError(
                     f"NWB object {object_name} not found in {nwb_obj}."
                 )

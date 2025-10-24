@@ -178,8 +178,8 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         """The NWB object type from which this table can ingest data."""
         return pynwb.NWBFile
 
-    @classmethod
-    def generate_entries_from_nwb_object(self, nwb_obj, base_key=dict()):
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
             logger.info("No experimenter metadata found for LabTeam.\n")

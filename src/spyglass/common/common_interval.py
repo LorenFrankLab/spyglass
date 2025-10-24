@@ -231,10 +231,10 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         **kwargs : dict
             Additional keyword arguments to pass to `insert`.
         """
-        if not inserts:  # No data to insert
-            return
         if not isinstance(inserts, (list, tuple)):  # Table.insert1 makes tuple
             inserts = [inserts]
+        if not inserts:  # No data to insert
+            return
         if not isinstance(inserts[0], dict):
             self.super_insert(inserts, **kwargs)  # fallback
             return
