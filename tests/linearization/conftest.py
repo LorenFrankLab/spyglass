@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
 # ============================================================================
 # Mock Helper Functions
 # ============================================================================
@@ -45,10 +44,7 @@ def create_fake_linear_position(n_time=1000):
 
 @pytest.fixture
 def mock_linearization():
-    """Mock the _compute_linearized_position helper for LinearizedPositionV1.
-
-    This mocks the expensive track_linearization operations (~25s).
-    """
+    """Mock the _compute_linearized_position helper for LinearizedPositionV1."""
 
     def _mock_compute(
         self,
@@ -87,3 +83,51 @@ def mock_linearization_save():
         return "fake_linearized_position_object_id"
 
     return _mock_save
+
+
+# ============================================================================
+# Fixtures for Mocked Linearization Test
+# ============================================================================
+
+
+@pytest.fixture
+def mock_lin_param_key():
+    """Unique parameter name for mocked linearization test.
+
+    This ensures the mocked test doesn't interfere with other tests
+    by using a distinct parameter name.
+    """
+    return {"linearization_param_name": "mocked_test_params"}
+
+
+@pytest.fixture
+def mock_lin_params(teardown, sgpl, mock_lin_param_key):
+    """Insert unique LinearizationParameters entry for mocked test."""
+    param_table = sgpl.LinearizationParameters()
+    param_table.insert1(mock_lin_param_key, skip_duplicates=True)
+    yield param_table
+
+
+@pytest.fixture
+def mock_lin_sel(
+    teardown,
+    sgpl,
+    pos_merge_key,
+    track_graph_key,
+    mock_lin_param_key,
+    mock_lin_params,
+):
+    """Create LinearizationSelection entry with unique parameter name for mocked test.
+
+    Note: mock_lin_params dependency ensures the parameter exists before creating selection.
+    """
+    lin_sel_key = {
+        "pos_merge_id": pos_merge_key["merge_id"],
+        **track_graph_key,
+        **mock_lin_param_key,
+    }
+    sel_table = sgpl.LinearizationSelection()
+    sel_table.insert1(lin_sel_key, skip_duplicates=True)
+
+    # Return both the table and the key for query restriction
+    yield sel_table, mock_lin_param_key

@@ -646,26 +646,14 @@ def mock_decoder_save():
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        print(f"[MOCK] Saving results to: {results_path}")
-        print(f"[MOCK] Results dataset dims: {results.dims}")
-        print(f"[MOCK] Results dataset coords: {list(results.coords.keys())}")
-
         # Actually save the fake results (small files, fast)
         # Use engine='netcdf4' for compatibility
-        try:
-            results.to_netcdf(results_path, engine="netcdf4")
-            print(
-                f"[MOCK] ✅ Saved netcdf successfully, file exists: {results_path.exists()}"
-            )
-        except Exception as e:
-            print(f"[MOCK] ❌ Error saving netcdf: {e}")
-            raise
+        results.to_netcdf(results_path, engine="netcdf4")
 
         # Save classifier pickle
         with open(classifier_path, "wb") as f:
             pickle.dump(classifier, f)
 
-        print(f"[MOCK] ✅ Returning paths: {results_path}, {classifier_path}")
         return str(results_path), str(classifier_path)
 
     return _mock_save_results

@@ -3,9 +3,6 @@
 These tests run ALL Spyglass code (fetch, parameter processing, interval
 calculations, database operations) but mock the expensive external
 dependencies (non_local_detector, file I/O).
-
-Runtime: ~11s (vs 236s with real operations) - 95% faster!
-Coverage: 70% ✅ (all Spyglass code tested)
 """
 
 import pytest
@@ -22,15 +19,7 @@ def test_clusterless_data_processing_mocked(
     pop_pos_group,
     group_unitwave,
 ):
-    """Test Spyglass data processing logic with mocked external operations.
-
-    This test runs ALL Spyglass code (fetch, parameter processing, interval
-    calculations, database operations) but mocks the expensive external
-    dependencies (non_local_detector, file I/O).
-
-    Runtime: ~11s (vs 236s with real operations) - 95% faster!
-    Coverage: 70% ✅ (all Spyglass code tested)
-    """
+    """Test Spyglass data processing logic with mocked external operations."""
     _ = pop_pos_group, group_unitwave  # ensure populated
 
     # Apply mocks to ClusterlessDecodingV1
@@ -91,11 +80,7 @@ def test_sorted_spikes_data_processing_mocked(
     pop_pos_group,
     pop_spikes_group,
 ):
-    """Test Spyglass data processing logic for sorted spikes with mocked operations.
-
-    Runtime: ~10s (vs 220s with real operations) - 95% faster!
-    Coverage: 70% ✅ (all Spyglass code tested)
-    """
+    """Test data processing logic for sorted spikes with mocked operations."""
     _ = pop_pos_group, pop_spikes_group  # ensure populated
 
     # Apply mocks to SortedSpikesDecodingV1

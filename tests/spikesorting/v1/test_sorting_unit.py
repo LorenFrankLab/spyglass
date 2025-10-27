@@ -1,10 +1,8 @@
 """Unit tests for SpikeSorting with mocked external operations.
 
-These tests use monkeypatch to replace expensive external operations (spikeinterface sorting)
-with instant mock functions, allowing fast validation of Spyglass logic without waiting
-for slow spike sorting algorithms.
-
-Runtime: ~2-3s (vs ~95s for integration tests)
+These tests use monkeypatch to replace expensive external operations
+(spikeinterface sorting) with instant mock functions, allowing fast validation
+of Spyglass logic without waiting for slow spike sorting algorithms.
 """
 
 import pytest
@@ -31,8 +29,6 @@ def test_spike_sorting_logic_mocked(
     Mocked operations:
     - _run_spike_sorter() - Returns fake sorting object instantly
     - _save_sorting_results() - Returns fake analysis file name and object ID
-
-    Runtime: ~2-3s (vs ~95s for real spike sorting)
     """
     # Apply mocks to SpikeSorting
     monkeypatch.setattr(
@@ -86,5 +82,3 @@ def test_spike_sorting_logic_mocked(
     assert isinstance(
         first_result["object_id"], str
     ), "object_id should be a string"
-
-    print(f"✅ Mocked spike sorting test passed ({len(sorting_table)} entries)")
