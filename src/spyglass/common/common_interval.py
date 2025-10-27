@@ -64,10 +64,10 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         else:
             name = getattr(epoch_row, "name", None)
 
-        # Handle various tags formats (list, tuple, single value, or None)
-        if tags and isinstance(tags, (list, tuple)):
+        # Handle formats: list, tuple, numpy array, single value, or None
+        if isinstance(tags, (list, tuple, np.ndarray)):
             return tags[0] if len(tags) > 0 else f"interval_{name}"
-        elif tags:
+        elif tags:  # Single value (string or other scalar)
             return tags
         else:
             return f"interval_{name}"
