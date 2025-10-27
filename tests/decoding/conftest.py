@@ -622,10 +622,7 @@ def mock_decoder_save():
     from pathlib import Path
 
     def _mock_save_results(self, classifier, results, key):
-        """Mocked version of _save_decoder_results that saves fake data quickly.
-
-        This saves actual small files (fast ~1s) so fetch_results() works.
-        """
+        """Mocked version of _save_decoder_results that skips file I/O."""
         import os
         import pickle
 
@@ -646,9 +643,7 @@ def mock_decoder_save():
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        # Actually save the fake results (small files, fast)
-        # Use engine='netcdf4' for compatibility
-        results.to_netcdf(results_path, engine="netcdf4")
+        results_path.touch()
 
         # Save classifier pickle
         with open(classifier_path, "wb") as f:

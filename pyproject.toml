@@ -98,13 +98,13 @@ optional-dependencies.moseq-gpu = [
   "keypoint-moseq",
 ]
 optional-dependencies.test = [
-  "codecov",                # for code coverage badge
-  "docker",                 # for tests in a container
+  "codecov",            # for code coverage badge
+  "docker",             # for tests in a container
   "ghostipy",
-  "kachery",                # database access
+  "kachery",            # database access
   "kachery-client",
   "kachery-cloud>=0.4",
-  "netcdf4",                # for mocking decoding data
+  # "netcdf4",                # REMOVE?
   "opencv-python-headless", # for headless testing of Qt
   "pre-commit",             # linting
   "pytest",                 # unit testing
