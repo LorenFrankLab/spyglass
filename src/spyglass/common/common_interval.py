@@ -47,15 +47,51 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
     @staticmethod
     def interval_name_from_tags(epoch_row):
-        return (
-            epoch_row.tags[0]
-            if epoch_row.tags
-            else f"interval_{epoch_row.name}"
-        )
+        """Extract interval name from tags attribute.
+
+        This function handles both:
+        1. NWB objects (pynwb.epoch.TimeIntervals rows) with .tags attribute
+        2. Pandas namedtuples from DataFrame.itertuples()
+
+        SpyglassIngestion converts table-like NWB objects to DataFrames and
+        iterates using .itertuples(), which produces namedtuples.
+        """
+        tags = getattr(epoch_row, "tags", None)
+
+        # For namedtuples from itertuples(), the index is stored as 'Index'
+        if idx_name := getattr(epoch_row, "Index", None):
+            name = idx_name
+        else:
+            name = getattr(epoch_row, "name", None)
+
+        # Handle various tags formats (list, tuple, single value, or None)
+        if tags and isinstance(tags, (list, tuple)):
+            return tags[0] if len(tags) > 0 else f"interval_{name}"
+        elif tags:
+            return tags
+        else:
+            return f"interval_{name}"
 
     @staticmethod
     def interval_from_start_stop_time(epoch_row):
-        return np.asarray([[epoch_row.start_time, epoch_row.stop_time]])
+        """Extract start and stop times from epoch row.
+
+        This function handles both:
+        1. NWB objects with .start_time and .stop_time attributes
+        2. Pandas namedtuples from DataFrame.itertuples() (new ingestion pattern)
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (1, 2) containing [start_time, stop_time]
+        """
+        start_time = getattr(epoch_row, "start_time", None)
+        stop_time = getattr(epoch_row, "stop_time", None)
+        if start_time is None or stop_time is None:
+            raise ValueError(
+                "Epoch row must have start_time and stop_time attributes."
+            )
+        return np.asarray([[start_time, stop_time]])
 
     def fetch_interval(self):
         """Fetch interval list object for a given key."""
