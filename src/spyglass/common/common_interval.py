@@ -59,8 +59,8 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         tags = getattr(epoch_row, "tags", None)
 
         # For namedtuples from itertuples(), the index is stored as 'Index'
-        if idx_name := getattr(epoch_row, "Index", None):
-            name = idx_name
+        if hasattr(epoch_row, "Index"):
+            name = epoch_row.Index
         else:
             name = getattr(epoch_row, "name", None)
 
@@ -87,10 +87,6 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         """
         start_time = getattr(epoch_row, "start_time", None)
         stop_time = getattr(epoch_row, "stop_time", None)
-        if start_time is None or stop_time is None:
-            raise ValueError(
-                "Epoch row must have start_time and stop_time attributes."
-            )
         return np.asarray([[start_time, stop_time]])
 
     def fetch_interval(self):
