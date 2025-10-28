@@ -63,7 +63,8 @@ class MyAnalysis(dj.Computed):
 
         my_data = ...  # Your analysis data here
 
-        with AnalysisNwbfile().build("session.nwb") as builder:
+        nwb_file_name = key["nwb_file_name"]
+        with AnalysisNwbfile().build(nwb_file_name) as builder:
             # Add your data using helper methods
             builder.add_nwb_object( pd.DataFrame(my_data))
 
