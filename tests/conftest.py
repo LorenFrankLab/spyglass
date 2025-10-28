@@ -237,7 +237,7 @@ def dj_conn(request, server_credentials, worker_id, verbose, teardown):
     # Cleanup: drop worker-specific schemas if tearing down
     if teardown:
         conn = dj.conn()
-        cursor = conn.query(f"SHOW DATABASES LIKE '{schema_prefix}%'")
+        cursor = conn.query(f"SHOW DATABASES LIKE '{schema_prefix}%%'")
         schemas = cursor.fetchall()
         for schema in schemas:
             dj_logger.info(f"Dropping worker schema: {schema[0]}")

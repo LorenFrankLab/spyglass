@@ -579,7 +579,10 @@ def mock_detector_io_globally(mock_results_storage):
     storage instead of reading from disk.
     """
     from unittest.mock import patch
-    from non_local_detector.models import ClusterlessDecoder, SortedSpikesDecoder
+    from non_local_detector.models import (
+        ClusterlessDecoder,
+        SortedSpikesDecoder,
+    )
 
     def _mock_load_results(filename):
         """Load results from in-memory storage."""
@@ -600,14 +603,21 @@ def mock_detector_io_globally(mock_results_storage):
         )
 
     # Patch the decoder classes' load methods globally
-    with patch.object(
-        ClusterlessDecoder, "load_results", staticmethod(_mock_load_results)
-    ), patch.object(
-        ClusterlessDecoder, "load_model", staticmethod(_mock_load_model)
-    ), patch.object(
-        SortedSpikesDecoder, "load_results", staticmethod(_mock_load_results)
-    ), patch.object(
-        SortedSpikesDecoder, "load_model", staticmethod(_mock_load_model)
+    with (
+        patch.object(
+            ClusterlessDecoder, "load_results", staticmethod(_mock_load_results)
+        ),
+        patch.object(
+            ClusterlessDecoder, "load_model", staticmethod(_mock_load_model)
+        ),
+        patch.object(
+            SortedSpikesDecoder,
+            "load_results",
+            staticmethod(_mock_load_results),
+        ),
+        patch.object(
+            SortedSpikesDecoder, "load_model", staticmethod(_mock_load_model)
+        ),
     ):
         yield
 
@@ -673,29 +683,45 @@ def mock_decoder_save(mock_results_storage):
     """Mock the _save_decoder_results helper for ClusterlessDecodingV1.
 
     Returns a function that can be used with monkeypatch to replace
-    the real _save_decoder_results method. Uses in-memory storage to avoid
-    netCDF4/HDF5 file I/O issues in CI.
+    the real _save_decoder_results method. Creates minimal pickle files
+    on disk to satisfy DataJoint's external storage, then stores data
+    in memory for actual loading.
     """
     from pathlib import Path
     import uuid
+    import pickle
+    import os
 
     def _mock_save_results(self, classifier, results, key):
-        """Mocked version of _save_decoder_results that uses in-memory storage."""
+        """Mocked version that creates minimal files and stores in memory."""
         # Generate unique identifier for this result set
         unique_id = str(uuid.uuid4())[:8]
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
-        # Create fake file paths (for database storage, not actual files)
-        analysis_dir = Path("tests/_data/analysis")
+        # Use absolute path to match environment expectations
+        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
+        analysis_dir = Path(base_dir) / "analysis"
         subdir = analysis_dir / nwb_file_name
-        results_path = str(subdir / f"{nwb_file_name}_{unique_id}_mocked.nc")
-        classifier_path = str(subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl")
+        subdir.mkdir(parents=True, exist_ok=True)
 
-        # Store in memory instead of writing to disk
-        mock_results_storage["results"][results_path] = results
-        mock_results_storage["classifiers"][classifier_path] = classifier
+        # Create file paths
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        return results_path, classifier_path
+        # Write minimal pickle files (for DataJoint validation)
+        # DataJoint just needs files to exist for upload_filepath check
+        with open(results_path, "wb") as f:
+            pickle.dump({"mock": "results"}, f)
+        with open(classifier_path, "wb") as f:
+            pickle.dump({"mock": "classifier"}, f)
+
+        # Store actual data in memory for loading
+        results_path_str = str(results_path)
+        classifier_path_str = str(classifier_path)
+        mock_results_storage["results"][results_path_str] = results
+        mock_results_storage["classifiers"][classifier_path_str] = classifier
+
+        return results_path_str, classifier_path_str
 
     return _mock_save_results
 
