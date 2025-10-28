@@ -405,6 +405,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         ]
 
     def make_compute(
+        self,
         key,
         waveform_params,
         waveform_extractor_path,
