@@ -430,8 +430,8 @@ class Waveforms(SpyglassMixin, dj.Computed):
             if waveform_params.pop("whiten"):
                 recording = sip.whiten(recording, dtype="float32")
 
-        if os.path.exists(key["waveform_extractor_path"]):
-            shutil.rmtree(key["waveform_extractor_path"])
+        if os.path.exists(waveform_extractor_path):
+            shutil.rmtree(waveform_extractor_path)
 
         waveforms = si.extract_waveforms(
             recording=recording,
