@@ -174,8 +174,44 @@ class Curation(SpyglassMixin, dj.Manual):
         """
         return SpikeSortingRecording().load_recording(key)
 
-    @staticmethod
-    def get_curated_sorting(key: dict):
+    def _load_sorting_info(self, key: dict) -> Tuple[str, List[List[int]]]:
+        """Returns the sorting path and merge groups for this curation
+
+        Parameters
+        ----------
+        key : dict
+            Curation key
+
+        Returns
+        -------
+        sorting_path : str
+        merge_groups : List[List[int]]
+        """
+        sorting_path = (SpikeSorting & key).fetch1("sorting_path")
+        merge_groups = (Curation & key).fetch1("merge_groups")
+        return sorting_path, merge_groups
+
+    def _load_sorting(self, sorting_path: str, merge_groups: List[List[int]]):
+        """Returns the sorting extractor with merges applied
+
+        Parameters
+        ----------
+        sorting_path : str
+        merge_groups : List[List[int]]
+
+        Returns
+        -------
+        sorting_extractor: spike interface sorting extractor
+
+        """
+        sorting = si.load_extractor(sorting_path)
+        if len(merge_groups) != 0:
+            return MergedSortingExtractor(
+                parent_sorting=sorting, merge_groups=merge_groups
+            )
+        return sorting
+
+    def get_curated_sorting(self, key: dict):
         """Returns the sorting extractor related to this curation,
         with merges applied.
 
@@ -189,16 +225,8 @@ class Curation(SpyglassMixin, dj.Manual):
         sorting_extractor: spike interface sorting extractor
 
         """
-        sorting_path = (SpikeSorting & key).fetch1("sorting_path")
-        sorting = si.load_extractor(sorting_path)
-        merge_groups = (Curation & key).fetch1("merge_groups")
-        # TODO: write code to get merged sorting extractor
-        if len(merge_groups) != 0:
-            return MergedSortingExtractor(
-                parent_sorting=sorting, merge_groups=merge_groups
-            )
-        else:
-            return sorting
+        sorting_path, merge_groups = self._load_sorting_info(key)
+        return self._load_sorting(sorting_path, merge_groups)
 
     @staticmethod
     def save_sorting_nwb(
@@ -341,8 +369,6 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Waveforms(SpyglassMixin, dj.Computed):
-    _use_transaction, _allow_insert = False, True
-
     definition = """
     -> WaveformSelection
     ---
@@ -351,51 +377,94 @@ class Waveforms(SpyglassMixin, dj.Computed):
     waveforms_object_id: varchar(40)   # Object ID for the waveforms in NWB file
     """
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate Waveforms table with waveform extraction results
 
         1. Fetches ...
             - Recording and sorting from Curation table
             - Parameters from WaveformParameters table
+        """
+        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
+        waveform_extractor_name = self._get_waveform_extractor_name(key)
+        waveform_extractor_path = Path(waveforms_dir) / Path(
+            waveform_extractor_name
+        )
+
+        recording_path = SpikeSortingRecording()._fetch_recording_path(key)
+        sorting_path, merge_groups = Curation()._load_sorting_info(key)
+
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
+        return [
+            waveform_params,
+            waveform_extractor_path,
+            recording_path,
+            sorting_path,
+            merge_groups,
+            analysis_file_name,
+        ]
+
+    def make_compute(
+        key,
+        waveform_params,
+        waveform_extractor_path,
+        recording_path,
+        sorting_path,
+        merge_groups,
+        analysis_file_name,
+    ):
+        """Computes waveforms and returns information for insertion
+
         2. Uses spikeinterface to extract waveforms
         3. Generates an analysis NWB file with the waveforms
-        4. Inserts the key into Waveforms table
         """
-        key["analysis_file_name"] = AnalysisNwbfile().create(
-            key["nwb_file_name"]
-        )
-        recording = Curation.get_recording(key)
+        recording = si.load_extractor(recording_path)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
 
-        sorting = Curation.get_curated_sorting(key)
+        sorting = Curation()._load_sorting(sorting_path, merge_groups)
 
         logger.info("Extracting waveforms...")
-        waveform_params = (WaveformParameters & key).fetch1("waveform_params")
         if "whiten" in waveform_params:
             if waveform_params.pop("whiten"):
                 recording = sip.whiten(recording, dtype="float32")
 
-        waveform_extractor_name = self._get_waveform_extractor_name(key)
-        key["waveform_extractor_path"] = str(
-            Path(waveforms_dir) / Path(waveform_extractor_name)
-        )
         if os.path.exists(key["waveform_extractor_path"]):
             shutil.rmtree(key["waveform_extractor_path"])
+
         waveforms = si.extract_waveforms(
             recording=recording,
             sorting=sorting,
-            folder=key["waveform_extractor_path"],
+            folder=waveform_extractor_path,
             **waveform_params,
         )
 
         object_id = AnalysisNwbfile().add_units_waveforms(
-            key["analysis_file_name"], waveform_extractor=waveforms
+            analysis_file_name, waveform_extractor=waveforms
         )
-        key["waveforms_object_id"] = object_id
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
+        return [
+            analysis_file_name,
+            waveform_extractor_path,
+            object_id,
+        ]
 
-        self.insert1(key)
+    def make_insert(
+        key, analysis_file_name, waveform_extractor_path, object_id
+    ):
+        """Inserts the computed waveforms into the Waveforms table
+
+        4. Inserts the key into Waveforms table
+        """
+        AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
+
+        self.insert1(
+            dict(
+                key,
+                analysis_file_name=analysis_file_name,
+                waveform_extractor_path=str(waveform_extractor_path),
+                waveforms_object_id=object_id,
+            )
+        )
 
     def load_waveforms(self, key: dict):
         """Returns a spikeinterface waveform extractor specified by key
