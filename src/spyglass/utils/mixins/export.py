@@ -6,6 +6,7 @@ from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
 from re import match as re_match
+from typing import List
 
 from datajoint.condition import AndList, Top, make_condition
 from datajoint.expression import QueryExpression
