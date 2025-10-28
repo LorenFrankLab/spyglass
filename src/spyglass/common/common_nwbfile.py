@@ -569,14 +569,11 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         if dry_run:
             return to_delete, tracked
 
-        if self._test_mode:  # TODO: remove before production
-            for path in to_delete:
-                try:
-                    path.unlink()
-                except Exception as e:
-                    self._logger.error(f"Error deleting file {path}: {e}")
-        else:
-            self._logger.info(f"would delete {len(to_delete)} untracked files")
+        for path in to_delete:
+            try:
+                path.unlink()
+            except Exception as e:
+                self._logger.error(f"Error deleting file {path}: {e}")
 
         return to_delete, tracked
 
