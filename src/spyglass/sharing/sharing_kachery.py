@@ -245,7 +245,7 @@ def share_data_to_kachery(
 
         # ----------- Copy to master if has AnalysisNwbfile parent -----------
         if custom_analysis := getattr(table, "_custom_analysis_parent", None):
-            (table & restriction)._parent_copy_to_master()
+            (table & restriction)._parent_copy_to_common()
         # ----------------------------------------------------------------------
 
         analysis_file_list = (table & restriction).fetch("analysis_file_name")
