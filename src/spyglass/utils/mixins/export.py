@@ -261,6 +261,21 @@ class ExportMixin(FetchMixin):
 
         return AnalysisRegistry().get_class(custom_parent[0])()
 
+    def _parent_copy_to_master(self, fnames: List[str] = None):
+        """Copy parent custom AnalysisNwbfile entries to master."""
+        custom_parent = self._custom_analysis_parent
+        if not custom_parent:
+            return
+
+        if not fnames:
+            fnames = self.fetch("analysis_file_name", log_export=False)
+        f_dict = [{"analysis_file_name": fname} for fname in fnames]
+
+        parent_name = custom_parent.full_table_name
+        self._logger.debug(f"Copying parent {parent_name} entries to master")
+
+        (custom_parent & f_dict)._copy_to_master()
+
     def _log_fetch_nwb(self, table, table_attr):
         """Log fetch_nwb for export table.
 
@@ -289,14 +304,7 @@ class ExportMixin(FetchMixin):
             )
             self._copy_to_master()
         elif custom_parent := self._custom_analysis_parent:
-            # Self has a custom AnalysisNwbfile parent, copy parent entries
-            parent_name = custom_parent.full_table_name
-            self._logger.debug(
-                f"Export: {this_name} has custom parent {parent_name}"
-            )
-            f_dict = [{tbl_pk: fname} for fname in fnames]
-            restr_parent = custom_parent.restrict(f_dict, log_export=False)
-            restr_parent._copy_to_master()
+            self._parent_copy_to_master(fnames=fnames)
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
         self._logger.debug(
