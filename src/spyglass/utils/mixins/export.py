@@ -261,10 +261,10 @@ class ExportMixin(FetchMixin):
 
         return AnalysisRegistry().get_class(custom_parent[0])()
 
-    def _parent_copy_to_master(self, fnames: List[str] = None):
-        """Copy parent custom AnalysisNwbfile entries to master.
+    def _parent_copy_to_common(self, fnames: List[str] = None):
+        """Copy parent custom AnalysisNwbfile entries to common.
 
-        Also used by `sharing_kachery.py` to ensure master table integrity.
+        Also used by `sharing_kachery.py` to ensure common table integrity.
 
         Parameters
         ----------
@@ -281,14 +281,14 @@ class ExportMixin(FetchMixin):
         f_dict = [{"analysis_file_name": fname} for fname in fnames]
 
         parent_name = custom_parent.full_table_name
-        self._logger.debug(f"Copying parent {parent_name} entries to master")
+        self._logger.debug(f"Copying parent {parent_name} entries to common")
 
-        (custom_parent & f_dict)._copy_to_master()
+        (custom_parent & f_dict)._copy_to_common()
 
     def _log_fetch_nwb(self, table, table_attr):
         """Log fetch_nwb for export table.
 
-        For custom AnalysisNwbfile tables, copy entries to master table
+        For custom AnalysisNwbfile tables, copy entries to common table
         to maintain referential integrity in ExportSelection.File.
         """
         from spyglass.common.common_nwbfile import AnalysisNwbfile
@@ -307,13 +307,13 @@ class ExportMixin(FetchMixin):
         )
 
         if is_custom_analysis:
-            # Self is custom AnalysisNwbfile, copy to master
+            # Self is custom AnalysisNwbfile, copy to common
             self._logger.debug(
                 f"Export: detected custom AnalysisNwbfile table {this_name}"
             )
-            self._copy_to_master()
+            self._copy_to_common()
         elif custom_parent := self._custom_analysis_parent:
-            self._parent_copy_to_master(fnames=fnames)
+            self._parent_copy_to_common(fnames=fnames)
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
         self._logger.debug(
@@ -324,7 +324,7 @@ class ExportMixin(FetchMixin):
             skip_duplicates=True,
         )
 
-        # Log fetch on master AnalysisNwbfile (entries were copied there)
+        # Log fetch on common AnalysisNwbfile (entries were copied there)
         this_restr = None
         if len(fnames) == 1:
             this_restr = f"{tbl_pk} = '{fnames[0]}'"

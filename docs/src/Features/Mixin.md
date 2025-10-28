@@ -52,7 +52,7 @@ to a `_nwb_table` attribute.
 **Custom Analysis File Tables**: Spyglass supports individualized
 `AnalysisNwbfile` tables to address transaction lock contention in multi-team
 environments. The `fetch_nwb()` method automatically detects whether your table
-references the master `AnalysisNwbfile` table or a custom team-specific table
+references the common `AnalysisNwbfile` table or a custom team-specific table
 and fetches from the appropriate location. See [Custom Analysis Tables](../ForDevelopers/Management.md#custom-analysis-tables)
 for details on using custom analysis file tables.
 

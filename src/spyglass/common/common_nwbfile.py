@@ -537,7 +537,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             If True, return the files that would be deleted. Defaults to True.
         custom_tables : list
             List of custom analysis table instances to check for tracked files.
-            If None, only checks master table. Defaults to None.
+            If None, only checks common table. Defaults to None.
 
         Returns
         -------
@@ -549,7 +549,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         def paths_from_external(tbl) -> Set[Path]:
             return set([fp[1] for fp in tbl._ext_tbl.fetch_external_paths()])
 
-        # Collect tracked files from master table, then custom tables
+        # Collect tracked files from common table, then custom tables
         tracked = paths_from_external(self)
         for tbl in custom_tables:
             tracked.update(paths_from_external(tbl))
@@ -578,9 +578,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return to_delete, tracked
 
     def cleanup(self) -> None:
-        """Clean up master and all custom AnalysisNwbfile tables.
+        """Clean up common and all custom AnalysisNwbfile tables.
 
-        Removes orphaned analysis files across both master and custom tables.
+        Removes orphaned analysis files across both common and custom tables.
         A file is considered orphaned if it has no downstream foreign key
         references. This method coordinates cleanup across all registered
         custom AnalysisNwbfile tables to prevent premature deletion.
@@ -589,9 +589,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             1. For each custom analysis table:
                a. Delete orphaned entries (no downstream references)
                b. Clean up unused external file entries
-               c. Remove valid entries from master orphan list
-            2. Delete remaining master orphans
-            3. Clean up master external entries
+               c. Remove valid entries from common orphan list
+            2. Delete remaining common orphans
+            3. Clean up common external entries
             4. Delete empty files (0 bytes)
 
         Example:
@@ -615,7 +615,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         # Get all custom tables first so we can check their tracked files
         custom_tables = list(registry.all_classes)
         num_tables = len(custom_tables)
-        master_orphans = self.get_orphans().proj()
+        common_orphans = self.get_orphans().proj()
 
         try:  # Long try block ensures that we always unblock inserts after
             for i, analysis_tbl in enumerate(custom_tables, start=1):
@@ -628,18 +628,18 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 # Step 1b: Clean up this table's external entries
                 _ = analysis_tbl.cleanup_external()
 
-                # Step 1c: Remove valid entries from master orphans.
+                # Step 1c: Remove valid entries from common orphans.
                 if bool(analysis_tbl):
-                    master_orphans -= analysis_tbl.proj()
+                    common_orphans -= analysis_tbl.proj()
 
-            # Step 3: Delete remaining master orphans.
-            if bool(master_orphans):
-                master_orphans.delete_quick()
+            # Step 3: Delete remaining common orphans.
+            if bool(common_orphans):
+                common_orphans.delete_quick()
 
-            # Step 4: Clean up master external table entries
+            # Step 4: Clean up common external table entries
             _ = self.cleanup_external()
 
-            # Remove untracked files, checking both master and custom tables
+            # Remove untracked files, checking both common and custom tables
             _ = self._remove_untracked_files(custom_tables, dry_run=False)
 
         finally:

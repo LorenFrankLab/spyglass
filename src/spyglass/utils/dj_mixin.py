@@ -112,7 +112,7 @@ class SpyglassMixin(
         """Ensure table doesn't reference multiple AnalysisNwbfile tables.
 
         Tables should only have one foreign key to an AnalysisNwbfile table
-        (either the master common.AnalysisNwbfile or a custom one).
+        (either the central common.AnalysisNwbfile or a custom one).
         Having multiple references creates ambiguity for fetch_nwb() and export.
 
         Raises
@@ -208,7 +208,7 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         Enforces ...
         - Database conforms to `{prefix}_nwbfile` naming convention, one '_'
         - Table conforms to AnalysisNwbfile class name
-        - Exact definition match for master AnalysisNwbfile table
+        - Exact definition match for common AnalysisNwbfile table
         - Not a part table (part tables cannot be AnalysisNwbfile)
         - Inserts into AnalysisRegistry on declaration
         """

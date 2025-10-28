@@ -314,14 +314,14 @@ DecodingOutput().cleanup()  # Remove unreferenced .nc and .pkl files
 ```
 
 **Analysis File Cleanup**: See dedicated section below for details on coordinated
-cleanup across master and custom `AnalysisNwbfile` tables.
+cleanup across common and custom `AnalysisNwbfile` tables.
 
 ---
 
 ## Analysis File Cleanup
 
 Spyglass provides a cleanup system for managing analysis NWB files across both
-the master `AnalysisNwbfile` table and team-specific custom tables. This system
+the common `AnalysisNwbfile` table and team-specific custom tables. This system
 detects and removes orphaned files that are no longer referenced by any
 downstream tables.
 
@@ -335,23 +335,23 @@ The cleanup system handles:
 
 - **Orphaned files**: Files with no downstream foreign key references
 - **Uninserted files**: Files created but never added to tables
-- **Multi-table coordination**: Works across master and all custom `AnalysisNwbfile` tables
+- **Multi-table coordination**: Works across common and all custom `AnalysisNwbfile` tables
 - **Empty files**: Files with 0 bytes are automatically removed
 
 ### Running Cleanup
 
-Use the master `AnalysisNwbfile` table to clean up all analysis files:
+Use the common `AnalysisNwbfile` table to clean up all analysis files:
 
 ```python
 from spyglass.common import AnalysisNwbfile
 
-# Run cleanup across all tables (master + custom)
+# Run cleanup across all tables (common + custom)
 AnalysisNwbfile().cleanup()
 ```
 
 **Important**: Cleanup automatically coordinates across all custom
 `AnalysisNwbfile` tables. A file is only deleted if it's not referenced by ANY
-table (master or custom).
+table (common or custom).
 
 **Warning**: This is a destructive operation that permanently deletes files. Ensure
 you have backups before running cleanup on production databases. This operation
@@ -381,4 +381,4 @@ The cleanup process checks:
 
 If you've created custom `AnalysisNwbfile` tables (see [Custom Analysis Files](./CustomAnalysisFiles.md)),
 cleanup works automatically. No special configuration needed - just run cleanup
-on the master table and it handles all custom tables.
+on the common table and it handles all custom tables.

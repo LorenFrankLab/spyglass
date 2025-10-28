@@ -123,7 +123,7 @@ except ValueError:
 
 ## Using Custom Tables
 
-By default, all users share the master `AnalysisNwbfile` table. When multiple
+By default, all users share the common `AnalysisNwbfile` table. When multiple
 users work concurrently, this can cause database lock contention and prevent
 new table declarations. To avoid this, Spyglass supports custom per-user
 analysis tables for custom analysis pipelines.

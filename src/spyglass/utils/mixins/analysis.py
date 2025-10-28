@@ -28,7 +28,7 @@ from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_hash import NwbfileHasher
 from spyglass.utils.nwb_helper_fn import get_electrode_indices, get_nwb_file
 
-# Only differs from the master AnalysisNwbfile in adding 'Custom' to heading
+# Only differs from the common AnalysisNwbfile in adding 'Custom' to heading
 ENFORCED_DEFINITION = """
 # Custom table for NWB files that contain results of analysis.
 analysis_file_name: varchar(64)                # name of the file
@@ -81,9 +81,9 @@ HASH_ERROR_MSG = (
 class AnalysisMixin(BaseMixin):
     """Provides analysis file management for AnalysisNwbfile tables.
 
-    This mixin provides core functionality for both master and custom
+    This mixin provides core functionality for both common and custom
     AnalysisNwbfile tables including file creation, NWB object management,
-    cleanup/orphan detection, and export integration (copy-to-master).
+    cleanup/orphan detection, and export integration (copy-to-common).
 
     Key Methods:
         build() - RECOMMENDED: Create builder for safe file creation (context manager)
@@ -91,14 +91,14 @@ class AnalysisMixin(BaseMixin):
         add() - Legacy: Register analysis file in table
         get_file_path() - Get absolute path to analysis file
         cleanup() - Remove orphaned files across all custom tables
-        _copy_to_master() - Copy entries to master table during export
+        _copy_to_common() - Copy entries to common table during export
 
     The build() method returns an AnalysisFileBuilder context manager that
     enforces the CREATE → POPULATE → REGISTER lifecycle, preventing common
     errors like forgetting registration or modifying registered files.
 
     This mixin is used by SpyglassAnalysis for custom tables and directly
-    inherited by the master AnalysisNwbfile table.
+    inherited by the common AnalysisNwbfile table.
     """
 
     _creation_times = {}
@@ -115,8 +115,8 @@ class AnalysisMixin(BaseMixin):
 
         AnalysisRegistry().insert1(self.full_table_name)
 
-    def _copy_to_master(self, file_names: list = None) -> None:
-        """Copy entries from this custom table to the master AnalysisNwbfile."""
+    def _copy_to_common(self, file_names: list = None) -> None:
+        """Copy entries from this custom table to the common AnalysisNwbfile."""
         from spyglass.common.common_nwbfile import AnalysisNwbfile
 
         # Build restriction based on file_names
@@ -143,7 +143,7 @@ class AnalysisMixin(BaseMixin):
         AnalysisNwbfile().insert(entries, skip_duplicates=True)
 
         self._logger.debug(
-            f"Copied {len(entries)} entries to master: "
+            f"Copied {len(entries)} entries to common: "
             f"{[e['analysis_file_name'] for e in entries]}"
         )
 
@@ -905,8 +905,8 @@ class AnalysisMixin(BaseMixin):
     def cleanup_external(self):
         """Remove the filepath entries for NWB files that are not in use.
 
-        Because an unused file in the master may be in use in a custom table,
-        we never want to delete external files. Instead, the master handles
+        Because an unused file in the common may be in use in a custom table,
+        we never want to delete external files. Instead, the common handles
         orphan detection and deletion.
         """
         self._ext_tbl.delete(delete_external_files=False)

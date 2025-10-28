@@ -94,7 +94,7 @@ class FetchMixin(BaseMixin):
             "_nwbfile`.`analysis_nwbfile`"
         )
         if is_export and is_analysis_table:
-            self._copy_to_master()
+            self._copy_to_common()
 
         return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
 

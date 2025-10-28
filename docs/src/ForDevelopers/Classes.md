@@ -119,7 +119,7 @@ These mixins form a dependency chain for NWB file fetching and export logging:
 - Inherits from `FetchMixin`
 - Adds: `_log_fetch()`, `_log_fetch_nwb()`
 - Logs file access during exports
-- Handles copy-to-master for custom AnalysisNwbfile tables
+- Handles copy-to-common for custom AnalysisNwbfile tables
 - See [Export Guide](../Features/Export.md)
 
 ---
@@ -215,7 +215,7 @@ class MyMaster(SpyglassMixin, dj.Manual):
 
 - Schema naming: `{prefix}_nwbfile` (one underscore)
 - Table naming: `AnalysisNwbfile` (exact match)
-- Table definition: Must match master `AnalysisNwbfile`
+- Table definition: Must match common `AnalysisNwbfile`
 - Auto-registration in `AnalysisRegistry`
 
 **Usage**:
@@ -288,7 +288,7 @@ from spyglass.common.custom_nwbfile import AnalysisNwbfile
 - ✅ All SpyglassMixin functionality
 - ✅ Analysis file operations (`create()`, `add()`, `cleanup()`)
 - ✅ Automatic registry tracking
-- ✅ Export integration (copy-to-master)
+- ✅ Export integration (copy-to-common)
 - ✅ Lock isolation (no contention with other users)
 
 ### Referencing Custom Analysis Tables
@@ -313,7 +313,7 @@ class MyResults(SpyglassMixin, dj.Manual):
 ```
 
 **NOTE**: Tables should only reference ONE `AnalysisNwbfile` table (either
-master or custom, not both). Spyglass validates this on table declaration.
+common or custom, not both). Spyglass validates this on table declaration.
 
 ---
 
