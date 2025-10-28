@@ -262,7 +262,16 @@ class ExportMixin(FetchMixin):
         return AnalysisRegistry().get_class(custom_parent[0])()
 
     def _parent_copy_to_master(self, fnames: List[str] = None):
-        """Copy parent custom AnalysisNwbfile entries to master."""
+        """Copy parent custom AnalysisNwbfile entries to master.
+
+        Also used by `sharing_kachery.py` to ensure master table integrity.
+
+        Parameters
+        ----------
+        fnames : List[str], optional
+            List of analysis_file_name to copy, by default None (fetches all
+            from self, likely restricted).
+        """
         custom_parent = self._custom_analysis_parent
         if not custom_parent:
             return
