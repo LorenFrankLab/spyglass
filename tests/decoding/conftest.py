@@ -1,5 +1,21 @@
 import numpy as np
 import pytest
+from unittest.mock import patch
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_netcdf_saves():
+    """Globally mock netCDF file writes to avoid HDF5 I/O conflicts in CI.
+
+    This prevents RuntimeError: NetCDF: HDF error during parallel test execution
+    by intercepting xarray.Dataset.to_netcdf() calls and making them no-ops.
+    """
+    def mock_to_netcdf(self, *args, **kwargs):
+        """Mock to_netcdf that does nothing (no file I/O)."""
+        return None
+
+    with patch("xarray.Dataset.to_netcdf", mock_to_netcdf):
+        yield
 
 
 @pytest.fixture(scope="session")
