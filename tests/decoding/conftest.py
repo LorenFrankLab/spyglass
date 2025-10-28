@@ -556,6 +556,63 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
 
 
 # ============================================================================
+# In-Memory Mock Storage (avoids netCDF4/HDF5 file I/O issues in CI)
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def mock_results_storage():
+    """Session-scoped dictionary to store decoding results in memory.
+
+    This eliminates netCDF4/HDF5 file I/O issues in CI by storing
+    xarray datasets and classifiers directly in memory.
+    """
+    return {"results": {}, "classifiers": {}}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_detector_io_globally(mock_results_storage):
+    """Globally mock detector load methods to avoid netCDF4/HDF5 file I/O.
+
+    This is an autouse fixture that automatically applies to all tests in the
+    decoding module, ensuring that all fetch_results() calls use in-memory
+    storage instead of reading from disk.
+    """
+    from unittest.mock import patch
+    from non_local_detector.models import ClusterlessDecoder, SortedSpikesDecoder
+
+    def _mock_load_results(filename):
+        """Load results from in-memory storage."""
+        filename_str = str(filename)
+        if filename_str in mock_results_storage["results"]:
+            return mock_results_storage["results"][filename_str]
+        raise FileNotFoundError(
+            f"Mock result not found in memory: {filename_str}"
+        )
+
+    def _mock_load_model(filename):
+        """Load classifier from in-memory storage."""
+        filename_str = str(filename)
+        if filename_str in mock_results_storage["classifiers"]:
+            return mock_results_storage["classifiers"][filename_str]
+        raise FileNotFoundError(
+            f"Mock classifier not found in memory: {filename_str}"
+        )
+
+    # Patch the decoder classes' load methods globally
+    with patch.object(
+        ClusterlessDecoder, "load_results", staticmethod(_mock_load_results)
+    ), patch.object(
+        ClusterlessDecoder, "load_model", staticmethod(_mock_load_model)
+    ), patch.object(
+        SortedSpikesDecoder, "load_results", staticmethod(_mock_load_results)
+    ), patch.object(
+        SortedSpikesDecoder, "load_model", staticmethod(_mock_load_model)
+    ):
+        yield
+
+
+# ============================================================================
 # Mock Fixtures for ClusterlessDecodingV1
 # ============================================================================
 
@@ -612,48 +669,81 @@ def mock_clusterless_decoder():
 
 
 @pytest.fixture
-def mock_decoder_save():
+def mock_decoder_save(mock_results_storage):
     """Mock the _save_decoder_results helper for ClusterlessDecodingV1.
 
     Returns a function that can be used with monkeypatch to replace
-    the real _save_decoder_results method.
+    the real _save_decoder_results method. Uses in-memory storage to avoid
+    netCDF4/HDF5 file I/O issues in CI.
     """
-    import tempfile
     from pathlib import Path
+    import uuid
 
     def _mock_save_results(self, classifier, results, key):
-        """Mocked version of _save_decoder_results that skips file I/O."""
-        import os
-        import pickle
-
-        analysis_dir = (
-            Path(os.environ.get("SPYGLASS_BASE_DIR", "tests/_data"))
-            / "analysis"
-        )
+        """Mocked version of _save_decoder_results that uses in-memory storage."""
+        # Generate unique identifier for this result set
+        unique_id = str(uuid.uuid4())[:8]
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
-        # Create subdirectory if needed
+        # Create fake file paths (for database storage, not actual files)
+        analysis_dir = Path("tests/_data/analysis")
         subdir = analysis_dir / nwb_file_name
-        subdir.mkdir(parents=True, exist_ok=True)
+        results_path = str(subdir / f"{nwb_file_name}_{unique_id}_mocked.nc")
+        classifier_path = str(subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl")
 
-        # Create unique file names
-        import uuid
+        # Store in memory instead of writing to disk
+        mock_results_storage["results"][results_path] = results
+        mock_results_storage["classifiers"][classifier_path] = classifier
 
-        unique_id = str(uuid.uuid4())[:8]
-        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
-        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
-
-        # Write the fake results as a valid NetCDF file
-        # This ensures xarray can read it back successfully
-        results.to_netcdf(results_path, engine="netcdf4")
-
-        # Save classifier pickle
-        with open(classifier_path, "wb") as f:
-            pickle.dump(classifier, f)
-
-        return str(results_path), str(classifier_path)
+        return results_path, classifier_path
 
     return _mock_save_results
+
+
+@pytest.fixture
+def mock_detector_load_results(mock_results_storage):
+    """Mock the detector load_results methods to use in-memory storage.
+
+    This mocks both ClusterlessDetector.load_results and
+    SortedSpikesDetector.load_results to retrieve from memory instead
+    of reading netCDF files from disk.
+    """
+
+    def _mock_load_results(filename):
+        """Load results from in-memory storage instead of disk."""
+        # Convert Path to string if needed
+        filename_str = str(filename)
+
+        # Retrieve from memory
+        if filename_str in mock_results_storage["results"]:
+            return mock_results_storage["results"][filename_str]
+
+        # If not found, raise an error similar to xarray
+        raise FileNotFoundError(
+            f"Mock result not found in memory: {filename_str}. "
+            "This usually means the test setup didn't properly mock "
+            "the _save_decoder_results method."
+        )
+
+    return _mock_load_results
+
+
+@pytest.fixture
+def mock_detector_load_model(mock_results_storage):
+    """Mock the detector load_model methods to use in-memory storage."""
+
+    def _mock_load_model(filename):
+        """Load classifier from in-memory storage instead of disk."""
+        filename_str = str(filename)
+
+        if filename_str in mock_results_storage["classifiers"]:
+            return mock_results_storage["classifiers"][filename_str]
+
+        raise FileNotFoundError(
+            f"Mock classifier not found in memory: {filename_str}"
+        )
+
+    return _mock_load_model
 
 
 # ============================================================================
