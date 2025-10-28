@@ -458,11 +458,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         path = query.fetch1("recording_path")
 
-        _ = self._validate_recording_path(path, make_if_missing=True)
+        _ = self._validate_recording_path(path, key, make_if_missing=True)
 
         return path
 
-    def _validate_recording_path(self, path, make_if_missing=True):
+    def _validate_recording_path(self, path, key, make_if_missing=True):
         """Validate that the recording path exists."""
         path_obj = Path(path)
 
