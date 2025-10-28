@@ -643,7 +643,9 @@ def mock_decoder_save():
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        results_path.touch()
+        # Write the fake results as a valid NetCDF file
+        # This ensures xarray can read it back successfully
+        results.to_netcdf(results_path, engine="netcdf4")
 
         # Save classifier pickle
         with open(classifier_path, "wb") as f:
