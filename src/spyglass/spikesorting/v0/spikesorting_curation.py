@@ -5,7 +5,7 @@ import time
 import uuid
 import warnings
 from pathlib import Path
-from typing import List
+from typing import List, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -466,6 +466,9 @@ class Waveforms(SpyglassMixin, dj.Computed):
             )
         )
 
+    def _get_waveform_path(self, key: dict) -> str:
+        return (self & key).fetch1("waveform_extractor_path")
+
     def load_waveforms(self, key: dict):
         """Returns a spikeinterface waveform extractor specified by key
 
@@ -479,7 +482,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         -------
         we : spikeinterface.WaveformExtractor
         """
-        we_path = (self & key).fetch1("waveform_extractor_path")
+        we_path = self._get_waveform_path(key)
         we = si.WaveformExtractor.load_from_folder(we_path)
         return we
 
@@ -615,7 +618,6 @@ class MetricSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class QualityMetrics(SpyglassMixin, dj.Computed):
-    _use_transaction, _allow_insert = False, True
 
     definition = """
     -> MetricSelection
@@ -625,43 +627,75 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     object_id: varchar(40) # Object ID for the metrics in NWB file
     """
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate QualityMetrics table with quality metric results.
 
         1. Fetches ...
             - Waveform extractor from Waveforms table
             - Parameters from MetricParameters table
+        """
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        wf_path = Waveforms()._get_waveform_path(key)
+        # add to key to prevent fetch errors, does not persist into next make
+        key["analysis_file_name"] = analysis_file_name
+        params = (MetricParameters & key).fetch1("metric_params")
+        qm_name = self._get_quality_metrics_name(key)
+        quality_metrics_path = Path(waveforms_dir) / Path(qm_name + ".json")
+
+        return [
+            analysis_file_name,
+            wf_path,
+            params,
+            qm_name,
+            quality_metrics_path,
+        ]
+
+    def make_compute(
+        key, analysis_file_name, wf_path, params, qm_name, quality_metrics_path
+    ):
+        """Computes quality metrics and returns information for insertion
+
         2. Computes metrics, including SNR, ISI violation, NN isolation,
             NN noise overlap, peak offset, peak channel, and number of spikes.
         3. Generates an analysis NWB file with the metrics.
-        4. Inserts the key into QualityMetrics table
         """
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        waveform_extractor = Waveforms().load_waveforms(key)
-        key["analysis_file_name"] = (
-            analysis_file_name  # add to key here to prevent fetch errors
-        )
+        waveform_extractor = si.WaveformExtractor.load_from_folder(wf_path)
+
         qm = {}
-        params = (MetricParameters & key).fetch1("metric_params")
         for metric_name, metric_params in params.items():
             metric = self._compute_metric(
                 waveform_extractor, metric_name, **metric_params
             )
             qm[metric_name] = metric
-        qm_name = self._get_quality_metrics_name(key)
-        key["quality_metrics_path"] = str(
-            Path(waveforms_dir) / Path(qm_name + ".json")
-        )
-        # save metrics dict as json
+
         logger.info(f"Computed all metrics: {qm}")
-        self._dump_to_json(qm, key["quality_metrics_path"])
+        self._dump_to_json(qm, quality_metrics_path)  # save dict as json
 
-        key["object_id"] = AnalysisNwbfile().add_units_metrics(
-            key["analysis_file_name"], metrics=qm
+        object_id = AnalysisNwbfile().add_units_metrics(
+            analysis_file_name, metrics=qm
         )
-        AnalysisNwbfile().add(key["nwb_file_name"], key["analysis_file_name"])
 
-        self.insert1(key)
+        return [
+            analysis_file_name,
+            quality_metrics_path,
+            object_id,
+        ]
+
+    def make_insert(key, analysis_file_name, quality_metrics_path, object_id):
+        """Inserts the computed quality metrics into the QualityMetrics table
+
+        4. Inserts the key into QualityMetrics table
+        """
+        AnalysisNwbfile().add(key["nwb_file_name"], analysis_file_name)
+
+        self.insert1(
+            dict(
+                key,
+                analysis_file_name=analysis_file_name,
+                quality_metrics_path=str(quality_metrics_path),
+                object_id=object_id,
+            )
+        )
 
     def _get_quality_metrics_name(self, key):
         wf_name = Waveforms()._get_waveform_extractor_name(key)
