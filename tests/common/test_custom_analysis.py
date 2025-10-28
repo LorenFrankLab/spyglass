@@ -440,7 +440,7 @@ class TestCleanupAndRegistry:
         export_fp = custom_table.get_abs_path(export_file)
         custom_table.add(mini_copy_name, export_file)
         downstream.insert_by_name(export_file)
-        custom_table._copy_to_master(export_file)
+        custom_table._copy_to_common(export_file)
 
         # TODO: use `cleanup()` logic to find orphans
         # Simulate orphan detection across all registered tables
