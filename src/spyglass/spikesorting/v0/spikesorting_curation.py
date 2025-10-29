@@ -2,7 +2,6 @@ import json
 import os
 import shutil
 import time
-import uuid
 import warnings
 from pathlib import Path
 from typing import List, Tuple
@@ -363,7 +362,6 @@ class WaveformSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> Curation
     -> WaveformParameters
-    ---
     """
 
 
@@ -393,15 +391,12 @@ class Waveforms(SpyglassMixin, dj.Computed):
         recording_path = SpikeSortingRecording()._fetch_recording_path(key)
         sorting_path, merge_groups = Curation()._load_sorting_info(key)
 
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-
         return [
             waveform_params,
             waveform_extractor_path,
             recording_path,
             sorting_path,
             merge_groups,
-            analysis_file_name,
         ]
 
     def make_compute(
@@ -412,13 +407,14 @@ class Waveforms(SpyglassMixin, dj.Computed):
         recording_path,
         sorting_path,
         merge_groups,
-        analysis_file_name,
     ):
         """Computes waveforms and returns information for insertion
 
         2. Uses spikeinterface to extract waveforms
         3. Generates an analysis NWB file with the waveforms
         """
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
         recording = si.load_extractor(recording_path)
         if recording.get_num_segments() > 1:
             recording = si.concatenate_recordings([recording])
@@ -450,7 +446,7 @@ class Waveforms(SpyglassMixin, dj.Computed):
         ]
 
     def make_insert(
-        key, analysis_file_name, waveform_extractor_path, object_id
+        self, key, analysis_file_name, waveform_extractor_path, object_id
     ):
         """Inserts the computed waveforms into the Waveforms table
 
@@ -497,8 +493,11 @@ class Waveforms(SpyglassMixin, dj.Computed):
             "waveform_params_name"
         )
 
+        # prev used uuid, but dj.hash is deterministic
+        rand_str = dj.hash.key_hash(key)[0:8]
+
         return (
-            f'{key["nwb_file_name"]}_{str(uuid.uuid4())[0:8]}_'
+            f'{key["nwb_file_name"]}_{rand_str}_'
             f'{key["curation_id"]}_{waveform_params_name}_waveforms'
         )
 
