@@ -651,7 +651,13 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
         ]
 
     def make_compute(
-        key, analysis_file_name, wf_path, params, qm_name, quality_metrics_path
+        self,
+        key,
+        analysis_file_name,
+        wf_path,
+        params,
+        qm_name,
+        quality_metrics_path,
     ):
         """Computes quality metrics and returns information for insertion
 
@@ -681,7 +687,9 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             object_id,
         ]
 
-    def make_insert(key, analysis_file_name, quality_metrics_path, object_id):
+    def make_insert(
+        self, key, analysis_file_name, quality_metrics_path, object_id
+    ):
         """Inserts the computed quality metrics into the QualityMetrics table
 
         4. Inserts the key into QualityMetrics table
