@@ -2,7 +2,6 @@ import os
 import random
 import string
 import subprocess
-import warnings
 from functools import cached_property
 from pathlib import Path
 from typing import Dict, Optional, Union
@@ -15,12 +14,8 @@ import pandas as pd
 import pynwb
 import scipy.io
 import spikeinterface as si
-from datajoint import DataJointError
-from datajoint.expression import QueryExpression
 from datajoint.table import Table
-from datajoint.utils import to_camel_case
 from hdmf.common import DynamicTable
-from packaging.version import parse as version_parse
 from pynwb.core import ScratchData
 
 from spyglass.utils.dj_helper_fn import get_child_tables
@@ -462,9 +457,7 @@ class AnalysisMixin(BaseMixin):
         create : Legacy method for file creation
         add : Legacy method for registration
         """
-        from spyglass.utils.mixins.analysis_builder import (
-            AnalysisFileBuilder,
-        )
+        from spyglass.utils.mixins.analysis_builder import AnalysisFileBuilder
 
         return AnalysisFileBuilder(self, nwb_file_name)
 

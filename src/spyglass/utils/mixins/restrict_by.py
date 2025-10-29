@@ -1,6 +1,5 @@
 """Mixin to allow restriction by ancestor or descendant fields."""
 
-import logging
 from typing import List
 
 from datajoint import DataJointError
@@ -82,8 +81,7 @@ class RestrictByMixin(BaseMixin):
                     "Restriction valid for this table. Using as is."
                 )
                 return ret
-        except DataJointError:
-            pass  # Could avoid try/except if assert_join_compatible return bool
+        except DataJointError:  # need assert_join_compatible return bool
             self._logger.debug("Restriction not valid. Attempting to cascade.")
 
         if direction == "up":
@@ -166,3 +164,4 @@ class RestrictByMixin(BaseMixin):
         if return_graph:
             return rg
         self._logger.info(rg.restr_ft)
+        return None

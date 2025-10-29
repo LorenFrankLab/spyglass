@@ -1,4 +1,4 @@
-"""Tests for AnalysisFileBuilder context manager (Phase 5.3).
+"""Tests for AnalysisFileBuilder context manager
 
 Tests the builder's lifecycle enforcement (CREATE → POPULATE → REGISTER),
 state machine validation, and integration with AnalysisMixin.
@@ -6,19 +6,13 @@ state machine validation, and integration with AnalysisMixin.
 
 import os
 from pathlib import Path
-from unittest.mock import patch
 
-import datajoint as dj
 import numpy as np
 import pandas as pd
 import pytest
 
 # Mark all tests in this module to run after other tests
 pytestmark = pytest.mark.order("last")
-
-
-# ================================ FIXTURES ===================================
-# Common fixtures are now in conftest.py
 
 
 # ======================= 1. BASIC FUNCTIONALITY TESTS =======================
@@ -503,11 +497,9 @@ class TestExceptionHandling:
             analysis_file = builder.analysis_file_name
 
             # Even if we have an error, we can manually register if recovered
-            try:
-                # Some operation that might fail
-                pass
-            except Exception:
-                # Recovery logic here...
+            try:  # Some operation that might fail
+                raise RuntimeError("Simulated failure")
+            except Exception:  # Recovery logic here...
                 pass
 
             # Manually register after recovery

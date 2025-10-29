@@ -377,7 +377,6 @@ class AnalysisRegistry(dj.Manual):
         >>> for ext in externals:
         ...     print(ext.database)
         """
-        externals = []
         ExtTable = dj.external.ExternalTable
         ext_kwargs = dict(connection=dj.conn(), store=store)
 
@@ -450,6 +449,8 @@ class AnalysisRegistry(dj.Manual):
 
         except Exception as e:
             return f"Failed to block {table}: {e}"
+
+        return None
 
     def block_new_inserts(self) -> None:
         """Block new inserts into all registered analysis tables.

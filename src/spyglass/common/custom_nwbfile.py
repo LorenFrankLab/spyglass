@@ -1,8 +1,6 @@
-import sys
-
 import datajoint as dj
 
-from spyglass.common.common_nwbfile import Nwbfile
+from spyglass.common.common_nwbfile import Nwbfile  # noqa F401
 from spyglass.utils.dj_mixin import SpyglassAnalysis
 
 db_prefix = dj.config.get("custom", {}).get("database.prefix")

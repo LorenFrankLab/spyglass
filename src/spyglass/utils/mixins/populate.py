@@ -105,7 +105,7 @@ class PopulateMixin(BaseMixin):
                         "Upstream tables changed during non-transaction "
                         + "populate. Please try again."
                     )
-                return
+                return None
 
         # If parallel in both make and populate, use non-daemon processes
         # package the call list

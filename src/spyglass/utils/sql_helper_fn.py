@@ -45,7 +45,7 @@ class SQLDumpHelper:
         return export_dir
 
     @cached_property
-    def _logger(cls):
+    def _logger(self):
         """Lazy load logger."""
         from spyglass.utils import logger
 

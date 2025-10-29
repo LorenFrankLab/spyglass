@@ -1,6 +1,5 @@
 """Mixin to add cautious delete functionality to DataJoint tables."""
 
-import logging
 from functools import cached_property
 from os import environ as os_environ
 from time import time
@@ -240,6 +239,8 @@ class CautiousDeleteMixin(BaseMixin):
             external[ext_type].delete(
                 delete_external_files=True, display_progress=False
             )
+
+        return None
 
     def delete(self, *args, **kwargs):
         """Alias for cautious_delete, overwrites datajoint.table.Table.delete"""

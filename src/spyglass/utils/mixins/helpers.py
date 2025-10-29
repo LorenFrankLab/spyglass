@@ -1,10 +1,8 @@
 """Helper methods for DataJoint tables, inherited as SpyglassHelpers."""
 
-import logging
 import os
 import sys
 from contextlib import nullcontext
-from functools import cached_property
 from typing import Union
 
 import datajoint as dj
@@ -189,6 +187,7 @@ class HelperMixin(BaseMixin):
         if dry_run:
             return orphans
         orphans.super_delete(warn=False, **kwargs)
+        return None
 
     # ------------------------------ Check locks ------------------------------
 

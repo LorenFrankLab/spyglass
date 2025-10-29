@@ -5,10 +5,8 @@
 3. Cleanup and Orphan Detection - AnalysisRegistry functionality
 """
 
-import os
 import random
 from pathlib import Path
-from unittest.mock import Mock, patch
 
 import datajoint as dj
 import numpy as np
@@ -36,7 +34,7 @@ def custom_analysis_tables(custom_config, dj_conn, common_nwbfile):
     schema = dj.schema(f"{prefix}_nwbfile")
 
     # Make Nwbfile available in the schema context for foreign key resolution
-    Nwbfile = common_nwbfile.Nwbfile
+    Nwbfile = common_nwbfile.Nwbfile  # noqa F401
     _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
 
     @schema
@@ -134,7 +132,7 @@ class TestTableDeclaration:
                     """This definition is managed by SpyglassAnalysis"""
                 )
 
-            new_table = AnalysisNwbfile()
+            _ = AnalysisNwbfile()
 
     def test_wrong_prefix_rejected(self, dj_conn):
         """Test that schema with wrong prefix is rejected."""
@@ -150,7 +148,7 @@ class TestTableDeclaration:
                     """This definition is managed by SpyglassAnalysis"""
                 )
 
-            new_table = AnalysisNwbfile()
+            _ = AnalysisNwbfile()
 
 
 # ========================= 2. FILE OPERATIONS TESTS =========================
@@ -209,6 +207,7 @@ class TestFileOperations:
         """Test adding DataFrame to analysis file using add_nwb_object."""
         # Create file
         analysis_file_name = custom_analysis_table.create(mini_copy_name)
+        analysis_dict = dict(analysis_file_name=analysis_file_name)
 
         try:
             # Create test DataFrame
@@ -228,21 +227,13 @@ class TestFileOperations:
             custom_analysis_table.add(mini_copy_name, analysis_file_name)
 
             # Verify entry exists
-            entry = custom_analysis_table & {
-                "analysis_file_name": analysis_file_name
-            }
+            entry = custom_analysis_table & analysis_dict
             assert len(entry) == 1
 
         finally:
             # Cleanup
             if teardown:
-                try:
-                    (
-                        custom_analysis_table
-                        & {"analysis_file_name": analysis_file_name}
-                    ).delete_quick()
-                except Exception:
-                    pass
+                (custom_analysis_table & analysis_dict).delete_quick()
                 file_path = custom_analysis_table.get_abs_path(
                     analysis_file_name
                 )
@@ -254,6 +245,7 @@ class TestFileOperations:
     ):
         """Test adding numpy array to analysis file."""
         analysis_file_name = custom_analysis_table.create(mini_copy_name)
+        analysis_dict = dict(analysis_file_name=analysis_file_name)
 
         try:
             # Create test array
@@ -271,13 +263,7 @@ class TestFileOperations:
 
         finally:
             if teardown:
-                try:
-                    (
-                        custom_analysis_table
-                        & {"analysis_file_name": analysis_file_name}
-                    ).delete_quick()
-                except Exception:
-                    pass
+                (custom_analysis_table & analysis_dict).delete_quick()
                 file_path = custom_analysis_table.get_abs_path(
                     analysis_file_name
                 )
@@ -382,13 +368,8 @@ class TestCleanupAndRegistry:
         """Test that AnalysisRegistry tracks all analysis tables."""
         registered_tables = analysis_registry.fetch("full_table_name")
 
-        # Should include both master and custom tables
         custom_name = custom_analysis_table.full_table_name
-        master_name = master_analysis_table.full_table_name
-
-        assert custom_name in registered_tables
-        # Master table may or may not be in registry depending on implementation
-        # assert master_name in registered_tables
+        assert custom_name in registered_tables, "Custom table not in registry"
 
     def test_orphan_detection_across_tables(
         self,
@@ -567,7 +548,8 @@ class TestIntegration:
         """
         from spyglass.utils.dj_mixin import SpyglassAnalysis
 
-        Nwbfile = common.common_nwbfile.Nwbfile  # For fk resolution
+        # For foreign key resolution
+        Nwbfile = common.common_nwbfile.Nwbfile  # noqa F401
 
         # Create two different custom schemas
         schema1 = dj.schema(f"{custom_config}_nwbfile")

@@ -24,7 +24,7 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
 
     try:
         schema = dj.schema(f"{prefix}_nwbfile")
-        Nwbfile = common.common_nwbfile.Nwbfile
+        Nwbfile = common.common_nwbfile.Nwbfile  # noqa F401
 
         @schema
         class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
@@ -55,17 +55,12 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
         yield table, downstream, analysis_file_name
 
         if teardown:
-            try:
-                (
-                    table & {"analysis_file_name": analysis_file_name}
-                ).delete_quick()
-                from pathlib import Path
+            (table & {"analysis_file_name": analysis_file_name}).delete_quick()
+            from pathlib import Path
 
-                file_path = Path(table.get_abs_path(analysis_file_name))
-                if file_path.exists():
-                    file_path.unlink()
-            except Exception:
-                pass
+            file_path = Path(table.get_abs_path(analysis_file_name))
+            if file_path.exists():
+                file_path.unlink()
     finally:
         if original_prefix:
             dj.config["custom"]["database.prefix"] = original_prefix

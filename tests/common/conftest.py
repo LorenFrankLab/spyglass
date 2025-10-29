@@ -273,13 +273,14 @@ def custom_analysis_table(custom_config, dj_conn, common_nwbfile):
     This fixture dynamically creates a table following the factory pattern.
     """
     import datajoint as dj
+
     from spyglass.utils.dj_mixin import SpyglassAnalysis
 
     prefix = custom_config
     schema = dj.schema(f"{prefix}_nwbfile")
 
     # Make Nwbfile available in the schema context for foreign key resolution
-    Nwbfile = common_nwbfile.Nwbfile
+    Nwbfile = common_nwbfile.Nwbfile  # noqa F401
     _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
 
     @schema
