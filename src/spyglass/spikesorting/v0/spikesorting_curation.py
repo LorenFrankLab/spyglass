@@ -270,7 +270,7 @@ class Curation(SpyglassMixin, dj.Manual):
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
         if (
-            not sort_interval_valid_times
+            sort_interval_valid_times is None
             and sort_interval_list_name is not None
         ):
             sort_interval_valid_times = (
