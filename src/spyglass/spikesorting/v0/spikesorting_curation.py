@@ -232,8 +232,9 @@ class Curation(SpyglassMixin, dj.Manual):
         key,
         sorting,
         timestamps,
-        sort_interval_list_name,
         sort_interval,
+        sort_interval_list_name: str = None,
+        sort_interval_valid_times: np.ndarray = None,
         labels=None,
         metrics=None,
         unit_ids=None,
@@ -268,9 +269,19 @@ class Curation(SpyglassMixin, dj.Manual):
         """
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 
-        sort_interval_valid_times = (
-            IntervalList & {"interval_list_name": sort_interval_list_name}
-        ).fetch1("valid_times")
+        if (
+            not sort_interval_valid_times
+            and sort_interval_list_name is not None
+        ):
+            sort_interval_valid_times = (
+                IntervalList & {"interval_list_name": sort_interval_list_name}
+            ).fetch1("valid_times")
+
+        if sort_interval_valid_times is None:
+            raise ValueError(
+                "Either sort_interval_valid_times or "
+                "sort_interval_list_name must be provided."
+            )
 
         units = dict()
         units_valid_times = dict()
@@ -634,16 +645,12 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             - Waveform extractor from Waveforms table
             - Parameters from MetricParameters table
         """
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         wf_path = Waveforms()._get_waveform_path(key)
-        # add to key to prevent fetch errors, does not persist into next make
-        key["analysis_file_name"] = analysis_file_name
         params = (MetricParameters & key).fetch1("metric_params")
         qm_name = self._get_quality_metrics_name(key)
         quality_metrics_path = Path(waveforms_dir) / Path(qm_name + ".json")
 
         return [
-            analysis_file_name,
             wf_path,
             params,
             qm_name,
@@ -653,7 +660,6 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
     def make_compute(
         self,
         key,
-        analysis_file_name,
         wf_path,
         params,
         qm_name,
@@ -665,6 +671,8 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             NN noise overlap, peak offset, peak channel, and number of spikes.
         3. Generates an analysis NWB file with the metrics.
         """
+        # File name involves random string. Can's pass it through make_fetch.
+        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         waveform_extractor = si.WaveformExtractor.load_from_folder(wf_path)
 
         qm = {}
@@ -959,7 +967,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         parent_merge_groups = parent_curation["merge_groups"]
         parent_labels = parent_curation["curation_labels"]
         parent_curation_id = parent_curation["curation_id"]
-        parent_sorting = Curation.get_curated_sorting(key)
+        parent_sorting = Curation().get_curated_sorting(key)
 
         merge_params = (AutomaticCurationParameters & key).fetch1(
             "merge_params"
@@ -1105,7 +1113,6 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     units_object_id: varchar(40)
     """
-    _use_transaction, _allow_insert = False, True
 
     class Unit(SpyglassMixin, dj.Part):
         definition = """
@@ -1123,28 +1130,65 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         peak_channel=null: int # channel of maximum amplitude for each unit
         """
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate CuratedSpikeSorting table with curated sorting results.
 
         1. Fetches metrics and sorting from the Curation table
-        2. Saves the sorting in an analysis NWB file
-        3. Inserts key into CuratedSpikeSorting table and units into part table.
         """
-        unit_labels_to_remove = ["reject"]
         # check that the Curation has metrics
-        metrics = (Curation & key).fetch1("quality_metrics")
+        metrics, unit_labels = (Curation & key).fetch1(
+            "quality_metrics", "curation_labels"
+        )
         if metrics == {}:
             logger.warning(
                 f"Metrics for Curation {key} should normally be calculated "
                 + "before insertion here"
             )
 
-        sorting = Curation.get_curated_sorting(key)
+        sorting_path, merge_groups = Curation()._load_sorting_info(key)
+        recording_path = SpikeSortingRecording()._fetch_recording_path(key)
+
+        # get the sort_interval and sorting interval list
+        sort_interval = (SortInterval & key).fetch1("sort_interval")
+        sort_interval_list_name = (SpikeSorting & key).fetch1(
+            "artifact_removed_interval_list_name"
+        )
+        sort_interval_valid_times = (
+            IntervalList & {"interval_list_name": sort_interval_list_name}
+        ).fetch1("valid_times")
+
+        return [
+            metrics,
+            unit_labels,
+            sorting_path,
+            merge_groups,
+            recording_path,
+            sort_interval,
+            sort_interval_valid_times,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        metrics,
+        unit_labels,
+        sorting_path,
+        merge_groups,
+        recording_path,
+        sort_interval,
+        sort_interval_valid_times,
+    ):
+        """Computes curated sorting and returns information for insertion
+
+        2. Saves the sorting in an analysis NWB file
+        3. Inserts key into CuratedSpikeSorting table and units into part table.
+        """
+        sorting = Curation()._load_sorting(sorting_path, merge_groups)
         unit_ids = sorting.get_unit_ids()
 
         # Get the labels for the units, add only those units that do not have
         # 'reject' or 'noise' labels
-        unit_labels = (Curation & key).fetch1("curation_labels")
+        unit_labels_to_remove = ["reject"]
         accepted_units = []
         for unit_id in unit_ids:
             if unit_id in unit_labels:
@@ -1174,53 +1218,57 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
 
         logger.info(f"Found {len(accepted_units)} accepted units")
 
-        # get the sorting and save it in the NWB file
-        sorting = Curation.get_curated_sorting(key)
-        recording = Curation.get_recording(key)
-
-        # get the sort_interval and sorting interval list
-        sort_interval = (SortInterval & key).fetch1("sort_interval")
-        sort_interval_list_name = (SpikeSorting & key).fetch1(
-            "artifact_removed_interval_list_name"
-        )
-
+        recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        (
-            key["analysis_file_name"],
-            key["units_object_id"],
-        ) = Curation().save_sorting_nwb(
-            key,
-            sorting,
-            timestamps,
-            sort_interval_list_name,
-            sort_interval,
+        (analysis_file_name, units_object_id) = Curation().save_sorting_nwb(
+            key=key,
+            sorting=sorting,
+            timestamps=timestamps,
+            sort_interval=sort_interval,
+            sort_interval_valid_times=sort_interval_valid_times,
             metrics=final_metrics,
             unit_ids=accepted_units,
             labels=labels,
         )
 
-        self.insert1(key)
-
-        # now add the units
-        # Remove the non primary key entries.
-        del key["units_object_id"]
-        del key["analysis_file_name"]
-
+        unit_inserts = []
         metric_fields = self.metrics_fields()
         for unit_id in accepted_units:
-            key["unit_id"] = unit_id
+            this_key = dict(key, unit_id=unit_id)
             if unit_id in labels:
-                key["label"] = labels[unit_id]
+                this_key["label"] = labels[unit_id]
             for field in metric_fields:
                 if field in final_metrics:
-                    key[field] = final_metrics[field][unit_id]
+                    this_key[field] = final_metrics[field][unit_id]
                 else:
                     Warning(
                         f"No metric named {field} in computed unit quality "
                         + "metrics; skipping"
                     )
-            CuratedSpikeSorting.Unit.insert1(key)
+            unit_inserts.append(this_key)
+
+        return [
+            analysis_file_name,
+            units_object_id,
+            unit_inserts,
+        ]
+
+    def make_insert(
+        self, key, analysis_file_name, units_object_id, unit_inserts
+    ):
+        """Inserts the computed curated sorting into CuratedSpikeSorting
+
+        4. Inserts the key into CuratedSpikeSorting table
+        """
+        self.insert1(
+            dict(
+                key,
+                analysis_file_name=analysis_file_name,
+                units_object_id=units_object_id,
+            )
+        )
+        CuratedSpikeSorting.Unit.insert(unit_inserts)
 
     def metrics_fields(self):
         """Returns a list of the metrics that are currently in the Units table."""
@@ -1241,7 +1289,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """Returns the sorting related to this curation. Useful for operations downstream of merge table"""
         # expand the key
         sorting_key = (cls & key).fetch1("KEY")
-        return Curation.get_curated_sorting(sorting_key)
+        return Curation().get_curated_sorting(sorting_key)
 
     @classmethod
     def get_sort_group_info(cls, key):
