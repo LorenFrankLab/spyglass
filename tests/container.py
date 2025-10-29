@@ -71,6 +71,10 @@ class DockerMySQLManager:
 
     def _container_name_from_branch(self) -> tuple:
         """Generate container name from current git branch."""
+        defaults = "spyglass-pytest", 3306
+        if self.client is None:
+            return defaults
+
         try:
             branch_name = (
                 subprocess.check_output(["git", "branch", "--show-current"])
@@ -79,7 +83,7 @@ class DockerMySQLManager:
             )
         except Exception as e:
             logger.error(f"Failed to get git branch name: {e}")
-            branch_name = ""
+            return defaults
 
         container_name = f"spyglass-pytest-{branch_name}"
         port = self.string_to_port(container_name)
