@@ -25,10 +25,13 @@ import all foreign key references.
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
+- Fix typo in VideoFile.make #1427
+- Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables from NWB #1433
 
 ### Infrastructure
 
 - Auto-load within-Spyglass tables for graph operations #1368
+- Allow rechecking of recomputes #1380, #1413
 - Remove `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
