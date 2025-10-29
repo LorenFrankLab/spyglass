@@ -71,8 +71,10 @@ class DockerMySQLManager:
 
     def _container_name_from_branch(self) -> tuple:
         """Generate container name from current git branch."""
-        defaults = "spyglass-pytest", 3308 + int(self.mysql_version[0])
-        if self.client is None:
+        # default is 3308, as a holdover from mysql version testing
+        defaults = "spyglass-pytest", 3300 + int(self.mysql_version[0])
+
+        if self.null_server:
             return defaults
 
         try:
