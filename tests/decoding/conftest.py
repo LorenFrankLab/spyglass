@@ -710,8 +710,12 @@ def mock_save_decoder_results_globally(mock_results_storage):
 
     # Patch both tables' _save_decoder_results methods globally
     with (
-        patch.object(ClusterlessDecodingV1, "_save_decoder_results", _mock_save_results),
-        patch.object(SortedSpikesDecodingV1, "_save_decoder_results", _mock_save_results),
+        patch.object(
+            ClusterlessDecodingV1, "_save_decoder_results", _mock_save_results
+        ),
+        patch.object(
+            SortedSpikesDecodingV1, "_save_decoder_results", _mock_save_results
+        ),
     ):
         yield
 
