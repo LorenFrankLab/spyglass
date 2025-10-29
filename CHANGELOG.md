@@ -16,6 +16,7 @@ import all foreign key references.
 - Delete extra pyscripts that were renamed # 1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
+- Add pages for custom analysis tables and class inheritance structure #1435
 
 ### Infrastructure
 
@@ -26,7 +27,9 @@ import all foreign key references.
 - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
-- Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables from NWB #1433
+- Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+  from NWB #1433
+- Split `SpyglassMixin` into task-specific mixins #1435
 
 ### Infrastructure
 
@@ -40,6 +43,7 @@ import all foreign key references.
 - Common
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
