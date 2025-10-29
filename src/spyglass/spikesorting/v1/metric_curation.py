@@ -8,7 +8,6 @@ import pynwb
 import spikeinterface as si
 import spikeinterface.preprocessing as sp
 import spikeinterface.qualitymetrics as sq
-from spikeinterface.extractors import NwbRecordingExtractor
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
