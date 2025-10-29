@@ -166,7 +166,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
                 "curation_id",
             ]
         }
-        waves = Waveforms().load_waveforms(Waveforms, sg_key)
+        waves = Waveforms().load_waveforms(sg_key)
         self._waves_cache[key_hash] = waves
         return waves
 
