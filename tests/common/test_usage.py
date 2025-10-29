@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 
@@ -55,8 +57,9 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
         yield table, downstream, analysis_file_name
 
         if teardown:
-            (table & {"analysis_file_name": analysis_file_name}).delete_quick()
-            from pathlib import Path
+            (table & {"analysis_file_name": analysis_file_name}).delete(
+                safemode=False
+            )
 
             file_path = Path(table.get_abs_path(analysis_file_name))
             if file_path.exists():
