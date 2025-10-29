@@ -10,6 +10,7 @@ def mock_netcdf_saves():
     This prevents RuntimeError: NetCDF: HDF error during parallel test execution
     by intercepting xarray.Dataset.to_netcdf() calls and making them no-ops.
     """
+
     def mock_to_netcdf(self, *args, **kwargs):
         """Mock to_netcdf that does nothing (no file I/O)."""
         return None
@@ -358,8 +359,13 @@ def clusterless_pop(
     group_unitwave,
     teardown,
     decode_merge,
+    mock_netcdf_saves,
 ):
-    _ = pop_pos_group, group_unitwave  # ensure populated
+    _ = (
+        pop_pos_group,
+        group_unitwave,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
 
     selection_key = {
         **decode_sel_key,
@@ -395,8 +401,13 @@ def clusterless_pop_estimated(
     group_name,
     teardown,
     decode_merge,
+    mock_netcdf_saves,
 ):
-    _ = pop_pos_group, group_unitwave
+    _ = (
+        pop_pos_group,
+        group_unitwave,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
@@ -440,8 +451,13 @@ def spikes_decoding(
     group_name,
     pop_spikes_group,
     pop_pos_group,
+    mock_netcdf_saves,
 ):
-    _ = pop_spikes_group, pop_pos_group  # ensure populated
+    _ = (
+        pop_spikes_group,
+        pop_pos_group,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
@@ -472,8 +488,13 @@ def spikes_decoding_estimated(
     group_name,
     pop_spikes_group,
     pop_pos_group,
+    mock_netcdf_saves,
 ):
-    _ = pop_spikes_group, pop_pos_group  # ensure populated
+    _ = (
+        pop_spikes_group,
+        pop_pos_group,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
