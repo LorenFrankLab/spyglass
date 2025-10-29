@@ -234,7 +234,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     - Idempotent: calling it multiple times has the same effect as calling it
       once.
 3. `make_compute` runs time-consuming computations.
-4. `make_compute` must should not modify the key or the database.
+4. `make_compute` should not modify the key or the database.
 5. `make_insert` modifies the database.
 
 ### Time Intervals
