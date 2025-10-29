@@ -29,6 +29,7 @@ import all foreign key references.
 ### Infrastructure
 
 - Auto-load within-Spyglass tables for graph operations #1368
+- Remove `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
 
