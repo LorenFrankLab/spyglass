@@ -659,6 +659,63 @@ def mock_detector_io_globally(mock_results_storage):
         yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def mock_save_decoder_results_globally(mock_results_storage):
+    """Globally mock _save_decoder_results to use pickle files and in-memory storage.
+
+    This prevents NetCDF4/HDF5 writes that cause errors in CI. Instead, it:
+    1. Writes minimal pickle files to satisfy DataJoint validation
+    2. Stores actual data in memory for loading via mock_detector_io_globally
+    """
+    from unittest.mock import patch
+    from pathlib import Path
+    import uuid
+    import pickle
+    import os
+
+    def _mock_save_results(self, classifier, results, key):
+        """Mocked version that creates minimal files and stores in memory."""
+        # Generate unique identifier for this result set
+        unique_id = str(uuid.uuid4())[:8]
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
+
+        # Use absolute path to match environment expectations
+        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
+        analysis_dir = Path(base_dir) / "analysis"
+        subdir = analysis_dir / nwb_file_name
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create file paths
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
+
+        # Write minimal pickle files (for DataJoint validation)
+        # DataJoint just needs files to exist for upload_filepath check
+        with open(results_path, "wb") as f:
+            pickle.dump({"mock": "results"}, f)
+        with open(classifier_path, "wb") as f:
+            pickle.dump({"mock": "classifier"}, f)
+
+        # Store actual data in memory for loading
+        results_path_str = str(results_path)
+        classifier_path_str = str(classifier_path)
+        mock_results_storage["results"][results_path_str] = results
+        mock_results_storage["classifiers"][classifier_path_str] = classifier
+
+        return results_path_str, classifier_path_str
+
+    # Import the decoding table classes
+    from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
+    from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingV1
+
+    # Patch both tables' _save_decoder_results methods globally
+    with (
+        patch.object(ClusterlessDecodingV1, "_save_decoder_results", _mock_save_results),
+        patch.object(SortedSpikesDecodingV1, "_save_decoder_results", _mock_save_results),
+    ):
+        yield
+
+
 # ============================================================================
 # Mock Fixtures for ClusterlessDecodingV1
 # ============================================================================
