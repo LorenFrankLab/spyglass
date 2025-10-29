@@ -175,7 +175,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         dlc_config = read_config(config_path)
         project_path = dlc_config["project_path"]
-        key["project_path"] = project_path  #
+        key["project_path"] = project_path
 
         # ---- Build and save DLC configuration (yaml) file ----
         dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(

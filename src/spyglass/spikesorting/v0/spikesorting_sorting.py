@@ -301,10 +301,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         sorting_path = str(sorting_folder / Path(sorting_name))
         if os.path.exists(sorting_path):
             shutil.rmtree(sorting_path)
-        sorting = sorting.save(folder=sorting_path)
+        _ = sorting.save(folder=sorting_path)
         return [sorting_path, time_of_sort]
 
-    def make_insert(key, sorting_path, time_of_sort):
+    def make_insert(self, key, sorting_path, time_of_sort):
         """Insert the sorting result into the SpikeSorting table."""
         self.insert1(
             dict(key, sorting_path=sorting_path, time_of_sort=time_of_sort)
