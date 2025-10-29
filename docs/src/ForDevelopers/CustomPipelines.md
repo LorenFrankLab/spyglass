@@ -229,9 +229,9 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
 ```
 
 1. `make_fetch` may not modify the key or the database, and only fetches data.
-2. `make_fetch` must be deterministic and indemponent.
+2. `make_fetch` must be deterministic and idempotent.
     - Deterministic: given the same key, it always returns the same data.
-    - Indemponent: calling it multiple times has the same effect as calling it
+    - Idempotent: calling it multiple times has the same effect as calling it
       once.
 3. `make_compute` runs time-consuming computations.
 4. `make_compute` must should not modify the key or the database.

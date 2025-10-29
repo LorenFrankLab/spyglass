@@ -536,7 +536,7 @@ class LFP(SpyglassMixin, dj.Imported):
                 "Error in LFP: no filter found with data sampling rate of "
                 + f"{sampling_rate}"
             )
-            return [None] * 2
+            return [None] * 2  # Number reflects expected values for make_insert
 
         # keep only the intervals > 1 second long
         orig_len = len(valid_times)
@@ -584,11 +584,12 @@ class LFP(SpyglassMixin, dj.Imported):
         return [lfp_valid_times, added_key]
 
     def make_insert(self, key, lfp_valid_times, added_key):
+        if lfp_valid_times is None and added_key is None:
+            return
+
         # add an interval list for the LFP valid times, skipping duplicates
-        key.update(added_key)
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
-        self.insert1(key)
+        self.insert1(dict(key, **added_key))
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
