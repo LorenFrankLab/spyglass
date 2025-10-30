@@ -358,6 +358,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     query_table = query_expression.join(
         tbl.proj(nwb2load_filepath=attr_name), **arg
     )
+
+    # Fix for custom analysis tables #1435
+    if attrs and "nwb2load_filepath" not in attrs:
+        attrs = list(attrs) + ["nwb2load_filepath"]
+
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
@@ -545,20 +550,46 @@ def _resolve_external_table(
         ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
+    from spyglass.common.common_nwbfile import AnalysisRegistry
     from spyglass.common.common_nwbfile import schema as common_schema
 
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
-    external_table = common_schema.external[location]
-    external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
-    external_key.update(
-        {
-            "size": Path(filepath).stat().st_size,
-            "contents_hash": dj.hash.uuid_from_file(filepath),
-        }
+
+    file_restr = f"filepath LIKE '%{file_name}'"
+
+    to_updates = []
+    if location == "analysis":  # Update for each custom Analysis external
+        for external in AnalysisRegistry().get_externals():
+            restr_external = external & file_restr
+            if not bool(restr_external):
+                continue
+            if len(restr_external) > 1:
+                raise ValueError(
+                    "Multiple entries found in external table for file: "
+                    + f"{file_name}, cannot resolve."
+                )
+            to_updates.append(restr_external)
+
+    elif location == "raw":
+        restr_external = common_schema.external["raw"] & file_restr
+        to_updates.append(restr_external)
+
+    if not to_updates:
+        logger.warning(
+            f"No entries found in external tables for file: {file_name}"
+        )
+        return
+
+    update_vals = dict(
+        size=Path(filepath).stat().st_size,
+        contents_hash=dj.hash.uuid_from_file(filepath),
     )
-    external_table.update1(external_key)
+    for to_update in to_updates:
+        key = to_update.fetch1()
+        key.update(update_vals)
+        to_update.update1(key)
 
 
 def make_file_obj_id_unique(nwb_path: str):

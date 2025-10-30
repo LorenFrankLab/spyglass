@@ -75,6 +75,7 @@ nav:
     - Overview: Features/index.md
     - FigURL: Features/FigURL.md
     - Merge Tables: Features/Merge.md
+    - Analysis Tables: Features/AnalysisTables.md
     - Export: Features/Export.md
     - Centralized Code: Features/Mixin.md
     - Recompute: Features/Recompute.md
@@ -84,6 +85,7 @@ nav:
     - Database Management: ForDevelopers/Management.md
     - Code Reuse: ForDevelopers/Reuse.md
     - Table Types: ForDevelopers/TableTypes.md
+    - Classes: ForDevelopers/Classes.md
     - Understanding a Schema: ForDevelopers/Schema.md
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md

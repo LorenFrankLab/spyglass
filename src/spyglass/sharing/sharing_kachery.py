@@ -242,10 +242,17 @@ def share_data_to_kachery(
         raise ValueError("Must provide a restriction to the table")
     selection_inserts = []
     for table in table_list:
+
+        # ----------- Copy to master if has AnalysisNwbfile parent -----------
+        if custom_analysis := getattr(table, "_custom_analysis_parent", None):
+            (table & restriction)._parent_copy_to_common()
+        # ----------------------------------------------------------------------
+
         analysis_file_list = (table & restriction).fetch("analysis_file_name")
         for file in analysis_file_list:  # Add all analysis to shared list
             kachery_selection_key["analysis_file_name"] = file
-            selection_inserts.append(kachery_selection_key)
+            selection_inserts.append(kachery_selection_key.copy())
+
     AnalysisNwbfileKacherySelection.insert(
         selection_inserts, skip_duplicates=True
     )
