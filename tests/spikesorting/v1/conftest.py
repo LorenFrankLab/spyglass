@@ -2,8 +2,9 @@ import pytest
 
 
 @pytest.fixture(scope="session")
-def burst_params_key(spike_v1):
-    yield dict(burst_params_name="default")
+def burst_params_key(burst_params_key_shared):
+    """V1 burst params key - uses shared fixture."""
+    yield burst_params_key_shared
 
 
 @pytest.fixture(scope="session")
