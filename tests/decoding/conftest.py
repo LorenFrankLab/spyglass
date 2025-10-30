@@ -8,11 +8,24 @@ def mock_netcdf_saves():
     """Globally mock netCDF file writes to avoid HDF5 I/O conflicts in CI.
 
     This prevents RuntimeError: NetCDF: HDF error during parallel test execution
-    by intercepting xarray.Dataset.to_netcdf() calls and making them no-ops.
+    by intercepting xarray.Dataset.to_netcdf() calls and using pickle instead.
     """
+    import pickle
+    from pathlib import Path
 
-    def mock_to_netcdf(self, *args, **kwargs):
-        """Mock to_netcdf that does nothing (no file I/O)."""
+    def mock_to_netcdf(self, path=None, mode='w', format=None, group=None,
+                       engine=None, encoding=None, unlimited_dims=None,
+                       compute=True, invalid_netcdf=False):
+        """Mock to_netcdf that writes pickle instead of netCDF."""
+        if path is None:
+            # Return bytes if no path given (original behavior for some use cases)
+            return None
+
+        # Keep the .nc extension to match expectations, but write pickle format
+        # This avoids netCDF4/HDF5 errors while maintaining file path compatibility
+        with open(path, 'wb') as f:
+            pickle.dump(self, f)
+
         return None
 
     with patch("xarray.Dataset.to_netcdf", mock_to_netcdf):
@@ -609,26 +622,41 @@ def mock_results_storage():
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_detector_io_globally(mock_results_storage):
-    """Globally mock detector load methods to avoid netCDF4/HDF5 file I/O.
+    """Globally mock detector load methods to use netcdf4 engine explicitly.
 
     This is an autouse fixture that automatically applies to all tests in the
-    decoding module, ensuring that all fetch_results() calls use in-memory
-    storage instead of reading from disk.
+    decoding module, ensuring that all fetch_results() calls use explicit
+    netcdf4 engine specification to avoid engine detection errors.
     """
     from unittest.mock import patch
-    from non_local_detector.models import (
-        ClusterlessDecoder,
-        SortedSpikesDecoder,
+    from non_local_detector.models.base import (
+        ClusterlessDetector,
+        SortedSpikesDetector,
     )
+    import xarray as xr
 
     def _mock_load_results(filename):
-        """Load results from in-memory storage."""
+        """Load results with explicit netcdf4 engine."""
         filename_str = str(filename)
+
+        # Try loading from memory first (for tests that use in-memory storage)
         if filename_str in mock_results_storage["results"]:
             return mock_results_storage["results"][filename_str]
-        raise FileNotFoundError(
-            f"Mock result not found in memory: {filename_str}"
-        )
+
+        # Load from disk with explicit engine
+        try:
+            return xr.open_dataset(filename_str, engine='netcdf4')
+        except (FileNotFoundError, OSError) as e:
+            # OSError with "Unknown file format" means old pickle file exists
+            # FileNotFoundError means file doesn't exist at all
+            if "Unknown file format" in str(e):
+                raise FileNotFoundError(
+                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
+                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                )
+            raise FileNotFoundError(
+                f"Mock result not found: {filename_str}"
+            )
 
     def _mock_load_model(filename):
         """Load classifier from in-memory storage."""
@@ -639,21 +667,21 @@ def mock_detector_io_globally(mock_results_storage):
             f"Mock classifier not found in memory: {filename_str}"
         )
 
-    # Patch the decoder classes' load methods globally
+    # Patch the detector base classes' load methods globally
     with (
         patch.object(
-            ClusterlessDecoder, "load_results", staticmethod(_mock_load_results)
+            ClusterlessDetector, "load_results", staticmethod(_mock_load_results)
         ),
         patch.object(
-            ClusterlessDecoder, "load_model", staticmethod(_mock_load_model)
+            ClusterlessDetector, "load_model", staticmethod(_mock_load_model)
         ),
         patch.object(
-            SortedSpikesDecoder,
+            SortedSpikesDetector,
             "load_results",
             staticmethod(_mock_load_results),
         ),
         patch.object(
-            SortedSpikesDecoder, "load_model", staticmethod(_mock_load_model)
+            SortedSpikesDetector, "load_model", staticmethod(_mock_load_model)
         ),
     ):
         yield
@@ -661,11 +689,11 @@ def mock_detector_io_globally(mock_results_storage):
 
 @pytest.fixture(scope="session", autouse=True)
 def mock_save_decoder_results_globally(mock_results_storage):
-    """Globally mock _save_decoder_results to use pickle files and in-memory storage.
+    """Globally mock _save_decoder_results to use netcdf4 engine explicitly.
 
-    This prevents NetCDF4/HDF5 writes that cause errors in CI. Instead, it:
-    1. Writes minimal pickle files to satisfy DataJoint validation
-    2. Stores actual data in memory for loading via mock_detector_io_globally
+    This prevents NetCDF4/HDF5 engine detection errors in CI by:
+    1. Writing netCDF files with explicit netcdf4 engine
+    2. Storing actual data in memory for loading via mock_detector_io_globally
     """
     from unittest.mock import patch
     from pathlib import Path
@@ -674,7 +702,7 @@ def mock_save_decoder_results_globally(mock_results_storage):
     import os
 
     def _mock_save_results(self, classifier, results, key):
-        """Mocked version that creates minimal files and stores in memory."""
+        """Mocked version that creates files with explicit netcdf4 engine."""
         # Generate unique identifier for this result set
         unique_id = str(uuid.uuid4())[:8]
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
@@ -689,12 +717,12 @@ def mock_save_decoder_results_globally(mock_results_storage):
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        # Write minimal pickle files (for DataJoint validation)
-        # DataJoint just needs files to exist for upload_filepath check
-        with open(results_path, "wb") as f:
-            pickle.dump({"mock": "results"}, f)
+        # Write netCDF file with explicit netcdf4 engine
+        results.to_netcdf(results_path, engine='netcdf4')
+
+        # Write classifier as pickle (non-xarray object)
         with open(classifier_path, "wb") as f:
-            pickle.dump({"mock": "classifier"}, f)
+            pickle.dump(classifier, f)
 
         # Store actual data in memory for loading
         results_path_str = str(results_path)
@@ -781,9 +809,8 @@ def mock_decoder_save(mock_results_storage):
     """Mock the _save_decoder_results helper for ClusterlessDecodingV1.
 
     Returns a function that can be used with monkeypatch to replace
-    the real _save_decoder_results method. Creates minimal pickle files
-    on disk to satisfy DataJoint's external storage, then stores data
-    in memory for actual loading.
+    the real _save_decoder_results method. Creates netCDF files using
+    the netcdf4 engine explicitly to avoid engine detection issues.
     """
     from pathlib import Path
     import uuid
@@ -791,7 +818,7 @@ def mock_decoder_save(mock_results_storage):
     import os
 
     def _mock_save_results(self, classifier, results, key):
-        """Mocked version that creates minimal files and stores in memory."""
+        """Mocked version that creates files with explicit netcdf4 engine."""
         # Generate unique identifier for this result set
         unique_id = str(uuid.uuid4())[:8]
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
@@ -806,12 +833,12 @@ def mock_decoder_save(mock_results_storage):
         results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
-        # Write minimal pickle files (for DataJoint validation)
-        # DataJoint just needs files to exist for upload_filepath check
-        with open(results_path, "wb") as f:
-            pickle.dump({"mock": "results"}, f)
+        # Write netCDF file with explicit netcdf4 engine
+        results.to_netcdf(results_path, engine='netcdf4')
+
+        # Write classifier as pickle (non-xarray object)
         with open(classifier_path, "wb") as f:
-            pickle.dump({"mock": "classifier"}, f)
+            pickle.dump(classifier, f)
 
         # Store actual data in memory for loading
         results_path_str = str(results_path)
@@ -826,28 +853,38 @@ def mock_decoder_save(mock_results_storage):
 
 @pytest.fixture
 def mock_detector_load_results(mock_results_storage):
-    """Mock the detector load_results methods to use in-memory storage.
+    """Mock the detector load_results methods to use netcdf4 engine.
 
     This mocks both ClusterlessDetector.load_results and
-    SortedSpikesDetector.load_results to retrieve from memory instead
-    of reading netCDF files from disk.
+    SortedSpikesDetector.load_results to read netCDF files with
+    explicit netcdf4 engine specification.
     """
+    import xarray as xr
 
     def _mock_load_results(filename):
-        """Load results from in-memory storage instead of disk."""
+        """Load results from disk with explicit netcdf4 engine."""
         # Convert Path to string if needed
         filename_str = str(filename)
 
-        # Retrieve from memory
+        # Try loading from memory first (for tests that use in-memory storage)
         if filename_str in mock_results_storage["results"]:
             return mock_results_storage["results"][filename_str]
 
-        # If not found, raise an error similar to xarray
-        raise FileNotFoundError(
-            f"Mock result not found in memory: {filename_str}. "
-            "This usually means the test setup didn't properly mock "
-            "the _save_decoder_results method."
-        )
+        # Load from disk with explicit engine
+        try:
+            return xr.open_dataset(filename_str, engine='netcdf4')
+        except (FileNotFoundError, OSError) as e:
+            # OSError with "Unknown file format" means old pickle file exists
+            if "Unknown file format" in str(e):
+                raise FileNotFoundError(
+                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
+                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                )
+            raise FileNotFoundError(
+                f"Mock result not found: {filename_str}. "
+                "This usually means the test setup didn't properly mock "
+                "the _save_decoder_results method."
+            )
 
     return _mock_load_results
 
