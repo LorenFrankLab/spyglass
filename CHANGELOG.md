@@ -29,7 +29,7 @@ import all foreign key references.
 - Fix typo in VideoFile.make #1427
 - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
   from NWB #1433
-- Split `SpyglassMixin` into task-specific mixins #1435
+- Split `SpyglassMixin` into task-specific mixins #1435 #1451
 
 ### Infrastructure
 
