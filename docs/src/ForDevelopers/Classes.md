@@ -122,6 +122,13 @@ These mixins form a dependency chain for NWB file fetching and export logging:
 - Handles copy-to-common for custom AnalysisNwbfile tables
 - See [Export Guide](../Features/Export.md)
 
+**IngestionMixin** (`mixins/ingestion.py`)
+
+- Defines a protocol for populating table entries from the raw nwb file
+- Provides `insert_from_nwbfile()` which identifies relevant objects within the
+  nwb file and creates table entries
+- See [Ingestion Guide](../Features/Ingestion.md)
+
 ---
 
 ## Core Composite Classes
