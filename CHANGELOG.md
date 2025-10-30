@@ -16,9 +16,20 @@ import all foreign key references.
 - Delete extra pyscripts that were renamed # 1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
+- Add pages for custom analysis tables and class inheritance structure #1435
 
 ### Infrastructure
 
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
+- Sort `UserEnvironment` dict objects by key for consistency #1380
+- Fix typo in VideoFile.make #1427
+- Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+  from NWB #1433
+- Split `SpyglassMixin` into task-specific mixins #1435
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
@@ -40,6 +51,7 @@ import all foreign key references.
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task
       tables from NWB #1433
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position

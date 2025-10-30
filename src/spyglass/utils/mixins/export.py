@@ -6,42 +6,29 @@ from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
 from re import match as re_match
+from typing import List
 
 from datajoint.condition import AndList, Top, make_condition
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
-from spyglass.utils.logging import logger
+from spyglass.utils.mixins.fetch import FetchMixin
 from spyglass.utils.sql_helper_fn import bash_escape_sql
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
-class ExportMixin:
+class ExportMixin(FetchMixin):
+    """Mixin for DataJoint tables to support export logging.
+
+    Uses FetchMixin._log_fetch to log fetch calls to an Export table.
+    """
 
     _export_cache = defaultdict(set)
 
     # ------------------------------ Version Info -----------------------------
-
-    @cached_property
-    def _spyglass_version(self):
-        """Get Spyglass version."""
-        from spyglass import __version__ as sg_version
-
-        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
-
-        if self._test_mode:
-            return ret[:16] if len(ret) > 16 else ret
-
-        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
-            raise ValueError(
-                f"Spyglass version issues. Expected #.#.#, Got {ret}."
-                + "Please try running `hatch build` from your spyglass dir."
-            )
-
-        return ret
 
     def compare_versions(
         self, version: str, other: str = None, msg: str = None
@@ -113,7 +100,9 @@ class ExportMixin:
     def _start_export(self, paper_id, analysis_id):
         """Start export process."""
         if self.export_id:
-            logger.info(f"Export {self.export_id} in progress. Starting new.")
+            self._logger.info(
+                f"Export {self.export_id} in progress. Starting new."
+            )
             self._stop_export(warn=False)
 
         self.export_id = self._export_table.insert1_return_pk(
@@ -127,7 +116,7 @@ class ExportMixin:
     def _stop_export(self, warn=True):
         """End export process."""
         if not self.export_id and warn:
-            logger.warning("Export not in progress.")
+            self._logger.warning("Export not in progress.")
         del self.export_id
 
     # ------------------------------- Log Fetch -------------------------------
@@ -175,6 +164,11 @@ class ExportMixin:
             or not FETCH_LOG_FLAG.get()
         ):
             return
+        elif isinstance(restriction, Top):
+            raise RuntimeError(
+                "Cannot log fetch with Top() restriction, as it is not "
+                "deterministic.\nUse a specific restriction, like a dict."
+            )
 
         banned = [
             "head",  # Prevents on Table().head() call
@@ -234,21 +228,111 @@ class ExportMixin:
         restr_logline = restr_str.replace("AND", "\n\tAND").replace(
             "OR", "\n\tOR"
         )
-        logger.debug(f"\nTable: {self.full_table_name}\nRestr: {restr_logline}")
+        self._logger.debug(
+            f"\nTable: {self.full_table_name}\nRestr: {restr_logline}"
+        )
+
+    @property
+    def _custom_analysis_parent(self):
+        """Check for custom AnalysisNwbfile parent table.
+
+        Returns
+        -------
+        custom_analysis_parent : str or None
+            Custom AnalysisNwbfile parent table if exists, else None.
+        """
+        this_name = self.full_table_name
+
+        custom_parent = [
+            p
+            for p in self.parents()
+            if p.endswith("nwbfile`.`analysis_nwbfile`")
+            and not p.startswith("`common_")
+        ]
+        if not custom_parent:
+            return None
+
+        if len(custom_parent) > 1:
+            raise RuntimeError(
+                f"Multiple AnalysisNwbfile parents found for "
+                f"{this_name}: {custom_parent}"
+            )
+
+        from spyglass.common.common_nwbfile import AnalysisRegistry
+
+        return AnalysisRegistry().get_class(custom_parent[0])()
+
+    def _parent_copy_to_common(self, fnames: List[str] = None):
+        """Copy parent custom AnalysisNwbfile entries to common.
+
+        Also used by `sharing_kachery.py` to ensure common table integrity.
+
+        Parameters
+        ----------
+        fnames : List[str], optional
+            List of analysis_file_name to copy, by default None (fetches all
+            from self, likely restricted).
+        """
+        custom_parent = self._custom_analysis_parent
+        if not custom_parent:
+            return
+
+        if not fnames:
+            fnames = self.fetch("analysis_file_name", log_export=False)
+        f_dict = [{"analysis_file_name": fname} for fname in fnames]
+
+        parent_name = custom_parent.full_table_name
+        self._logger.debug(f"Copying parent {parent_name} entries to common")
+
+        (custom_parent & f_dict)._copy_to_common()
 
     def _log_fetch_nwb(self, table, table_attr):
-        """Log fetch_nwb for export table."""
+        """Log fetch_nwb for export table.
+
+        For custom AnalysisNwbfile tables, copy entries to common table
+        to maintain referential integrity in ExportSelection.File.
+        """
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+        this_name = self.full_table_name
         tbl_pk = "analysis_file_name"
         fnames = self.fetch(tbl_pk, log_export=True)
-        logger.debug(
-            f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
+        self._logger.debug(
+            f"Export: fetch_nwb\nTable:{this_name},\nFiles: {fnames}"
+        )
+
+        # Check if this table is itself a custom AnalysisNwbfile table
+        is_custom_analysis = (
+            this_name.endswith("_nwbfile`.`analysis_nwbfile`")
+            and this_name != AnalysisNwbfile().full_table_name
+        )
+
+        if is_custom_analysis:
+            # Self is custom AnalysisNwbfile, copy to common
+            self._logger.debug(
+                f"Export: detected custom AnalysisNwbfile table {this_name}"
+            )
+            self._copy_to_common()
+        elif custom_parent := self._custom_analysis_parent:
+            self._parent_copy_to_common(fnames=fnames)
+
+        # Insert into ExportSelection.File (FK now guaranteed valid)
+        self._logger.debug(
+            f"Export: inserting {len(fnames)} files from {this_name}"
         )
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
-        table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
+
+        # Log fetch on common AnalysisNwbfile (entries were copied there)
+        this_restr = None
+        if len(fnames) == 1:
+            this_restr = f"{tbl_pk} = '{fnames[0]}'"
+        elif len(fnames) > 1:
+            this_restr = f"{tbl_pk} IN {tuple(fnames)}"
+        if this_restr:
+            AnalysisNwbfile()._log_fetch(restriction=this_restr)
 
     def _run_join(self, **kwargs):
         """Log join for export.
@@ -262,11 +346,12 @@ class ExportMixin:
         if hasattr(other, "_log_fetch"):  # Check if other has mixin
             table_list.append(other)  # can other._log_fetch
         else:
-            logger.warning(f"Cannot export log join for\n{other}")
+            self._logger.warning(f"Cannot export log join for\n{other}")
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
             if isinstance(table, type) and issubclass(table, Table):
+                # instancing table if class
                 table = table()  # adapted from dj.declare.compile_foreign_key
             for r in joined.fetch(*table.primary_key, as_dict=True):
                 table._log_fetch(restriction=r)
@@ -297,7 +382,7 @@ class ExportMixin:
                 ):
                     restr = restr.restriction
                 self._log_fetch(restriction=restr)
-            logger.debug(f"Export: {self._called_funcs()}")
+            self._logger.debug(f"Export: {self._called_funcs()}")
 
         return ret
 
@@ -323,9 +408,9 @@ class ExportMixin:
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, log_export=True):  # NOTE: added param
         """Log restrict for export."""
-        if not self.export_id:
+        if not self.export_id or log_export is False:
             return super().restrict(restriction)
 
         log_export = "fetch_nwb" not in self._called_funcs()
