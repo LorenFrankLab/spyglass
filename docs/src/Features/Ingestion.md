@@ -10,7 +10,7 @@ lab-specific conversions ([1](https://github.com/catalystneuro),
 [2](https://github.com/LorenFrankLab/trodes_to_nwb)) that can be used as a reference.
 
 The following sections describe how data is extracted from these files and brought
-into the spyglass system. For best compatability, please use these as reference when
+into the spyglass system. For best compatibility, please use these as reference when
 creating your NWB files.
 
 ## What is ingestion?
