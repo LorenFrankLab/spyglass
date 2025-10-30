@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from tests.conftest import VERBOSE
-from tests.spikesorting.test_recompute_shared import RecomputeTestMixin
 
 
 @pytest.fixture(scope="module")
@@ -66,31 +65,42 @@ def recomp_repop(pop_rec_v0, recomp_selection, recomp_tbl):
     yield recomp_tbl
 
 
-class TestRecomputeV0(RecomputeTestMixin):
-    """V0-specific recompute tests using shared base class."""
+@pytest.mark.slow
+def test_recompute_env(recomp_repop):
+    """Test recompute match"""
 
-    version = "v0"
+    ret = (recomp_repop & dj.Top()).fetch1("matched")
+    assert ret, "Recompute failed"
 
-    # Shared tests from mixin: test_recompute_env, test_recheck
 
-    # V0-specific tests below
-    def test_selection_restr(self, recomp_repop, user_env_tbl, recomp_selection):
-        """Test that the selection env restriction works."""
-        _ = recomp_repop  # Ensure recompute repop is used to load the recording
-        env_dict = user_env_tbl.this_env
-        manual_restr = recomp_selection & env_dict
-        assert len(recomp_selection.this_env) == len(
-            manual_restr
-        ), "Recompute selection table property does not match env restriction"
+def test_selection_restr(recomp_repop, user_env_tbl, recomp_selection):
+    """Test that the selection env restriction works."""
+    _ = recomp_repop  # Ensure recompute repop is used to load the recording
+    env_dict = user_env_tbl.this_env
+    manual_restr = recomp_selection & env_dict
+    assert len(recomp_selection.this_env) == len(
+        manual_restr
+    ), "Recompute selection table property does not match env restriction"
 
-    @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
-    def test_recompute_compare(self, caplog, recomp_repop, recomp_tbl):
-        """Test recompute compare."""
-        _ = recomp_repop
-        _ = recomp_tbl.Hash().compare()
-        assert caplog.text == "", "No output for matched recompute compare"
 
-    def test_get_disk_space(self, recomp_tbl):
-        """Test get_disk_space."""
-        space = recomp_tbl.get_disk_space(restr=True)
-        assert "Total:" in space, "Disk space retrieval failed"
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
+def test_recompute_compare(caplog, recomp_repop, recomp_tbl):
+    """Test recompute compare."""
+    _ = recomp_repop
+    _ = recomp_tbl.Hash().compare()
+    assert caplog.text == "", "No output for matched recompute compare"
+
+
+def test_get_disk_space(recomp_tbl):
+    """Test get_disk_space."""
+    space = recomp_tbl.get_disk_space(restr=True)
+    assert "Total:" in space, "Disk space retrieval failed"
+
+
+@pytest.mark.slow
+def test_recheck(recomp_tbl, recomp_repop):
+    """Test recheck method."""
+    _ = recomp_repop  # Ensure recompute populated
+    key = recomp_tbl.fetch("KEY")[0]
+    result = recomp_tbl.recheck(key)
+    assert result, "Recheck failed"

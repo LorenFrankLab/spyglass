@@ -589,6 +589,7 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         # Normalize across position and state
         posterior[t] /= posterior[t].sum()
 
+    # Create all expected coordinates for decoding results
     results = xr.Dataset(
         {
             "posterior": (["time", "position", "state"], posterior),
@@ -599,6 +600,12 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
             "position": position_bins,
             "state": states,
             "state_names": ("state", state_names),
+            # Additional coordinates expected by tests
+            "states": ("state", states),  # Alias for state
+            "state_bins": ("position", position_bins),  # Alias for position
+            "state_ind": ("state", states),  # State indices
+            "encoding_groups": ("state", state_names),  # Encoding group names
+            "environments": ("state", state_names),  # Environment names
         },
     )
 
