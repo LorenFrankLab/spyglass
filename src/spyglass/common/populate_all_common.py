@@ -42,7 +42,7 @@ from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
 from spyglass.utils import logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
-from spyglass.utils.dj_mixin import IngestionMixin
+from spyglass.utils.mixins.ingestion import IngestionMixin
 
 
 def log_insert_error(
