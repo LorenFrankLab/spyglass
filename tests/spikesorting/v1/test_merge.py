@@ -28,6 +28,7 @@ def test_merge_get_recording(spike_merge, pop_spike_merge):
     ), "SpikeSortingOutput.get_recording failed to return a RecordingExtractor"
 
 
+@pytest.mark.slow
 def test_merge_get_sorting(spike_merge, pop_spike_merge):
     sort = spike_merge.get_sorting(pop_spike_merge)
     assert isinstance(

@@ -24,6 +24,7 @@ def test_open_path(mini_path, mini_open):
     ), "Path of ephys link is incorrect"
 
 
+@pytest.mark.slow
 def test_copy_link(mini_path, settings, mini_closed, copy_nwb_link_raw_ephys):
     """Test readability after moving the linking raw file, breaking link"""
     new_path = Path(settings.raw_dir) / "no_ephys.nwb"

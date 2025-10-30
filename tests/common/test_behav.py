@@ -4,6 +4,7 @@ from pandas import DataFrame
 from ..conftest import TEARDOWN
 
 
+@pytest.mark.slow
 def test_invalid_interval(pos_src):
     """Test invalid interval"""
     with pytest.raises(ValueError):
@@ -22,6 +23,7 @@ def test_valid_epoch_num(common):
     assert epoch_num == 1, "PositionSource get_epoch_num failed"
 
 
+@pytest.mark.slow
 def test_pos_source_make(common):
     """Test custom populate"""
     common.PositionSource().make(common.Session())

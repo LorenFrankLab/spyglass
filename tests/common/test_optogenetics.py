@@ -1,6 +1,8 @@
+import pytest
 from ndx_optogenetics import OptogeneticVirusInjection
 
 
+@pytest.mark.slow
 def test_virus_injection(
     opto_only_nwb,
     common,
@@ -27,6 +29,7 @@ def test_virus_injection(
     ], "VirusInjection did not fetch the expected virus construct name."
 
 
+@pytest.mark.slow
 def test_optical_fiber(
     opto_only_nwb,
     common,
@@ -49,6 +52,7 @@ def test_optical_fiber(
     ], "OpticalFiberDevice did not fetch the expected fiber model."
 
 
+@pytest.mark.slow
 def test_optogenetic_protocol(
     opto_only_nwb,
     common,

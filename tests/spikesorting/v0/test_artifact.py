@@ -1,3 +1,7 @@
+import pytest
+
+
+@pytest.mark.slow
 def test_artifact(pop_art):
     """Test artifact"""
     list_name = pop_art.fetch("artifact_removed_interval_list_name")

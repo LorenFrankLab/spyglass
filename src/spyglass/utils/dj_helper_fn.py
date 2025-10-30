@@ -110,6 +110,8 @@ def declare_all_merge_tables():
         SpikeSortingOutput,
     )  # noqa: F401
 
+    return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
+
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
     """Given lists of items/names, return item at index or by substring."""

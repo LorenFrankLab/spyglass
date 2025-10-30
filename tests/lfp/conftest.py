@@ -2,7 +2,7 @@ import pytest
 from pynwb import NWBHDF5IO
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def lfp_analysis_raw(common, lfp, populate_lfp, mini_dict):
     abs_path = (common.AnalysisNwbfile * lfp.v1.LFPV1 & mini_dict).fetch(
         "analysis_file_abs_path"
@@ -68,7 +68,7 @@ def populate_lfp_band(lfp_band, add_band_selection):
     yield
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def lfp_band_analysis_raw(common, lfp_band, populate_lfp_band, mini_dict):
     abs_path = (common.AnalysisNwbfile * lfp_band.LFPBandV1 & mini_dict).fetch(
         "analysis_file_abs_path"

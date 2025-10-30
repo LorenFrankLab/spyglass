@@ -52,7 +52,7 @@ def test_rg_restr_ft(restr_graph):
 
 def test_rg_file_paths(restr_graph):
     """Test collection of upstream file paths."""
-    assert len(restr_graph.file_paths) == 2, "Unexpected number of file paths."
+    assert len(restr_graph.file_paths) == 3, "Unexpected number of file paths."
 
 
 def test_rg_invalid_table(restr_graph):

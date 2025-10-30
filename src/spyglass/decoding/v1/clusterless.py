@@ -169,7 +169,76 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             }
         ).fetch1("valid_times")
 
-        # Decode
+        # Run decoder (external dependency - can be mocked in tests)
+        classifier, results = self._run_decoder(
+            key=key,
+            decoding_params=decoding_params,
+            decoding_kwargs=decoding_kwargs,
+            position_info=position_info,
+            position_variable_names=position_variable_names,
+            spike_times=spike_times,
+            spike_waveform_features=spike_waveform_features,
+            decoding_interval=decoding_interval,
+        )
+
+        # Save results to disk (external I/O - can be mocked in tests)
+        results_path, classifier_path = self._save_decoder_results(
+            classifier=classifier,
+            results=results,
+            key=key,
+        )
+
+        key["results_path"] = results_path
+        key["classifier_path"] = classifier_path
+
+        self.insert1(key)
+
+        from spyglass.decoding.decoding_merge import DecodingOutput
+
+        DecodingOutput.insert1(orig_key, skip_duplicates=True)
+
+    def _run_decoder(
+        self,
+        key,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        spike_waveform_features,
+        decoding_interval,
+    ):
+        """Run ClusterlessDetector (external dependency).
+
+        This method wraps all calls to the non_local_detector package,
+        making it easy to mock in tests for faster execution.
+
+        Parameters
+        ----------
+        key : dict
+            The key for the current decode operation
+        decoding_params : dict
+            Parameters for ClusterlessDetector initialization
+        decoding_kwargs : dict
+            Additional kwargs for fit/predict
+        position_info : pd.DataFrame
+            Position data with time index
+        position_variable_names : list
+            Names of position columns to use
+        spike_times : list
+            Spike times for each unit
+        spike_waveform_features : list
+            Waveform features for each unit
+        decoding_interval : array
+            Time intervals for decoding
+
+        Returns
+        -------
+        classifier : ClusterlessDetector
+            Fitted classifier instance
+        results : xr.Dataset
+            Decoding results with posteriors
+        """
         classifier = ClusterlessDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
@@ -206,9 +275,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             ]
 
             fit_kwargs = {
-                key: value
-                for key, value in decoding_kwargs.items()
-                if key in VALID_FIT_KWARGS
+                k: value
+                for k, value in decoding_kwargs.items()
+                if k in VALID_FIT_KWARGS
             }
 
             classifier.fit(
@@ -224,9 +293,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 "return_causal_posterior",
             ]
             predict_kwargs = {
-                key: value
-                for key, value in decoding_kwargs.items()
-                if key in VALID_PREDICT_KWARGS
+                k: value
+                for k, value in decoding_kwargs.items()
+                if k in VALID_PREDICT_KWARGS
             }
 
             # We treat each decoding interval as a separate sequence
@@ -274,9 +343,30 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 classifier.discrete_transition_coefficients_
             )
 
-        # Insert results
-        # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
+        return classifier, results
 
+    def _save_decoder_results(self, classifier, results, key):
+        """Save decoder results and model to disk (external I/O).
+
+        This method wraps all file I/O operations, making it easy to
+        mock in tests to avoid filesystem dependencies.
+
+        Parameters
+        ----------
+        classifier : ClusterlessDetector
+            Fitted classifier to save
+        results : xr.Dataset
+            Decoding results to save
+        key : dict
+            The key for naming files
+
+        Returns
+        -------
+        results_path : Path
+            Path where results were saved (.nc file)
+        classifier_path : Path
+            Path where classifier was saved (.pkl file)
+        """
         nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
 
         # Make sure the results directory exists
@@ -292,21 +382,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             # if the results_path already exists, try a different uuid
             path_exists = results_path.exists()
 
-        classifier.save_results(
-            results,
-            results_path,
-        )
-        key["results_path"] = results_path
+        # Save results and model to disk
+        classifier.save_results(results, results_path)
 
         classifier_path = results_path.with_suffix(".pkl")
         classifier.save_model(classifier_path)
-        key["classifier_path"] = classifier_path
 
-        self.insert1(key)
-
-        from spyglass.decoding.decoding_merge import DecodingOutput
-
-        DecodingOutput.insert1(orig_key, skip_duplicates=True)
+        return results_path, classifier_path
 
     def fetch_results(self) -> xr.Dataset:
         """Retrieve the decoding results

@@ -45,3 +45,15 @@ def test_merge_fetch_video_path(pos_merge, dlc_key, populate_dlc):
     merge_key = (pos_merge.DLCPosV1 & dlc_key).fetch1("KEY")
     path = (pos_merge & merge_key).fetch_video_path()
     assert Path(path).exists(), f"Video path does not exist: {path}"
+
+
+def test_merge_id_order(pos_merge):
+    merge_keys = pos_merge.TrodesPosV1().fetch("KEY")
+    assert len(merge_keys) > 1
+    nwb_file_list, merge_ids = (pos_merge & merge_keys).fetch_nwb(
+        return_merge_ids=True
+    )
+    for nwb_file, merge_id in zip(nwb_file_list, merge_ids):
+        assert (pos_merge.TrodesPosV1() & nwb_file).fetch1(
+            "merge_id"
+        ) == merge_id, "Returned merge ID order does not match the order of returned nwb files"

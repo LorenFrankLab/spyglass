@@ -65,6 +65,7 @@ def nwb_hasher(mini_path):
     yield NwbfileHasher(mini_path, precision_lookup=5, keep_obj_hash=True)
 
 
+@pytest.mark.slow
 def test_nwb_hasher(nwb_hasher):
 
     hash = nwb_hasher.hash

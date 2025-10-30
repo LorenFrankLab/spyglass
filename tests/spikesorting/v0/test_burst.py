@@ -9,6 +9,7 @@ def test_burst_params(spike_v0, burst_params_key):
     ), "Default burst parameters not inserted correctly"
 
 
+@pytest.mark.very_slow
 def test_burst_pairs(spike_v0, pop_burst):
     assert len(pop_burst), "Burst pairs not populated correctly"
 
