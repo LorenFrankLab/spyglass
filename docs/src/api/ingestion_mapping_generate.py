@@ -2,7 +2,7 @@
 """
 spyglass_ingestion_autodoc.py
 
-Scan a Python package for SpyglassIngestion tables and auto-generate
+Scan a Python package for IngestionMixin tables and auto-generate
 documentation of their NWB ingestion mappings.
 
 Outputs Markdown by default; can also emit JSON or CSV.
@@ -78,17 +78,17 @@ def callable_name(v: Any, owner: type) -> str:
 
 def is_spyglass_ingestion_subclass(cls) -> bool:
     """
-    Identify SpyglassIngestion subclasses without hard-failing if the package isn't importable.
-    We prefer issubclass against spyglass.utils.SpyglassIngestion when available; otherwise,
+    Identify IngestionMixin subclasses without hard-failing if the package isn't importable.
+    We prefer issubclass against spyglass.utils.IngestionMixin when available; otherwise,
     duck-type on required properties.
     """
     try:
-        from spyglass.utils import SpyglassIngestion  # type: ignore
+        from spyglass.utils import IngestionMixin  # type: ignore
 
         return (
             inspect.isclass(cls)
-            and issubclass(cls, SpyglassIngestion)
-            and cls is not SpyglassIngestion
+            and issubclass(cls, IngestionMixin)
+            and cls is not IngestionMixin
         )
     except Exception:
         # Duck-typing fallback: has the two required @properties
@@ -133,7 +133,7 @@ def iter_modules(package_name: str) -> Iterable[types.ModuleType]:
 
 
 def discover_ingestion_classes(package_name: str) -> List[type]:
-    """Return all SpyglassIngestion subclasses found in package modules."""
+    """Return all IngestionMixin subclasses found in package modules."""
     classes: List[type] = []
     for mod in iter_modules(package_name):
         for _, cls in inspect.getmembers(mod, inspect.isclass):
@@ -152,7 +152,7 @@ def discover_ingestion_classes(package_name: str) -> List[type]:
 
 def extract_mapping_rows(cls: type) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
-    For a given SpyglassIngestion class, return:
+    For a given IngestionMixin class, return:
       - list of rows describing mapping entries
       - list of warnings (if any)
     """
@@ -224,7 +224,7 @@ def as_markdown(rows: List[Dict[str, Any]]) -> str:
     Render a single Markdown table, sorted for readability.
     """
     if not rows:
-        return "_No SpyglassIngestion classes found._\n"
+        return "_No IngestionMixin classes found._\n"
 
     cols = [
         "module",

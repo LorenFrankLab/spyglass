@@ -6,13 +6,13 @@ import pynwb
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_imported")
 
 
 @schema
-class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
+class ImportedSpikeSorting(SpyglassMixin, IngestionMixin, dj.Imported):
     definition = """
     -> Session
     ---
@@ -30,7 +30,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         annotations: longblob # dict of other annotations (e.g. metrics)
         """
 
-    # SpyglassIngestion properties
+    # IngestionMixin properties
     @property
     def table_key_to_obj_attr(self):
         return {
@@ -66,9 +66,9 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
         # Add merge table integration
         orig_key = {"nwb_file_name": nwb_file_name}
 
-        from spyglass.spikesorting.spikesorting_merge import (
+        from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
             SpikeSortingOutput,
-        )  # noqa: F401
+        )
 
         part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(
@@ -82,7 +82,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
 
         Kept for backward compatibility during migration.
         """
-        # Call the new SpyglassIngestion method
+        # Call the new IngestionMixin method
         from spyglass.common.common_usage import ActivityLog
 
         ActivityLog().deprecate_log(

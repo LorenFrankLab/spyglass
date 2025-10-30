@@ -14,7 +14,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -275,7 +275,7 @@ class Electrode(SpyglassMixin, dj.Imported):
 
 
 @schema
-class Raw(SpyglassIngestion, dj.Imported):
+class Raw(SpyglassMixin, IngestionMixin, dj.Imported):
     definition = """ # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
     ---
@@ -357,7 +357,7 @@ class Raw(SpyglassIngestion, dj.Imported):
 
         ActivityLog.deprecate_log(self, "Raw.make", alt="insert_from_nwbfile")
 
-        # Call the new SpyglassIngestion method
+        # Call the new IngestionMixin method
         self.insert_from_nwbfile(key["nwb_file_name"])
 
     def nwb_object(self, key):

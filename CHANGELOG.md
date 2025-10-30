@@ -34,7 +34,7 @@ import all foreign key references.
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Add `IngestionMixin` class to centralize functionality #1377, #1423
 
 ### Pipelines
 

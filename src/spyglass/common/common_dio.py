@@ -10,14 +10,14 @@ from spyglass.common.common_ephys import Raw
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import get_data_interface, get_nwb_file
 
 schema = dj.schema("common_dio")
 
 
 @schema
-class DIOEvents(SpyglassIngestion, dj.Imported):
+class DIOEvents(SpyglassMixin, IngestionMixin, dj.Imported):
     definition = """
     -> Session
     dio_event_name: varchar(80)   # the name assigned to this DIO event
@@ -36,7 +36,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
 
     def generate_entries_from_nwb_object(
         self, nwb_obj, base_key=None
-    ) -> Dict["SpyglassIngestion", List[dict]]:
+    ) -> Dict["IngestionMixin", List[dict]]:
         """Generate entries from nwb object.
 
         Parameters
@@ -48,7 +48,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
 
         Returns
         -------
-        Dict[SpyglassIngestion, List[dict]]
+        Dict[IngestionMixin, List[dict]]
             A dictionary with the table class as the key and a list of entries
             as the value.
         """
@@ -108,7 +108,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
             self, "DIOEvents.make", alt="insert_from_nwbfile"
         )
 
-        # Call the new SpyglassIngestion method
+        # Call the new IngestionMixin method
         self.insert_from_nwbfile(key["nwb_file_name"])
 
     def plot_all_dio_events(self, return_fig=False):

@@ -1,13 +1,13 @@
 import datajoint as dj
 import pynwb
 
-from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 
 schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(SpyglassIngestion, dj.Manual):
+class Subject(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     subject_id: varchar(80)
     ---

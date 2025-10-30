@@ -3,7 +3,7 @@ import ndx_franklab_novela
 
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import (
     _replace_nan_with_default,
     accept_divergence,
@@ -14,7 +14,7 @@ schema = dj.schema("common_device")
 
 
 @schema
-class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
+class DataAcquisitionDeviceSystem(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     # Known data acquisition device system names.
     data_acquisition_device_system: varchar(80)
@@ -33,7 +33,7 @@ class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
+class DataAcquisitionDeviceAmplifier(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     # Known data acquisition device amplifier names.
     data_acquisition_device_amplifier: varchar(80)
@@ -52,7 +52,7 @@ class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
+class DataAcquisitionDevice(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     data_acquisition_device_name: varchar(80)
     ---
@@ -267,7 +267,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class CameraDevice(SpyglassIngestion, dj.Manual):
+class CameraDevice(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     camera_name: varchar(80)
     ---
@@ -309,7 +309,7 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class ProbeType(SpyglassIngestion, dj.Manual):
+class ProbeType(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     # Type/category of probe regardless of configuration. Controlled vocabulary
     # of probe type names. e.g., Neuropixels 1.0 or NeuroNexus X-Y-Z, etc.
@@ -349,7 +349,7 @@ class ProbeType(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class Probe(SpyglassIngestion, dj.Manual):
+class Probe(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     # A configuration of a ProbeType. For most probe types, there is only one,
     # which should always be used. For Neuropixels, the channel map (which
@@ -362,7 +362,7 @@ class Probe(SpyglassIngestion, dj.Manual):
     contact_side_numbering: enum("True", "False")  # Facing you when numbering
     """
 
-    class Shank(SpyglassIngestion, dj.Part):
+    class Shank(SpyglassMixin, IngestionMixin, dj.Part):
         definition = """
         -> Probe
         probe_shank: int              # unique shank number within probe.
@@ -400,7 +400,7 @@ class Probe(SpyglassIngestion, dj.Manual):
                 adjusted.append(key)
             return adjusted
 
-    class Electrode(SpyglassIngestion, dj.Part):
+    class Electrode(SpyglassMixin, IngestionMixin, dj.Part):
         definition = """
         # Electrode configuration, with ID, contact size, X/Y/Z coordinates
         -> Probe.Shank

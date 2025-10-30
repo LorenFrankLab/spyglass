@@ -5,7 +5,7 @@ from typing import Dict
 import datajoint as dj
 import pynwb
 
-from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 
 from ..utils.nwb_helper_fn import get_nwb_file
 from .common_nwbfile import Nwbfile
@@ -14,7 +14,7 @@ schema = dj.schema("common_lab")
 
 
 @schema
-class LabMember(SpyglassIngestion, dj.Manual):
+class LabMember(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -52,8 +52,8 @@ class LabMember(SpyglassIngestion, dj.Manual):
 
     def generate_entries_from_nwb_object(
         self, nwb_obj: pynwb.NWBFile, base_key=None
-    ) -> Dict["SpyglassIngestion", list]:
-        """Override SpyglassIngestion to make entry for each experimenter."""
+    ) -> Dict["IngestionMixin", list]:
+        """Override IngestionMixin to make entry for each experimenter."""
         base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
@@ -156,7 +156,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class LabTeam(SpyglassIngestion, dj.Manual):
+class LabTeam(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
@@ -165,7 +165,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
 
-    class LabTeamMember(SpyglassIngestion, dj.Part):
+    class LabTeamMember(SpyglassMixin, IngestionMixin, dj.Part):
         definition = """
         -> LabTeam
         -> LabMember
@@ -280,7 +280,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class Institution(SpyglassIngestion, dj.Manual):
+class Institution(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     institution_name: varchar(80)
     """
@@ -302,7 +302,7 @@ class Institution(SpyglassIngestion, dj.Manual):
 
 
 @schema
-class Lab(SpyglassIngestion, dj.Manual):
+class Lab(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """

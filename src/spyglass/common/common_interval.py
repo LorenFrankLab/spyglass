@@ -11,7 +11,7 @@ import pandas as pd
 import pynwb
 
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils import IngestionMixin, SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 
 schema = dj.schema("common_interval")
@@ -20,7 +20,7 @@ schema = dj.schema("common_interval")
 
 
 @schema
-class IntervalList(SpyglassIngestion, dj.Manual):
+class IntervalList(SpyglassMixin, IngestionMixin, dj.Manual):
     definition = """
     # Time intervals used for analysis
     -> Session
@@ -53,7 +53,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         1. NWB objects (pynwb.epoch.TimeIntervals rows) with .tags attribute
         2. Pandas namedtuples from DataFrame.itertuples()
 
-        SpyglassIngestion converts table-like NWB objects to DataFrames and
+        IngestionMixin converts table-like NWB objects to DataFrames and
         iterates using .itertuples(), which produces namedtuples.
         """
         tags = getattr(epoch_row, "tags", None)
