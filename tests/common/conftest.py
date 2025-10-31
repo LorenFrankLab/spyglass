@@ -78,8 +78,13 @@ def pop_common_electrode_group(common_ephys):
 @pytest.fixture(scope="session")
 def dio_only_nwb(raw_dir, common):
     nwbfile = mock_NWBFile(
-        identifier="my_identifier", session_description="my_session_description"
+        identifier="my_identifier",
+        session_description="my_session_description",
+        lab="My Lab",
+        institution="My Institution",
+        experimenter=["Dr. A", "Dr. B"],
     )
+    nwbfile.subject = mock_Subject()
     time_series = mock_TimeSeries(
         name="my_time_series", timestamps=np.arange(20), data=np.ones((20, 1))
     )

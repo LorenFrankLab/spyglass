@@ -304,7 +304,7 @@ def load_config(dj_conn, base_dir):
 
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
-    dj_conn, mini_path, mini_content, teardown, server, load_config
+    dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
@@ -325,7 +325,7 @@ def mini_insert(
     if not server.connected:
         raise ConnectionError("No server connection.")
 
-    if len(Nwbfile()) != 0:
+    if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
     else:
         try:

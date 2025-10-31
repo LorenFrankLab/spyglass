@@ -1,6 +1,8 @@
+from pathlib import Path
 from typing import List, Union
 
 import datajoint as dj
+import yaml
 from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
@@ -9,6 +11,14 @@ from spyglass.common.common_behav import (
     StateScriptFile,
     VideoFile,
 )
+from spyglass.common.common_device import (
+    CameraDevice,
+    DataAcquisitionDevice,
+    DataAcquisitionDeviceAmplifier,
+    DataAcquisitionDeviceSystem,
+    Probe,
+    ProbeType,
+)
 from spyglass.common.common_dio import DIOEvents
 from spyglass.common.common_ephys import (
     Electrode,
@@ -16,6 +26,8 @@ from spyglass.common.common_ephys import (
     Raw,
     SampleCount,
 )
+from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_optogenetics import (
     OpticalFiberImplant,
@@ -24,9 +36,11 @@ from spyglass.common.common_optogenetics import (
 )
 from spyglass.common.common_sensors import SensorData
 from spyglass.common.common_session import Session
+from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
-from spyglass.utils import logger
+from spyglass.settings import base_dir
+from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
 
 
@@ -56,10 +70,20 @@ def log_insert_error(
             **error_constants,
             table=table.__name__,
             error_type=type(err).__name__,
-            error_message=str(err),
+            error_message=str(err)[:255],  # limit to 255 chars
             error_raw=str(err),
         )
     )
+
+
+def _get_config_name(table_obj):
+    """Given a table object, return its config name for entries.yaml
+
+    Returns Master.Part for part tables, otherwise just the table name.
+    """
+    if hasattr(table_obj, "_master"):
+        return f"{table_obj._master.__name__}.{table_obj.__class__.__name__}"
+    return table_obj.__class__.__name__
 
 
 def single_transaction_make(
@@ -67,6 +91,7 @@ def single_transaction_make(
     nwb_file_name: str,
     raise_err: bool = False,
     error_constants: dict = None,
+    config: dict = None,
 ):
     """For each table, run the `make` method directly instead of `populate`.
 
@@ -74,12 +99,28 @@ def single_transaction_make(
     nwb_file_name search table key_source for relevant key. Currently assumes
     all tables will have exactly one key_source entry per nwb file.
     """
+
     file_restr = {"nwb_file_name": nwb_file_name}
-    with Nwbfile.connection.transaction:
+    with Nwbfile._safe_context():
         for table in tables:
-            logger.info(f"Populating {table.__name__}...")
+            config_name = _get_config_name(table())
+            table_config = config.get(config_name, dict())
+
+            if isinstance(table(), SpyglassIngestion):
+                try:
+                    table().insert_from_nwbfile(
+                        nwb_file_name, config=table_config
+                    )
+                except Exception as err:
+                    if raise_err:
+                        raise err
+                    log_insert_error(
+                        table=table, err=err, error_constants=error_constants
+                    )
+                continue
 
             # If imported/computed table, get key from key_source
+            logger.info(f"Populating {table.__name__}...")
             key_source = getattr(table, "key_source", None)
             if key_source is None:  # Generate key from parents
                 parents = table.parents(as_objects=True)
@@ -99,7 +140,8 @@ def single_transaction_make(
             ]:
                 key_source = Nwbfile()
 
-            for pop_key in (key_source & file_restr).fetch("KEY"):
+            query = key_source & file_restr
+            for pop_key in query.fetch("KEY"):
                 try:
                     table().make(pop_key)
                 except Exception as err:
@@ -108,6 +150,8 @@ def single_transaction_make(
                     log_insert_error(
                         table=table, err=err, error_constants=error_constants
                     )
+            # if table_name in ["TaskEpoch"]:
+            #     __import__("pdb").set_trace()
 
 
 def populate_all_common(
@@ -143,16 +187,35 @@ def populate_all_common(
         nwb_file_name=nwb_file_name,
     )
 
-    table_lists = [
-        [  # Tables that can be inserted in a single transaction
-            Session,
+    table_lists: List[List[dj.Table]] = [
+        # Tables that can be inserted in a single transaction
+        [
+            Institution,  # Parent node
+            Lab,  # Parent node
+            LabMember,  # Parent node
+            LabTeam,  # Parent node
+            Subject,  # Parent node
+            CameraDevice,  # Parent node
+            ProbeType,  # Parent node
+            DataAcquisitionDeviceAmplifier,  # Parent node
+            DataAcquisitionDeviceSystem,  # Parent node
+            DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
+        ],
+        [
+            Probe,  # Depends on ProbeType, DataAcquisitionDevice
+            Probe.Shank,  # Depends on Probe
+            Probe.Electrode,  # Depends on Probe
+            Session,  # Depends on Subject, Institution, Lab
+            Session.Experimenter,  # Depends on Session
+            Session.DataAcquisitionDevice,  # Depends on Sess, DataAcq*Device
             ElectrodeGroup,  # Depends on Session
             Raw,  # Depends on Session
             SampleCount,  # Depends on Session
             DIOEvents,  # Depends on Session
-            TaskEpoch,  # Depends on Session
             ImportedSpikeSorting,  # Depends on Session
             SensorData,  # Depends on Session
+            IntervalList,  # Depends on Session
+            TaskEpoch,  # Depends on Session, Task, CamearaDevice, IntervalList
             # NwbfileKachery, # Not used by default
         ],
         [  # Tables that depend on above transaction
@@ -162,6 +225,7 @@ def populate_all_common(
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
+            ImportedSpikeSorting,  # Depends on Session
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
@@ -171,12 +235,19 @@ def populate_all_common(
         ],
     ]
 
+    config = dict()
+    entries_path = Path(base_dir) / "entries.yaml"
+    if entries_path.exists():
+        with open(f"{base_dir}/entries.yaml", "r") as stream:
+            config = yaml.safe_load(stream)
+
     for tables in table_lists:
         single_transaction_make(
             tables=tables,
             nwb_file_name=nwb_file_name,
             raise_err=raise_err,
             error_constants=error_constants,
+            config=config,
         )
 
     err_query = InsertError & error_constants

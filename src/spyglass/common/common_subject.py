@@ -1,13 +1,13 @@
 import datajoint as dj
-from pynwb import NWBFile
+import pynwb
 
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, logger
 
 schema = dj.schema("common_subject")
 
 
 @schema
-class Subject(SpyglassMixin, dj.Manual):
+class Subject(SpyglassIngestion, dj.Manual):
     definition = """
     subject_id: varchar(80)
     ---
@@ -17,51 +17,42 @@ class Subject(SpyglassMixin, dj.Manual):
     sex = "U": enum("M", "F", "U")
     species = NULL: varchar(200)
     """
+    _expected_duplicates = True
 
-    @classmethod
-    def insert_from_nwbfile(cls, nwbf: NWBFile, config: dict = None):
-        """Get the subject info from the NWBFile, insert into the Subject.
-
-        Parameters
-        ----------
-        nwbf: pynwb.NWBFile
-            The NWB file with subject information.
-        config : dict, optional
-            Dictionary read from a user-defined YAML file containing values to
-            replace in the NWB file.
-
-        Returns
-        -------
-        subject_id : string
-            The id of the subject found in the NWB or config file, or None.
-        """
-        config = config or dict()
-        if "Subject" not in config and nwbf.subject is None:
-            logger.warning("No subject metadata found.\n")
-            return None
-
-        conf = config["Subject"][0] if "Subject" in config else dict()
-        sub = (
-            nwbf.subject
-            if nwbf.subject is not None
-            else type("DefaultObject", (), {})()
-        )
-        subject_dict = {
-            field: conf.get(field, getattr(sub, field, None))
-            for field in [
-                "subject_id",
-                "age",
-                "description",
-                "genotype",
-                "species",
-                "sex",
-            ]
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "subject_id": "subject_id",
+                "age": "age",
+                "description": "description",
+                "genotype": "genotype",
+                "sex": self.standardized_sex_string,
+                "species": "species",
+            }
         }
-        sex_field = subject_dict.get("sex") or ["U"]  # If not provided
-        if (sex := sex_field[0].upper()) in ("M", "F", "U"):
-            subject_dict["sex"] = sex
-        else:
-            subject_dict["sex"] = "U"
 
-        cls.insert1(subject_dict, skip_duplicates=True)
-        return subject_dict["subject_id"]
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.file.Subject
+
+    @staticmethod
+    def standardized_sex_string(subject, warn=True):
+        """Takes subject.sex and returns 'M', 'F', or 'U'."""
+        sex_field = getattr(subject, "sex", "U") or "U"
+        if (sex := sex_field[0].upper()) in ("M", "F", "U"):
+            return sex
+        elif warn:
+            logger.info(
+                f"Unrecognized sex identifier {sex_field}, setting to 'U'"
+            )
+        return "U"
+
+    def _adjust_keys_for_entry(self, keys):
+        """Fill in any NULL values in the key with defaults."""
+        # Avoids triggering 'accept_divergence' on reinsert
+        adjusted = []
+        for key in keys.copy():
+            key["sex"] = self.standardized_sex_string(key, warn=False)
+            adjusted.append(key)
+        return super()._adjust_keys_for_entry(adjusted)

@@ -1,10 +1,12 @@
+import inspect
 import os
 import sys
+from abc import abstractmethod
 from contextlib import nullcontext
 from functools import cached_property
 from os import environ as os_environ
 from time import time
-from typing import List, Union
+from typing import Any, Callable, Dict, List, Optional, Type, TypeAlias, Union
 
 import datajoint as dj
 from datajoint.errors import DataJointError
@@ -14,11 +16,13 @@ from datajoint.utils import to_camel_case
 from packaging.version import parse as version_parse
 from pandas import DataFrame
 from pymysql.err import DataError
+from pynwb import NWBHDF5IO, NWBFile
 
 from spyglass.utils.database_settings import SHARED_MODULES
 from spyglass.utils.dj_helper_fn import (
     NonDaemonPool,
     _quick_get_analysis_path,
+    accept_divergence,
     bytes_to_human_readable,
     ensure_names,
     fetch_nwb,
@@ -35,6 +39,7 @@ from spyglass.utils.mixins import (
     HelperMixin,
     PopulateMixin,
     RestrictByMixin,
+    IngestionMixin,
 )
 
 
@@ -253,3 +258,11 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
         self.definition = self._enforced_definition
         self._register_table()
+
+
+class SpyglassIngestion(SpyglassMixin, IngestionMixin):
+    """Mixin for Spyglass ingestion tables.
+
+    Provides additional methods and properties to automate population of table
+    entries from raw NWB files.
+    """
