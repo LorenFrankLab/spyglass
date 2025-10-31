@@ -79,6 +79,7 @@ nav:
     - Export: Features/Export.md
     - Centralized Code: Features/Mixin.md
     - Recompute: Features/Recompute.md
+    - Ingestion: Features/Ingestion.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md
