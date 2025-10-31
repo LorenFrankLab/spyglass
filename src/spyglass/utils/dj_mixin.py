@@ -39,6 +39,7 @@ from spyglass.utils.mixins import (
     HelperMixin,
     PopulateMixin,
     RestrictByMixin,
+    IngestionMixin,
 )
 
 
@@ -257,3 +258,11 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
         self.definition = self._enforced_definition
         self._register_table()
+
+
+class SpyglassIngestion(SpyglassMixin, IngestionMixin):
+    """Mixin for Spyglass ingestion tables.
+
+    Provides additional methods and properties to automate population of table
+    entries from raw NWB files.
+    """

@@ -31,7 +31,7 @@ appropriate entries.
 *Note: Migration to this format is in progress, and not yet implemented for all
 ingestion tables
 
-Tables that are populated from the raw NWB file are instances of the `IngestionMixin`
+Tables that are populated from the raw NWB file are instances of the `SpyglassIngestion`
 class. Tables of this class must define the following properties which enable finding
 relevant data in the NWB file and creating corresponding table entries.
 

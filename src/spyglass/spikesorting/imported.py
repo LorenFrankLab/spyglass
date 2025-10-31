@@ -6,13 +6,13 @@ import pynwb
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import IngestionMixin, SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_imported")
 
 
 @schema
-class ImportedSpikeSorting(SpyglassMixin, IngestionMixin, dj.Imported):
+class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     definition = """
     -> Session
     ---
@@ -30,7 +30,7 @@ class ImportedSpikeSorting(SpyglassMixin, IngestionMixin, dj.Imported):
         annotations: longblob # dict of other annotations (e.g. metrics)
         """
 
-    # IngestionMixin properties
+    # SpyglassIngestion properties
     @property
     def table_key_to_obj_attr(self):
         return {
@@ -82,7 +82,7 @@ class ImportedSpikeSorting(SpyglassMixin, IngestionMixin, dj.Imported):
 
         Kept for backward compatibility during migration.
         """
-        # Call the new IngestionMixin method
+        # Call the new SpyglassIngestion method
         from spyglass.common.common_usage import ActivityLog
 
         ActivityLog().deprecate_log(

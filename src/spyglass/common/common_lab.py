@@ -5,16 +5,15 @@ from typing import Dict
 import datajoint as dj
 import pynwb
 
-from spyglass.utils import IngestionMixin, SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 
-from ..utils.nwb_helper_fn import get_nwb_file
-from .common_nwbfile import Nwbfile
+from .common_nwbfile import Nwbfile  # noqa: F401
 
 schema = dj.schema("common_lab")
 
 
 @schema
-class LabMember(SpyglassMixin, IngestionMixin, dj.Manual):
+class LabMember(SpyglassIngestion, dj.Manual):
     definition = """
     lab_member_name: varchar(80)
     ---
@@ -52,8 +51,8 @@ class LabMember(SpyglassMixin, IngestionMixin, dj.Manual):
 
     def generate_entries_from_nwb_object(
         self, nwb_obj: pynwb.NWBFile, base_key=None
-    ) -> Dict["IngestionMixin", list]:
-        """Override IngestionMixin to make entry for each experimenter."""
+    ) -> Dict["SpyglassIngestion", list]:
+        """Override SpyglassIngestion to make entry for each experimenter."""
         base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
@@ -156,7 +155,7 @@ class LabMember(SpyglassMixin, IngestionMixin, dj.Manual):
 
 
 @schema
-class LabTeam(SpyglassMixin, IngestionMixin, dj.Manual):
+class LabTeam(SpyglassIngestion, dj.Manual):
     definition = """
     team_name: varchar(80)
     ---
@@ -165,7 +164,7 @@ class LabTeam(SpyglassMixin, IngestionMixin, dj.Manual):
 
     _expected_duplicates = True
 
-    class LabTeamMember(SpyglassMixin, IngestionMixin, dj.Part):
+    class LabTeamMember(SpyglassIngestion, dj.Part):
         definition = """
         -> LabTeam
         -> LabMember
@@ -280,7 +279,7 @@ class LabTeam(SpyglassMixin, IngestionMixin, dj.Manual):
 
 
 @schema
-class Institution(SpyglassMixin, IngestionMixin, dj.Manual):
+class Institution(SpyglassIngestion, dj.Manual):
     definition = """
     institution_name: varchar(80)
     """
@@ -302,7 +301,7 @@ class Institution(SpyglassMixin, IngestionMixin, dj.Manual):
 
 
 @schema
-class Lab(SpyglassMixin, IngestionMixin, dj.Manual):
+class Lab(SpyglassIngestion, dj.Manual):
     definition = """
     lab_name: varchar(80)
     """

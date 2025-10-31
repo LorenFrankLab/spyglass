@@ -11,13 +11,13 @@ from spyglass.common.common_lab import (
 )
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_subject import Subject
-from spyglass.utils import IngestionMixin, SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, logger
 
 schema = dj.schema("common_session")
 
 
 @schema
-class Session(SpyglassMixin, IngestionMixin, dj.Imported):
+class Session(SpyglassIngestion, dj.Imported):
     definition = """
     # Table for holding experimental sessions.
     # Note that each session can have multiple experimenters and data acquisition
@@ -54,7 +54,7 @@ class Session(SpyglassMixin, IngestionMixin, dj.Imported):
             "subject": {"subject_id": "subject_id"},
         }
 
-    class DataAcquisitionDevice(SpyglassMixin, IngestionMixin, dj.Part):
+    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):
         definition = """
         # Part table linking Session to multiple DataAcquisitionDevice entries.
         -> Session
@@ -73,7 +73,7 @@ class Session(SpyglassMixin, IngestionMixin, dj.Imported):
                 }
             }
 
-    class Experimenter(SpyglassMixin, IngestionMixin, dj.Part):
+    class Experimenter(SpyglassIngestion, dj.Part):
         definition = """
         # Part table linking Session to multiple LabMember entries.
         -> Session

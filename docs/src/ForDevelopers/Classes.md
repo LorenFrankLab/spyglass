@@ -122,7 +122,7 @@ These mixins form a dependency chain for NWB file fetching and export logging:
 - Handles copy-to-common for custom AnalysisNwbfile tables
 - See [Export Guide](../Features/Export.md)
 
-**IngestionMixin** (`mixins/ingestion.py`)
+***IngestionMixin* (`mixins/ingestion.py`)
 
 - Defines a protocol for populating table entries from the raw nwb file
 - Provides `insert_from_nwbfile()` which identifies relevant objects within the
@@ -240,6 +240,50 @@ schema (`{username}_nwbfile`), preventing concurrent insert operations from
 blocking each other.
 
 **See also:** [Custom Analysis Tables](./Management.md#custom-analysis-tables)
+
+### SpyglassIngestion
+
+**Location**: `src/spyglass/utils/dj_mixin.py`
+
+**Purpose**: Specialized mixin for generating table entries from raw nwb files
+
+**Inherits from**:
+
+- `SpyglassMixin` (all 5 base mixins)
+- `IngestionMixin` (ingestion operations)
+
+**Additional Functionality**:
+
+- Defines `insert_from_nwbfile()` which identifies source data in the nwb file and
+  translates into table entries. Depends on defining the following properties for
+  each class:
+    - `_source_nwb_object_type`: The `pynwb` type of object(s) in the file containing
+        data for the given table.
+    - `_source_nwb_object_name`: OPtional property which further limits ingestion
+        to nwb_objects with this name attribute
+    - `table_key_to_obj_attr`: A dictionary which defines a mapping from spyglass
+        table column to the name of the nwb object attribute to be stored.
+        Optionally, a callable function which generates the value to be stored from
+        the nwb object can be used instead of the attribute name.
+
+**Usage**:
+
+```python
+@schema
+class MyIngestionTable(SpyglassIngestion, dj.Manual):
+    definition = """
+        -> Session
+        ----
+        lfp_obj_id: varchar(32)
+    """
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.ecephys.LFP
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {"self": {"lfp_obj_id": "object_id"}}
+```
 
 ---
 

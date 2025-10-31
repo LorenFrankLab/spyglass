@@ -40,9 +40,8 @@ from spyglass.common.common_subject import Subject
 from spyglass.common.common_task import TaskEpoch
 from spyglass.common.common_usage import InsertError
 from spyglass.settings import base_dir
-from spyglass.utils import logger
+from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import declare_all_merge_tables
-from spyglass.utils.mixins.ingestion import IngestionMixin
 
 
 def log_insert_error(
@@ -107,7 +106,7 @@ def single_transaction_make(
             config_name = _get_config_name(table())
             table_config = config.get(config_name, dict())
 
-            if isinstance(table(), IngestionMixin):
+            if isinstance(table(), SpyglassIngestion):
                 try:
                     table().insert_from_nwbfile(
                         nwb_file_name, config=table_config

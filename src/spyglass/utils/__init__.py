@@ -3,13 +3,13 @@ from spyglass.utils.dj_mixin import (
     SpyglassAnalysis,
     SpyglassMixin,
     SpyglassMixinPart,
+    SpyglassIngestion,
 )
 from spyglass.utils.logging import logger
-from spyglass.utils.mixins.ingestion import IngestionMixin
 
 __all__ = [
     "SpyglassAnalysis",
-    "IngestionMixin",
+    "SpyglassIngestion",
     "SpyglassMixin",
     "SpyglassMixinPart",
     "_Merge",
