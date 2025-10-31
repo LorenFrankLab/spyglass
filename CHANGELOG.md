@@ -35,6 +35,7 @@ import all foreign key references.
 
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
+- Remove `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
 
