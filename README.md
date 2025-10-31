@@ -65,10 +65,67 @@ Documentation can be found at -
 
 ## Installation
 
-For installation instructions see -
-[https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+### Quick Start (Recommended)
 
-Typical installation time is: 5-10 minutes
+Get started with Spyglass in 5 minutes using our automated installer:
+
+```bash
+# Clone the repository
+git clone https://github.com/LorenFrankLab/spyglass.git
+cd spyglass
+
+# Run automated installer
+python scripts/install.py
+
+# Activate environment
+conda activate spyglass
+```
+
+The installer will:
+- ✅ Create conda environment with all dependencies
+- ✅ Set up local MySQL database (Docker) or connect to remote
+- ✅ Validate installation
+- ✅ Provide clear next steps
+
+**Installation Options:**
+```bash
+# Minimal installation (recommended for new users)
+python scripts/install.py --minimal
+
+# Full installation (all features)
+python scripts/install.py --full
+
+# With Docker database
+python scripts/install.py --docker
+
+# Connect to remote database
+python scripts/install.py --remote
+
+# Non-interactive with environment variables
+export SPYGLASS_BASE_DIR=/path/to/data
+python scripts/install.py --minimal --docker
+
+# Non-interactive remote database setup
+python scripts/install.py --remote \
+  --db-host db.lab.edu \
+  --db-user myuser \
+  --db-password mysecret
+
+# Or use environment variable for password
+export SPYGLASS_DB_PASSWORD=mysecret
+python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
+```
+
+**Troubleshooting:**
+- See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues
+- Run `python scripts/validate.py` to check your installation
+- For database help, see [docs/DATABASE.md](docs/DATABASE.md)
+
+### Manual Installation
+
+For manual installation and advanced configuration:
+- [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+- [Database Setup Guide](docs/DATABASE.md)
 
 ## Tutorials
 
