@@ -13,9 +13,18 @@ def mock_netcdf_saves():
     import pickle
     from pathlib import Path
 
-    def mock_to_netcdf(self, path=None, mode='w', format=None, group=None,
-                       engine=None, encoding=None, unlimited_dims=None,
-                       compute=True, invalid_netcdf=False):
+    def mock_to_netcdf(
+        self,
+        path=None,
+        mode="w",
+        format=None,
+        group=None,
+        engine=None,
+        encoding=None,
+        unlimited_dims=None,
+        compute=True,
+        invalid_netcdf=False,
+    ):
         """Mock to_netcdf that writes pickle instead of netCDF."""
         if path is None:
             # Return bytes if no path given (original behavior for some use cases)
@@ -23,7 +32,7 @@ def mock_netcdf_saves():
 
         # Keep the .nc extension to match expectations, but write pickle format
         # This avoids netCDF4/HDF5 errors while maintaining file path compatibility
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             pickle.dump(self, f)
 
         return None
@@ -652,7 +661,7 @@ def mock_detector_io_globally(mock_results_storage):
 
         # Load from disk with explicit engine
         try:
-            return xr.open_dataset(filename_str, engine='netcdf4')
+            return xr.open_dataset(filename_str, engine="netcdf4")
         except (FileNotFoundError, OSError) as e:
             # OSError with "Unknown file format" means old pickle file exists
             # FileNotFoundError means file doesn't exist at all
@@ -661,9 +670,7 @@ def mock_detector_io_globally(mock_results_storage):
                     f"Mock result has invalid format (likely old pickle file): {filename_str}. "
                     "Please delete old *_mocked.nc files from tests/_data/analysis/"
                 )
-            raise FileNotFoundError(
-                f"Mock result not found: {filename_str}"
-            )
+            raise FileNotFoundError(f"Mock result not found: {filename_str}")
 
     def _mock_load_model(filename):
         """Load classifier from in-memory storage."""
@@ -677,7 +684,9 @@ def mock_detector_io_globally(mock_results_storage):
     # Patch the detector base classes' load methods globally
     with (
         patch.object(
-            ClusterlessDetector, "load_results", staticmethod(_mock_load_results)
+            ClusterlessDetector,
+            "load_results",
+            staticmethod(_mock_load_results),
         ),
         patch.object(
             ClusterlessDetector, "load_model", staticmethod(_mock_load_model)
@@ -725,7 +734,7 @@ def mock_save_decoder_results_globally(mock_results_storage):
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
         # Write netCDF file with explicit netcdf4 engine
-        results.to_netcdf(results_path, engine='netcdf4')
+        results.to_netcdf(results_path, engine="netcdf4")
 
         # Write classifier as pickle (non-xarray object)
         with open(classifier_path, "wb") as f:
@@ -841,7 +850,7 @@ def mock_decoder_save(mock_results_storage):
         classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
 
         # Write netCDF file with explicit netcdf4 engine
-        results.to_netcdf(results_path, engine='netcdf4')
+        results.to_netcdf(results_path, engine="netcdf4")
 
         # Write classifier as pickle (non-xarray object)
         with open(classifier_path, "wb") as f:
@@ -879,7 +888,7 @@ def mock_detector_load_results(mock_results_storage):
 
         # Load from disk with explicit engine
         try:
-            return xr.open_dataset(filename_str, engine='netcdf4')
+            return xr.open_dataset(filename_str, engine="netcdf4")
         except (FileNotFoundError, OSError) as e:
             # OSError with "Unknown file format" means old pickle file exists
             if "Unknown file format" in str(e):
