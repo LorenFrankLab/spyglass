@@ -209,12 +209,8 @@ def populate_export(export_tbls, gen_export_selection):
     Export.super_delete(warn=False, safemode=False)
 
 
-<<<<<<< HEAD
 @pytest.mark.slow
-def test_export_populate(populate_export):
-=======
 def test_export_populate(populate_export, custom_analysis_file):
->>>>>>> 8c6ad08c3731de9506a6032793b950db3c966b78
     table, file = populate_export
 
     assert len(file) == 5, "Export files not captured correctly"
