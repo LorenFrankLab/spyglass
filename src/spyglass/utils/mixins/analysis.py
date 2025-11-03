@@ -264,11 +264,10 @@ class AnalysisMixin(BaseMixin):
 
         return analysis_file_name
 
-    @classmethod
-    def _alter_spyglass_version(cls, nwb_file_path: str) -> None:
+    def _alter_spyglass_version(self, nwb_file_path: str) -> None:
         """Change the source script to the current version of spyglass"""
         with h5py.File(nwb_file_path, "a") as f:
-            f["/general/source_script"][()] = cls._logged_env_info()
+            f["/general/source_script"][()] = self._logged_env_info()
 
     def _logged_env_info(self) -> str:
         """Get the environment information for logging."""
