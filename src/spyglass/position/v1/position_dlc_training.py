@@ -175,7 +175,6 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         dlc_config = read_config(config_path)
         project_path = dlc_config["project_path"]
-        key["project_path"] = project_path
 
         # ---- Build and save DLC configuration (yaml) file ----
         dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(
@@ -251,7 +250,10 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 max_modified_time = modified_time
 
         self_insert = dict(
-            key, latest_snapshot=latest_snapshot, config_template=dlc_config
+            key,
+            project_path=project_path,
+            latest_snapshot=latest_snapshot,
+            config_template=dlc_config,
         )
         dlc_model_name = (
             f"{key['project_name']}_"

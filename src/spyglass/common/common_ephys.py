@@ -524,13 +524,6 @@ class LFP(SpyglassMixin, dj.Imported):
         filter,
     ):
 
-        key.update(
-            {
-                "filter_name": filter["filter_name"],
-                "filter_sampling_rate": sampling_rate,
-            }
-        )
-
         if len(filter["filter_coeff"]) == 0:
             logger.error(
                 "Error in LFP: no filter found with data sampling rate of "
