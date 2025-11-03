@@ -671,7 +671,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             NN noise overlap, peak offset, peak channel, and number of spikes.
         3. Generates an analysis NWB file with the metrics.
         """
-        # File name involves random string. Can's pass it through make_fetch.
+        # File name involves random string. Can't pass it through make_fetch.
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         waveform_extractor = si.WaveformExtractor.load_from_folder(wf_path)
 
