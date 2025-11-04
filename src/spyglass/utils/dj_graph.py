@@ -301,30 +301,6 @@ class AbstractGraph(ABC):
         self._set_node(table, "restr", restriction)
         return restriction
 
-        # if not replace and existing:
-        # new_entries = bool((ft & restriction) - existing)
-        # excess_existing_entries = bool((ft & existing) - restriction)
-
-        # if new_entries and (not excess_existing_entries):
-        #     restriction = restriction
-        # elif excess_existing_entries and (not new_entries):
-        #     restriction = existing
-        #     return existing
-        # else:
-        #     try:
-        #         restriction = self._coerce_to_condition(
-        #             ft, (ft & [existing, restriction])
-        #         )
-        #     except pymysql.err.OperationalError as e:
-        #         print("squash nested query through a key fetch")
-        #         existing = (ft & existing).fetch("KEY")
-        #         restriction = self._coerce_to_condition(
-        #             ft, (ft & [existing, restriction])
-        #         )
-
-        # self._set_node(table, "restr", restriction)
-        # return restriction
-
     @lru_cache(maxsize=128)
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
