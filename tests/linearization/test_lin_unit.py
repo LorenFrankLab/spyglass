@@ -5,8 +5,6 @@ These tests use monkeypatch to replace expensive external operations
 Spyglass logic without waiting for slow computations.
 """
 
-import pytest
-
 
 def test_linearization_logic_mocked(
     sgpl,

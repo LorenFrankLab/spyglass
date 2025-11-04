@@ -5,8 +5,6 @@ calculations, database operations) but mock the expensive external
 dependencies (non_local_detector, file I/O).
 """
 
-import pytest
-
 
 def test_clusterless_data_processing_mocked(
     decode_v1,
@@ -42,8 +40,6 @@ def test_clusterless_data_processing_mocked(
         "estimate_decoding_params": False,
     }
 
-    # Only run populate if entry doesn't exist (avoids foreign key deletion issues)
-    table = decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
     # Insert selection
     decode_v1.clusterless.ClusterlessDecodingSelection.insert1(
         selection_key,
@@ -93,8 +89,6 @@ def test_sorted_spikes_data_processing_mocked(
         "estimate_decoding_params": False,
     }
 
-    # Only run populate if entry doesn't exist (avoids foreign key deletion issues)
-    table = decode_v1.sorted_spikes.SortedSpikesDecodingV1 & selection_key
     # Insert selection
     decode_v1.sorted_spikes.SortedSpikesDecodingSelection.insert1(
         selection_key,

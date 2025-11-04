@@ -97,7 +97,7 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
-def declare_all_merge_tables():
+def declare_all_merge_tables() -> List[Type[dj.Table]]:
     """Ensures all merge tables in the spyglass core package are declared.
     - Prevents circular imports
     - Prevents errors from table declaration within a transaction
@@ -110,7 +110,7 @@ def declare_all_merge_tables():
         SpikeSortingOutput,
     )  # noqa: F401
 
-    return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
+    return [DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput]
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
