@@ -520,6 +520,7 @@ class Export(SpyglassMixin, dj.Computed):
         """Populate Export table with the latest export for a given paper."""
         logger.debug(f"Populating Export for {key}")
         paper_key = (ExportSelection & key).fetch("paper_id", as_dict=True)[0]
+        paper_id = paper_key["paper_id"]
         query = ExportSelection & paper_key
 
         included_nwb_files = self._nwb_whitelist_paper_cache.get(paper_id, None)

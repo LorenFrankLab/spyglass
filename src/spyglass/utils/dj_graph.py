@@ -14,6 +14,7 @@ from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 import datajoint as dj
 import pandas as pd
+import pymysql
 from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
@@ -248,6 +249,10 @@ class AbstractGraph(ABC):
         """Get restriction from graph node."""
         return self._get_node(ensure_names(table)).get("restr")
 
+    def _get_restr_list(self, table):
+        """Get restriction list from graph node."""
+        return self._get_node(ensure_names(table)).get("restr_list", [])
+
     @staticmethod
     def _coerce_to_condition(ft: FreeTable, r: Any) -> str | QueryExpression:
         """Coerce restriction to a valid condition.
@@ -284,18 +289,41 @@ class AbstractGraph(ABC):
         restriction = self._coerce_to_condition(ft, restriction)
         existing = self._get_restr(table)
 
-        if not replace and existing:
-            if restriction == existing:
-                return restriction
-            join = ft & [existing, restriction]
-            if len(join) == len(ft & existing):
-                return existing  # restriction is a subset of existing
-            restriction = make_condition(
-                ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
-            )
+        if (not existing) or replace:
+            self._set_node(table, "restr_list", [restriction])
+            self._set_node(table, "restr", restriction)
+            return restriction
 
+        # Merge restrictions
+        restr_list = self._get_restr_list(table) + [restriction]
+        self._set_node(table, "restr_list", restr_list)
+        restriction = self._coerce_to_condition(ft, ft & restr_list)
         self._set_node(table, "restr", restriction)
         return restriction
+
+        # if not replace and existing:
+        # new_entries = bool((ft & restriction) - existing)
+        # excess_existing_entries = bool((ft & existing) - restriction)
+
+        # if new_entries and (not excess_existing_entries):
+        #     restriction = restriction
+        # elif excess_existing_entries and (not new_entries):
+        #     restriction = existing
+        #     return existing
+        # else:
+        #     try:
+        #         restriction = self._coerce_to_condition(
+        #             ft, (ft & [existing, restriction])
+        #         )
+        #     except pymysql.err.OperationalError as e:
+        #         print("squash nested query through a key fetch")
+        #         existing = (ft & existing).fetch("KEY")
+        #         restriction = self._coerce_to_condition(
+        #             ft, (ft & [existing, restriction])
+        #         )
+
+        # self._set_node(table, "restr", restriction)
+        # return restriction
 
     @lru_cache(maxsize=128)
     def _get_ft(self, table, with_restr=False, warn=True):
@@ -366,7 +394,9 @@ class AbstractGraph(ABC):
 
         Converts any non-string restrictions to string conditions.
         """
-        for table in self.visited:
+        for table in self.graph.nodes:
+            if not self.graph.nodes.get(table):
+                continue
             restr = self._get_restr(table)
             if not restr or isinstance(restr, str):
                 continue
@@ -927,11 +957,12 @@ class RestrGraph(AbstractGraph):
             total=len(to_visit),
             disable=not (show_progress or self.verbose),
         ):
+            self.visited.clear()
             restr = self._get_restr(table)
             self._log_truncate(
                 f"Start  {direction:<4}: {self._camel(table)}, {restr}"
             )
-            self.cascade1(table, restr, direction=direction)
+            self.cascade1(table, restr, direction=direction, replace=False)
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
         self.cascade_files()  # Otherwise attempts to re-cascade, recursively
