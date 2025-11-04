@@ -665,7 +665,7 @@ class AbstractGraph(ABC):
         Topological sort logic adopted from datajoint.diagram.
         """
         self.cascade(warn=False)
-        nodes = [n for n in self.visited if not n.isnumeric()]
+        nodes = [n for n in self.included_tables if not n.isnumeric()]
         return [
             self._get_ft(table, with_restr=True, warn=False)
             for table in self._topo_sort(nodes, subgraph=True, reverse=False)
@@ -676,7 +676,9 @@ class AbstractGraph(ABC):
         self.cascade(warn=False)
         valid_tables = self.analysis_file_tbl.children()
         nodes = [
-            n for n in self.visited if not n.isnumeric() and n in valid_tables
+            n
+            for n in self.included_tables
+            if not n.isnumeric() and n in valid_tables
         ]
         return [
             self._get_ft(table, with_restr=True, warn=False)
@@ -724,9 +726,16 @@ class AbstractGraph(ABC):
         self.cascade()
         return [
             {"table_name": table, "restriction": self._get_restr(table)}
-            for table in self.visited
+            for table in self.included_tables
             if self._get_restr(table)
         ]
+
+    @property
+    def included_tables(self) -> Set[str]:
+        """Get all tables included in the graph that are included from the cascade."""
+        if not self.cascaded:
+            return {}
+        return set([table for table, node in self.graph.nodes.items() if node])
 
 
 class RestrGraph(AbstractGraph):
@@ -1019,6 +1028,32 @@ class RestrGraph(AbstractGraph):
         self = self & other
         return self
 
+    # ----------------------------- Graph Addition -----------------------------
+
+    def _graph_union(self, other: "RestrGraph") -> "RestrGraph":
+        if not (self.cascaded and other.cascaded):
+            raise ValueError("Both RestrGraphs must be cascaded before union.")
+        other_dicts = other.as_dict
+
+        for dict in other_dicts:
+            table = dict["table_name"]
+            node = self.graph.nodes.get(table, {})
+            new_restr_list = self._get_restr_list(
+                table
+            ) + other._get_restr_list(table)
+
+            self._set_node(table, "restr_list", new_restr_list)
+            ft = self._get_ft(table)
+            restriction = self._coerce_to_condition(ft, ft & new_restr_list)
+            self._set_node(table, "restr", restriction)
+        return self
+
+    def __add__(self, other: "RestrGraph") -> "RestrGraph":
+        """Return union of two RestrGraphs."""
+        if not isinstance(other, RestrGraph):
+            raise TypeError(f"Cannot OR RestrGraph with {type(other)}")
+        return self._graph_union(other)
+
     # ----------------------------- File Handling -----------------------------
 
     @property
@@ -1111,7 +1146,7 @@ class RestrGraph(AbstractGraph):
 
         files = {
             file
-            for table in self.visited
+            for table in self.included_tables
             for file in self._get_node(table).get("files", [])
         }
 
