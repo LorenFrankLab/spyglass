@@ -35,6 +35,7 @@ import all foreign key references.
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Refactor pytests for speed, run fast tests on push #1440
 
 ### Pipelines
 
