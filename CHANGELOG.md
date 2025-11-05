@@ -52,7 +52,7 @@ import all foreign key references.
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task
       tables from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
-    - Improve error transparency on duplicate `Electrode` ids #XXXX
+    - Improve error transparency on duplicate `Electrode` ids #1454
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
