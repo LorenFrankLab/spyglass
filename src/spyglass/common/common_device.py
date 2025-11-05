@@ -400,8 +400,9 @@ class Probe(SpyglassIngestion, dj.Manual):
         definition = """
         # Electrode configuration, with ID, contact size, X/Y/Z coordinates
         -> Probe.Shank
-        probe_electrode: int          # electrode ID, output from acquisition
-                                      # system. Unique within a Probe
+        probe_electrode: int          # electrode ID from ShanksElectrode.name
+                                      # Should be globally unique across all
+                                      # probes and shanks for clarity (see #1447)
         ---
         contact_size = NULL: float    # (um) contact size
         rel_x = NULL: float           # (um) x coordinate of electrode
