@@ -52,10 +52,13 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
     definition = """
     data_acquisition_device_name: varchar(80)
     ---
-    -> DataAcquisitionDeviceSystem
-    -> DataAcquisitionDeviceAmplifier
+    -> [nullable] DataAcquisitionDeviceSystem
+    -> [nullable] DataAcquisitionDeviceAmplifier
     adc_circuit = NULL: varchar(2000)
     """
+
+    # NOTE: As of #1455, fks are nullable to accommodate null values. This cannot
+    # be changed with datajoint alter for existing databases.
 
     _expected_duplicates = True
 
@@ -193,15 +196,15 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
                 )
 
     @classmethod
-    def _add_system(cls, system):
+    def _add_system(cls, system=None):
         """Check the system value. If not in the db, prompt user to add it.
 
         This method also renames the system value "MCU" to "SpikeGadgets".
 
         Parameters
         ----------
-        system : str
-            The system value to check.
+        system : str or None
+            The system value to check. None is allowed for optional fields.
 
         Raises
         ------
@@ -211,15 +214,21 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
         Returns
         -------
-        system : str
-            The system value that was added to the database.
+        system : str or None
+            The system value that was added to the database, or None if
+            the input was None.
         """
+        # Handle None values for optional system field
+        if system is None:
+            return None
+
         if system == "MCU":
             system = "SpikeGadgets"
 
         all_values = DataAcquisitionDeviceSystem.fetch(
             "data_acquisition_device_system"
         ).tolist()
+
         if prompt_insert(
             name=system, all_values=all_values, table_type="system"
         ):
@@ -228,13 +237,13 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return system
 
     @classmethod
-    def _add_amplifier(cls, amplifier):
+    def _add_amplifier(cls, amplifier=None):
         """Check amplifier value. If not in db, prompt user to add.
 
         Parameters
         ----------
-        amplifier : str
-            The amplifier value to check.
+        amplifier : str or None
+            The amplifier value to check. None is allowed for optional fields.
 
         Raises
         ------
@@ -244,9 +253,14 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
         Returns
         -------
-        amplifier : str
-            The amplifier value that was added to the database.
+        amplifier : str or None
+            The amplifier value that was added to the database, or None if
+            the input was None.
         """
+        # Handle None values for optional amplifier field
+        if amplifier is None:
+            return None
+
         # standardize how Intan is represented in the database
         if amplifier.title() == "Intan":
             amplifier = "Intan"

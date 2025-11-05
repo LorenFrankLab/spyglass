@@ -47,3 +47,17 @@ def test_replace_nan_with_default(utils):
     assert result["probe_id"] == "nTrode32_probe description"
     assert result["probe_shank"] == 0
     assert result["probe_electrode"] == 194
+
+
+def test_none_acq_device_attrs(common):
+    """Test that _add_amplifier handles None values gracefully.
+
+    Issue #1446: DataAcqDevice insertion fails when optional amplifier and
+    system fields are None, despite being optional in ndx-franklab-novela
+    """
+    acq_dev = common.DataAcquisitionDevice()
+    amp = acq_dev._add_amplifier(None)
+    assert amp is None, "None amplifier should return None"
+
+    system = common.DataAcquisitionDevice._add_system(None)
+    assert system is None, "None system should return None"
