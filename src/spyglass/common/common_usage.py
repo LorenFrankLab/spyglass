@@ -384,12 +384,16 @@ class Export(SpyglassMixin, dj.Computed):
                 (self.Table & id_dict).delete_quick()
                 (self.Table & id_dict).delete_quick()
 
+        logger.debug(f"Building restr graph for export {key['export_id']}")
         restr_graph = ExportSelection().get_restr_graph(paper_key)
+
         # Original plus upstream files
+        logger.debug("Collecting file paths from export selection")
         file_paths = {
             *query.list_file_paths(paper_key, as_dict=False),
             *restr_graph.file_paths,
         }
+        logger.debug(f"Found {len(file_paths)} total files to export")
 
         # Check for linked nwb objects and add them to the export
         unlinked_files = set()
@@ -405,10 +409,15 @@ class Export(SpyglassMixin, dj.Computed):
             unlinked_files.update(links)
         file_paths = unlinked_files
 
+        table_count = len(restr_graph.as_dict)
+        logger.debug(f"Preparing {table_count} table entries for export")
         table_inserts = [
             {**key, **rd, "table_id": i}
             for i, rd in enumerate(restr_graph.as_dict)
         ]
+
+        file_count = len(file_paths)
+        logger.debug(f"Preparing {file_count} file entries for export")
         file_inserts = [
             {**key, "file_path": fp, "file_id": i}
             for i, fp in enumerate(file_paths)
@@ -425,12 +434,19 @@ class Export(SpyglassMixin, dj.Computed):
             msg="Must use same Spyglass version for analysis and export",
         )
 
+        logger.debug("Writing MySQL dump for export")
         sql_helper = SQLDumpHelper(**paper_key, spyglass_version=version_ids[0])
         sql_helper.write_mysqldump(free_tables=restr_graph.restr_ft)
 
+        logger.debug("Inserting export metadata into database")
         self.insert1({**key, **paper_key})
         self.Table().insert(table_inserts)
         self.File().insert(file_inserts)
+
+        logger.info(
+            f"Export {key['export_id']} completed successfully: "
+            f"{table_count} tables, {file_count} files"
+        )
 
     def prepare_files_for_export(self, key, **kwargs):
         """Resolve common known errors to make a set of analysis

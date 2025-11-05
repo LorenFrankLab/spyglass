@@ -56,6 +56,8 @@ def pytest_addoption(parser):
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
+    --container-name (str): Default 'spyglass-pytest'. Docker container name.
+    --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
         "--quiet-spy",
@@ -92,6 +94,20 @@ def pytest_addoption(parser):
         default=False,
         help="Skip downloads for and tests of DLC-dependent features.",
     )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-name",
+        action="store",
+        default="spyglass-pytest",
+        dest="container_name",
+        help="Docker container name for MySQL server.",
+    )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-port",
+        action="store",
+        default=None,
+        dest="container_port",
+        help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
+    )
 
 
 def pytest_configure(config):
@@ -110,6 +126,8 @@ def pytest_configure(config):
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
 
     SERVER = DockerMySQLManager(
+        container_name=config.option.container_name,
+        port=config.option.container_port,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
@@ -286,13 +304,13 @@ def load_config(dj_conn, base_dir):
 
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
-    dj_conn, mini_path, mini_content, teardown, server, load_config
+    dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
@@ -307,7 +325,7 @@ def mini_insert(
     if not server.connected:
         raise ConnectionError("No server connection.")
 
-    if len(Nwbfile()) != 0:
+    if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
     else:
         try:
