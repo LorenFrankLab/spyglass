@@ -1,3 +1,5 @@
+from typing import Optional
+
 import datajoint as dj
 import ndx_franklab_novela
 
@@ -80,8 +82,8 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
     def insert_from_nwbfile(
         self,
         nwb_file_name: str,
-        config=None,
-        dry_run=False,
+        config: Optional[dict] = None,
+        dry_run: bool = False,
     ):
         """Insert data acquisition devices from an NWB file.
 
@@ -107,7 +109,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return entries
 
     @classmethod
-    def get_all_device_names(cls, nwbf, config) -> tuple:
+    def get_all_device_names(cls, nwbf, config: Optional[dict]) -> tuple:
         """
         Return device names in the NWB file, after appending and overwriting by
         the config file.
@@ -149,7 +151,9 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return all_device_names, ndx_devices, config_devices
 
     @classmethod
-    def _add_device(cls, new_device_dict, test_mode=None):
+    def _add_device(
+        cls, new_device_dict: dict, test_mode: Optional[bool] = None
+    ):
         """Ensure match between NWB file info & database entry.
 
         If no DataAcquisitionDevice with the given name exists in the database,
@@ -196,7 +200,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
                 )
 
     @classmethod
-    def _add_system(cls, system=None):
+    def _add_system(cls, system: Optional[str] = None) -> Optional[str]:
         """Check the system value. If not in the db, prompt user to add it.
 
         This method also renames the system value "MCU" to "SpikeGadgets".
@@ -237,7 +241,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return system
 
     @classmethod
-    def _add_amplifier(cls, amplifier=None):
+    def _add_amplifier(cls, amplifier: Optional[str] = None) -> Optional[str]:
         """Check amplifier value. If not in db, prompt user to add.
 
         Parameters
@@ -308,7 +312,7 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
         }
 
     @staticmethod
-    def get_camera_id(camera_nwb_obj: ndx_franklab_novela.CameraDevice):
+    def get_camera_id(camera_nwb_obj: ndx_franklab_novela.CameraDevice) -> int:
         id_int = [int(i) for i in camera_nwb_obj.name.split() if i.isnumeric()]
         if not id_int:
             logger.warning(
@@ -350,11 +354,13 @@ class ProbeType(SpyglassIngestion, dj.Manual):
         }
 
     @staticmethod
-    def manufacturer_default_empty(probe_nwb_obj: ndx_franklab_novela.Probe):
+    def manufacturer_default_empty(
+        probe_nwb_obj: ndx_franklab_novela.Probe,
+    ) -> str:
         return getattr(probe_nwb_obj, "manufacturer", "")
 
     @staticmethod
-    def get_num_shanks(probe_nwb_obj: ndx_franklab_novela.Probe):
+    def get_num_shanks(probe_nwb_obj: ndx_franklab_novela.Probe) -> int:
         return len(probe_nwb_obj.shanks)
 
 
@@ -394,11 +400,11 @@ class Probe(SpyglassIngestion, dj.Manual):
             }
 
         @staticmethod
-        def parent_probe_type(shank_nwb_obj: ndx_franklab_novela.Shank):
+        def parent_probe_type(shank_nwb_obj: ndx_franklab_novela.Shank) -> str:
             return shank_nwb_obj.parent.probe_type
 
         @staticmethod
-        def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank):
+        def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank) -> int:
             return int(shank_nwb_obj.name)
 
         def _adjust_keys_for_entry(self, keys):
@@ -445,25 +451,25 @@ class Probe(SpyglassIngestion, dj.Manual):
         @staticmethod
         def parent_parent_probe_type(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> str:
             return electrode_nwb_obj.parent.parent.probe_type
 
         @staticmethod
         def parent_shank_name_to_int(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> int:
             return int(electrode_nwb_obj.parent.name)
 
         @staticmethod
         def electrode_name_to_int(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> int:
             return int(electrode_nwb_obj.name)
 
         @staticmethod
         def parent_probe_contact_size(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> float:
             return electrode_nwb_obj.parent.parent.contact_size
 
     # ------ Probe Ingestion Methods ------
@@ -486,7 +492,7 @@ class Probe(SpyglassIngestion, dj.Manual):
     @staticmethod
     def contact_side_numbering_as_string(
         probe_nwb_obj: ndx_franklab_novela.Probe,
-    ):
+    ) -> str:
         return "True" if probe_nwb_obj.contact_side_numbering else "False"
 
 
@@ -498,7 +504,7 @@ def prompt_insert(
     name: str,
     all_values: list,
     table: str = "Data Acquisition Device",
-    table_type: str = None,
+    table_type: Optional[str] = None,
 ) -> bool:
     """Prompt user to add an item to the database. Return True if yes.
 
