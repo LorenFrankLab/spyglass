@@ -163,7 +163,7 @@ def MixinChild(Mixin):
 
 
 def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
-    schema_orph = dj.Schema("orph_prefix", {}, connection=dj_conn)
+    schema_orph = dj.Schema("test_orph_prefix", {}, connection=dj_conn)
     schema_orph(Mixin)
     schema_orph(MixinChild)
 

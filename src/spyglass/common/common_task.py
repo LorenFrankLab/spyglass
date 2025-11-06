@@ -217,7 +217,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                         epoch, session_intervals
                     )
                     if target_interval is None:
-                        logger.warning("Skipping epoch.")
                         continue
                     key["interval_list_name"] = target_interval
                     task_epoch_inserts.append(key.copy())
@@ -250,7 +249,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                     epoch, session_intervals
                 )
                 if target_interval is None:
-                    logger.warning("Skipping epoch.")
                     continue
                 new_key["interval_list_name"] = target_interval
                 task_epoch_inserts.append(key.copy())
@@ -264,22 +262,65 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
     @classmethod
     def get_epoch_interval_name(cls, epoch, session_intervals):
-        """Get the interval name for a given epoch based on matching number"""
-        target_interval = str(epoch).zfill(2)
+        """Get the interval name for a given epoch based on matching number.
+
+        This method implements flexible matching to handle various epoch tag
+        formats. It tries multiple formats to find a match:
+        1. Exact match (e.g., "1")
+        2. Two-digit zero-padded (e.g., "01")
+        3. Three-digit zero-padded (e.g., "001")
+
+        Parameters
+        ----------
+        epoch : int or str
+            The epoch number to search for
+        session_intervals : list of str
+            List of interval names from IntervalList
+
+        Returns
+        -------
+        str or None
+            The matching interval name, or None if no unique match is found
+
+        Examples
+        --------
+        >>> session_intervals = ["1", "02", "003"]
+        >>> TaskEpoch.get_epoch_interval_name(1, session_intervals)
+        '1'
+        >>> TaskEpoch.get_epoch_interval_name(2, session_intervals)
+        '02'
+        >>> TaskEpoch.get_epoch_interval_name(3, session_intervals)
+        '003'
+        """
+        if epoch in session_intervals:
+            return epoch
+
+        # Try multiple formats:
+        possible_formats = [
+            str(epoch),  # Try exact match first (e.g., "1")
+            str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
+            str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
+        ]
+
+        # Find matches for any format, remove duplicates preserving order
         possible_targets = [
             interval
             for interval in session_intervals
-            if target_interval in interval
+            for target in list(dict.fromkeys(possible_formats))
+            if target in interval
         ]
-        if not possible_targets:
-            logger.warning(f"Interval not found for epoch {epoch}.")
-        elif len(possible_targets) > 1:
-            logger.warning(
-                f"Multiple intervals found for epoch {epoch}. "
-                + f"matches are {possible_targets}."
-            )
-        else:
+        possible_targets = list(dict.fromkeys(possible_targets))
+
+        if len(possible_targets) == 1:
             return possible_targets[0]
+
+        warn = "Multiple" if len(possible_targets) > 1 else "No"
+
+        logger.warning(
+            f"{warn} intervals not found for epoch {epoch}. "
+            f"Available intervals: {session_intervals}"
+        )
+        return None
 
     @classmethod
     def update_entries(cls, restrict=True):
