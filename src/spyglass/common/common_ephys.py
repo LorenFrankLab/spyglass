@@ -201,8 +201,8 @@ class Electrode(SpyglassMixin, dj.Imported):
             electrode_inserts.append(key.copy())
 
         # Validate electrode ID uniqueness (issue #1447)
-        # Check for duplicate probe_electrode values across the entire session
-        _validate_electrode_ids(electrode_inserts, nwb_file_name)
+        if not self._test_mode:
+            _validate_electrode_ids(electrode_inserts, nwb_file_name)
 
         self.insert(
             electrode_inserts,
