@@ -103,9 +103,6 @@ def epoch_tag_nwb(raw_dir, common):
         epoch_tags=["1", "02", "003"],
     )
 
-    # Write NWB file
-    from spyglass.settings import raw_dir
-
     file_name = "test_epoch_tag_format.nwb"
     nwb_path = Path(raw_dir) / file_name
     if nwb_path.exists():
