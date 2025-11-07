@@ -356,14 +356,17 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
 
 @schema
 class VideoFile(SpyglassMixin, dj.Imported):
-    """
+    """Video file metadata from NWB ImageSeries.
 
     Notes
     -----
     The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is
     used. If PTP is not used, the video timestamps come from
-    videoTimeStamps.cameraHWFrameCount .
+    videoTimeStamps.cameraHWFrameCount.
 
+    **Issue #1444 Note:** VideoFile requires TaskEpoch entries to import videos.
+    If your NWB file contains ImageSeries (video data) without task metadata,
+    a warning will be issued.
     """
 
     definition = """
@@ -411,6 +414,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         cam_device_str = r"camera_device (\d+)"
         is_found = False
+        self_inserts = []
         for ind, video in enumerate(videos.values()):
             if isinstance(video, pynwb.image.ImageSeries):
                 video = [video]
@@ -423,35 +427,70 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 if not len(these_times) > (0.9 * len(timestamps)):
                     continue
 
-                nwb_cam_device = video_obj.device.name
-
-                # returns whatever was captured in the first group (within the
-                # parentheses) of the regular expression - in this case, 0
-
-                key["video_file_num"] = int(
-                    re.match(cam_device_str, nwb_cam_device)[1]
-                )
                 camera_name = video_obj.device.camera_name
-                if CameraDevice & {"camera_name": camera_name}:
-                    key["camera_name"] = video_obj.device.camera_name
+                camera_dict = dict(camera_name=camera_name)
+                if CameraDevice & camera_dict:
+                    key.update(camera_dict)
                 else:
                     raise KeyError(
                         f"No camera with camera_name: {camera_name} found "
                         + "in CameraDevice table."
                     )
-                key["video_file_object_id"] = video_obj.object_id
-                self.insert1(
-                    key,
-                    skip_duplicates=skip_duplicates,
-                    allow_direct_insert=True,
+
+                self_inserts.append(
+                    dict(
+                        key,
+                        video_file_num=int(
+                            re.match(cam_device_str, video_obj.device.name)[1]
+                        ),
+                        video_file_object_id=video_obj.object_id,
+                    )
                 )
                 is_found = True
+
+        if self_inserts:
+            self.insert(
+                self_inserts,
+                skip_duplicates=skip_duplicates,
+                allow_direct_insert=True,
+            )
+
+        # Issue #1444: Check for partial imports while file is already open
+        if videos and len(self_inserts) < len(videos):
+            self._warn_partial_import(
+                nwb_file_name, len(videos), len(self_inserts)
+            )
 
         if not is_found and verbose:
             logger.info(
                 f"No video found corresponding to file {nwb_file_name}, "
                 + f"epoch {interval_list_name}"
             )
+
+    @staticmethod
+    def _warn_partial_import(nwb_file_name, total_count, imported_count):
+        """Warn about partial video import when file is already open.
+
+        Issue #1444: Some videos may not be imported due to timestamp
+        misalignment, camera device issues, or other problems.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Name of the NWB file
+        total_count : int
+            Total number of ImageSeries found
+        imported_count : int
+            Number of ImageSeries successfully imported
+        """
+        logger.warning(
+            f"{nwb_file_name}: VideoFile Partial Import Warning\n"
+            f"Found {total_count} ImageSeries, but inserted {imported_count}.\n"
+            f"Possible reasons:\n"
+            f"1. Video timestamps don't overlap with TaskEpoch intervals\n"
+            f"2. Camera devices not registered in CameraDevice table\n"
+            f"3. Video device names don't match expected format\n"
+        )
 
     @classmethod
     def update_entries(cls, restrict=True):
