@@ -52,6 +52,7 @@ import all foreign key references.
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task
       tables from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Allow multiple VideoFile entries during ingestion #1462
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position
