@@ -39,7 +39,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
     filter_sampling_rate: int
         The sampling rate of the filter.
     filter_type: str
-        The type of filter ('lowpass', 'highpass', or 'bandpass').
+        The type of filter ('lowpass', 'highpass', 'bandpass', or 'notch').
     filter_low_stop: float
         The lowest frequency for the stop band for low filter.
     filter_low_pass: float
@@ -58,7 +58,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter
     ---
-    filter_type: enum("lowpass", "highpass", "bandpass")
+    filter_type: enum("lowpass", "highpass", "bandpass", "notch")
     filter_low_stop = 0: float     # lowest freq for stop band for low filt
     filter_low_pass = 0: float     # lowest freq for pass band of low filt
     filter_high_pass = 0: float    # highest freq for pass band for high filt
@@ -86,7 +86,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         fs: float
             The filter sampling rate.
         filter_type: str
-            The type of the filter ('lowpass', 'highpass', or 'bandpass').
+            The type of the filter ('lowpass', 'highpass', 'bandpass', or 'notch').
         band_edges: List[float]
             The band edges for the filter.
         comments: str, optional)
@@ -103,15 +103,16 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         Exception:
             Raises an exception if an unexpected filter type is encountered.
         """
-        VALID_FILTERS = {"lowpass": 2, "highpass": 2, "bandpass": 4}
+        VALID_FILTERS = {"lowpass": 2, "highpass": 2, "bandpass": 4, "notch": 4}
         FILTER_ERR = "Error in Filter.add_filter: "
         FILTER_N_ERR = FILTER_ERR + "filter {} requires {} band_frequencies."
 
-        # add an FIR bandpass filter of the specified type.
+        # add an FIR filter of the specified type.
         # band_edges should be as follows:
         #   low pass : [high_pass high_stop]
-        #   high pass: [low stop low pass]
-        #   band pass: [low_stop low_pass high_pass high_stop].
+        #   high pass: [low_stop low_pass]
+        #   band pass: [low_stop low_pass high_pass high_stop]
+        #   notch    : [low_stop low_pass high_pass high_stop].
         if filter_type not in VALID_FILTERS:
             logger.error(
                 FILTER_ERR
@@ -128,11 +129,12 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         gsp = _import_ghostipy()
         TRANS_SPLINE = 2  # transition spline will be quadratic
 
-        if filter_type != "bandpass":
+        if filter_type in ("lowpass", "highpass"):
             transition_width = band_edges[1] - band_edges[0]
 
         else:
             # transition width is mean of left and right transition regions
+            # for bandpass and notch filters
             transition_width = (
                 (band_edges[1] - band_edges[0])
                 + (band_edges[3] - band_edges[2])
@@ -164,8 +166,16 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 "filter_low_stop": band_edges[0],
                 "filter_low_pass": band_edges[1],
             }
-        else:
+        elif filter_type == "bandpass":
             desired = [0, 1, 1, 0]
+            pass_stop_dict = {
+                "filter_low_stop": band_edges[0],
+                "filter_low_pass": band_edges[1],
+                "filter_high_pass": band_edges[2],
+                "filter_high_stop": band_edges[3],
+            }
+        else:  # notch
+            desired = [1, 0, 0, 1]
             pass_stop_dict = {
                 "filter_low_stop": band_edges[0],
                 "filter_low_pass": band_edges[1],
