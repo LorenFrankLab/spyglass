@@ -1001,10 +1001,9 @@ def _validate_electrode_ids(electrode_inserts, nwb_file_name):
 
     # Track probe_electrode values by location
     # probe_electrode -> list of (probe_id, probe_shank, nwb_electrode_id)
-    electrode_locs = defaultdict(list)
-
+    elec_locs = defaultdict(list)
     for electrode in probe_electrodes:
-        electrode_locs[electrode["probe_electrode"]].append(
+        elec_locs[electrode["probe_electrode"]].append(
             (
                 electrode["probe_id"],
                 electrode.get("probe_shank", "unknown"),
@@ -1012,17 +1011,14 @@ def _validate_electrode_ids(electrode_inserts, nwb_file_name):
             )
         )
 
-    duplicates = {
-        e: locs for e, locs in electrode_locs.items() if len(locs) > 1
-    }
+    duplicates = {e: locs for e, locs in elec_locs.items() if len(locs) > 1}
 
     if not duplicates:
         return  # All probe_electrode values are unique
 
     error_lines = [
-        f"\nDuplicate electrode IDs detected in NWB file '{nwb_file_name}'.",
-        "\nElectrode IDs (probe_electrode values) must be globally unique ",
-        "across all probes and shanks.\nThe following IDs are duplicated:\n",
+        f"Duplicate electrode IDs detected in NWB file '{nwb_file_name}'.",
+        "The following IDs are duplicated:",
     ]
 
     for elec_id, locations in sorted(duplicates.items()):
@@ -1033,5 +1029,10 @@ def _validate_electrode_ids(electrode_inserts, nwb_file_name):
             error_lines.append(
                 f"    - Probe '{probe_id}', Shank {shank}, NWB index {nwb_id}"
             )
+
+    error_lines.append(
+        "To resolve, please ensure that each electrode has a unique "
+        + "'probe_electrode' value across all probes and shanks. "
+    )
 
     raise ValueError("\n".join(error_lines))
