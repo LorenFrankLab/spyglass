@@ -1,5 +1,6 @@
 """Mixin for tables with custom populate behavior."""
 
+from spyglass.utils.dj_helper_fn import NonDaemonPool, populate_pass_function
 from spyglass.utils.mixins.base import BaseMixin
 
 

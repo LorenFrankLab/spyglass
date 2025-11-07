@@ -47,7 +47,7 @@ dependencies = [
     "matplotlib",
     "ndx_franklab_novela>=0.1.0",
     "ndx-pose",
-    "ndx-optogenetics",
+    "ndx-optogenetics==0.2.0",
     "non_local_detector",
     "numpy",
     "opencv-python",

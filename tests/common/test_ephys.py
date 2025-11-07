@@ -1,5 +1,16 @@
+import numpy as np
 import pytest
+from ndx_franklab_novela import (
+    DataAcqDevice,
+    NwbElectrodeGroup,
+    Probe,
+    Shank,
+    ShanksElectrode,
+)
 from numpy import array_equal
+from pynwb import NWBHDF5IO
+from pynwb.testing.mock.ecephys import mock_ElectricalSeries
+from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 from ..conftest import TEARDOWN
 
@@ -54,3 +65,21 @@ def test_set_lfp_electrodes(mini_insert, common_ephys, mini_copy_name):
 @pytest.mark.skip(reason="Not testing V0: common lfp")
 def test_lfp():
     pass
+
+
+def test_duplicate_electrode_ids_error(common_ephys):
+    """Test duplicate electrode IDs (probe_electrode) produce clear error."""
+    validate = common_ephys._validate_electrode_ids
+    bad_inserts = [
+        dict(probe_electrode=i, probe_id=j) for i in [1, 2] for j in [1, 2]
+    ]
+
+    # Attempt insertion - expect clear ValueError about duplicate electrode IDs
+    with pytest.raises(ValueError) as exc_info:
+        validate(bad_inserts, "some_file")
+
+    # Verify we get a clear, informative error message
+    error_message = str(exc_info.value)
+    assert "Duplicate electrode IDs detected" in error_message
+    assert "Electrode ID 1 appears 2 times" in error_message
+    assert "Electrode ID 2 appears 2 times" in error_message
