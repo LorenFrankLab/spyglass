@@ -251,7 +251,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
                 if target_interval is None:
                     continue
                 new_key["interval_list_name"] = target_interval
-                task_epoch_inserts.append(key.copy())
+                task_epoch_inserts.append(new_key.copy())
 
         # check if the task entries are in the Task table and if not, add it
         [
@@ -301,23 +301,23 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
             str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
         ]
+        unique_formats = list(dict.fromkeys(possible_formats))
 
         # Find matches for any format, remove duplicates preserving order
         possible_targets = [
             interval
             for interval in session_intervals
-            for target in list(dict.fromkeys(possible_formats))
+            for target in unique_formats
             if target in interval
         ]
-        possible_targets = list(dict.fromkeys(possible_targets))
 
-        if len(possible_targets) == 1:
+        if len(set(possible_targets)) == 1:
             return possible_targets[0]
 
         warn = "Multiple" if len(possible_targets) > 1 else "No"
 
         logger.warning(
-            f"{warn} intervals not found for epoch {epoch}. "
+            f"{warn} interval(s) found for epoch {epoch}. "
             f"Available intervals: {session_intervals}"
         )
         return None
