@@ -1,5 +1,5 @@
 import inspect
-from typing import Callable, Dict, List, Optional, Type, TypeAlias, Union
+from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
 from datajoint.utils import to_camel_case
@@ -9,7 +9,8 @@ from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 
-IngestionEntries: TypeAlias = Dict["IngestionMixin", List[dict]]
+# typing alias compatible with Python 3.9
+IngestionEntries = Dict["IngestionMixin", List[dict]]
 # How IngestionMixin handles generated entries from NWB objects
 # Dict keys are IngestionMixin table classes, or FreeTable Table objects
 # Values are lists of dicts to insert into those tables
