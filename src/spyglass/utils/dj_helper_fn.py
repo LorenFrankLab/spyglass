@@ -6,7 +6,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Type, Union
+from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -97,8 +97,9 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
-def declare_all_merge_tables() -> List[Type[dj.Table]]:
+def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     """Ensures all merge tables in the spyglass core package are declared.
+
     - Prevents circular imports
     - Prevents errors from table declaration within a transaction
     - Run during nwb insertion
@@ -110,7 +111,7 @@ def declare_all_merge_tables() -> List[Type[dj.Table]]:
         SpikeSortingOutput,
     )  # noqa: F401
 
-    return [DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput]
+    return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
