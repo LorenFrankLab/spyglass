@@ -8,7 +8,11 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
-#
+# Position V2 #1317
+from spyglass.common.common_behav import VideoFile
+
+VideoFile().alter()
+VideoFile.update_entries()
 ```
 
 ### Documentation
@@ -55,6 +59,7 @@ import all foreign key references.
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Improve error transparency on duplicate `Electrode` ids #1454
+    - Add position v2 #1317
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
 - Position

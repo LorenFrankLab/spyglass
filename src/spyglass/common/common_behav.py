@@ -1,6 +1,6 @@
-import pathlib
 import re
 from functools import reduce
+from pathlib import Path
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -363,7 +363,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
     The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is
     used. If PTP is not used, the video timestamps come from
     videoTimeStamps.cameraHWFrameCount .
-
     """
 
     definition = """
@@ -372,6 +371,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
     ---
     camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
+    path = NULL: varchar(512)  # path to video file (if extracted)
+    unique index (path)
     """
 
     _nwb_table = Nwbfile
@@ -439,9 +440,12 @@ class VideoFile(SpyglassMixin, dj.Imported):
                         f"No camera with camera_name: {camera_name} found "
                         + "in CameraDevice table."
                     )
-                key["video_file_object_id"] = video_obj.object_id
                 self.insert1(
-                    key,
+                    dict(
+                        key,
+                        video_file_object_id=video_obj.object_id,
+                        path=Path(video_dir) / video_obj.name,
+                    ),
                     skip_duplicates=skip_duplicates,
                     allow_direct_insert=True,
                 )
@@ -456,9 +460,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
     @classmethod
     def update_entries(cls, restrict=True):
         """Update the camera_name field for all entries in the table."""
-        existing_entries = (cls & restrict).fetch("KEY")
+        query = cls & restrict & "camera_name IS NULL OR path IS NULL"
+        existing_entries = query.fetch("KEY")
+
         for row in existing_entries:
-            if (cls & row).fetch1("camera_name"):
+            if row.get("camera_name"):
                 continue
             video_nwb = (cls & row).fetch_nwb()[0]
             if len(video_nwb) != 1:
@@ -466,6 +472,13 @@ class VideoFile(SpyglassMixin, dj.Imported):
                     f"Expecting 1 video file per entry. {len(video_nwb)} found"
                 )
             row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            cls.update1(row=row)
+
+        for row in existing_entries:
+            if row.get("path"):
+                continue
+            abs_path = cls.get_abs_path(row)
+            row["path"] = abs_path
             cls.update1(row=row)
 
     @classmethod
@@ -485,14 +498,14 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_path_obj = pathlib.Path(video_dir)
+        video_path_obj = Path(video_dir)
         video_info = (cls & key).fetch1()
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
         video_filename = nwb_video.name
         # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(video_path_obj / video_filename)
+        nwb_video_file_abspath = Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
         else:
@@ -518,16 +531,21 @@ class VideoFile(SpyglassMixin, dj.Imported):
         key : dict
             The primary key for the given video file path.
         """
-        video_path = pathlib.Path(video_file_path).resolve()
+        video_path = Path(video_file_path).resolve()
+
         if not video_path.exists():
             raise FileNotFoundError(f"File {video_path} does not exist.")
 
-        raise NotImplementedError
+        _ = self.update_entries()  # ensure paths are updated
 
-        # TODO: Ideally, we could find a path in the DLC config and readily map
-        # it to a TaskEpoch. Is it worth the fuzzy find here of pulling the date
-        # and subject info from the path? Code already exists in my 'find rec
-        # file' project
+        query = self & f"path='{video_path.as_posix()}'"
+
+        if len(query) != 1:
+            raise ValueError(
+                f"No unique entry in VideoFile for {video_path}: \n{query}"
+            )
+
+        return query.fetch1("KEY")
 
 
 @schema
@@ -541,10 +559,6 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     # #849 - Insert null to avoid rerun
 
     def make(self, key):
-        """Make without transaction"""
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         # Find correspondence between pos valid times names and epochs. Use
         # epsilon to tolerate small differences in epoch boundaries across
         # epoch/pos intervals
@@ -670,7 +684,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     if populate_missing and (no_entries or null_entry):
         if null_entry:
             pos_query.delete(safemode=False)  # no prompt
-        PositionIntervalMap()._no_transaction_make(key)
+        PositionIntervalMap().make(key)
         pos_query = PositionIntervalMap & key
 
     if pos_query.fetch(pos_str)[0] == "":
