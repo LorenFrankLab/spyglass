@@ -8,7 +8,9 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
-#
+from spyglass.decoding.v1.core import DecodingParameters
+
+DecodingParameters().alter()
 ```
 
 ### Documentation
@@ -57,6 +59,7 @@ import all foreign key references.
     - Improve error transparency on duplicate `Electrode` ids #1454
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
+    - Change BLOB fields to LONGBLOB in DecodingParameters #1463
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
