@@ -1,3 +1,5 @@
+from typing import Optional
+
 import datajoint as dj
 import ndx_franklab_novela
 
@@ -52,10 +54,13 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
     definition = """
     data_acquisition_device_name: varchar(80)
     ---
-    -> DataAcquisitionDeviceSystem
-    -> DataAcquisitionDeviceAmplifier
+    -> [nullable] DataAcquisitionDeviceSystem
+    -> [nullable] DataAcquisitionDeviceAmplifier
     adc_circuit = NULL: varchar(2000)
     """
+
+    # NOTE: As of #1455, fks are nullable to accommodate null values. This cannot
+    # be changed with datajoint alter for existing databases.
 
     _expected_duplicates = True
 
@@ -77,8 +82,8 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
     def insert_from_nwbfile(
         self,
         nwb_file_name: str,
-        config=None,
-        dry_run=False,
+        config: Optional[dict] = None,
+        dry_run: bool = False,
     ):
         """Insert data acquisition devices from an NWB file.
 
@@ -104,7 +109,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return entries
 
     @classmethod
-    def get_all_device_names(cls, nwbf, config) -> tuple:
+    def get_all_device_names(cls, nwbf, config: Optional[dict]) -> tuple:
         """
         Return device names in the NWB file, after appending and overwriting by
         the config file.
@@ -146,7 +151,9 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return all_device_names, ndx_devices, config_devices
 
     @classmethod
-    def _add_device(cls, new_device_dict, test_mode=None):
+    def _add_device(
+        cls, new_device_dict: dict, test_mode: Optional[bool] = None
+    ):
         """Ensure match between NWB file info & database entry.
 
         If no DataAcquisitionDevice with the given name exists in the database,
@@ -193,15 +200,15 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
                 )
 
     @classmethod
-    def _add_system(cls, system):
+    def _add_system(cls, system: Optional[str] = None) -> Optional[str]:
         """Check the system value. If not in the db, prompt user to add it.
 
         This method also renames the system value "MCU" to "SpikeGadgets".
 
         Parameters
         ----------
-        system : str
-            The system value to check.
+        system : str or None
+            The system value to check. None is allowed for optional fields.
 
         Raises
         ------
@@ -211,15 +218,21 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
         Returns
         -------
-        system : str
-            The system value that was added to the database.
+        system : str or None
+            The system value that was added to the database, or None if
+            the input was None.
         """
+        # Handle None values for optional system field
+        if system is None:
+            return None
+
         if system == "MCU":
             system = "SpikeGadgets"
 
         all_values = DataAcquisitionDeviceSystem.fetch(
             "data_acquisition_device_system"
         ).tolist()
+
         if prompt_insert(
             name=system, all_values=all_values, table_type="system"
         ):
@@ -228,13 +241,13 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         return system
 
     @classmethod
-    def _add_amplifier(cls, amplifier):
+    def _add_amplifier(cls, amplifier: Optional[str] = None) -> Optional[str]:
         """Check amplifier value. If not in db, prompt user to add.
 
         Parameters
         ----------
-        amplifier : str
-            The amplifier value to check.
+        amplifier : str or None
+            The amplifier value to check. None is allowed for optional fields.
 
         Raises
         ------
@@ -244,9 +257,14 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
         Returns
         -------
-        amplifier : str
-            The amplifier value that was added to the database.
+        amplifier : str or None
+            The amplifier value that was added to the database, or None if
+            the input was None.
         """
+        # Handle None values for optional amplifier field
+        if amplifier is None:
+            return None
+
         # standardize how Intan is represented in the database
         if amplifier.title() == "Intan":
             amplifier = "Intan"
@@ -294,7 +312,7 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
         }
 
     @staticmethod
-    def get_camera_id(camera_nwb_obj: ndx_franklab_novela.CameraDevice):
+    def get_camera_id(camera_nwb_obj: ndx_franklab_novela.CameraDevice) -> int:
         id_int = [int(i) for i in camera_nwb_obj.name.split() if i.isnumeric()]
         if not id_int:
             logger.warning(
@@ -336,11 +354,13 @@ class ProbeType(SpyglassIngestion, dj.Manual):
         }
 
     @staticmethod
-    def manufacturer_default_empty(probe_nwb_obj: ndx_franklab_novela.Probe):
+    def manufacturer_default_empty(
+        probe_nwb_obj: ndx_franklab_novela.Probe,
+    ) -> str:
         return getattr(probe_nwb_obj, "manufacturer", "")
 
     @staticmethod
-    def get_num_shanks(probe_nwb_obj: ndx_franklab_novela.Probe):
+    def get_num_shanks(probe_nwb_obj: ndx_franklab_novela.Probe) -> int:
         return len(probe_nwb_obj.shanks)
 
 
@@ -380,11 +400,11 @@ class Probe(SpyglassIngestion, dj.Manual):
             }
 
         @staticmethod
-        def parent_probe_type(shank_nwb_obj: ndx_franklab_novela.Shank):
+        def parent_probe_type(shank_nwb_obj: ndx_franklab_novela.Shank) -> str:
             return shank_nwb_obj.parent.probe_type
 
         @staticmethod
-        def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank):
+        def shank_name_to_int(shank_nwb_obj: ndx_franklab_novela.Shank) -> int:
             return int(shank_nwb_obj.name)
 
         def _adjust_keys_for_entry(self, keys):
@@ -400,8 +420,9 @@ class Probe(SpyglassIngestion, dj.Manual):
         definition = """
         # Electrode configuration, with ID, contact size, X/Y/Z coordinates
         -> Probe.Shank
-        probe_electrode: int          # electrode ID, output from acquisition
-                                      # system. Unique within a Probe
+        probe_electrode: int          # electrode ID from ShanksElectrode.name
+                                      # Should be globally unique across all
+                                      # probes and shanks for clarity (see #1447)
         ---
         contact_size = NULL: float    # (um) contact size
         rel_x = NULL: float           # (um) x coordinate of electrode
@@ -431,25 +452,25 @@ class Probe(SpyglassIngestion, dj.Manual):
         @staticmethod
         def parent_parent_probe_type(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> str:
             return electrode_nwb_obj.parent.parent.probe_type
 
         @staticmethod
         def parent_shank_name_to_int(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> int:
             return int(electrode_nwb_obj.parent.name)
 
         @staticmethod
         def electrode_name_to_int(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> int:
             return int(electrode_nwb_obj.name)
 
         @staticmethod
         def parent_probe_contact_size(
             electrode_nwb_obj: ndx_franklab_novela.ShanksElectrode,
-        ):
+        ) -> float:
             return electrode_nwb_obj.parent.parent.contact_size
 
     # ------ Probe Ingestion Methods ------
@@ -472,7 +493,7 @@ class Probe(SpyglassIngestion, dj.Manual):
     @staticmethod
     def contact_side_numbering_as_string(
         probe_nwb_obj: ndx_franklab_novela.Probe,
-    ):
+    ) -> str:
         return "True" if probe_nwb_obj.contact_side_numbering else "False"
 
 
@@ -484,7 +505,7 @@ def prompt_insert(
     name: str,
     all_values: list,
     table: str = "Data Acquisition Device",
-    table_type: str = None,
+    table_type: Optional[str] = None,
 ) -> bool:
     """Prompt user to add an item to the database. Return True if yes.
 
