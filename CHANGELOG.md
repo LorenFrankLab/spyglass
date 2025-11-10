@@ -1,26 +1,69 @@
 # Change Log
 
-<!--
-## [0.5.6] (Unreleased) - WHEN UNCOMMENTING, ADD LINK AT BOTTOM
+## [0.5.6] (Unreleased)
 
 ### Release Notes
 
-Running draft to be removed immediately prior to release.
-When altering tables, import all foreign key references.
+Running draft to be removed immediately prior to release. When altering tables,
+import all foreign key references.
 
 ```python
 #
 ```
 
+### Documentation
+
+- Delete extra pyscripts that were renamed # 1363
+- Add note on fetching changes to setup notebook #1371
+- Revise table field docstring heading and `mermaid` diagram generation #1402
+- Add pages for custom analysis tables and class inheritance structure #1435
+
 ### Infrastructure
 
-- Thing
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
+- Allow email send on space check success, clean up maintenance logging #1381
+- Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
+- Sort `UserEnvironment` dict objects by key for consistency #1380
+- Fix typo in VideoFile.make #1427
+- Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+    from NWB #1433
+- Split `SpyglassMixin` into task-specific mixins #1435 #1451
+- Auto-load within-Spyglass tables for graph operations #1368
+- Allow rechecking of recomputes #1380, #1413
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Pin `ndx-optogenetics` to 0.2.0 #1458
 
 ### Pipelines
 
+- Behavior
+    - Add methods for calling moseq visualization functions #1374
 - Common
-    - Thing
--->
+    - Add tables for storing optogenetic experiment information #1312
+    - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Change `IntervalList.insert` to `cautious_insert` #1423
+    - Allow email send on space check success, clean up maintenance logging #1381
+    - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+    - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
+    - Sort `UserEnvironment` dict objects by key for consistency #1380
+    - Fix typo in VideoFile.make #1427
+    - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+        from NWB #1433
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Allow nullable `DataAcquisitionDevice` foreign keys #1455
+    - Improve error transparency on duplicate `Electrode` ids #1454
+- Decoding
+    - Ensure results directory is created if it doesn't exist #1362
+- Position
+    - Ensure video files are properly added to `DLCProject` # 1367
+    - DLC parameter handling improvements and default value corrections #1379
+    - Fix ingestion nwb files with position objects but no spatial series #1405
+    - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+- Spikesorting
+    - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -517,3 +560,4 @@ When altering tables, import all foreign key references.
 [0.5.3]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.3
 [0.5.4]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.4
 [0.5.5]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.5
+[0.5.6]: https://github.com/LorenFrankLab/spyglass/releases/tag/0.5.6

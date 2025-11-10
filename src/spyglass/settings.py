@@ -113,10 +113,11 @@ class SpyglassConfig:
         Loads the configuration settings for the object.
 
         Order of precedence, where X is base, raw, analysis, etc.:
-            1. SpyglassConfig(base_dir="string") for base dir only
-            2. dj.config['custom']['{spyglass/kachery}_dirs']['X']
-            3. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
-            4. resolved_base_dir/X for non-base dirs
+        1. SpyglassConfig(base_dir="string") for base dir only
+        2. dj.config['custom']['spyglass_dirs']['X']
+        3. dj.config['custom']['kachery_dirs']['X']
+        4. os.environ['{SPYGLASS/KACHERY}_{X}_DIR']
+        5. resolved_base_dir/X for non-base dirs
 
         Parameters
         ----------

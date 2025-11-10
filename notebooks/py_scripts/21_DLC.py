@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.7
+#       jupytext_version: 1.17.0
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -38,7 +38,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-position Conda environment (instructions for install are in the environment_position.yml)**
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environment_dlc.yml)**
 #
 
 # Here is a schematic showing the tables used in this pipeline.
@@ -136,7 +136,7 @@ sgp.BodyPart()
 
 # To train a model, we'll need to extract frames, which we can label as training data. We can construct a list of videos from which we'll extract frames.
 #
-# The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos you want to use.
+# The list can either contain dictionaries identifying behavioral videos for NWB files that have already been added to Spyglass, or absolute file paths to the videos (in .h264 format) you want to use.
 #
 # For this tutorial, we'll use two videos for which we already have frames labeled.
 #
@@ -418,8 +418,6 @@ video_file_num = 0  # change based on VideoFile entry
 #
 # - `task_mode` (trigger or load) determines whether or not populating
 #   `DLCPoseEstimation` triggers a new pose estimation, or loads an existing.
-# - `video_file_num` will be 0 in almost all
-#   cases.
 # - `gputouse` was already set during training. It may be a good idea to make sure
 #   that core is still free before moving forward.
 #
@@ -433,30 +431,30 @@ video_file_num = 0  # change based on VideoFile entry
 #
 
 # +
-# #! find /nimbus/deeplabcut/video -type f -name '*20210604_J16*' -delete
-# -
+key = {
+    "nwb_file_name": nwb_file_name,
+    "epoch": epoch,
+    "video_file_num": video_file_num,
+    **model_key,
+}
 
-pose_estimation_key = sgp.DLCPoseEstimationSelection.insert_estimation_task(
-    {
-        "nwb_file_name": nwb_file_name,
-        "epoch": epoch,
-        "video_file_num": video_file_num,
-        **model_key,
-    },
+dlc_pose_estimation = sgp.DLCPoseEstimationSelection()  # Create an instance
+
+pose_estimation_key = dlc_pose_estimation.insert_estimation_task(
+    key,
     task_mode="trigger",  # trigger or load
     params={"gputouse": gputouse, "videotype": "mp4"},
 )
+# -
 
 # If the above insertion step fails in either trigger or load mode for an epoch, run the following lines:
 #
 # ```
-# (pose_estimation_key = sgp.DLCPoseEstimationSelection.insert_estimation_task(
-#     {
-#         "nwb_file_name": nwb_file_name,
-#         "epoch": epoch,
-#         "video_file_num": video_file_num,
-#         **model_key,
-#     }).delete()
+# (pose_estimation_key = dlc_pose_estimation.insert_estimation_task(
+#     key,
+#     task_mode="trigger", #trigger or load
+#     params={"gputouse": gputouse, "videotype": "mp4"},
+#     )).delete()
 # ```
 #
 

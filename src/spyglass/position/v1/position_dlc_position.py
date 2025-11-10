@@ -28,7 +28,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
     """
     Parameters for extracting the smoothed head position.
 
-    Parameters
+    Attributes
     ----------
     dlc_si_params_name : str
         Name for this set of parameters
@@ -219,7 +219,8 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
         nan_spans = get_span_start_stop(np.where(bad_inds)[0])
 
-        if interp_params := params.get("interpolate"):
+        if params.get("interpolate"):
+            interp_params = params.get("interp_params", dict())
             logger.info("interpolating across low likelihood times")
             interp_df = interp_pos(df_w_nans.copy(), nan_spans, **interp_params)
         else:

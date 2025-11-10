@@ -53,7 +53,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
-        return self.namespace_dict(pynwb.get_manager().type_map)
+        return sort_dict(self.namespace_dict(pynwb.get_manager().type_map))
 
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
@@ -65,33 +65,45 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if key_deps != self.nwb_deps:  # comment out to debug
+            if sort_dict(key_deps) != self.nwb_deps:  # comment out to debug
                 continue
             restr.append(self.dict_to_pk(key))
         return self & restr
 
-    def _has_matching_env(self, key: dict, show_err=False) -> bool:
-        """Check current env for matching pynwb versions."""
+    def _has_key(self, key: dict) -> bool:
+        """Attempt make, return status"""
+        if not SpikeSortingRecording & key:
+            logger.warning(
+                f"Attempt to populate Recompute before Recording: {key}"
+            )
         if not self & key:
             self.make(key)
+        return bool(self & key)
 
-        ret = self.this_env & key
+    def _has_matching_env(self, key: dict, show_err=False) -> bool:
+        """Check current env for matching pynwb versions."""
+        if not self._has_key(key):
+            return False  # # pragma: no cover
+
+        need = sort_dict(self.key_env(key))
+        ret = self.nwb_deps == need
 
         if not ret and show_err:
-            have = sort_dict(self.nwb_deps)
-            need = sort_dict(self.key_env(key))
-            logger.warning(
+            logger.warning(  # pragma: no cover
                 f"PyNWB version mismatch. Skipping key: {self.dict_to_pk(key)}"
-                + f"\n\tHave: {have}"
+                + f"\n\tHave: {self.nwb_deps}"
                 + f"\n\tNeed: {need}"
             )
         return bool(ret)
 
     def key_env(self, key):
         """Return the pynwb environment for a given key."""
+
         if not self & key:
             self.make(key)
         query = self & key
+        if len(query) == 0:
+            return None
         if len(query) != 1:
             raise ValueError(f"Key matches {len(query)} entries: {query}")
         this_env = query.fetch("nwb_deps", as_dict=True)[0]["nwb_deps"]
@@ -493,6 +505,40 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return new_vals
         return dict(hash=None)  # pragma: no cover
 
+    def _hash_both(self, key) -> Tuple[NwbfileHasher, NwbfileHasher]:
+        """Compare old and new files for a given key."""
+        old, new = self._get_paths(key)
+        new_hasher = (
+            self._hash_one(new, key.get("rounding"))
+            if new.exists()
+            else self._recompute(key)["hash"]
+        )
+        if new_hasher is None:  # Error occurred during recompute_file_name
+            return None, None
+        old_hasher = self._hash_one(old, key.get("rounding"))
+        if new_hasher.hash == old_hasher.hash and not self._other_roundings(
+            key, operator="!="
+        ):
+            new.unlink(missing_ok=True)
+        return old_hasher, new_hasher
+
+    def recheck(self, key) -> None:
+        """Recheck a previous recompute attempt."""
+        old_hasher, new_hasher = self._hash_both(key)
+
+        new_path = (
+            new_hasher.path.name if new_hasher else self._get_paths(key)[1]
+        )
+        if new_hasher is None:  # Error occurred during recompute_file_name
+            logger.error(f"V1 Recheck failed: {new_path}")
+            return None
+
+        if new_hasher.hash == old_hasher.hash:
+            return True
+
+        logger.error(f"V1 Recheck mismatch: {new_path}")
+        return False
+
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
         rec_dict = dict(recording_id=key["recording_id"])
@@ -500,7 +546,6 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         parent = self.get_parent_key(key)
-        rounding = key.get("rounding")
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
@@ -513,24 +558,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 + "Run with force_check=True to recompute."
             )
 
-        old, new = self._get_paths(parent)
-
-        new_hasher = (
-            self._hash_one(new, rounding)
-            if new.exists()
-            else self._recompute(key)["hash"]
-        )
+        old_hasher, new_hasher = self._hash_both(key)
 
         if new_hasher is None:  # Error occurred during recompute
             return
 
-        old_hasher = self._hash_one(old, rounding)
-
         if new_hasher.hash == old_hasher.hash:
             self.insert1(dict(key, matched=True))
-            if not self._other_roundings(key, operator="!="):
-                # if no other recompute attempts
-                new.unlink(missing_ok=True)
             return
 
         names, hashes = [], []
