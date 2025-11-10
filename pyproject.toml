@@ -104,7 +104,7 @@ optional-dependencies.test = [
   "kachery",                # database access
   "kachery-client",
   "kachery-cloud>=0.4",
-  "netcdf4",                # REMOVE?
+  "netcdf4",                # for decoding mocking
   "opencv-python-headless", # for headless testing of Qt
   "pre-commit",             # linting
   "pytest",                 # unit testing
@@ -198,12 +198,11 @@ omit = [ # which submodules have no tests
   "*/__init__.py",
   "*/_version.py",
   # "*/behavior/*",
-  "*/cli/*",
   # "*/common/*",
   "*/data_import/*",
   "*/decoding/v0/*",
-  "*/figurl_views/*",
   # "*/decoding/*",
+  "*/figurl_views/*",
   # "*/lfp/*",
   # "*/linearization/*",
   "*/lock/*",
@@ -214,5 +213,4 @@ omit = [ # which submodules have no tests
   # "*/spikesorting/*",
   # "*/utils/*",
   "settings.py",
-  "*/moseq/*",
 ]
