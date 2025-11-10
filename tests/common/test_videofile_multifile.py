@@ -38,6 +38,7 @@ def multifile_video_nwb(raw_dir, common, data_import, teardown):
         name="camera_device 1",
         meters_per_pixel=0.001,
         lens="test_lens",
+        model="Test Camera Model",
         camera_name="test_camera",
     )
     nwbfile.add_device(camera_device)
