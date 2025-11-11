@@ -45,6 +45,7 @@ COLORS = (
 # System constants
 BYTES_PER_GB = 1024**3
 LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
+CURRENT_SCHEMA_VERSION = "1.0.0"  # Config schema version compatibility
 
 # Disk space requirements (GB)
 DISK_SPACE_REQUIREMENTS = {
@@ -815,14 +816,247 @@ def validate_env_file_inline(env_path: str = ".env") -> bool:
         return False
 
 
+# ============================================================================
+# JSON Schema Loading Functions (DRY Architecture)
+# ============================================================================
+# These functions read from config_schema.json at repository root to ensure
+# the installer and settings.py use the same directory structure (single
+# source of truth). This avoids code duplication and ensures consistency.
+
+
+def validate_schema(schema: Dict[str, Any]) -> None:
+    """Validate config schema structure.
+
+    Raises
+    ------
+    ValueError
+        If schema is invalid or missing required keys
+    """
+    if "directory_schema" not in schema:
+        raise ValueError("Schema missing 'directory_schema' key")
+
+    required_prefixes = {"spyglass", "kachery", "dlc", "moseq"}
+    actual_prefixes = set(schema["directory_schema"].keys())
+
+    if required_prefixes != actual_prefixes:
+        missing = required_prefixes - actual_prefixes
+        extra = actual_prefixes - required_prefixes
+        msg = []
+        if missing:
+            msg.append(f"Missing prefixes: {missing}")
+        if extra:
+            msg.append(f"Extra prefixes: {extra}")
+        raise ValueError("; ".join(msg))
+
+    # Validate each prefix has expected keys (matches settings.py exactly)
+    required_keys = {
+        "spyglass": {
+            "raw",
+            "analysis",
+            "recording",
+            "sorting",
+            "waveforms",
+            "temp",
+            "video",
+            "export",
+        },
+        "kachery": {"cloud", "storage", "temp"},
+        "dlc": {"project", "video", "output"},
+        "moseq": {"project", "video"},
+    }
+
+    for prefix, expected_keys in required_keys.items():
+        actual_keys = set(schema["directory_schema"][prefix].keys())
+        if expected_keys != actual_keys:
+            missing = expected_keys - actual_keys
+            extra = actual_keys - expected_keys
+            msg = [f"Invalid keys for '{prefix}':"]
+            if missing:
+                msg.append(f"missing {missing}")
+            if extra:
+                msg.append(f"extra {extra}")
+            raise ValueError(" ".join(msg))
+
+
+def load_full_schema() -> Dict[str, Any]:
+    """Load complete schema including TLS config.
+
+    Returns
+    -------
+    Dict[str, Any]
+        Complete schema with directory_schema and tls sections
+
+    Raises
+    ------
+    FileNotFoundError
+        If config_schema.json not found
+    ValueError
+        If schema is invalid
+    """
+    import json
+
+    schema_path = Path(__file__).parent.parent / "config_schema.json"
+
+    if not schema_path.exists():
+        raise FileNotFoundError(
+            f"Config schema not found: {schema_path}\n"
+            f"This file should exist at repository root."
+        )
+
+    try:
+        with open(schema_path) as f:
+            schema = json.load(f)
+    except (OSError, IOError) as e:
+        raise ValueError(f"Cannot read {schema_path}: {e}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {schema_path}: {e}")
+
+    if not isinstance(schema, dict):
+        raise ValueError(f"Schema should be a dict, got {type(schema)}")
+
+    # Check schema version for compatibility
+    schema_version = schema.get("_schema_version")
+    if schema_version and schema_version != CURRENT_SCHEMA_VERSION:
+        print_warning(
+            f"Schema version mismatch: expected {CURRENT_SCHEMA_VERSION}, "
+            f"got {schema_version}. This may cause compatibility issues."
+        )
+
+    # Validate schema
+    validate_schema(schema)
+
+    return schema
+
+
+def load_directory_schema() -> Dict[str, Dict[str, str]]:
+    """Load directory schema from JSON file (single source of truth).
+
+    Returns
+    -------
+    Dict[str, Dict[str, str]]
+        Directory schema with prefixes (spyglass, kachery, dlc, moseq)
+
+    Raises
+    ------
+    FileNotFoundError
+        If config_schema.json not found at repository root
+    ValueError
+        If schema is invalid or missing required keys
+    """
+    full_schema = load_full_schema()
+    return full_schema["directory_schema"]
+
+
+def build_directory_structure(
+    base_dir: Path,
+    schema: Optional[Dict[str, Dict[str, str]]] = None,
+    create: bool = True,
+    verbose: bool = True,
+) -> Dict[str, Path]:
+    """Build Spyglass directory structure from base directory.
+
+    Parameters
+    ----------
+    base_dir : Path
+        Base directory for Spyglass data
+    schema : Dict[str, Dict[str, str]], optional
+        Pre-loaded directory schema. If None, will load from file.
+    create : bool, optional
+        Whether to create directories if they don't exist, by default True
+    verbose : bool, optional
+        Whether to print progress feedback, by default True
+
+    Returns
+    -------
+    Dict[str, Path]
+        Mapping of directory names to full paths
+    """
+    if schema is None:
+        schema = load_directory_schema()
+
+    directories = {}
+
+    if verbose and create:
+        print(f"Creating Spyglass directory structure in {base_dir}")
+        print("  Creating:")
+
+    for prefix, dir_map in schema.items():
+        for key, rel_path in dir_map.items():
+            full_path = base_dir / rel_path
+            directories[f"{prefix}_{key}"] = full_path
+
+            if create:
+                full_path.mkdir(parents=True, exist_ok=True)
+                if verbose:
+                    print(f"    • {rel_path}")
+
+    if verbose and create:
+        print(f"  ✓ Created {len(directories)} directories")
+
+    return directories
+
+
+def determine_tls(host: str, schema: Optional[Dict[str, Any]] = None) -> bool:
+    """Automatically determine if TLS should be used.
+
+    Uses smart defaults - no user prompt needed.
+
+    Parameters
+    ----------
+    host : str
+        Database hostname
+    schema : Dict[str, Any], optional
+        Pre-loaded schema. If None, will load from file.
+
+    Returns
+    -------
+    bool
+        Whether to use TLS
+    """
+    if schema is None:
+        schema = load_full_schema()
+
+    tls_config = schema.get("tls", {})
+    localhost_addresses = tls_config.get(
+        "localhost_addresses", ["localhost", "127.0.0.1", "::1"]
+    )
+
+    # Automatic decision: enable for remote, disable for local
+    is_local = host in localhost_addresses
+    use_tls = not is_local
+
+    # User-friendly messaging (plain language instead of technical terms)
+    if is_local:
+        print(
+            f"{COLORS['blue']}✓ Connecting to local database at {host}{COLORS['reset']}"
+        )
+        print("  Security: Using unencrypted connection (safe for localhost)")
+    else:
+        print(
+            f"{COLORS['blue']}✓ Connecting to remote database at {host}{COLORS['reset']}"
+        )
+        print(
+            "  Security: Using encrypted connection (TLS) to protect your data"
+        )
+        print("  This is required when connecting over a network")
+
+    return use_tls
+
+
 def create_database_config(
     host: str = "localhost",
     port: int = 3306,
     user: str = "root",
     password: str = "tutorial",
-    use_tls: bool = False,
+    use_tls: Optional[bool] = None,
+    base_dir: Optional[Path] = None,
 ) -> None:
-    """Create DataJoint configuration file.
+    """Create complete Spyglass configuration with database and directories.
+
+    This creates a complete DataJoint + Spyglass configuration including:
+    - Database connection settings
+    - DataJoint external stores
+    - Spyglass directory structure (all 16 directories)
 
     Parameters
     ----------
@@ -834,34 +1068,155 @@ def create_database_config(
         Database user (default: "root")
     password : str, optional
         Database password (default: "tutorial")
-    use_tls : bool, optional
-        Whether to use TLS/SSL (default: False)
+    use_tls : bool or None, optional
+        Whether to use TLS/SSL. If None, automatically determined based on host.
+    base_dir : Path or None, optional
+        Base directory for Spyglass data. If None, will prompt user.
 
     Notes
     -----
     Uses JSON for safety (no code injection vulnerability).
+    Reads directory structure from config_schema.json (DRY principle).
     """
-    # Use JSON for safety (no code injection)
-    dj_config = {
+    # Get base directory if not provided
+    if base_dir is None:
+        base_dir = get_base_directory()
+
+    # Load schema once for efficiency (used by both TLS and directory creation)
+    full_schema = load_full_schema()
+    dir_schema = full_schema["directory_schema"]
+
+    # Auto-determine TLS if not explicitly provided
+    if use_tls is None:
+        use_tls = determine_tls(host, schema=full_schema)
+
+    # Build directory structure from JSON schema
+    print_step("Setting up Spyglass directories...")
+    dirs = build_directory_structure(
+        base_dir, schema=dir_schema, create=True, verbose=True
+    )
+
+    # Create complete configuration
+    config = {
+        # Database connection settings
         "database.host": host,
         "database.port": port,
         "database.user": user,
         "database.password": password,
         "database.use_tls": use_tls,
+        # DataJoint stores for external file storage
+        "stores": {
+            "raw": {
+                "protocol": "file",
+                "location": str(dirs["spyglass_raw"]),
+                "stage": str(dirs["spyglass_raw"]),
+            },
+            "analysis": {
+                "protocol": "file",
+                "location": str(dirs["spyglass_analysis"]),
+                "stage": str(dirs["spyglass_analysis"]),
+            },
+        },
+        # Spyglass custom configuration
+        "custom": {
+            "spyglass_dirs": {
+                "base": str(base_dir),
+                "raw": str(dirs["spyglass_raw"]),
+                "analysis": str(dirs["spyglass_analysis"]),
+                "recording": str(dirs["spyglass_recording"]),
+                "sorting": str(dirs["spyglass_sorting"]),
+                "waveforms": str(dirs["spyglass_waveforms"]),
+                "temp": str(dirs["spyglass_temp"]),
+                "video": str(dirs["spyglass_video"]),
+                "export": str(dirs["spyglass_export"]),
+            },
+            "kachery_dirs": {
+                "cloud": str(dirs["kachery_cloud"]),
+                "storage": str(dirs["kachery_storage"]),
+                "temp": str(dirs["kachery_temp"]),
+            },
+            "dlc_dirs": {
+                "project": str(dirs["dlc_project"]),
+                "video": str(dirs["dlc_video"]),
+                "output": str(dirs["dlc_output"]),
+            },
+            "moseq_dirs": {
+                "project": str(dirs["moseq_project"]),
+                "video": str(dirs["moseq_video"]),
+            },
+        },
     }
 
     config_file = Path.home() / ".datajoint_config.json"
 
+    # Handle existing config file with better UX
     if config_file.exists():
-        response = input(f"{config_file} exists. Overwrite? [y/N]: ")
-        if response.lower() not in ["y", "yes"]:
-            print_warning("Keeping existing configuration")
+        print_warning(f"Configuration file already exists: {config_file}")
+        print("\nExisting database settings:")
+        try:
+            with config_file.open() as f:
+                existing = json.load(f)
+                existing_host = existing.get("database.host", "unknown")
+                existing_port = existing.get("database.port", "unknown")
+                existing_user = existing.get("database.user", "unknown")
+                print(f"  Database: {existing_host}:{existing_port}")
+                print(f"  User: {existing_user}")
+        except:
+            print("  (Unable to read existing config)")
+
+        print("\nOptions:")
+        print(
+            "  [b] Backup and create new (saves to .datajoint_config.json.backup)"
+        )
+        print("  [o] Overwrite with new settings")
+        print("  [k] Keep existing (cancel installation)")
+
+        choice = input("\nChoice [B/o/k]: ").strip().lower() or "b"
+
+        if choice in ["k", "keep"]:
+            print_warning(
+                "Keeping existing configuration. Installation cancelled."
+            )
+            print("\nTo install with different settings:")
+            print(
+                "  1. Backup your config: cp ~/.datajoint_config.json ~/.datajoint_config.json.backup"
+            )
+            print("  2. Run installer again")
+            return
+        elif choice in ["b", "backup"]:
+            backup_file = config_file.with_suffix(".json.backup")
+            shutil.copy2(config_file, backup_file)
+            print_success(f"Backed up existing config to {backup_file}")
+        elif choice not in ["o", "overwrite"]:
+            print_error("Invalid choice")
             return
 
+    # Save configuration
     with config_file.open("w") as f:
-        json.dump(dj_config, f, indent=2)
+        json.dump(config, f, indent=2)
 
-    print_success(f"Configuration saved to {config_file}")
+    # Enhanced success message with next steps
+    print()
+    print_success("✓ Spyglass configuration complete!")
+    print()
+    print("Database connection:")
+    print(f"  • Server: {host}:{port}")
+    print(f"  • User: {user}")
+    tls_status = "Yes" if use_tls else "No (localhost)"
+    print(f"  • Encrypted: {tls_status}")
+    print()
+    print("Data directories:")
+    print(f"  • Base: {base_dir}")
+    print(f"  • Raw data: {config['custom']['spyglass_dirs']['raw']}")
+    print(f"  • Analysis: {config['custom']['spyglass_dirs']['analysis']}")
+    print(f"  • ({len(dirs)} directories total)")
+    print()
+    print("Next steps:")
+    print("  1. Activate environment: conda activate spyglass")
+    print("  2. Test your installation: python scripts/validate.py")
+    print("  3. Start using Spyglass: python -c 'import spyglass'")
+    print()
+    print("Need help? See: https://lorenfranklab.github.io/spyglass/")
 
 
 def validate_hostname(hostname: str) -> bool:
