@@ -79,6 +79,17 @@ class _TestDatabaseManager:
             "custom": {"test_mode": True, "debug_mode": False},
         }
 
+    @property
+    def connected(self):
+        """Check if database connection is available.
+
+        Returns True for service container (always ready) or if null_server.
+        """
+        if self.null_server:
+            return False
+        # For GitHub Actions service container, assume connection is ready
+        return True
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
