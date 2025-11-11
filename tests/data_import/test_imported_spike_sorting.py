@@ -1,4 +1,4 @@
-import pytest
+
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 import numpy as np
 
@@ -21,7 +21,7 @@ def test_imported_spike_sorting_ingestion(imported_spike):
     ), f"Should return the single UnitTable, but got {len(objs_to_insert)} objects."
 
     inserts = ss_table.generate_entries_from_nwb_object(
-        objs_to_insert[0], base_key={"nwb_file_name": "maock_units_file.nwb"}
+        objs_to_insert[0], base_key={"nwb_file_name": "mock_units_file.nwb"}
     )
     insert_keys = inserts[ss_table]
     assert (
