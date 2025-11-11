@@ -105,13 +105,14 @@ class _TestDatabaseManager:
     def connected(self):
         """Check if database connection is available.
 
-        Verifies DataJoint connection works. Assumes dj.config is already set
-        by test fixtures (dj_conn fixture handles config setup).
+        Updates dj.config and verifies connection works. This ensures test_mode
+        is set in dj.config before any spyglass imports happen in mini_insert.
         """
         try:
             import datajoint as dj
 
-            # Check if connection works (config should already be set by fixtures)
+            # Update config to ensure test_mode is set (needed for electrode validation skip)
+            dj.config.update(self.credentials)
             return dj.conn().is_connected
         except Exception:
             return False
