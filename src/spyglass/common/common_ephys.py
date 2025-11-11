@@ -1,4 +1,5 @@
 import warnings
+from collections import defaultdict
 
 import datajoint as dj
 import ndx_franklab_novela
@@ -198,6 +199,10 @@ class Electrode(SpyglassMixin, dj.Imported):
                 else:
                     key.update(electrode_config_dicts[elect_id])
             electrode_inserts.append(key.copy())
+
+        # Validate electrode ID uniqueness (issue #1447)
+        if not self._test_mode:
+            _validate_electrode_ids(electrode_inserts, nwb_file_name)
 
         self.insert(
             electrode_inserts,
@@ -956,3 +961,78 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 filtered_nwb["filtered_data"].timestamps, name="time"
             ),
         )
+
+
+def _validate_electrode_ids(electrode_inserts, nwb_file_name):
+    """Validate that electrode IDs (probe_electrode values) are globally unique.
+
+    Checks for duplicate probe_electrode values across all electrodes in the
+    session. While Spyglass technically allows duplicate probe_electrode values
+    across different shanks (since the primary key includes probe_shank),
+    having duplicates can lead to confusing foreign key errors and makes it
+    unclear which electrode is being referenced.
+
+    Parameters
+    ----------
+    electrode_inserts : list of dict
+        List of electrode dictionaries to be inserted
+    nwb_file_name : str
+        Name of the NWB file being processed
+
+    Raises
+    ------
+    ValueError
+        If duplicate probe_electrode values are detected, with detailed
+        information about which electrodes are duplicated and suggestions for
+        fixing the issue.
+
+    See Also
+    --------
+    https://github.com/LorenFrankLab/spyglass/issues/1447
+    """
+    probe_electrodes = [
+        e
+        for e in electrode_inserts
+        if "probe_electrode" in e and "probe_id" in e
+    ]
+
+    if not probe_electrodes:
+        return  # No probe electrodes to validate
+
+    # Track probe_electrode values by location
+    # probe_electrode -> list of (probe_id, probe_shank, nwb_electrode_id)
+    elec_locs = defaultdict(list)
+    for electrode in probe_electrodes:
+        elec_locs[electrode["probe_electrode"]].append(
+            (
+                electrode["probe_id"],
+                electrode.get("probe_shank", "unknown"),
+                electrode.get("electrode_id", "unknown"),
+            )
+        )
+
+    duplicates = {e: locs for e, locs in elec_locs.items() if len(locs) > 1}
+
+    if not duplicates:
+        return  # All probe_electrode values are unique
+
+    error_lines = [
+        f"Duplicate electrode IDs detected in NWB file '{nwb_file_name}'.",
+        "The following IDs are duplicated:",
+    ]
+
+    for elec_id, locations in sorted(duplicates.items()):
+        error_lines.append(
+            f"  Electrode ID {elec_id} appears {len(locations)} times:"
+        )
+        for probe_id, shank, nwb_id in locations:
+            error_lines.append(
+                f"    - Probe '{probe_id}', Shank {shank}, NWB index {nwb_id}"
+            )
+
+    error_lines.append(
+        "To resolve, please ensure that each electrode has a unique "
+        + "'probe_electrode' value across all probes and shanks. "
+    )
+
+    raise ValueError("\n".join(error_lines))
