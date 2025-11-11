@@ -26,8 +26,9 @@ from install import (
     validate_schema,
 )
 
-# Import from spyglass
-from spyglass.settings import SpyglassConfig
+# Spyglass imports - lazy loaded in tests to avoid hanging during pytest collection
+# DO NOT import SpyglassConfig at module level - it imports datajoint which may
+# try to connect to database before fixtures are set up
 
 
 class TestConfigSchema:
@@ -82,6 +83,8 @@ class TestSchemaConsistency:
 
     def test_installer_and_settings_use_same_schema(self):
         """Test that installer and settings.py load identical schemas."""
+        from spyglass.settings import SpyglassConfig
+
         # Load from installer
         installer_schema = load_directory_schema()
 
@@ -243,6 +246,8 @@ class TestInstallerConfig:
 
     def test_installer_config_keys_match_settings_expectations(self):
         """Test that installer config keys match what settings.py expects."""
+        from spyglass.settings import SpyglassConfig
+
         with TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir) / "spyglass_data"
 
@@ -316,6 +321,8 @@ class TestBackwardsCompatibility:
 
     def test_settings_produces_original_structure(self):
         """Test that settings.py produces original structure at runtime."""
+        from spyglass.settings import SpyglassConfig
+
         # Original structure
         original = {
             "spyglass": {
@@ -422,6 +429,8 @@ class TestConfigCompatibility:
 
     def test_installer_config_has_all_settings_keys(self):
         """Test that installer config includes all keys from settings.py."""
+        from spyglass.settings import SpyglassConfig
+
         with TemporaryDirectory() as tmpdir:
             base_dir = Path(tmpdir) / "spyglass_data"
 
