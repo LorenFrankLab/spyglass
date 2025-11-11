@@ -56,9 +56,8 @@ class _TestDatabaseManager:
     def wait(self, timeout=120, wait_interval=3):
         """Wait for database to be ready.
 
-        For service containers (null_server=False), polls the database connection
-        with retries to ensure MySQL is actually accepting connections, not just
-        that the container health check passed.
+        For service containers (null_server=False), does minimal verification.
+        Config setup is handled by test fixtures (server_credentials + dj_conn).
 
         Parameters
         ----------
@@ -70,22 +69,9 @@ class _TestDatabaseManager:
         if self.null_server:
             return
 
-        # Poll for actual connectivity instead of assuming service container is ready
-        import time
-
-        import datajoint as dj
-
-        for attempt in range(timeout // wait_interval):
-            try:
-                dj.config.update(self.credentials)
-                if dj.conn().is_connected:
-                    return  # Connection successful
-            except Exception:
-                pass  # Retry
-            time.sleep(wait_interval)
-
-        # If we get here, connection failed - but don't raise error yet
-        # Let the actual test code handle connection failures with better error messages
+        # Service container should be ready if health check passed
+        # Let test fixtures handle actual connection verification
+        pass
 
     def stop(self):
         """Stop database. No-op as service container is managed by GitHub Actions."""
@@ -119,15 +105,13 @@ class _TestDatabaseManager:
     def connected(self):
         """Check if database connection is available.
 
-        Actually verifies DataJoint can connect to the database, regardless of
-        how it's managed (service container, local Docker, or manual).
+        Verifies DataJoint connection works. Assumes dj.config is already set
+        by test fixtures (dj_conn fixture handles config setup).
         """
         try:
             import datajoint as dj
 
-            # Update config with our credentials
-            dj.config.update(self.credentials)
-            # Check if connection actually works
+            # Check if connection works (config should already be set by fixtures)
             return dj.conn().is_connected
         except Exception:
             return False
