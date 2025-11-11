@@ -405,3 +405,104 @@ class TestSchemaVersioning:
         schema = load_full_schema()
         assert "_version_history" in schema
         assert "1.0.0" in schema["_version_history"]
+
+
+class TestConfigCompatibility:
+    """Tests for config compatibility between installer and settings.py."""
+
+    def _get_all_keys(self, d: dict, prefix: str = "") -> set:
+        """Recursively get all keys in nested dictionary."""
+        keys = set()
+        for k, v in d.items():
+            full_key = f"{prefix}.{k}" if prefix else k
+            keys.add(full_key)
+            if isinstance(v, dict):
+                keys.update(self._get_all_keys(v, full_key))
+        return keys
+
+    def test_installer_config_has_all_settings_keys(self):
+        """Test that installer config includes all keys from settings.py."""
+        with TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir) / "spyglass_data"
+
+            # Get config from installer
+            dir_schema = load_directory_schema()
+            dirs = build_directory_structure(
+                base_dir, schema=dir_schema, create=True, verbose=False
+            )
+
+            installer_config = {
+                "database.host": "localhost",
+                "database.port": 3306,
+                "database.user": "testuser",
+                "database.password": "testpass",
+                "database.use_tls": False,
+                "filepath_checksum_size_limit": 1 * 1024**3,
+                "enable_python_native_blobs": True,
+                "stores": {
+                    "raw": {
+                        "protocol": "file",
+                        "location": str(dirs["spyglass_raw"]),
+                        "stage": str(dirs["spyglass_raw"]),
+                    },
+                    "analysis": {
+                        "protocol": "file",
+                        "location": str(dirs["spyglass_analysis"]),
+                        "stage": str(dirs["spyglass_analysis"]),
+                    },
+                },
+                "custom": {
+                    "debug_mode": False,
+                    "test_mode": False,
+                    "kachery_zone": "franklab.default",
+                    "spyglass_dirs": {
+                        "base": str(base_dir),
+                        "raw": str(dirs["spyglass_raw"]),
+                        "analysis": str(dirs["spyglass_analysis"]),
+                        "recording": str(dirs["spyglass_recording"]),
+                        "sorting": str(dirs["spyglass_sorting"]),
+                        "waveforms": str(dirs["spyglass_waveforms"]),
+                        "temp": str(dirs["spyglass_temp"]),
+                        "video": str(dirs["spyglass_video"]),
+                        "export": str(dirs["spyglass_export"]),
+                    },
+                    "kachery_dirs": {
+                        "cloud": str(dirs["kachery_cloud"]),
+                        "storage": str(dirs["kachery_storage"]),
+                        "temp": str(dirs["kachery_temp"]),
+                    },
+                    "dlc_dirs": {
+                        "base": str(base_dir / "deeplabcut"),
+                        "project": str(dirs["dlc_project"]),
+                        "video": str(dirs["dlc_video"]),
+                        "output": str(dirs["dlc_output"]),
+                    },
+                    "moseq_dirs": {
+                        "base": str(base_dir / "moseq"),
+                        "project": str(dirs["moseq_project"]),
+                        "video": str(dirs["moseq_video"]),
+                    },
+                },
+            }
+
+            # Get config from settings.py
+            sg_config = SpyglassConfig()
+            settings_config = sg_config._generate_dj_config(
+                base_dir=str(base_dir),
+                database_user="testuser",
+                database_password="testpass",
+                database_host="localhost",
+                database_port=3306,
+                database_use_tls=False,
+            )
+
+            # Get all keys from both
+            installer_keys = self._get_all_keys(installer_config)
+            settings_keys = self._get_all_keys(settings_config)
+
+            # Installer must have all settings.py keys
+            missing_keys = settings_keys - installer_keys
+            assert not missing_keys, (
+                f"Installer config is missing keys from settings.py: "
+                f"{sorted(missing_keys)}. Update install.py::create_database_config()"
+            )

@@ -1125,6 +1125,9 @@ def create_database_config(
         "database.user": user,
         "database.password": password,
         "database.use_tls": use_tls,
+        # DataJoint performance settings
+        "filepath_checksum_size_limit": 1 * 1024**3,  # 1 GB
+        "enable_python_native_blobs": True,
         # DataJoint stores for external file storage
         "stores": {
             "raw": {
@@ -1140,6 +1143,9 @@ def create_database_config(
         },
         # Spyglass custom configuration
         "custom": {
+            "debug_mode": False,
+            "test_mode": False,
+            "kachery_zone": "franklab.default",
             "spyglass_dirs": {
                 "base": str(base_dir),
                 "raw": str(dirs["spyglass_raw"]),
@@ -1157,11 +1163,13 @@ def create_database_config(
                 "temp": str(dirs["kachery_temp"]),
             },
             "dlc_dirs": {
+                "base": str(base_dir / "deeplabcut"),
                 "project": str(dirs["dlc_project"]),
                 "video": str(dirs["dlc_video"]),
                 "output": str(dirs["dlc_output"]),
             },
             "moseq_dirs": {
+                "base": str(base_dir / "moseq"),
                 "project": str(dirs["moseq_project"]),
                 "video": str(dirs["moseq_video"]),
             },

@@ -36,11 +36,14 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    @cached_property
+    @property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
+
+        Note: Using @property instead of @cached_property so we always get
+        current value from dj.config, even if test_mode changes after first access.
 
         Used by ...
         - BaseMixin._spyglass_version
