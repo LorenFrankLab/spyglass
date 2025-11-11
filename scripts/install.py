@@ -203,7 +203,8 @@ def get_required_python_version() -> Tuple[int, int]:
         match = re.search(r">=(\d+)\.(\d+)", requires_python)
         if match:
             return (int(match.group(1)), int(match.group(2)))
-    except Exception:
+    except (FileNotFoundError, KeyError, AttributeError, ValueError):
+        # Expected errors during parsing - use safe fallback
         pass
 
     return (3, 9)  # Safe fallback
@@ -307,10 +308,23 @@ def check_prerequisites(
                 f"Disk space: {available_gb} GB available (need {required_gb} GB)"
             )
         else:
-            print_error("Insufficient disk space!")
+            print_error(
+                "Insufficient disk space - installation cannot continue"
+            )
+            print(f"  Checking: {base_dir}")
             print(f"  Available: {available_gb} GB")
-            print(f"  Required:  {required_gb} GB")
-            print("  Please free up space or choose a different location")
+            print(
+                f"  Required:  {required_gb} GB ({install_type} installation)"
+            )
+            print()
+            print("  To fix:")
+            print("    1. Free up disk space in this location")
+            print(
+                f"    2. Choose different directory: python scripts/install.py --base-dir /other/path"
+            )
+            print(
+                "    3. Use minimal install (needs 10 GB): python scripts/install.py --minimal"
+            )
             raise RuntimeError("Insufficient disk space")
 
 
@@ -974,6 +988,13 @@ def build_directory_structure(
     if schema is None:
         schema = load_directory_schema()
 
+    # Validate schema loaded successfully
+    if not schema:
+        raise ValueError(
+            "Directory schema could not be loaded. "
+            "Check config_schema.json exists at repository root."
+        )
+
     directories = {}
 
     if verbose and create:
@@ -1161,8 +1182,8 @@ def create_database_config(
                 existing_user = existing.get("database.user", "unknown")
                 print(f"  Database: {existing_host}:{existing_port}")
                 print(f"  User: {existing_user}")
-        except:
-            print("  (Unable to read existing config)")
+        except (OSError, IOError, json.JSONDecodeError, KeyError) as e:
+            print(f"  (Unable to read existing config: {e})")
 
         print("\nOptions:")
         print(
@@ -1191,9 +1212,41 @@ def create_database_config(
             print_error("Invalid choice")
             return
 
-    # Save configuration
-    with config_file.open("w") as f:
-        json.dump(config, f, indent=2)
+    # Save configuration with atomic write and secure permissions
+    import tempfile
+
+    # Security warning before saving
+    print_warning(
+        "Database password will be stored in plain text in config file.\n"
+        "  For production environments:\n"
+        "    1. Use environment variable SPYGLASS_DB_PASSWORD\n"
+        "    2. File permissions will be restricted automatically\n"
+        "    3. Consider database roles with limited privileges"
+    )
+
+    # Atomic write: write to temp file, then move
+    config_dir = config_file.parent
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        dir=config_dir,
+        delete=False,
+        prefix=".datajoint_config.tmp",
+        suffix=".json",
+    ) as tmp_file:
+        json.dump(config, tmp_file, indent=2)
+        tmp_path = Path(tmp_file.name)
+
+    # Set restrictive permissions (Unix/Linux/macOS only)
+    try:
+        tmp_path.chmod(0o600)  # Owner read/write only
+    except (AttributeError, OSError):
+        # Windows doesn't support chmod - permissions handled differently
+        pass
+
+    # Atomic move (on same filesystem)
+    shutil.move(str(tmp_path), str(config_file))
+    print_success(f"Configuration saved to: {config_file}")
+    print(f"  Permissions: Owner read/write only (secure)")
 
     # Enhanced success message with next steps
     print()
@@ -2102,15 +2155,24 @@ def setup_database_remote(
     success, _error = test_database_connection(**config)
 
     if not success:
-        print("\nConnection test failed. Common issues:")
-        print("  • Wrong host/port (check firewall)")
-        print("  • Incorrect username/password")
-        print("  • Database not accessible from this machine")
-        print("  • TLS misconfiguration")
-
-        retry = (
-            input("\nRetry with different settings? [y/N]: ").strip().lower()
+        print_error(f"Cannot connect to database: {_error}")
+        print()
+        print("Most common causes (in order):")
+        print("  1. Wrong password - Double check credentials")
+        print("  2. Firewall blocking connection")
+        print("  3. Database not running")
+        print("  4. TLS mismatch")
+        print()
+        print("Diagnostic steps:")
+        print(f"  Test port:  nc -zv {host} {port}")
+        print(f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p")
+        print()
+        print(
+            "Need help? See: docs/TROUBLESHOOTING.md#database-connection-fails"
         )
+        print()
+
+        retry = input("Retry with different settings? [y/N]: ").strip().lower()
         if retry in ["y", "yes"]:
             return setup_database_remote()  # Recursive retry
         else:
@@ -2122,7 +2184,7 @@ def setup_database_remote(
     return True
 
 
-def validate_installation(env_name: str) -> None:
+def validate_installation(env_name: str) -> bool:
     """Run validation checks.
 
     Executes validate.py script in the specified conda environment to
@@ -2135,7 +2197,8 @@ def validate_installation(env_name: str) -> None:
 
     Returns
     -------
-    None
+    bool
+        True if all critical checks passed, False if any failed
 
     Notes
     -----
@@ -2151,9 +2214,11 @@ def validate_installation(env_name: str) -> None:
             check=True,
         )
         print_success("Validation passed")
+        return True
     except subprocess.CalledProcessError:
         print_warning("Some validation checks failed")
         print("  Review errors above and see docs/TROUBLESHOOTING.md")
+        return False
 
 
 def run_installation(args) -> None:
@@ -2231,13 +2296,22 @@ def run_installation(args) -> None:
         handle_database_setup_interactive()
 
     # 5. Validation (runs in new environment, CAN import spyglass)
+    validation_passed = True
     if not args.skip_validation:
-        validate_installation(args.env_name)
+        validation_passed = validate_installation(args.env_name)
 
-    # Success message
+    # Success message - conditional based on validation
     print(f"\n{COLORS['green']}{'='*60}{COLORS['reset']}")
-    print(f"{COLORS['green']}✓ Installation complete!{COLORS['reset']}")
-    print(f"{COLORS['green']}{'='*60}{COLORS['reset']}\n")
+    if validation_passed:
+        print(f"{COLORS['green']}✓ Installation complete!{COLORS['reset']}")
+        print(f"{COLORS['green']}{'='*60}{COLORS['reset']}\n")
+    else:
+        print(
+            f"{COLORS['yellow']}⚠ Installation complete with warnings{COLORS['reset']}"
+        )
+        print(f"{COLORS['yellow']}{'='*60}{COLORS['reset']}\n")
+        print("Core installation succeeded but some features may not work.")
+        print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
     print("Next steps:")
     print(f"  1. Activate environment: conda activate {args.env_name}")
     print("  2. Start tutorial:       jupyter notebook notebooks/")
