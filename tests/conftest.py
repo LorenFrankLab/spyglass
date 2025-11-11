@@ -21,7 +21,6 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
-from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
@@ -40,6 +39,44 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
+
+class _TestDatabaseManager:
+    """Manages test database connection (service container or local Docker).
+
+    Provides minimal interface compatible with old DockerMySQLManager for tests.
+    """
+
+    def __init__(self, container_name="mysql", port=3308, null_server=False):
+        self.container_name = container_name
+        self.port = port
+        self.null_server = null_server
+
+    def wait(self):
+        """Wait for database to be ready. No-op as service container handles this."""
+        if self.null_server:
+            return
+        # GitHub Actions service container is already ready when tests run
+        pass
+
+    def stop(self):
+        """Stop database. No-op as service container is managed by GitHub Actions."""
+        if self.null_server:
+            return
+        # Service container cleanup is handled by GitHub Actions
+        pass
+
+    @property
+    def credentials(self):
+        """Database credentials for test connection."""
+        return {
+            "database.host": "localhost",
+            "database.password": "tutorial",
+            "database.user": "root",
+            "database.port": int(self.port),
+            "safemode": "false",
+            "custom": {"test_mode": True, "debug_mode": False},
+        }
 
 
 def pytest_addoption(parser):
@@ -125,7 +162,7 @@ def pytest_configure(config):
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
 
-    # Check if docker module is available before using DockerMySQLManager
+    # Check if docker module is available for local testing
     try:
         import docker as _docker_check
 
@@ -133,13 +170,11 @@ def pytest_configure(config):
     except ImportError:
         docker_available = False
 
-    SERVER = DockerMySQLManager(
+    # Use GitHub Actions service container or local Docker for tests
+    SERVER = _TestDatabaseManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
-        restart=TEARDOWN,
-        shutdown=TEARDOWN,
         null_server=config.option.no_docker or not docker_available,
-        verbose=VERBOSE,
     )
 
     DOWNLOADS = DataDownloader(
