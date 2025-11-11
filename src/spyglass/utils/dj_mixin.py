@@ -1,31 +1,7 @@
-import os
-import sys
-from contextlib import nullcontext
-from functools import cached_property
-from os import environ as os_environ
-from time import time
-from typing import List, Union
-
 import datajoint as dj
 from datajoint.errors import DataJointError
-from datajoint.expression import QueryExpression
-from datajoint.table import Table
-from datajoint.utils import to_camel_case
-from packaging.version import parse as version_parse
-from pandas import DataFrame
-from pymysql.err import DataError
 
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (
-    NonDaemonPool,
-    _quick_get_analysis_path,
-    bytes_to_human_readable,
-    ensure_names,
-    fetch_nwb,
-    get_child_tables,
-    get_nwb_table,
-    populate_pass_function,
-)
 from spyglass.utils.dj_merge_tables import Merge, is_merge_table
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins import (
@@ -33,6 +9,7 @@ from spyglass.utils.mixins import (
     CautiousDeleteMixin,
     ExportMixin,
     HelperMixin,
+    IngestionMixin,
     PopulateMixin,
     RestrictByMixin,
 )
@@ -253,3 +230,11 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
 
         self.definition = self._enforced_definition
         self._register_table()
+
+
+class SpyglassIngestion(SpyglassMixin, IngestionMixin):
+    """Mixin for Spyglass ingestion tables.
+
+    Provides additional methods and properties to automate population of table
+    entries from raw NWB files.
+    """

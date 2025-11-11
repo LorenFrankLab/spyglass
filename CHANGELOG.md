@@ -28,13 +28,14 @@ import all foreign key references.
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
 - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
-  from NWB #1433
+    from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
-
-### Infrastructure
-
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
+- Set default codecov threshold for test fail, disable patch check #1370, #1372
+- Simplify PR template #1370
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Pin `ndx-optogenetics` to 0.2.0 #1458
 
 ### Pipelines
 
@@ -43,7 +44,17 @@ import all foreign key references.
 - Common
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
+    - Change `IntervalList.insert` to `cautious_insert` #1423
+    - Allow email send on space check success, clean up maintenance logging #1381
+    - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
+    - Fix error from unlinked object in `AnalysisNwbfile.create` #1396
+    - Sort `UserEnvironment` dict objects by key for consistency #1380
+    - Fix typo in VideoFile.make #1427
+    - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
+        from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Allow nullable `DataAcquisitionDevice` foreign keys #1455
+    - Improve error transparency on duplicate `Electrode` ids #1454
     - Remove pre-existing `Units` from created analysis nwb files #1453
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362

@@ -1,4 +1,5 @@
 import warnings
+from collections import defaultdict
 
 import datajoint as dj
 import ndx_franklab_novela
@@ -14,7 +15,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -199,6 +200,10 @@ class Electrode(SpyglassMixin, dj.Imported):
                     key.update(electrode_config_dicts[elect_id])
             electrode_inserts.append(key.copy())
 
+        # Validate electrode ID uniqueness (issue #1447)
+        if not self._test_mode:
+            _validate_electrode_ids(electrode_inserts, nwb_file_name)
+
         self.insert(
             electrode_inserts,
             skip_duplicates=True,
@@ -226,53 +231,57 @@ class Electrode(SpyglassMixin, dj.Imported):
             for electrode_dict in config["Electrode"]
         }
 
+        defaults = dict(
+            x_warped=0,
+            y_warped=0,
+            z_warped=0,
+            contacts="",
+        )
+
+        inserts = []
+        updates = []
         electrodes = nwbf.electrodes.to_dataframe()
         for nwbfile_elect_id, elect_data in electrodes.iterrows():
-            if nwbfile_elect_id in electrode_dicts:
-                # use the information in the electrodes table to start and then
-                # add (or overwrite) values from the config YAML
-
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["name"] = str(nwbfile_elect_id)
-                key["electrode_group_name"] = elect_data.group_name
-                key["region_id"] = BrainRegion.fetch_add(
-                    region_name=elect_data.group.location
-                )
-                key["x"] = elect_data.x
-                key["y"] = elect_data.y
-                key["z"] = elect_data.z
-                key["x_warped"] = 0
-                key["y_warped"] = 0
-                key["z_warped"] = 0
-                key["contacts"] = ""
-                key["filtering"] = elect_data.filtering
-                key["impedance"] = elect_data.get("imp")
-                key.update(electrode_dicts[nwbfile_elect_id])
-                query = Electrode & {"electrode_id": nwbfile_elect_id}
-                if len(query):
-                    cls.update1(key)
-                    logger.info(
-                        f"Updated Electrode with ID {nwbfile_elect_id}."
-                    )
-                else:
-                    cls.insert1(
-                        key, skip_duplicates=True, allow_direct_insert=True
-                    )
-                    logger.info(
-                        f"Inserted Electrode with ID {nwbfile_elect_id}."
-                    )
-            else:
+            if nwbfile_elect_id not in electrode_dicts:
                 warnings.warn(
                     f"Electrode ID {nwbfile_elect_id} exists in the NWB file "
                     + "but has no corresponding config YAML entry."
                 )
+                continue
+
+            # use the information in the electrodes table to start and then
+            # add (or overwrite) values from the config YAML
+
+            key = dict(
+                nwb_file_name=nwb_file_name,
+                electrode_id=str(nwbfile_elect_id),
+                electrode_group_name=elect_data.group_name,
+                region_id=BrainRegion.fetch_add(
+                    region_name=elect_data.group.location
+                ),
+                **defaults,
+                filtering=elect_data.filtering,
+                impedance=elect_data.get("imp"),
+                **electrode_dicts[nwbfile_elect_id],
+            )
+
+            query = Electrode & {"electrode_id": nwbfile_elect_id}
+
+            if len(query):
+                updates.append(key)
+                logger.info(f"Updated Electrode with ID {nwbfile_elect_id}.")
+            else:
+                inserts.append(key)
+                logger.info(f"Inserted Electrode with ID {nwbfile_elect_id}.")
+
+        cls.insert(inserts, skip_duplicates=True, allow_direct_insert=True)
+        for update in updates:
+            cls.update1(update)
 
 
 @schema
-class Raw(SpyglassMixin, dj.Imported):
-    definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+class Raw(SpyglassIngestion, dj.Imported):
+    definition = """ # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
     ---
     -> IntervalList
@@ -283,86 +292,78 @@ class Raw(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _only_ingest_first = True
+    _source_nwb_object_name = "e-series"
+
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.ecephys.ElectricalSeries
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": lambda *args: "raw data valid times",
+                "raw_object_id": "object_id",
+                "sampling_rate": self._rate_fallback,
+                "comments": "comments",
+                "description": "description",
+                "valid_times": self._valid_times_from_raw,
+            },
+        }
+
+    def _rate_fallback(self, nwb_object):
+        """Return the rate if available, otherwise None."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return rate
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+        return estimate_sampling_rate(
+            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=True
+        )
+
+    def _valid_times_from_raw(self, nwb_object):
+        """Return valid times from the raw data."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return np.array([[0, len(nwb_object.data) / rate]])
+
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+
+        return get_valid_intervals(
+            timestamps=np.asarray(timestamps),
+            sampling_rate=self._rate_fallback(nwb_object),
+            gap_proportion=1.75,
+            min_valid_len=0,
+        )
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        valid_times = self_key.pop("valid_times")  # remove from self key
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        return {
+            IntervalList: [dict(interval_insert, valid_times=valid_times)],
+            **super_ins,
+        }
 
     def make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_interval_name = "raw data valid times"
+        from spyglass.common.common_usage import ActivityLog
 
-        # get the ElectricalSeries acquisition object
-        eseries_aquisitions = []
-        for obj_name, obj in nwbf.acquisition.items():
-            if isinstance(obj, pynwb.ecephys.ElectricalSeries):
-                eseries_aquisitions.append(obj)
-        if len(eseries_aquisitions) == 0:
-            warnings.warn(
-                f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
-                + f"Skipping entry in {self.full_table_name}"
-            )
-            return
-        elif len(eseries_aquisitions) > 1:
-            warnings.warn(
-                f"Multiple ElectricalSeries objects found in: {nwb_file_abspath}\n\t"
-                + f"Inserting only first entry in {self.full_table_name}\n\t"
-                + "See issue #396 for more details."
-            )
-        rawdata = eseries_aquisitions[0]
+        ActivityLog.deprecate_log(self, "Raw.make", alt="insert_from_nwbfile")
 
-        if rawdata.rate is not None:
-            key["sampling_rate"] = rawdata.rate
-        else:
-            logger.info("Estimating sampling rate...")
-            # NOTE: Only use first 1e6 timepoints to save time
-            key["sampling_rate"] = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
-            )
-
-        interval_dict = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": raw_interval_name,
-        }
-
-        if rawdata.rate is not None:
-            interval_dict["valid_times"] = np.array(
-                [[0, len(rawdata.data) / rawdata.rate]]
-            )
-        else:
-            # get the list of valid times given the specified sampling rate.
-            interval_dict["valid_times"] = get_valid_intervals(
-                timestamps=np.asarray(rawdata.timestamps),
-                sampling_rate=key["sampling_rate"],
-                gap_proportion=1.75,
-                min_valid_len=0,
-            )
-
-        IntervalList().cautious_insert(interval_dict, update=True)
-
-        # now insert each of the electrodes as an individual row, but with the
-        # same nwb_object_id
-
-        logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
-            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
-        )
-
-        key.update(
-            {
-                "raw_object_id": rawdata.object_id,
-                "interval_list_name": raw_interval_name,
-                "comments": rawdata.comments,
-                "description": rawdata.description,
-            }
-        )
-
-        self.insert1(
-            key,
-            skip_duplicates=True,
-            allow_direct_insert=True,
-        )
+        # Call the new SpyglassIngestion method
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
@@ -960,3 +961,78 @@ class LFPBand(SpyglassMixin, dj.Computed):
                 filtered_nwb["filtered_data"].timestamps, name="time"
             ),
         )
+
+
+def _validate_electrode_ids(electrode_inserts, nwb_file_name):
+    """Validate that electrode IDs (probe_electrode values) are globally unique.
+
+    Checks for duplicate probe_electrode values across all electrodes in the
+    session. While Spyglass technically allows duplicate probe_electrode values
+    across different shanks (since the primary key includes probe_shank),
+    having duplicates can lead to confusing foreign key errors and makes it
+    unclear which electrode is being referenced.
+
+    Parameters
+    ----------
+    electrode_inserts : list of dict
+        List of electrode dictionaries to be inserted
+    nwb_file_name : str
+        Name of the NWB file being processed
+
+    Raises
+    ------
+    ValueError
+        If duplicate probe_electrode values are detected, with detailed
+        information about which electrodes are duplicated and suggestions for
+        fixing the issue.
+
+    See Also
+    --------
+    https://github.com/LorenFrankLab/spyglass/issues/1447
+    """
+    probe_electrodes = [
+        e
+        for e in electrode_inserts
+        if "probe_electrode" in e and "probe_id" in e
+    ]
+
+    if not probe_electrodes:
+        return  # No probe electrodes to validate
+
+    # Track probe_electrode values by location
+    # probe_electrode -> list of (probe_id, probe_shank, nwb_electrode_id)
+    elec_locs = defaultdict(list)
+    for electrode in probe_electrodes:
+        elec_locs[electrode["probe_electrode"]].append(
+            (
+                electrode["probe_id"],
+                electrode.get("probe_shank", "unknown"),
+                electrode.get("electrode_id", "unknown"),
+            )
+        )
+
+    duplicates = {e: locs for e, locs in elec_locs.items() if len(locs) > 1}
+
+    if not duplicates:
+        return  # All probe_electrode values are unique
+
+    error_lines = [
+        f"Duplicate electrode IDs detected in NWB file '{nwb_file_name}'.",
+        "The following IDs are duplicated:",
+    ]
+
+    for elec_id, locations in sorted(duplicates.items()):
+        error_lines.append(
+            f"  Electrode ID {elec_id} appears {len(locations)} times:"
+        )
+        for probe_id, shank, nwb_id in locations:
+            error_lines.append(
+                f"    - Probe '{probe_id}', Shank {shank}, NWB index {nwb_id}"
+            )
+
+    error_lines.append(
+        "To resolve, please ensure that each electrode has a unique "
+        + "'probe_electrode' value across all probes and shanks. "
+    )
+
+    raise ValueError("\n".join(error_lines))

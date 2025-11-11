@@ -19,6 +19,7 @@ def imported_pose_tbl():
 @pytest.fixture(scope="module")
 def import_pose_nwb(verbose_context, imported_pose_tbl):
     from spyglass.common import Nwbfile, Session
+    from spyglass.data_import import insert_sessions
     from spyglass.settings import raw_dir
 
     # --- Create fake data
@@ -81,7 +82,9 @@ def import_pose_nwb(verbose_context, imported_pose_tbl):
     behavior_mod.add(pose)
 
     # --- Write to file
-    pose_file = Path(raw_dir) / "test_imported_pose.nwb"
+    raw_file_name = "test_imported_pose.nwb"
+    copy_file_name = "test_imported_pose_.nwb"
+    pose_file = Path(raw_dir) / raw_file_name
     nwb_dict = dict(nwb_file_name=pose_file.name)
     if (Nwbfile() & nwb_dict) or pose_file.exists():
         Nwbfile().delete(safemode=False)
@@ -91,10 +94,11 @@ def import_pose_nwb(verbose_context, imported_pose_tbl):
         io.write(nwbfile)
 
     # --- Insert pose data into ImportedPose
-    Nwbfile().insert_from_relative_file_name(pose_file.name)
-    Session().populate(dict(nwb_file_name=pose_file.name))
+    insert_sessions([str(pose_file)], raise_err=True)
+    # Nwbfile().insert_from_relative_file_name(pose_file.name)
+    # Session().populate(dict(nwb_file_name=pose_file.name))
 
-    imported_pose_tbl.insert_from_nwbfile(pose_file.name, skip_duplicates=True)
+    imported_pose_tbl.insert_from_nwbfile(copy_file_name, skip_duplicates=True)
 
     yield pose_file
 
