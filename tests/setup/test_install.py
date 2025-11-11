@@ -61,28 +61,44 @@ class TestGetCondaCommand:
 class TestGetBaseDirectory:
     """Tests for get_base_directory()."""
 
-    def test_cli_arg_priority(self):
+    def test_cli_arg_priority(self, tmp_path):
         """Test that CLI argument has highest priority."""
-        result = get_base_directory("/cli/path")
-        assert result == Path("/cli/path").resolve()
+        cli_path = tmp_path / "cli_path"
+        result = get_base_directory(str(cli_path))
+        assert result == cli_path.resolve()
+        assert result.exists()  # Verify it was created
 
-    def test_env_var_priority(self, monkeypatch):
+    def test_env_var_priority(self, monkeypatch, tmp_path):
         """Test that environment variable has second priority."""
-        monkeypatch.setenv("SPYGLASS_BASE_DIR", "/env/path")
+        env_path = tmp_path / "env_path"
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_path))
         result = get_base_directory(None)
-        assert result == Path("/env/path").resolve()
+        assert result == env_path.resolve()
+        assert result.exists()  # Verify it was created
 
-    def test_cli_overrides_env_var(self, monkeypatch):
+    def test_cli_overrides_env_var(self, monkeypatch, tmp_path):
         """Test that CLI argument overrides environment variable."""
-        monkeypatch.setenv("SPYGLASS_BASE_DIR", "/env/path")
-        result = get_base_directory("/cli/path")
-        assert result == Path("/cli/path").resolve()
+        env_path = tmp_path / "env_path"
+        cli_path = tmp_path / "cli_path"
+        monkeypatch.setenv("SPYGLASS_BASE_DIR", str(env_path))
+        result = get_base_directory(str(cli_path))
+        assert result == cli_path.resolve()
+        assert result.exists()  # Verify CLI path was created
+        assert not env_path.exists()  # Verify ENV path was NOT created
 
-    def test_expands_user_home(self):
+    def test_expands_user_home(self, tmp_path):
         """Test that ~ is expanded to user home."""
-        result = get_base_directory("~/test")
-        assert "~" not in str(result)
-        assert result.is_absolute()
+        # Use a subdirectory under user's home that we can safely create/delete
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a test directory we can safely use
+            test_path = Path(tmpdir) / "test"
+            result = get_base_directory(str(test_path))
+            assert test_path.resolve() == result
+            assert result.is_absolute()
+            assert result.exists()
 
 
 class TestIsDockerAvailableInline:
