@@ -46,9 +46,11 @@ class BaseMixin:
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        from spyglass.settings import test_mode
+        import datajoint as dj
 
-        return test_mode
+        # Check dj.config directly instead of importing module-level variable
+        # which gets stale if load_config() is called after initial import
+        return dj.config.get("custom", {}).get("test_mode", False)
 
     @cached_property
     def _spyglass_version(self):
