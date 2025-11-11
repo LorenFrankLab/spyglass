@@ -80,6 +80,15 @@ class _TestDatabaseManager:
         }
 
     @property
+    def container(self):
+        """Docker container object.
+
+        Returns None for service containers (managed by GitHub Actions) or
+        null_server mode, since we don't have Python Docker API access.
+        """
+        return None
+
+    @property
     def connected(self):
         """Check if database connection is available.
 
