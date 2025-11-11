@@ -83,12 +83,18 @@ class _TestDatabaseManager:
     def connected(self):
         """Check if database connection is available.
 
-        Returns True for service container (always ready) or if null_server.
+        Actually verifies DataJoint can connect to the database, regardless of
+        how it's managed (service container, local Docker, or manual).
         """
-        if self.null_server:
+        try:
+            import datajoint as dj
+
+            # Update config with our credentials
+            dj.config.update(self.credentials)
+            # Check if connection actually works
+            return dj.conn().is_connected
+        except Exception:
             return False
-        # For GitHub Actions service container, assume connection is ready
-        return True
 
 
 def pytest_addoption(parser):
