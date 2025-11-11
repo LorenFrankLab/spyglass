@@ -53,12 +53,39 @@ class _TestDatabaseManager:
         self.port = port if port is not None else 3308
         self.null_server = null_server
 
-    def wait(self):
-        """Wait for database to be ready. No-op as service container handles this."""
+    def wait(self, timeout=120, wait_interval=3):
+        """Wait for database to be ready.
+
+        For service containers (null_server=False), polls the database connection
+        with retries to ensure MySQL is actually accepting connections, not just
+        that the container health check passed.
+
+        Parameters
+        ----------
+        timeout : int
+            Maximum time to wait in seconds. Default 120.
+        wait_interval : int
+            Time between connection attempts in seconds. Default 3.
+        """
         if self.null_server:
             return
-        # GitHub Actions service container is already ready when tests run
-        pass
+
+        # Poll for actual connectivity instead of assuming service container is ready
+        import time
+
+        import datajoint as dj
+
+        for attempt in range(timeout // wait_interval):
+            try:
+                dj.config.update(self.credentials)
+                if dj.conn().is_connected:
+                    return  # Connection successful
+            except Exception:
+                pass  # Retry
+            time.sleep(wait_interval)
+
+        # If we get here, connection failed - but don't raise error yet
+        # Let the actual test code handle connection failures with better error messages
 
     def stop(self):
         """Stop database. No-op as service container is managed by GitHub Actions."""
