@@ -47,9 +47,10 @@ class _TestDatabaseManager:
     Provides minimal interface compatible with old DockerMySQLManager for tests.
     """
 
-    def __init__(self, container_name="mysql", port=3308, null_server=False):
+    def __init__(self, container_name="mysql", port=None, null_server=False):
         self.container_name = container_name
-        self.port = port
+        # Use 3308 as default (GitHub Actions service container port)
+        self.port = port if port is not None else 3308
         self.null_server = null_server
 
     def wait(self):
