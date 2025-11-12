@@ -304,6 +304,7 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
     -> IntervalList
     ---
     compass_object_id: varchar(40)  # the object id of the compass direction object
+    name: varchar(80)              # name of the compass direction object
     """
 
     @property
@@ -314,36 +315,37 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
     def table_key_to_obj_attr(self):
         return {
             "self": {
+                "name": "name",
                 "compass_object_id": "object_id",
                 "valid_times": self.generate_valid_intervals_from_timeseries,
                 "interval_list_name": lambda obj: f"compass {obj.object_id} valid times",  # unique placeholder name,
             }
         }
 
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Get all CompassDirection spatial series from NWB file."""
+        compass_objects = super().get_nwb_objects(nwb_file, nwb_file_name)
+        spatial_series = sum(
+            [list(obj.spatial_series.values()) for obj in compass_objects], []
+        )
+        return spatial_series
+
     @staticmethod
     def generate_valid_intervals_from_timeseries(
-        nwb_obj: CompassDirection,
+        nwb_obj: pynwb.behavior.SpatialSeries,
     ):
-        """Generate valid intervals from CompassDirection spatial series.
+        """Generate valid intervals from spatial series.
 
         Parameters
         ----------
-        nwb_obj : CompassDirection
-            The CompassDirection NWB object.
+        nwb_obj : pynwb.behavior.SpatialSeries
+            The pynwb.behavior.SpatialSeries NWB object.
         Returns
         -------
         valid_times : list
             List of valid time intervals.
         """
-
-        if len(nwb_obj.spatial_series) != 1:
-            raise ValueError(
-                "Expected exactly one spatial series in CompassDirection."
-                + f" Found {len(nwb_obj.spatial_series)}."
-            )
-
-        compass_series = list(nwb_obj.spatial_series.values())[0]
-        timestamps = compass_series.get_timestamps()
+        timestamps = nwb_obj.get_timestamps()
         sampling_rate = estimate_sampling_rate(
             timestamps, filename=nwb_obj.name
         )
