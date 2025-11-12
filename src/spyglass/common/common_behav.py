@@ -320,7 +320,7 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
                 "name": "name",
                 "compass_object_id": "object_id",
                 "valid_times": self.generate_valid_intervals_from_timeseries,
-                "interval_list_name": lambda obj: f"compass {obj.object_id} valid times",  # unique placeholder name,
+                "interval_list_name": lambda obj: f"compass {obj.object_id} valid times",  # unique placeholder name
             }
         }
 

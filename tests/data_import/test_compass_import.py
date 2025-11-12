@@ -51,7 +51,7 @@ def import_compass_nwb(
     with NWBHDF5IO(file_path, mode="w") as io:
         io.write(nwbfile)
 
-    # --- Insert pose data into ImportedPose
+    # --- Insert compass direction data
     insert_sessions([str(file_path)], raise_err=True)
 
     yield nwb_dict
