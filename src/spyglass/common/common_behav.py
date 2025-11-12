@@ -307,6 +307,8 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
     name: varchar(80)              # name of the compass direction object
     """
 
+    _nwb_table = Nwbfile
+
     @property
     def _source_nwb_object_type(self):
         return CompassDirection
