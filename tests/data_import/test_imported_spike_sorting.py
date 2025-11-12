@@ -1,4 +1,3 @@
-
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 import numpy as np
 
