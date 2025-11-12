@@ -38,8 +38,8 @@ class DecodingParameters(SpyglassMixin, dj.Lookup):
     definition = """
     decoding_param_name : varchar(80)  # a name for this set of parameters
     ---
-    decoding_params : BLOB             # initialization parameters for model
-    decoding_kwargs = NULL : BLOB      # additional keyword arguments
+    decoding_params : LONGBLOB             # initialization parameters for model
+    decoding_kwargs = NULL : LONGBLOB      # additional keyword arguments
     """
 
     pk = "decoding_param_name"
