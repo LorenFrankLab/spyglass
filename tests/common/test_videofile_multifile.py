@@ -1,4 +1,15 @@
-"""Test VideoFile import with multi-file ImageSeries. #1445"""
+"""Test VideoFile import with multi-file ImageSeries.
+
+This module verifies that:
+
+- VideoFile entries are correctly created for each external file in a
+    multi-file ImageSeries.
+- Each entry is associated with the correct epoch and references the same
+    ImageSeries object.
+- Camera device and task information are properly linked.
+
+Related to issue #1445.
+"""
 
 import numpy as np
 import pytest

@@ -387,6 +387,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The video object from the NWB file
         cam_device_str : str
             Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
@@ -431,6 +432,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The primary key for the VideoFile entry
         cam_device_str : str
             Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
@@ -484,6 +486,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The primary key for the VideoFile entry
         cam_device_str : str
             Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
