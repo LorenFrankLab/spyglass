@@ -41,6 +41,10 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
 
+# Disable OMP error from MUA imports
+os.environ.setdefault("KMP_WARNINGS", "0")
+os.environ.setdefault("OMP_DISPLAY_ENV", "FALSE")
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line
@@ -235,6 +239,13 @@ def base_dir():
 def raw_dir(base_dir):
     # could do settings.raw_dir, but this is faster while server booting
     yield base_dir / "raw"
+
+
+@pytest.fixture(scope="session")
+def logger():
+    from spyglass.utils import logger
+
+    yield logger
 
 
 # ------------------------------- FIXTURES, DATA -------------------------------
