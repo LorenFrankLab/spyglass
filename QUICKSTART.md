@@ -10,11 +10,11 @@ If you received database credentials from your lab admin, this is you!
 The installer will:
 
 - Set up your development environment
-- Connect you to your lab's shared database
-- Offer to change your temporary password
+- Connect you to your lab's existing database
+- Guide you to change your temporary password (recommended)
 - Configure all necessary directories
 
-**Time**: ~5 minutes | **Database**: Connect to existing lab database
+**Time**: ~5 minutes | **Database**: Connect to lab's existing database
 
 ### 🧪 Trying Spyglass Locally?
 
@@ -56,11 +56,11 @@ The installer will prompt you to choose:
 
 1. **Installation type**: Minimal (recommended) or Full
 2. **Database setup**:
-   - **Remote** (recommended for lab members) - Connect to existing lab database
+   - **Remote** (recommended for lab members) - Connect to lab's existing database
    - **Docker** - Local trial database for testing
    - **Skip** - Configure manually later
 
-If joining a lab, you'll be prompted to change your password for security.
+If joining a lab, you can change your password after installation (recommended).
 
 ### Step 2: Validate installation
 
@@ -69,7 +69,7 @@ If joining a lab, you'll be prompted to change your password for security.
 conda activate spyglass
 
 # Run validation
-python scripts/validate_spyglass.py -v
+python scripts/validate.py -v
 ```
 
 **That's it!** Setup complete in ~5-10 minutes.

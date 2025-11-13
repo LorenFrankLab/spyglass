@@ -1424,7 +1424,8 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     ...     print(f"Connecting to {config['host']}:{config['port']}")
     """
     print("\nRemote database configuration:")
-    print("  Enter connection details for your MySQL database")
+    print("  Your lab admin should have provided these credentials.")
+    print("  Check your welcome email or contact your admin if unsure.")
     print("  (Press Ctrl+C to cancel)")
 
     try:
@@ -1533,7 +1534,7 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
             number="1",
             name="Remote",
             status="✓ Available (Recommended for lab members)",
-            description="Connect to existing lab database",
+            description="Connect to lab's existing database",
         )
     )
 
@@ -2289,18 +2290,9 @@ def setup_database_remote(
             print_warning("Database setup cancelled")
             return False
 
-    # Offer password change for new lab members (only for non-localhost)
-    if config["host"] not in LOCALHOST_ADDRESSES:
-        new_password = change_database_password(
-            host=config["host"],
-            port=config["port"],
-            user=config["user"],
-            old_password=config["password"],
-            use_tls=config["use_tls"],
-        )
-        # Update config with new password if changed
-        if new_password is not None:
-            config["password"] = new_password
+    # NOTE: Password change deferred to post-install
+    # Cannot change password during install because DataJoint isn't available
+    # in the outer Python environment. Instructions provided in success message.
 
     # Save configuration
     create_database_config(**config)
@@ -2437,6 +2429,24 @@ def run_installation(args) -> None:
         print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
     print("Next steps:")
     print(f"  1. Activate environment: conda activate {args.env_name}")
+
+    # Check if user configured remote database (recommend password change)
+    config_file = Path.home() / ".datajoint_config.json"
+    if config_file.exists():
+        try:
+            with config_file.open() as f:
+                config = json.load(f)
+                host = config.get("database.host", "localhost")
+                if host not in LOCALHOST_ADDRESSES:
+                    print()
+                    print(f"{COLORS['blue']}Recommended for lab members:{COLORS['reset']}")
+                    print("  Change your password for security:")
+                    print(f"    conda activate {args.env_name}")
+                    print("    python -c 'import datajoint as dj; dj.set_password()'")
+                    print()
+        except (json.JSONDecodeError, IOError):
+            pass  # Ignore config file errors
+
     print("  2. Start tutorial:       jupyter notebook notebooks/")
     print(
         "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
