@@ -13,14 +13,14 @@ If you don't have mamba/conda, install [miniforge](https://github.com/conda-forg
 
 ## Installation (2 commands)
 
-### 1. Download and run quickstart
+### 1. Download and run installer
 ```bash
 # Clone the repository
 git clone https://github.com/LorenFrankLab/spyglass.git
 cd spyglass
 
-# Run quickstart (minimal installation)
-python scripts/quickstart.py
+# Run installer (minimal installation)
+python scripts/install.py
 ```
 
 ### 2. Validate installation
@@ -55,13 +55,13 @@ jupyter notebook 01_Concepts.ipynb
 
 ## Installation Options
 
-Need something different? The quickstart supports these options:
+Need something different? The installer supports these options:
 
 ```bash
-python scripts/quickstart.py --full           # All optional dependencies
-python scripts/quickstart.py --pipeline=dlc   # DeepLabCut pipeline
-python scripts/quickstart.py --no-database    # Skip database setup
-python scripts/quickstart.py --help           # See all options
+python scripts/install.py --full           # All optional dependencies
+python scripts/install.py --pipeline=dlc   # DeepLabCut pipeline
+python scripts/install.py --no-database    # Skip database setup
+python scripts/install.py --help           # See all options
 ```
 
 ## What Gets Installed
@@ -78,13 +78,13 @@ The quickstart creates:
 ```bash
 # Remove environment and retry
 conda env remove -n spyglass
-python scripts/quickstart.py
+python scripts/install.py
 ```
 
 ### Validation fails?
 1. Check error messages for specific issues
 2. Ensure Docker is running (for database)
-3. Try: `python scripts/quickstart.py --no-database`
+3. Try: `python scripts/install.py --no-database`
 
 ### Need help?
 - Check [Advanced Setup Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/) for manual installation
