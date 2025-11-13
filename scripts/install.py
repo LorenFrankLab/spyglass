@@ -2080,10 +2080,11 @@ def change_database_password(
     old_password: str,
     use_tls: bool,
 ) -> Optional[str]:
-    """Prompt user to change their database password.
+    """Prompt user to change their database password using DataJoint.
 
     Interactive password change flow for new lab members who received
-    temporary credentials from their admin.
+    temporary credentials from their admin. Uses DataJoint's built-in
+    set_password() function which is the standard approach in Spyglass.
 
     Parameters
     ----------
@@ -2105,10 +2106,9 @@ def change_database_password(
 
     Notes
     -----
-    Executes ALTER USER statement to change password in MySQL.
+    Uses DataJoint's dj.set_password() which prompts interactively and
+    updates both the MySQL server and dj.config.
     """
-    import getpass
-
     print("\n" + "=" * 60)
     print("Password Change (Recommended for lab members)")
     print("=" * 60)
@@ -2121,60 +2121,52 @@ def change_database_password(
         print_warning("Keeping current password")
         return None
 
-    # Prompt for new password with confirmation
-    while True:
-        print()
-        new_password = getpass.getpass("  New password: ")
-        if not new_password:
-            print_error("Password cannot be empty")
-            continue
-
-        confirm_password = getpass.getpass("  Confirm password: ")
-        if new_password != confirm_password:
-            print_error("Passwords do not match")
-            retry = input("  Try again? [Y/n]: ").strip().lower()
-            if retry in ["n", "no"]:
-                return None
-            continue
-
-        break
-
-    # Execute password change
+    # Use DataJoint's standard password change workflow
     try:
-        import pymysql
+        import datajoint as dj
 
-        print_step("Changing password...")
+        print_step("Setting up connection for password change...")
 
-        connection = pymysql.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=old_password,
-            connect_timeout=10,
-            ssl={"ssl": True} if use_tls else None,
-        )
+        # Configure DataJoint with current credentials
+        dj.config["database.host"] = host
+        dj.config["database.port"] = port
+        dj.config["database.user"] = user
+        dj.config["database.password"] = old_password
+        if use_tls:
+            dj.config["database.use_tls"] = True
 
-        with connection.cursor() as cursor:
-            # Use ALTER USER for MySQL 5.7.6+
-            cursor.execute(
-                f"ALTER USER '{user}'@'%%' IDENTIFIED BY %s", (new_password,)
-            )
-        connection.commit()
-        connection.close()
+        # Establish connection
+        dj.conn()
+
+        # Use DataJoint's interactive password change
+        # This prompts user, changes password on server, and updates dj.config
+        print()
+        print("DataJoint will now prompt you for your new password.")
+        print()
+        dj.set_password()
+
+        # Extract the new password from updated dj.config
+        new_password = dj.config["database.password"]
 
         print_success("Password changed successfully!")
         return new_password
 
     except ImportError:
-        print_warning("Cannot change password (pymysql not available)")
-        print("  You can change it later using MySQL client")
+        print_warning("Cannot change password (DataJoint not available)")
+        print("  You can change it later after activating the environment:")
+        print("    conda activate spyglass")
+        print("    python -c 'import datajoint as dj; dj.set_password()'")
         return None
 
     except Exception as e:
         print_error(f"Failed to change password: {e}")
         print("\nYou can change it manually later:")
-        print(f"  mysql -h {host} -P {port} -u {user} -p")
-        print(f"  ALTER USER '{user}'@'%' IDENTIFIED BY 'newpassword';")
+        print("  Option 1 (recommended):")
+        print("    conda activate spyglass")
+        print("    python -c 'import datajoint as dj; dj.set_password()'")
+        print("  Option 2 (MySQL client):")
+        print(f"    mysql -h {host} -P {port} -u {user} -p")
+        print(f"    ALTER USER '{user}'@'%' IDENTIFIED BY 'newpassword';")
         return None
 
 
