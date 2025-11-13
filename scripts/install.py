@@ -2157,8 +2157,10 @@ def change_database_password(
     print_step("Changing password on database server...")
 
     # Build Python code to run inside conda environment
+    # New password is passed via environment variable for security
     python_code = f"""
 import sys
+import os
 import datajoint as dj
 
 # Configure connection
@@ -2168,14 +2170,21 @@ dj.config['database.user'] = {repr(user)}
 dj.config['database.password'] = {repr(old_password)}
 {'dj.config["database.use_tls"] = True' if use_tls else ''}
 
+# Get new password from environment variable (passed securely)
+new_password = os.environ.get('SPYGLASS_NEW_PASSWORD')
+if not new_password:
+    print("ERROR: SPYGLASS_NEW_PASSWORD not provided", file=sys.stderr)
+    sys.exit(1)
+
 try:
     # Connect to database
     dj.conn()
 
-    # Change password using ALTER USER
+    # Change password using ALTER USER with proper parameterization
     conn = dj.conn()
     with conn.cursor() as cursor:
-        cursor.execute("ALTER USER %s@'%%' IDENTIFIED BY %s", (dj.config['database.user'], {repr(new_password)}))
+        cursor.execute("ALTER USER %s@'%%' IDENTIFIED BY %s",
+                      (dj.config['database.user'], new_password))
     conn.commit()
 
     print("SUCCESS")
@@ -2185,8 +2194,14 @@ except Exception as e:
 """
 
     try:
+        # Pass new password via environment variable for security
+        import os
+        env = os.environ.copy()
+        env['SPYGLASS_NEW_PASSWORD'] = new_password
+
         result = subprocess.run(
             ["conda", "run", "-n", env_name, "python", "-c", python_code],
+            env=env,
             capture_output=True,
             text=True,
             timeout=30,
