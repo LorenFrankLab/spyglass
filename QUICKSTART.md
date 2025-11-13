@@ -11,7 +11,7 @@ The installer will:
 
 - Set up your development environment
 - Connect you to your lab's existing database
-- Guide you to change your temporary password (recommended)
+- Prompt you to change your temporary password
 - Configure all necessary directories
 
 **Time**: ~5 minutes | **Database**: Connect to lab's existing database
@@ -60,7 +60,7 @@ The installer will prompt you to choose:
    - **Docker** - Local trial database for testing
    - **Skip** - Configure manually later
 
-If joining a lab, you can change your password after installation (recommended).
+If joining a lab, you'll be prompted to change your password during installation.
 
 ### Step 2: Validate installation
 

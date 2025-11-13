@@ -1973,7 +1973,7 @@ def test_database_connection(
         return False, error_msg
 
 
-def handle_database_setup_interactive() -> None:
+def handle_database_setup_interactive(env_name: str) -> None:
     """Interactive database setup with retry logic.
 
     Allows user to try different database options if one fails,
@@ -1981,7 +1981,8 @@ def handle_database_setup_interactive() -> None:
 
     Parameters
     ----------
-    None
+    env_name : str
+        Name of conda environment where DataJoint is installed
 
     Returns
     -------
@@ -2013,7 +2014,7 @@ def handle_database_setup_interactive() -> None:
                 # Loop continues to show menu again
 
         elif db_choice == "remote":
-            success = setup_database_remote()
+            success = setup_database_remote(env_name)
             if success:
                 break
             # If remote setup returns False (cancelled), loop to menu
@@ -2026,6 +2027,7 @@ def handle_database_setup_interactive() -> None:
 
 
 def handle_database_setup_cli(
+    env_name: str,
     db_type: str,
     db_host: Optional[str] = None,
     db_port: Optional[int] = None,
@@ -2036,6 +2038,8 @@ def handle_database_setup_cli(
 
     Parameters
     ----------
+    env_name : str
+        Name of conda environment where DataJoint is installed
     db_type : str
         One of: "compose", "docker" (alias for compose), or "remote"
     db_host : str, optional
@@ -2067,7 +2071,11 @@ def handle_database_setup_cli(
             print("  You can configure manually later")
     elif db_type == "remote":
         success = setup_database_remote(
-            host=db_host, port=db_port, user=db_user, password=db_password
+            env_name=env_name,
+            host=db_host,
+            port=db_port,
+            user=db_user,
+            password=db_password,
         )
         if not success:
             print_warning("Remote database setup cancelled")
@@ -2080,12 +2088,13 @@ def change_database_password(
     user: str,
     old_password: str,
     use_tls: bool,
+    env_name: str,
 ) -> Optional[str]:
     """Prompt user to change their database password using DataJoint.
 
     Interactive password change flow for new lab members who received
-    temporary credentials from their admin. Uses DataJoint's built-in
-    set_password() function which is the standard approach in Spyglass.
+    temporary credentials from their admin. Runs inside the conda environment
+    where DataJoint is installed.
 
     Parameters
     ----------
@@ -2099,6 +2108,8 @@ def change_database_password(
         Current password (temporary from admin)
     use_tls : bool
         Whether TLS is enabled
+    env_name : str
+        Name of conda environment where DataJoint is installed
 
     Returns
     -------
@@ -2107,9 +2118,11 @@ def change_database_password(
 
     Notes
     -----
-    Uses DataJoint's dj.set_password() which prompts interactively and
-    updates both the MySQL server and dj.config.
+    Prompts user for new password, then uses DataJoint (running in conda env)
+    to change password on MySQL server.
     """
+    import getpass
+
     print("\n" + "=" * 60)
     print("Password Change (Recommended for lab members)")
     print("=" * 60)
@@ -2122,56 +2135,90 @@ def change_database_password(
         print_warning("Keeping current password")
         return None
 
-    # Use DataJoint's standard password change workflow
+    # Prompt for new password with confirmation
+    while True:
+        print()
+        new_password = getpass.getpass("  New password: ")
+        if not new_password:
+            print_error("Password cannot be empty")
+            continue
+
+        confirm_password = getpass.getpass("  Confirm password: ")
+        if new_password != confirm_password:
+            print_error("Passwords do not match")
+            retry = input("  Try again? [Y/n]: ").strip().lower()
+            if retry in ["n", "no"]:
+                return None
+            continue
+
+        break
+
+    # Change password using DataJoint in conda environment
+    print_step("Changing password on database server...")
+
+    # Build Python code to run inside conda environment
+    python_code = f"""
+import sys
+import datajoint as dj
+
+# Configure connection
+dj.config['database.host'] = {repr(host)}
+dj.config['database.port'] = {port}
+dj.config['database.user'] = {repr(user)}
+dj.config['database.password'] = {repr(old_password)}
+{'dj.config["database.use_tls"] = True' if use_tls else ''}
+
+try:
+    # Connect to database
+    dj.conn()
+
+    # Change password using ALTER USER
+    conn = dj.conn()
+    with conn.cursor() as cursor:
+        cursor.execute("ALTER USER %s@'%%' IDENTIFIED BY %s", (dj.config['database.user'], {repr(new_password)}))
+    conn.commit()
+
+    print("SUCCESS")
+except Exception as e:
+    print(f"ERROR: {{e}}", file=sys.stderr)
+    sys.exit(1)
+"""
+
     try:
-        import datajoint as dj
+        result = subprocess.run(
+            ["conda", "run", "-n", env_name, "python", "-c", python_code],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
-        print_step("Setting up connection for password change...")
+        if result.returncode == 0 and "SUCCESS" in result.stdout:
+            print_success("Password changed successfully!")
+            return new_password
+        else:
+            print_error(f"Failed to change password: {result.stderr}")
+            print("\nYou can change it manually later:")
+            print(f"  conda activate {env_name}")
+            print("  python -c 'import datajoint as dj; dj.set_password()'")
+            return None
 
-        # Configure DataJoint with current credentials
-        dj.config["database.host"] = host
-        dj.config["database.port"] = port
-        dj.config["database.user"] = user
-        dj.config["database.password"] = old_password
-        if use_tls:
-            dj.config["database.use_tls"] = True
-
-        # Establish connection
-        dj.conn()
-
-        # Use DataJoint's interactive password change
-        # This prompts user, changes password on server, and updates dj.config
-        print()
-        print("DataJoint will now prompt you for your new password.")
-        print()
-        dj.set_password()
-
-        # Extract the new password from updated dj.config
-        new_password = dj.config["database.password"]
-
-        print_success("Password changed successfully!")
-        return new_password
-
-    except ImportError:
-        print_warning("Cannot change password (DataJoint not available)")
-        print("  You can change it later after activating the environment:")
-        print("    conda activate spyglass")
-        print("    python -c 'import datajoint as dj; dj.set_password()'")
+    except subprocess.TimeoutExpired:
+        print_error("Password change timed out")
+        print("\nYou can change it manually later:")
+        print(f"  conda activate {env_name}")
+        print("  python -c 'import datajoint as dj; dj.set_password()'")
         return None
 
     except Exception as e:
         print_error(f"Failed to change password: {e}")
         print("\nYou can change it manually later:")
-        print("  Option 1 (recommended):")
-        print("    conda activate spyglass")
-        print("    python -c 'import datajoint as dj; dj.set_password()'")
-        print("  Option 2 (MySQL client):")
-        print(f"    mysql -h {host} -P {port} -u {user} -p")
-        print(f"    ALTER USER '{user}'@'%' IDENTIFIED BY 'newpassword';")
+        print(f"  conda activate {env_name}")
+        print("  python -c 'import datajoint as dj; dj.set_password()'")
         return None
 
 
 def setup_database_remote(
+    env_name: str,
     host: Optional[str] = None,
     port: Optional[int] = None,
     user: Optional[str] = None,
@@ -2185,6 +2232,8 @@ def setup_database_remote(
 
     Parameters
     ----------
+    env_name : str
+        Name of conda environment where DataJoint is installed
     host : str, optional
         Database host (prompts if not provided)
     port : int, optional
@@ -2285,14 +2334,24 @@ def setup_database_remote(
 
         retry = input("Retry with different settings? [y/N]: ").strip().lower()
         if retry in ["y", "yes"]:
-            return setup_database_remote()  # Recursive retry
+            return setup_database_remote(env_name)  # Recursive retry
         else:
             print_warning("Database setup cancelled")
             return False
 
-    # NOTE: Password change deferred to post-install
-    # Cannot change password during install because DataJoint isn't available
-    # in the outer Python environment. Instructions provided in success message.
+    # Offer password change for new lab members (only for non-localhost)
+    if config["host"] not in LOCALHOST_ADDRESSES:
+        new_password = change_database_password(
+            host=config["host"],
+            port=config["port"],
+            user=config["user"],
+            old_password=config["password"],
+            use_tls=config["use_tls"],
+            env_name=env_name,
+        )
+        # Update config with new password if changed
+        if new_password is not None:
+            config["password"] = new_password
 
     # Save configuration
     create_database_config(**config)
@@ -2392,7 +2451,7 @@ def run_installation(args) -> None:
     #    because docker operations are self-contained
     if args.docker:
         # Docker explicitly requested via CLI
-        handle_database_setup_cli("docker")
+        handle_database_setup_cli(args.env_name, "docker")
     elif args.remote:
         # Remote database explicitly requested via CLI
         # Support non-interactive mode with CLI args or env vars
@@ -2400,6 +2459,7 @@ def run_installation(args) -> None:
 
         db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
         handle_database_setup_cli(
+            args.env_name,
             "remote",
             db_host=args.db_host,
             db_port=args.db_port,
@@ -2408,7 +2468,7 @@ def run_installation(args) -> None:
         )
     else:
         # Interactive prompt with retry logic
-        handle_database_setup_interactive()
+        handle_database_setup_interactive(args.env_name)
 
     # 5. Validation (runs in new environment, CAN import spyglass)
     validation_passed = True
@@ -2429,24 +2489,6 @@ def run_installation(args) -> None:
         print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
     print("Next steps:")
     print(f"  1. Activate environment: conda activate {args.env_name}")
-
-    # Check if user configured remote database (recommend password change)
-    config_file = Path.home() / ".datajoint_config.json"
-    if config_file.exists():
-        try:
-            with config_file.open() as f:
-                config = json.load(f)
-                host = config.get("database.host", "localhost")
-                if host not in LOCALHOST_ADDRESSES:
-                    print()
-                    print(f"{COLORS['blue']}Recommended for lab members:{COLORS['reset']}")
-                    print("  Change your password for security:")
-                    print(f"    conda activate {args.env_name}")
-                    print("    python -c 'import datajoint as dj; dj.set_password()'")
-                    print()
-        except (json.JSONDecodeError, IOError):
-            pass  # Ignore config file errors
-
     print("  2. Start tutorial:       jupyter notebook notebooks/")
     print(
         "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
