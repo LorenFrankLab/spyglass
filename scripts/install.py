@@ -1527,33 +1527,37 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
     # Check Docker Compose availability
     compose_available = is_docker_compose_available_inline()
 
+    # Option 1: Remote database (primary use case - joining existing lab)
+    options.append(
+        DatabaseOption(
+            number="1",
+            name="Remote",
+            status="✓ Available (Recommended for lab members)",
+            description="Connect to existing lab database",
+        )
+    )
+
+    # Option 2: Docker (trial/development use case)
     if compose_available:
         options.append(
             DatabaseOption(
-                number="1",
+                number="2",
                 name="Docker",
-                status="✓ Available (Recommended)",
-                description="Automatic local database setup",
+                status="✓ Available",
+                description="Local trial database (for testing)",
             )
         )
     else:
         options.append(
             DatabaseOption(
-                number="1",
+                number="2",
                 name="Docker",
                 status="✗ Not available",
                 description="Requires Docker Desktop",
             )
         )
 
-    options.append(
-        DatabaseOption(
-            number="2",
-            name="Remote",
-            status="✓ Available",
-            description="Connect to existing lab/cloud database",
-        )
-    )
+    # Option 3: Skip setup
     options.append(
         DatabaseOption(
             number="3",
@@ -1614,17 +1618,17 @@ def prompt_database_setup() -> str:
         print("    3. Verify: docker compose version")
         print("    4. Re-run installer")
 
-    # Map choices to actions
+    # Map choices to actions (updated order: Remote first, then Docker)
     choice_map = {
-        "1": "compose",
-        "2": "remote",
+        "1": "remote",
+        "2": "compose",
         "3": "skip",
     }
 
     # Get valid choices
-    valid_choices = ["2", "3"]  # Remote and Skip always available
+    valid_choices = ["1", "3"]  # Remote and Skip always available
     if compose_available:
-        valid_choices.insert(0, "1")
+        valid_choices.insert(1, "2")  # Insert Docker as option 2 if available
 
     while True:
         choice = input(f"\nChoice [{'/'.join(valid_choices)}]: ").strip()
@@ -1634,7 +1638,7 @@ def prompt_database_setup() -> str:
             continue
 
         # Handle Docker unavailability
-        if choice == "1" and not compose_available:
+        if choice == "2" and not compose_available:
             print_error("Docker is not available")
             continue
 
@@ -2069,6 +2073,111 @@ def handle_database_setup_cli(
             print("  You can configure manually later")
 
 
+def change_database_password(
+    host: str,
+    port: int,
+    user: str,
+    old_password: str,
+    use_tls: bool,
+) -> Optional[str]:
+    """Prompt user to change their database password.
+
+    Interactive password change flow for new lab members who received
+    temporary credentials from their admin.
+
+    Parameters
+    ----------
+    host : str
+        Database hostname
+    port : int
+        Database port
+    user : str
+        Database username
+    old_password : str
+        Current password (temporary from admin)
+    use_tls : bool
+        Whether TLS is enabled
+
+    Returns
+    -------
+    str or None
+        New password if changed, None if user skipped or error occurred
+
+    Notes
+    -----
+    Executes ALTER USER statement to change password in MySQL.
+    """
+    import getpass
+
+    print("\n" + "=" * 60)
+    print("Password Change (Recommended for lab members)")
+    print("=" * 60)
+    print("\nIf you received temporary credentials from your lab admin,")
+    print("you should change your password now for security.")
+    print()
+
+    change = input("Change password? [Y/n]: ").strip().lower()
+    if change in ["n", "no"]:
+        print_warning("Keeping current password")
+        return None
+
+    # Prompt for new password with confirmation
+    while True:
+        print()
+        new_password = getpass.getpass("  New password: ")
+        if not new_password:
+            print_error("Password cannot be empty")
+            continue
+
+        confirm_password = getpass.getpass("  Confirm password: ")
+        if new_password != confirm_password:
+            print_error("Passwords do not match")
+            retry = input("  Try again? [Y/n]: ").strip().lower()
+            if retry in ["n", "no"]:
+                return None
+            continue
+
+        break
+
+    # Execute password change
+    try:
+        import pymysql
+
+        print_step("Changing password...")
+
+        connection = pymysql.connect(
+            host=host,
+            port=port,
+            user=user,
+            password=old_password,
+            connect_timeout=10,
+            ssl={"ssl": True} if use_tls else None,
+        )
+
+        with connection.cursor() as cursor:
+            # Use ALTER USER for MySQL 5.7.6+
+            cursor.execute(
+                f"ALTER USER '{user}'@'%%' IDENTIFIED BY %s", (new_password,)
+            )
+        connection.commit()
+        connection.close()
+
+        print_success("Password changed successfully!")
+        return new_password
+
+    except ImportError:
+        print_warning("Cannot change password (pymysql not available)")
+        print("  You can change it later using MySQL client")
+        return None
+
+    except Exception as e:
+        print_error(f"Failed to change password: {e}")
+        print("\nYou can change it manually later:")
+        print(f"  mysql -h {host} -P {port} -u {user} -p")
+        print(f"  ALTER USER '{user}'@'%' IDENTIFIED BY 'newpassword';")
+        return None
+
+
 def setup_database_remote(
     host: Optional[str] = None,
     port: Optional[int] = None,
@@ -2078,7 +2187,8 @@ def setup_database_remote(
     """Set up remote database connection.
 
     Prompts for connection details (if not provided), tests the connection,
-    and creates configuration file if connection succeeds.
+    optionally changes password for new lab members, and creates configuration
+    file if connection succeeds.
 
     Parameters
     ----------
@@ -2186,6 +2296,19 @@ def setup_database_remote(
         else:
             print_warning("Database setup cancelled")
             return False
+
+    # Offer password change for new lab members (only for non-localhost)
+    if config["host"] not in LOCALHOST_ADDRESSES:
+        new_password = change_database_password(
+            host=config["host"],
+            port=config["port"],
+            user=config["user"],
+            old_password=config["password"],
+            use_tls=config["use_tls"],
+        )
+        # Update config with new password if changed
+        if new_password is not None:
+            config["password"] = new_password
 
     # Save configuration
     create_database_config(**config)

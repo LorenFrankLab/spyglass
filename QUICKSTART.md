@@ -1,6 +1,34 @@
-# Spyglass Quickstart (5 minutes)
+# Spyglass Quickstart
 
 Get from zero to analyzing neural data with Spyglass in just a few commands.
+
+## Choose Your Path
+
+### 👥 Joining an Existing Lab? (Recommended)
+
+If you received database credentials from your lab admin, this is you!
+The installer will:
+
+- Set up your development environment
+- Connect you to your lab's shared database
+- Offer to change your temporary password
+- Configure all necessary directories
+
+**Time**: ~5 minutes | **Database**: Connect to existing lab database
+
+### 🧪 Trying Spyglass Locally?
+
+Want to explore Spyglass features without joining a lab?
+The installer can:
+
+- Set up a local trial database using Docker
+- Create an isolated test environment
+- Let you experiment with sample data
+
+**Time**: ~10 minutes | **Database**: Local Docker container
+(requires [Docker Desktop](https://docs.docker.com/get-docker/))
+
+---
 
 ## Prerequisites
 
@@ -11,19 +39,31 @@ Get from zero to analyzing neural data with Spyglass in just a few commands.
 
 If you don't have mamba/conda, install [miniforge](https://github.com/conda-forge/miniforge#install) first.
 
-## Installation (2 commands)
+## Installation (2 steps)
 
-### 1. Download and run installer
+### Step 1: Run the installer
+
 ```bash
 # Clone the repository
 git clone https://github.com/LorenFrankLab/spyglass.git
 cd spyglass
 
-# Run installer (minimal installation)
+# Run interactive installer
 python scripts/install.py
 ```
 
-### 2. Validate installation
+The installer will prompt you to choose:
+
+1. **Installation type**: Minimal (recommended) or Full
+2. **Database setup**:
+   - **Remote** (recommended for lab members) - Connect to existing lab database
+   - **Docker** - Local trial database for testing
+   - **Skip** - Configure manually later
+
+If joining a lab, you'll be prompted to change your password for security.
+
+### Step 2: Validate installation
+
 ```bash
 # Activate the environment
 conda activate spyglass
@@ -32,7 +72,7 @@ conda activate spyglass
 python scripts/validate_spyglass.py -v
 ```
 
-**That's it!** Total time: ~5-10 minutes
+**That's it!** Setup complete in ~5-10 minutes.
 
 ## Next Steps
 
@@ -66,9 +106,10 @@ python scripts/install.py --help           # See all options
 
 ## What Gets Installed
 
-The quickstart creates:
+The installer creates:
+
 - **Conda environment** with Spyglass and core dependencies
-- **MySQL database** (local Docker container)
+- **Database connection** (remote lab database OR local Docker container)
 - **Data directories** in `~/spyglass_data/`
 - **Jupyter environment** for running tutorials
 
@@ -82,11 +123,14 @@ python scripts/install.py
 ```
 
 ### Validation fails?
+
 1. Check error messages for specific issues
-2. Ensure Docker is running (for database)
-3. Try: `python scripts/install.py --no-database`
+2. If using Docker database, ensure Docker Desktop is running
+3. If database connection fails, verify credentials with your lab admin
+4. Try skipping database: `python scripts/install.py --no-database`
 
 ### Need help?
+
 - Check [Advanced Setup Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/) for manual installation
 - Ask questions in [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
 
