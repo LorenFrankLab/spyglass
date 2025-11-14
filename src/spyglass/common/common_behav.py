@@ -376,6 +376,150 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
+    def _prepare_video_entry(self, key, video_obj, cam_device_str):
+        """Prepare a VideoFile entry dict for a given video object.
+
+        Parameters
+        ----------
+        key : dict
+            The primary key for the VideoFile entry
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        cam_device_str : str
+            Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
+
+        Returns
+        -------
+        dict
+            Prepared entry dict ready for insertion
+
+        Raises
+        ------
+        KeyError
+            If camera_name is not found in CameraDevice table
+        """
+        nwb_cam_device = video_obj.device.name
+        key["video_file_num"] = int(re.match(cam_device_str, nwb_cam_device)[1])
+
+        camera_name = video_obj.device.camera_name
+        if not (CameraDevice & {"camera_name": camera_name}):
+            raise KeyError(
+                f"No camera with camera_name: {camera_name} found "
+                "in CameraDevice table."
+            )
+
+        key["camera_name"] = camera_name
+        key["video_file_object_id"] = video_obj.object_id
+        return key
+
+    def _process_video_timestamps(
+        self, video_obj, valid_times, key, cam_device_str
+    ):
+        """Process video timestamps and collect VideoFile entries.
+
+        Handles both single-file and multi-file ImageSeries. For multi-file
+        ImageSeries (indicated by starting_frame attribute), segments
+        timestamps per file and validates each segment separately.
+
+        Parameters
+        ----------
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        valid_times : Interval
+            Valid time intervals for the current epoch
+        key : dict
+            The primary key for the VideoFile entry
+        cam_device_str : str
+            Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
+
+        Returns
+        -------
+        list
+            List of entry dicts ready for insertion (may be empty)
+        """
+        timestamps = video_obj.timestamps
+        starting_frame = getattr(video_obj, "starting_frame", None)
+
+        # Check for multi-file ImageSeries
+        if starting_frame is not None and len(starting_frame) > 1:
+            return self._process_multifile_video(
+                video_obj,
+                timestamps,
+                starting_frame,
+                valid_times,
+                key,
+                cam_device_str,
+            )
+
+        # Single-file ImageSeries: original logic for backward compatibility
+        these_times = valid_times.contains(timestamps)
+        if len(these_times) <= (0.9 * len(timestamps)):
+            return []
+
+        entry = self._prepare_video_entry(key, video_obj, cam_device_str)
+        return [entry]
+
+    def _process_multifile_video(
+        self,
+        video_obj,
+        timestamps,
+        starting_frame,
+        valid_times,
+        key,
+        cam_device_str,
+    ):
+        """Process multi-file ImageSeries with starting_frame parameter.
+
+        Parameters
+        ----------
+        video_obj : pynwb.image.ImageSeries
+            The video object from the NWB file
+        timestamps : array
+            All timestamps for the ImageSeries
+        starting_frame : array
+            Frame indices indicating where each external file begins
+        valid_times : Interval
+            Valid time intervals for the current epoch
+        key : dict
+            The primary key for the VideoFile entry
+        cam_device_str : str
+            Regular expression pattern to extract camera device number
+            (e.g., r"camera_device (\d+)") as an integer.
+
+        Returns
+        -------
+        list
+            List of entry dicts ready for insertion (may be empty)
+        """
+        entries = []
+
+        for file_idx in range(len(starting_frame)):
+            # Determine timestamp range for this file segment
+            start_idx = starting_frame[file_idx]
+            end_idx = (
+                starting_frame[file_idx + 1]
+                if file_idx + 1 < len(starting_frame)
+                else len(timestamps)
+            )
+
+            # Extract timestamps for this specific file
+            file_timestamps = timestamps[start_idx:end_idx]
+
+            # Check if 90% of this file's timestamps overlap with epoch
+            these_times = valid_times.contains(file_timestamps)
+            if len(these_times) <= (0.9 * len(file_timestamps)):
+                continue
+
+            # This file segment matches the epoch - prepare VideoFile entry
+            entry = self._prepare_video_entry(
+                key.copy(), video_obj, cam_device_str
+            )
+            entries.append(entry)
+
+        return entries
+
     def make(self, key, verbose=True, skip_duplicates=False):
         """Make without optional transaction"""
         if not self.connection.in_transaction:
@@ -387,7 +531,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_file_name = key["nwb_file_name"]
         nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
         nwbf = get_nwb_file(nwb_file_abspath)
-        # get all ImageSeries objects in the NWB file
+
+        # Get all ImageSeries objects in the NWB file
         videos = {
             obj.name: obj
             for obj in nwbf.objects.values()
@@ -399,7 +544,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
             return
 
-        # get the interval for the current TaskEpoch
+        # Get the interval for the current TaskEpoch
         interval_list_name = (TaskEpoch() & key).fetch1("interval_list_name")
         valid_times = (
             IntervalList
@@ -410,47 +555,31 @@ class VideoFile(SpyglassMixin, dj.Imported):
         ).fetch_interval()
 
         cam_device_str = r"camera_device (\d+)"
-        is_found = False
-        for ind, video in enumerate(videos.values()):
-            if isinstance(video, pynwb.image.ImageSeries):
-                video = [video]
-            for video_obj in video:
-                # check to see if the times for this video_object are largely
-                # overlapping with the task epoch times
+        video_inserts = []
 
-                timestamps = video_obj.timestamps
-                these_times = valid_times.contains(timestamps)
-                if not len(these_times) > (0.9 * len(timestamps)):
-                    continue
-
-                nwb_cam_device = video_obj.device.name
-
-                # returns whatever was captured in the first group (within the
-                # parentheses) of the regular expression - in this case, 0
-
-                key["video_file_num"] = int(
-                    re.match(cam_device_str, nwb_cam_device)[1]
+        for video in videos.values():
+            video_list = (
+                [video] if isinstance(video, pynwb.image.ImageSeries) else video
+            )
+            for video_obj in video_list:
+                entries = self._process_video_timestamps(
+                    video_obj,
+                    valid_times,
+                    key.copy(),
+                    cam_device_str,
                 )
-                camera_name = video_obj.device.camera_name
-                if CameraDevice & {"camera_name": camera_name}:
-                    key["camera_name"] = video_obj.device.camera_name
-                else:
-                    raise KeyError(
-                        f"No camera with camera_name: {camera_name} found "
-                        + "in CameraDevice table."
-                    )
-                key["video_file_object_id"] = video_obj.object_id
-                self.insert1(
-                    key,
-                    skip_duplicates=skip_duplicates,
-                    allow_direct_insert=True,
-                )
-                is_found = True
+                video_inserts.extend(entries)
 
-        if not is_found and verbose:
+        if video_inserts:
+            self.insert(
+                video_inserts,
+                skip_duplicates=skip_duplicates,
+                allow_direct_insert=True,
+            )
+        elif verbose:
             logger.info(
                 f"No video found corresponding to file {nwb_file_name}, "
-                + f"epoch {interval_list_name}"
+                f"epoch {interval_list_name}"
             )
 
     @classmethod
