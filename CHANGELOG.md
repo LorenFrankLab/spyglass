@@ -36,7 +36,7 @@ DecodingParameters().alter()
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 
 ### Pipelines
@@ -57,6 +57,7 @@ DecodingParameters().alter()
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Improve error transparency on duplicate `Electrode` ids #1454
+    - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
     - Add the table `RawCompassDirection` for importing orientation
       data from NWB files #1466
