@@ -57,6 +57,7 @@ DecodingParameters().alter()
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Improve error transparency on duplicate `Electrode` ids #1454
+    - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
