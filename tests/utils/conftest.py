@@ -33,8 +33,8 @@ def schema_test(teardown, dj_conn):
 def chain(Nwbfile):
     """Return example TableChain object from chains."""
     from spyglass.linearization.merge import (
-        LinearizedPositionOutput,
-    )  # noqa: F401
+        LinearizedPositionOutput,  # noqa: F401
+    )
     from spyglass.utils.dj_graph import TableChain
 
     yield TableChain(Nwbfile, LinearizedPositionOutput)

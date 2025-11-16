@@ -21,6 +21,101 @@ class SpyglassConfig:
     facilitate testing.
     """
 
+    @staticmethod
+    def _load_directory_schema():
+        """Load directory schema from JSON file at repository root.
+
+        Returns
+        -------
+        dict
+            Directory schema with prefixes (spyglass, kachery, dlc, moseq)
+
+        Notes
+        -----
+        This method reads from config_schema.json at the repository root,
+        which is the single source of truth for Spyglass directory structure.
+        Falls back to hard-coded defaults if file is not found (for backwards
+        compatibility during development).
+        """
+        # Define fallback once to avoid duplication
+        fallback_schema = {
+            "spyglass": {
+                "raw": "raw",
+                "analysis": "analysis",
+                "recording": "recording",
+                "sorting": "spikesorting",
+                "waveforms": "waveforms",
+                "temp": "tmp",
+                "video": "video",
+                "export": "export",
+            },
+            "kachery": {
+                "cloud": ".kachery-cloud",
+                "storage": "kachery_storage",
+                "temp": "tmp",
+            },
+            "dlc": {
+                "project": "projects",
+                "video": "video",
+                "output": "output",
+            },
+            "moseq": {
+                "project": "projects",
+                "video": "video",
+            },
+        }
+
+        schema_path = Path(__file__).parent.parent.parent / "config_schema.json"
+
+        if not schema_path.exists():
+            logger.warning(
+                f"Config schema file not found at {schema_path}. "
+                "Using fallback default directory structure. "
+                "This is normal during development but should not happen "
+                "in production installations."
+            )
+            return fallback_schema
+
+        try:
+            with open(schema_path) as f:
+                schema = json.load(f)
+
+            if not isinstance(schema, dict):
+                raise ValueError(f"Schema should be a dict, got {type(schema)}")
+
+            if "directory_schema" not in schema:
+                raise ValueError("Schema missing 'directory_schema' key")
+
+            # Check schema version for compatibility
+            schema_version = schema.get("_schema_version", "1.0.0")
+            expected_version = "1.0.0"
+            if schema_version != expected_version:
+                logger.warning(
+                    f"Config schema version mismatch: expected {expected_version}, "
+                    f"got {schema_version}. This may cause compatibility issues."
+                )
+
+            return schema["directory_schema"]
+
+        except (OSError, IOError) as e:
+            logger.error(
+                f"Failed to read directory schema from {schema_path}: {e}. "
+                "Using fallback defaults."
+            )
+            return fallback_schema
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"Invalid JSON in directory schema {schema_path}: {e}. "
+                "Using fallback defaults."
+            )
+            return fallback_schema
+        except ValueError as e:
+            logger.error(
+                f"Schema validation failed for {schema_path}: {e}. "
+                "Using fallback defaults."
+            )
+            return fallback_schema
+
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
         Initializes a new instance of the class.
@@ -59,34 +154,10 @@ class SpyglassConfig:
         self._dlc_base = None
         self.load_failed = False
 
-        self.relative_dirs = {
-            # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
-            # NOTE: Adding new dir requires edit to HHMI hub
-            "spyglass": {
-                "raw": "raw",
-                "analysis": "analysis",
-                "recording": "recording",
-                "sorting": "spikesorting",
-                "waveforms": "waveforms",
-                "temp": "tmp",
-                "video": "video",
-                "export": "export",
-            },
-            "kachery": {
-                "cloud": ".kachery-cloud",
-                "storage": "kachery_storage",
-                "temp": "tmp",
-            },
-            "dlc": {
-                "project": "projects",
-                "video": "video",
-                "output": "output",
-            },
-            "moseq": {
-                "project": "projects",
-                "video": "video",
-            },
-        }
+        # Load directory schema from JSON file (single source of truth)
+        # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
+        # NOTE: Adding new dir requires edit to HHMI hub AND config_schema.json
+        self.relative_dirs = self._load_directory_schema()
         self.dj_defaults = {
             "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
             "database.user": kwargs.get("database_user"),
@@ -160,12 +231,23 @@ class SpyglassConfig:
             or os.environ.get("SPYGLASS_BASE_DIR")
         )
 
-        if resolved_base and not Path(resolved_base).exists():
-            resolved_base = Path(resolved_base).expanduser()
-        if not resolved_base or not Path(resolved_base).exists():
+        # Log when supplied base_dir causes environment variable overrides to be ignored
+        if self.supplied_base_dir:
+            logger.info(
+                "Using supplied base_dir - ignoring SPYGLASS_* environment variable overrides"
+            )
+
+        if resolved_base:
+            base_path = Path(resolved_base).expanduser().resolve()
+            if not self._debug_mode:
+                # Create base directory if it doesn't exist
+                base_path.mkdir(parents=True, exist_ok=True)
+            resolved_base = str(base_path)
+
+        if not resolved_base:
             if not on_startup:  # Only warn if not on startup
                 logger.error(
-                    f"Could not find SPYGLASS_BASE_DIR: {resolved_base}"
+                    "Could not find SPYGLASS_BASE_DIR"
                     + "\n\tCheck dj.config['custom']['spyglass_dirs']['base']"
                     + "\n\tand os.environ['SPYGLASS_BASE_DIR']"
                 )
@@ -178,14 +260,14 @@ class SpyglassConfig:
             or os.environ.get("DLC_PROJECT_PATH", "").split("projects")[0]
             or str(Path(resolved_base) / "deeplabcut")
         )
-        Path(self._dlc_base).mkdir(exist_ok=True)
+        Path(self._dlc_base).mkdir(parents=True, exist_ok=True)
 
         self._moseq_base = (
             dj_moseq.get("base")
             or os.environ.get("MOSEQ_BASE_DIR")
             or str(Path(resolved_base) / "moseq")
         )
-        Path(self._moseq_base).mkdir(exist_ok=True)
+        Path(self._moseq_base).mkdir(parents=True, exist_ok=True)
 
         config_dirs = {"SPYGLASS_BASE_DIR": str(resolved_base)}
         source_config_lookup = {
@@ -257,7 +339,7 @@ class SpyglassConfig:
         if self._debug_mode:
             return
         for dir_str in dir_dict.values():
-            Path(dir_str).mkdir(exist_ok=True)
+            Path(dir_str).mkdir(parents=True, exist_ok=True)
 
     def _set_dj_config_stores(self, check_match=True, set_stores=True) -> None:
         """
@@ -265,8 +347,6 @@ class SpyglassConfig:
 
         Parameters
         ----------
-        dir_dict: dict
-            Dictionary of resolved dirs.
         check_match: bool
             Optional. Default True. Check that dj.config['stores'] match
             resolved dirs.
@@ -323,6 +403,8 @@ class SpyglassConfig:
 
         Parameters
         ----------
+        base_dir : str, optional
+            The base directory. If not provided, will use existing config.
         database_user : str, optional
             The database user. If not provided, resulting config will not
             specify.
@@ -331,7 +413,7 @@ class SpyglassConfig:
             specify.
         database_host : str, optional
             Default lmf-db.cin.ucsf.edu. MySQL host name.
-        dapabase_port : int, optional
+        database_port : int, optional
             Default 3306. Port number for MySQL server.
         database_use_tls : bool, optional
             Default True. Use TLS encryption.
@@ -373,7 +455,7 @@ class SpyglassConfig:
             datajoint builtins will be used to save.
         output_filename : str or Path, optional
             Default to datajoint global config. If save_method = 'custom', name
-            of file to generate. Must end in either be either yaml or json.
+            of file to generate. Must end in either yaml or json.
         base_dir : str, optional
             The base directory. If not provided, will default to the env var
         set_password : bool, optional
@@ -392,7 +474,9 @@ class SpyglassConfig:
         if output_filename:
             save_method = "custom"
             path = Path(output_filename).expanduser()  # Expand ~
-            filepath = path if path.is_absolute() else path.absolute()
+            filepath = (
+                path if path.is_absolute() else path.resolve()
+            )  # Resolve relative paths and symlinks
             filepath.parent.mkdir(exist_ok=True, parents=True)
             filepath = (
                 filepath.with_suffix(".json")  # ensure suffix, default json
@@ -419,7 +503,12 @@ class SpyglassConfig:
 
         user_warn = (
             f"Replace existing file? {filepath.resolve()}\n\t"
-            + "\n\t".join([f"{k}: {v}" for k, v in config.items()])
+            + "\n\t".join(
+                [
+                    f"{k}: {v if k != 'database.password' else '***'}"
+                    for k, v in dj.config._conf.items()
+                ]
+            )
             + "\n"
         )
 
@@ -501,7 +590,9 @@ class SpyglassConfig:
                     "project": self.moseq_project_dir,
                     "video": self.moseq_video_dir,
                 },
-                "kachery_zone": "franklab.default",
+                "kachery_zone": os.environ.get(
+                    "KACHERY_ZONE", "franklab.default"
+                ),
             }
         }
 
@@ -601,7 +692,7 @@ sg_config = SpyglassConfig()
 sg_config.load_config(on_startup=True)
 if sg_config.load_failed:  # Failed to load
     logger.warning("Failed to load SpyglassConfig. Please set up config file.")
-    config = {}  # Let __intit__ fetch empty config for first time setup
+    config = {}  # Let __init__ fetch empty config for first time setup
     prepopulate = False
     test_mode = False
     debug_mode = False
