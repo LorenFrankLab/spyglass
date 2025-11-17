@@ -42,7 +42,7 @@ def import_compass_nwb(
 
     # --- Write to file
     raw_file_name = "test_imported_compass.nwb"
-    copy_file_name = "test_imported_compass.nwb"
+    copy_file_name = "test_imported_compass_.nwb"
     file_path = Path(raw_dir) / raw_file_name
     nwb_dict = dict(nwb_file_name=copy_file_name)
     if file_path.exists():
