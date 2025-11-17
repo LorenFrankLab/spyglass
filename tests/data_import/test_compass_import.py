@@ -41,8 +41,8 @@ def import_compass_nwb(
     behavior_module.add(compass_direction_obj)
 
     # --- Write to file
-    raw_file_name = "test_imported_pose.nwb"
-    copy_file_name = "test_imported_pose_.nwb"
+    raw_file_name = "test_imported_compass.nwb"
+    copy_file_name = "test_imported_compass.nwb"
     file_path = Path(raw_dir) / raw_file_name
     nwb_dict = dict(nwb_file_name=copy_file_name)
     if file_path.exists():
