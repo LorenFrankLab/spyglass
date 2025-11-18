@@ -3,6 +3,7 @@ from spyglass.utils.dj_mixin import SpyglassMixin  # isort:skip
 from spyglass.common.common_behav import (
     PositionIntervalMap,
     PositionSource,
+    RawCompassDirection,
     RawPosition,
     StateScriptFile,
     VideoFile,
@@ -94,6 +95,7 @@ __all__ = [
     "Probe",
     "ProbeType",
     "Raw",
+    "RawCompassDirection",
     "RawPosition",
     "SampleCount",
     "SensorData",

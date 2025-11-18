@@ -5,8 +5,10 @@ from typing import Dict, List, Union
 
 import datajoint as dj
 import ndx_franklab_novela
+import numpy as np
 import pandas as pd
 import pynwb
+from pynwb.behavior import CompassDirection
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
@@ -15,11 +17,13 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
+    estimate_sampling_rate,
+    get_valid_intervals,
 )
 
 schema = dj.schema("common_behav")
@@ -287,6 +291,124 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return next(iter(ret.values()))
 
         return pd.concat(ret, axis=1)
+
+
+@schema
+class RawCompassDirection(SpyglassIngestion, dj.Manual):
+    """
+    Table to store raw CompassDirection data from NWB files.
+    """
+
+    definition = """
+    -> Session
+    -> IntervalList
+    ---
+    compass_object_id: varchar(40)  # the object id of the compass direction object
+    name: varchar(80)              # name of the compass direction object
+    """
+
+    _nwb_table = Nwbfile
+
+    @property
+    def _source_nwb_object_type(self):
+        return CompassDirection
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "name": "name",
+                "compass_object_id": "object_id",
+                "valid_times": self.generate_valid_intervals_from_timeseries,
+                "interval_list_name": lambda obj: f"compass {obj.object_id} valid times",  # unique placeholder name
+            }
+        }
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Get all CompassDirection spatial series from NWB file."""
+        compass_objects = super().get_nwb_objects(nwb_file, nwb_file_name)
+        spatial_series = sum(
+            [list(obj.spatial_series.values()) for obj in compass_objects], []
+        )
+        return spatial_series
+
+    @staticmethod
+    def generate_valid_intervals_from_timeseries(
+        nwb_obj: pynwb.behavior.SpatialSeries,
+    ):
+        """Generate valid intervals from spatial series.
+
+        Parameters
+        ----------
+        nwb_obj : pynwb.behavior.SpatialSeries
+            The pynwb.behavior.SpatialSeries NWB object.
+        Returns
+        -------
+        valid_times : list
+            List of valid time intervals.
+        """
+        timestamps = nwb_obj.get_timestamps()
+        sampling_rate = estimate_sampling_rate(
+            timestamps, filename=nwb_obj.name
+        )
+        valid_times = get_valid_intervals(
+            timestamps=timestamps,
+            sampling_rate=sampling_rate,
+            min_valid_len=int(sampling_rate),
+        )
+        return valid_times
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        valid_times = self_key.pop("valid_times")  # remove from self key
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        return {
+            IntervalList: [dict(interval_insert, valid_times=valid_times)],
+            **super_ins,
+        }
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Insert entries from NWB file, renaming interval lists by time ordering."""
+        inserts = super().insert_from_nwbfile(
+            nwb_file_name, config, dry_run=True
+        )
+
+        # rename interval list names ordered by time of each compass entry
+        interval_entries = inserts.get(IntervalList, [])
+        compass_entries = inserts.get(self, [])
+
+        old_names = []
+        start_times = []
+        for entry in interval_entries:
+            old_names.append(entry["interval_list_name"])
+            start_times.append(entry["valid_times"][0][0])
+        order = np.argsort(start_times)
+        new_names = [
+            f"compass {i+1} valid times" for i in range(len(old_names))
+        ]
+        name_mapping = {
+            old_names[order[i]]: new_names[i] for i in range(len(old_names))
+        }
+        for entry in interval_entries:
+            entry["interval_list_name"] = name_mapping[
+                entry["interval_list_name"]
+            ]
+        for entry in compass_entries:
+            entry["interval_list_name"] = name_mapping[
+                entry["interval_list_name"]
+            ]
+
+        entries = {
+            IntervalList: interval_entries,
+            self: compass_entries,
+        }
+        if not dry_run:
+            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
+        return entries
 
 
 @schema
