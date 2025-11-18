@@ -8,8 +8,10 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
+FirFilterParameters().alter()
 DecodingParameters().alter()
 ```
 
@@ -19,6 +21,7 @@ DecodingParameters().alter()
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
+- Add support for bandstop filter type #1464
 
 ### Infrastructure
 
