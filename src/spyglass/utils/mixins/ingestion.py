@@ -41,10 +41,11 @@ class IngestionMixin(BaseMixin):
 
     """
 
-    _expected_duplicates = False
+    _expected_duplicates = False  # If True, entries in this table are valid to be shared across sessions
     _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
+    _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
 
     @property
     def table_key_to_obj_attr(
@@ -110,7 +111,10 @@ class IngestionMixin(BaseMixin):
         base_key = base_key.copy()  # avoid modifying original
 
         # For table objects, generate entry(s) for each row
-        if hasattr(nwb_obj, "to_dataframe"):
+        if (
+            hasattr(nwb_obj, "to_dataframe")
+            and not self._single_entry_per_table
+        ):
             obj_df = nwb_obj.to_dataframe()
             entries = sum(
                 [

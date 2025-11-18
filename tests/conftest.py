@@ -1408,6 +1408,13 @@ def spike_v1(common):
 
 
 @pytest.fixture(scope="session")
+def imported_spike(common):
+    from spyglass.spikesorting import imported
+
+    yield imported
+
+
+@pytest.fixture(scope="session")
 def pop_rec(spike_v1, mini_dict, team_name):
     spike_v1.SortGroup.set_group_by_shank(**mini_dict)
     key = {
