@@ -209,6 +209,10 @@ class AnalysisMixin(BaseMixin):
                     if isinstance(nwb_object, pynwb.core.LabelledDict):
                         for module in list(nwb_object.keys()):
                             nwb_object.pop(module)
+                    # Remove units to avoid conflict with spyglass-managed spikesorting
+                    if field == "units":
+                        nwbf._remove_child(nwb_object)
+                        nwbf.fields[field] = None
 
             # pop off optogenetic_epochs if it exists
             if (
