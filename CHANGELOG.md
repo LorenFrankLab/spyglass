@@ -8,7 +8,9 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
-#
+from spyglass.decoding.v1.core import DecodingParameters
+
+DecodingParameters().alter()
 ```
 
 ### Documentation
@@ -34,7 +36,8 @@ import all foreign key references.
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465
+- Pin `ndx-optogenetics` to 0.2.0 #1458
 
 ### Pipelines
 
@@ -53,9 +56,13 @@ import all foreign key references.
         from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
+    - Improve error transparency on duplicate `Electrode` ids #1454
+    - Remove pre-existing `Units` from created analysis nwb files #1453
+    - Allow multiple VideoFile entries during ingestion #1462
     - Handle epoch formats with varying zero-padding #1459
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
+    - Change BLOB fields to LONGBLOB in DecodingParameters #1463
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
