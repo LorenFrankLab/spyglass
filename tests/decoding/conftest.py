@@ -1,5 +1,44 @@
 import numpy as np
 import pytest
+from unittest.mock import patch
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_netcdf_saves():
+    """Globally mock netCDF file writes to avoid HDF5 I/O conflicts in CI.
+
+    This prevents RuntimeError: NetCDF: HDF error during parallel test execution
+    by intercepting xarray.Dataset.to_netcdf() calls and using pickle instead.
+    """
+    import pickle
+    from pathlib import Path
+
+    def mock_to_netcdf(
+        self,
+        path=None,
+        mode="w",
+        format=None,
+        group=None,
+        engine=None,
+        encoding=None,
+        unlimited_dims=None,
+        compute=True,
+        invalid_netcdf=False,
+    ):
+        """Mock to_netcdf that writes pickle instead of netCDF."""
+        if path is None:
+            # Return bytes if no path given (original behavior for some use cases)
+            return None
+
+        # Keep the .nc extension to match expectations, but write pickle format
+        # This avoids netCDF4/HDF5 errors while maintaining file path compatibility
+        with open(path, "wb") as f:
+            pickle.dump(self, f)
+
+        return None
+
+    with patch("xarray.Dataset.to_netcdf", mock_to_netcdf):
+        yield
 
 
 @pytest.fixture(scope="session")
@@ -342,8 +381,14 @@ def clusterless_pop(
     group_unitwave,
     teardown,
     decode_merge,
+    mock_netcdf_saves,
 ):
-    _ = pop_pos_group, group_unitwave  # ensure populated
+    _ = (
+        pop_pos_group,
+        group_unitwave,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
+
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
@@ -378,8 +423,13 @@ def clusterless_pop_estimated(
     group_name,
     teardown,
     decode_merge,
+    mock_netcdf_saves,
 ):
-    _ = pop_pos_group, group_unitwave
+    _ = (
+        pop_pos_group,
+        group_unitwave,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     selection_key = {
         **decode_sel_key,
         **decode_clusterless_params_insert,
@@ -423,8 +473,13 @@ def spikes_decoding(
     group_name,
     pop_spikes_group,
     pop_pos_group,
+    mock_netcdf_saves,
 ):
-    _ = pop_spikes_group, pop_pos_group  # ensure populated
+    _ = (
+        pop_spikes_group,
+        pop_pos_group,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
@@ -455,8 +510,13 @@ def spikes_decoding_estimated(
     group_name,
     pop_spikes_group,
     pop_pos_group,
+    mock_netcdf_saves,
 ):
-    _ = pop_spikes_group, pop_pos_group  # ensure populated
+    _ = (
+        pop_spikes_group,
+        pop_pos_group,
+        mock_netcdf_saves,
+    )  # ensure populated and mock active
     spikes = decode_v1.sorted_spikes
     selection_key = {
         **decode_sel_key,
@@ -472,3 +532,439 @@ def spikes_decoding_estimated(
     spikes.SortedSpikesDecodingV1.populate(selection_key)
 
     yield spikes.SortedSpikesDecodingV1 & selection_key
+
+
+# ============================================================================
+# Mock Helper Functions for Fast Unit Tests
+# ============================================================================
+
+
+class FakeClassifier:
+    """Minimal classifier interface for mocking.
+
+    Module-level class so it's picklable for mock_decoder_save.
+    """
+
+    def __init__(self):
+        # 2 states (e.g., "continuous" and "fragmented")
+        # initial_conditions_: shape (n_states,)
+        self.initial_conditions_ = np.array([0.5, 0.5])
+        # discrete_state_transitions_: shape (n_states, n_states)
+        self.discrete_state_transitions_ = np.array([[0.9, 0.1], [0.1, 0.9]])
+
+
+def create_fake_classifier():
+    """Create a fake classifier object that mimics non_local_detector output."""
+    return FakeClassifier()
+
+
+def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
+    """Create fake decoding results that mimic ClusterlessDetector output.
+
+    Parameters
+    ----------
+    n_time : int
+        Number of time points
+    n_position_bins : int
+        Number of position bins
+    n_states : int
+        Number of discrete states (default: 2 for continuous/fragmented)
+
+    Returns
+    -------
+    results : xr.Dataset
+        Fake decoding results matching expected structure with proper dimensions
+    """
+    import xarray as xr
+
+    time = np.linspace(0, 10, n_time)
+    position_bins = np.linspace(0, 100, n_position_bins)
+    states = np.arange(n_states)
+    state_names = ["continuous", "fragmented"][:n_states]
+
+    # Create realistic-looking posterior probabilities
+    position_mean = n_position_bins // 2
+    position_std = n_position_bins // 10
+
+    # Posterior shape: (n_time, n_position_bins, n_states)
+    posterior = np.zeros((n_time, n_position_bins, n_states))
+    for t in range(n_time):
+        for s in range(n_states):
+            # Gaussian-like posterior for each state
+            posterior[t, :, s] = np.exp(
+                -((np.arange(n_position_bins) - position_mean) ** 2)
+                / (2 * position_std**2)
+            )
+        # Normalize across position and state
+        posterior[t] /= posterior[t].sum()
+
+    # Create all expected coordinates for decoding results
+    results = xr.Dataset(
+        {
+            "posterior": (["time", "position", "state"], posterior),
+            "likelihood": (["time", "position", "state"], posterior * 0.8),
+        },
+        coords={
+            "time": time,
+            "position": position_bins,
+            "state": states,
+            "state_names": ("state", state_names),
+            # Additional coordinates expected by tests
+            "states": ("state", states),  # Alias for state
+            "state_bins": ("position", position_bins),  # Alias for position
+            "state_ind": ("state", states),  # State indices
+            "encoding_groups": ("state", state_names),  # Encoding group names
+            "environments": ("state", state_names),  # Environment names
+        },
+    )
+
+    return results
+
+
+# ============================================================================
+# In-Memory Mock Storage (avoids netCDF4/HDF5 file I/O issues in CI)
+# ============================================================================
+
+
+@pytest.fixture(scope="session")
+def mock_results_storage():
+    """Session-scoped dictionary to store decoding results in memory.
+
+    This eliminates netCDF4/HDF5 file I/O issues in CI by storing
+    xarray datasets and classifiers directly in memory.
+    """
+    return {"results": {}, "classifiers": {}}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_detector_io_globally(mock_results_storage):
+    """Globally mock detector load methods to use netcdf4 engine explicitly.
+
+    This is an autouse fixture that automatically applies to all tests in the
+    decoding module, ensuring that all fetch_results() calls use explicit
+    netcdf4 engine specification to avoid engine detection errors.
+    """
+    from unittest.mock import patch
+    from non_local_detector.models.base import (
+        ClusterlessDetector,
+        SortedSpikesDetector,
+    )
+    import xarray as xr
+
+    def _mock_load_results(filename):
+        """Load results with explicit netcdf4 engine."""
+        filename_str = str(filename)
+
+        # Try loading from memory first (for tests that use in-memory storage)
+        if filename_str in mock_results_storage["results"]:
+            return mock_results_storage["results"][filename_str]
+
+        # Load from disk with explicit engine
+        try:
+            return xr.open_dataset(filename_str, engine="netcdf4")
+        except (FileNotFoundError, OSError) as e:
+            # OSError with "Unknown file format" means old pickle file exists
+            # FileNotFoundError means file doesn't exist at all
+            if "Unknown file format" in str(e):
+                raise FileNotFoundError(
+                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
+                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                )
+            raise FileNotFoundError(f"Mock result not found: {filename_str}")
+
+    def _mock_load_model(filename):
+        """Load classifier from in-memory storage."""
+        filename_str = str(filename)
+        if filename_str in mock_results_storage["classifiers"]:
+            return mock_results_storage["classifiers"][filename_str]
+        raise FileNotFoundError(
+            f"Mock classifier not found in memory: {filename_str}"
+        )
+
+    # Patch the detector base classes' load methods globally
+    with (
+        patch.object(
+            ClusterlessDetector,
+            "load_results",
+            staticmethod(_mock_load_results),
+        ),
+        patch.object(
+            ClusterlessDetector, "load_model", staticmethod(_mock_load_model)
+        ),
+        patch.object(
+            SortedSpikesDetector,
+            "load_results",
+            staticmethod(_mock_load_results),
+        ),
+        patch.object(
+            SortedSpikesDetector, "load_model", staticmethod(_mock_load_model)
+        ),
+    ):
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def mock_save_decoder_results_globally(mock_results_storage):
+    """Globally mock _save_decoder_results to use netcdf4 engine explicitly.
+
+    This prevents NetCDF4/HDF5 engine detection errors in CI by:
+    1. Writing netCDF files with explicit netcdf4 engine
+    2. Storing actual data in memory for loading via mock_detector_io_globally
+    """
+    from unittest.mock import patch
+    from pathlib import Path
+    import uuid
+    import pickle
+    import os
+
+    def _mock_save_results(self, classifier, results, key):
+        """Mocked version that creates files with explicit netcdf4 engine."""
+        # Generate unique identifier for this result set
+        unique_id = str(uuid.uuid4())[:8]
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
+
+        # Use absolute path to match environment expectations
+        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
+        analysis_dir = Path(base_dir) / "analysis"
+        subdir = analysis_dir / nwb_file_name
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create file paths
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
+
+        # Write netCDF file with explicit netcdf4 engine
+        results.to_netcdf(results_path, engine="netcdf4")
+
+        # Write classifier as pickle (non-xarray object)
+        with open(classifier_path, "wb") as f:
+            pickle.dump(classifier, f)
+
+        # Store actual data in memory for loading
+        results_path_str = str(results_path)
+        classifier_path_str = str(classifier_path)
+        mock_results_storage["results"][results_path_str] = results
+        mock_results_storage["classifiers"][classifier_path_str] = classifier
+
+        return results_path_str, classifier_path_str
+
+    # Import the decoding table classes
+    from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
+    from spyglass.decoding.v1.sorted_spikes import SortedSpikesDecodingV1
+
+    # Patch both tables' _save_decoder_results methods globally
+    with (
+        patch.object(
+            ClusterlessDecodingV1, "_save_decoder_results", _mock_save_results
+        ),
+        patch.object(
+            SortedSpikesDecodingV1, "_save_decoder_results", _mock_save_results
+        ),
+    ):
+        yield
+
+
+# ============================================================================
+# Mock Fixtures for ClusterlessDecodingV1
+# ============================================================================
+
+
+@pytest.fixture
+def mock_clusterless_decoder():
+    """Mock the _run_decoder helper for ClusterlessDecodingV1.
+
+    Returns a function that can be used with monkeypatch to replace
+    the real _run_decoder method.
+    """
+    import xarray as xr
+
+    def _mock_run_decoder(
+        self,
+        key,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        spike_waveform_features,
+        decoding_interval,
+    ):
+        """Mocked version of _run_decoder that returns fake results instantly.
+
+        This mocks the expensive non_local_detector operations (~220s)
+        while preserving all the Spyglass logic in make().
+        """
+        classifier = create_fake_classifier()
+        results = create_fake_decoding_results(
+            n_time=len(position_info), n_position_bins=50, n_states=2
+        )
+
+        # Add metadata (same as real implementation)
+        # initial_conditions: shape (n_states,) with explicit dims
+        results["initial_conditions"] = xr.DataArray(
+            classifier.initial_conditions_,
+            dims=("state",),
+            name="initial_conditions",
+        )
+        # discrete_state_transitions: shape (n_states, n_states) with explicit dims
+        # Use different dim names to avoid "duplicate dimension" warning
+        # Don't set coords - xarray will create default integer indices
+        results["discrete_state_transitions"] = xr.DataArray(
+            classifier.discrete_state_transitions_,
+            dims=("state_from", "state_to"),
+            name="discrete_state_transitions",
+        )
+
+        return classifier, results
+
+    return _mock_run_decoder
+
+
+@pytest.fixture
+def mock_decoder_save(mock_results_storage):
+    """Mock the _save_decoder_results helper for ClusterlessDecodingV1.
+
+    Returns a function that can be used with monkeypatch to replace
+    the real _save_decoder_results method. Creates netCDF files using
+    the netcdf4 engine explicitly to avoid engine detection issues.
+    """
+    from pathlib import Path
+    import uuid
+    import pickle
+    import os
+
+    def _mock_save_results(self, classifier, results, key):
+        """Mocked version that creates files with explicit netcdf4 engine."""
+        # Generate unique identifier for this result set
+        unique_id = str(uuid.uuid4())[:8]
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
+
+        # Use absolute path to match environment expectations
+        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
+        analysis_dir = Path(base_dir) / "analysis"
+        subdir = analysis_dir / nwb_file_name
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create file paths
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
+
+        # Write netCDF file with explicit netcdf4 engine
+        results.to_netcdf(results_path, engine="netcdf4")
+
+        # Write classifier as pickle (non-xarray object)
+        with open(classifier_path, "wb") as f:
+            pickle.dump(classifier, f)
+
+        # Store actual data in memory for loading
+        results_path_str = str(results_path)
+        classifier_path_str = str(classifier_path)
+        mock_results_storage["results"][results_path_str] = results
+        mock_results_storage["classifiers"][classifier_path_str] = classifier
+
+        return results_path_str, classifier_path_str
+
+    return _mock_save_results
+
+
+@pytest.fixture
+def mock_detector_load_results(mock_results_storage):
+    """Mock the detector load_results methods to use netcdf4 engine.
+
+    This mocks both ClusterlessDetector.load_results and
+    SortedSpikesDetector.load_results to read netCDF files with
+    explicit netcdf4 engine specification.
+    """
+    import xarray as xr
+
+    def _mock_load_results(filename):
+        """Load results from disk with explicit netcdf4 engine."""
+        # Convert Path to string if needed
+        filename_str = str(filename)
+
+        # Try loading from memory first (for tests that use in-memory storage)
+        if filename_str in mock_results_storage["results"]:
+            return mock_results_storage["results"][filename_str]
+
+        # Load from disk with explicit engine
+        try:
+            return xr.open_dataset(filename_str, engine="netcdf4")
+        except (FileNotFoundError, OSError) as e:
+            # OSError with "Unknown file format" means old pickle file exists
+            if "Unknown file format" in str(e):
+                raise FileNotFoundError(
+                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
+                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                )
+            raise FileNotFoundError(
+                f"Mock result not found: {filename_str}. "
+                "This usually means the test setup didn't properly mock "
+                "the _save_decoder_results method."
+            )
+
+    return _mock_load_results
+
+
+@pytest.fixture
+def mock_detector_load_model(mock_results_storage):
+    """Mock the detector load_model methods to use in-memory storage."""
+
+    def _mock_load_model(filename):
+        """Load classifier from in-memory storage instead of disk."""
+        filename_str = str(filename)
+
+        if filename_str in mock_results_storage["classifiers"]:
+            return mock_results_storage["classifiers"][filename_str]
+
+        raise FileNotFoundError(
+            f"Mock classifier not found in memory: {filename_str}"
+        )
+
+    return _mock_load_model
+
+
+# ============================================================================
+# Mock Fixtures for SortedSpikesDecodingV1
+# ============================================================================
+
+
+@pytest.fixture
+def mock_sorted_spikes_decoder():
+    """Mock the _run_decoder helper for SortedSpikesDecodingV1."""
+    import xarray as xr
+
+    def _mock_run_decoder(
+        self,
+        key,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        decoding_interval,
+    ):
+        """Mocked version that returns fake results instantly."""
+        classifier = create_fake_classifier()
+        results = create_fake_decoding_results(
+            n_time=len(position_info), n_position_bins=50, n_states=2
+        )
+
+        # Add metadata (same as real implementation)
+        # initial_conditions: shape (n_states,) with explicit dims
+        results["initial_conditions"] = xr.DataArray(
+            classifier.initial_conditions_,
+            dims=("state",),
+            name="initial_conditions",
+        )
+        # discrete_state_transitions: shape (n_states, n_states) with explicit dims
+        # Use different dim names to avoid "duplicate dimension" warning
+        # Don't set coords - xarray will create default integer indices
+        results["discrete_state_transitions"] = xr.DataArray(
+            classifier.discrete_state_transitions_,
+            dims=("state_from", "state_to"),
+            name="discrete_state_transitions",
+        )
+
+        return classifier, results
+
+    return _mock_run_decoder

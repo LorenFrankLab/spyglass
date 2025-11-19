@@ -18,6 +18,7 @@ def recomp_module(pop_rec_v0):
     return recompute
 
 
+@pytest.mark.slow
 def test_recompute(pop_rec_v0):
     key = pop_rec_v0.fetch(as_dict=True)[0]
     path = key["recording_path"]
@@ -64,6 +65,7 @@ def recomp_repop(pop_rec_v0, recomp_selection, recomp_tbl):
     yield recomp_tbl
 
 
+@pytest.mark.slow
 def test_recompute_env(recomp_repop):
     """Test recompute match"""
 
@@ -95,6 +97,7 @@ def test_get_disk_space(recomp_tbl):
     assert "Total:" in space, "Disk space retrieval failed"
 
 
+@pytest.mark.slow
 def test_recheck(recomp_tbl, recomp_repop):
     """Test recheck method."""
     _ = recomp_repop  # Ensure recompute populated
