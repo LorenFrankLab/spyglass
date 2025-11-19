@@ -209,19 +209,50 @@ def server_credentials(server):
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_credentials, verbose, teardown):
-    """Fixture for datajoint connection."""
-    config_file = "dj_local_conf.json_test"
+def worker_id(request):
+    """Get unique worker ID for pytest-xdist parallelization.
+
+    Returns 'master' for serial execution, or 'gwN' for parallel workers.
+    This enables worker-specific database schema isolation.
+    """
+    if hasattr(request.config, "workerinput"):
+        return request.config.workerinput["workerid"]
+    return "master"
+
+
+@pytest.fixture(scope="session")
+def dj_conn(request, server_credentials, worker_id, verbose, teardown):
+    """Fixture for datajoint connection with pytest-xdist support.
+
+    For parallel execution, each worker gets its own database schema prefix
+    to avoid race conditions and ensure test isolation.
+    """
+    # Worker-specific config file to avoid conflicts
+    config_file = f"dj_local_conf.json_test_{worker_id}"
     if Path(config_file).exists():
         os.remove(config_file)
 
+    # Set worker-specific schema prefix for database isolation
+    schema_prefix = f"test_spyglass_{worker_id}_"
+
     dj.config.update(server_credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
+    dj.config["database.prefix"] = schema_prefix
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
     dj.conn()
+
     yield dj.conn()
+
+    # Cleanup: drop worker-specific schemas if tearing down
     if teardown:
+        conn = dj.conn()
+        cursor = conn.query(f"SHOW DATABASES LIKE '{schema_prefix}%%'")
+        schemas = cursor.fetchall()
+        for schema in schemas:
+            dj_logger.info(f"Dropping worker schema: {schema[0]}")
+            conn.query(f"DROP DATABASE IF EXISTS `{schema[0]}`")
+
         if Path(config_file).exists():
             os.remove(config_file)
 

@@ -41,6 +41,7 @@ DecodingParameters().alter()
 - Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465
 - Pin `ndx-optogenetics` to 0.2.0 #1458
+- Refactor pytests for speed, run fast tests on push #1440
 
 ### Pipelines
 
