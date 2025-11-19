@@ -78,8 +78,13 @@ def pop_common_electrode_group(common_ephys):
 @pytest.fixture(scope="session")
 def dio_only_nwb(raw_dir, common):
     nwbfile = mock_NWBFile(
-        identifier="my_identifier", session_description="my_session_description"
+        identifier="my_identifier",
+        session_description="my_session_description",
+        lab="My Lab",
+        institution="My Institution",
+        experimenter=["Dr. A", "Dr. B"],
     )
+    nwbfile.subject = mock_Subject()
     time_series = mock_TimeSeries(
         name="my_time_series", timestamps=np.arange(20), data=np.ones((20, 1))
     )
@@ -106,7 +111,7 @@ def dio_only_nwb(raw_dir, common):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_dict():
     return dict(
         name="test_virus_1",
@@ -117,7 +122,7 @@ def virus_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_injection_dict(virus_dict):
     return dict(
         name="injection_1",
@@ -135,7 +140,7 @@ def virus_injection_dict(virus_dict):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_model_dict():
     return dict(
         name="test_source_model",
@@ -146,7 +151,7 @@ def excitation_source_model_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_dict():
     return dict(
         name="test_source",
@@ -156,7 +161,7 @@ def excitation_source_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def fiber_model_dict():
     return dict(
         name="test_fiber_model",
@@ -172,7 +177,7 @@ def fiber_model_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def fiber_implant_dict():
     return dict(
         implanted_fiber_description="Test fiber implant",

@@ -103,7 +103,7 @@ def get_nwb_file(nwb_file_path, query_expression=None):
         return _open_nwb_file(nwb_file_path, source="dandi")
 
     if DandiPath().has_raw_path(file_path=nwb_file_path):
-        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
+        raw = DandiPath().raw_from_path(file_path=nwb_file_path)["filename"]
         return _open_nwb_file(raw, source="dandi")
 
     if hasattr(query_expression, "_make_file"):
@@ -395,7 +395,9 @@ def get_valid_intervals(
 
     if total_time < min_valid_len:
         half_total_time = total_time / 2
-        logger.warning(f"Setting minimum valid interval to {half_total_time}")
+        logger.warning(
+            f"Setting minimum valid interval to {half_total_time:.4f}"
+        )
         min_valid_len = half_total_time
 
     # get rid of NaN elements

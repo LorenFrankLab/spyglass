@@ -1,6 +1,7 @@
 import numpy as np
 from spikeinterface import BaseSorting
 from spikeinterface.extractors.nwbextractors import NwbRecordingExtractor
+import pytest
 
 
 def test_curation_rec(spike_v1, pop_curation):
@@ -20,6 +21,7 @@ def test_curation_rec(spike_v1, pop_curation):
     ), "CurationV1.get_times unexpected value"
 
 
+@pytest.mark.slow
 def test_curation_sort(spike_v1, pop_curation):
     sort = spike_v1.CurationV1.get_sorting(pop_curation)
     sort_dict = sort.to_dict()
