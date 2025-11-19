@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -297,6 +298,27 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
         }
         self.insert1(key, skip_duplicates=True)
 
+    def fetch_params(self, preproc_params_name: str) -> dict:
+        """Fetch preprocessing parameters for a given name.
+
+        Parameters
+        ----------
+        preproc_params_name : str
+            Name of the preprocessing parameters.
+
+        Returns
+        -------
+        dict
+            Dictionary of preprocessing parameters.
+        """
+        if isinstance(preproc_params_name, dict):
+            preproc_params_name = preproc_params_name.get("preproc_params_name")
+        if not preproc_params_name:
+            raise ValueError("preproc_params_name must be provided")
+
+        params_pk = {"preproc_params_name": preproc_params_name}
+        return (self & params_pk).fetch1("preproc_params")
+
 
 @schema
 class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
@@ -322,6 +344,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
+    _data_cache = dict()
 
     def make_fetch(self, key: dict) -> List[Interval]:
         """Fetch times for compute.
@@ -500,6 +523,80 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 # key["team_name"], # TODO: add team name, reflect PK structure
             ]
         )
+
+    def _key_to_path(self, key: dict) -> Path:
+        """Convert a key to a recording path."""
+        rec_name = self._get_recording_name(key)
+        rec_path = Path(recording_dir) / Path(rec_name)
+        return rec_path
+
+    def _get_n_samples(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[int]:
+        """Get number of samples in the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            return self._data_cache[rec_path].get("num_samples")
+
+        with open(rec_path / "si_folder.json") as f:
+            data = json.load(f)
+            self._data_cache[rec_path] = data
+            num_samples = data.get("num_samples", None)
+
+        return num_samples
+
+    def _get_sampling_rate(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[float]:
+        """Get sampling rate of the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            return self._data_cache[rec_path].get("sampling_rate")
+
+        with open(rec_path / "si_folder.json") as f:
+            data = json.load(f)
+            self._data_cache[rec_path] = data
+            sampling_rate = data.get("sampling_rate", None)
+
+        return sampling_rate
 
     @staticmethod
     def _get_recording_timestamps(recording):

@@ -10,6 +10,10 @@ RecordingRecompute: Computed table to track recompute success.
     Runs `SpikeSortingRecording()._make_file` to recompute files, saving the
     resulting folder to `temp_dir/{this database}/{env_id}`. If the new
     directory matches the old, the new directory is deleted.
+
+XFAIL Patterns
+--------------
+Use check_xfail() to test entries against known expected failure patterns.
 """
 
 import json
@@ -28,15 +32,25 @@ from tqdm import tqdm
 
 from spyglass.common.common_user import UserEnvironment  # noqa F401
 from spyglass.settings import recording_dir, temp_dir
-from spyglass.spikesorting.v0.spikesorting_recording import (
+from spyglass.spikesorting.v0.spikesorting_recording import (  # noqa F401
+    SpikeSortingPreprocessingParameters,
     SpikeSortingRecording,
-)  # noqa F401
+)
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
 
+VERBOSE = True
+if logger.level > 20:
+    VERBOSE = False
+
+
 schema = dj.schema("spikesorting_recompute_v0")
+
+
+def check_xfail(*args, **kwargs) -> Tuple[bool, Optional[str]]:
+    return RecordingRecomputeSelection()._check_xfail(*args, **kwargs)
 
 
 @schema
@@ -199,6 +213,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     -> UserEnvironment
     ---
     logged_at_creation=0: bool
+    xfail_reason=NULL   : varchar(127)
     """
 
     @cached_property
@@ -206,15 +221,110 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         logger.info("Initializing UserEnvironment")
         return UserEnvironment().insert_current_env()
 
+    def _check_xfail(
+        self,
+        key: dict,
+        rec_path: Optional[Path] = None,
+        skip_padlen: bool = True,
+        skip_si094: bool = True,
+        skip_low_sr: bool = True,
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if entry matches known xfail (expected failure) patterns.
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with nwb_file_name, sort_group_id, etc.
+        recording_path : Path, optional
+            Path to recording directory. If None, computed from key.
+        skip_padlen : bool, optional
+            Check for padlen errors (recordings <35 samples). Default True.
+        skip_si094 : bool, optional
+            Check for SI 0.94.x incompatibility. Default True.
+        skip_low_sr : bool, optional
+            Check for low sampling rate causing Wn[0] < Wn[1] errors. Default True.
+
+        Returns
+        -------
+        is_xfail : bool
+            True if entry matches any enabled xfail pattern
+        reason : str or None
+            Description of xfail pattern matched, or None
+        """
+        rec_tbl = SpikeSortingRecording()
+
+        if rec_path is None:
+            rec_name = rec_tbl._get_recording_name(key)
+            rec_path = Path(recording_dir) / rec_name
+
+        if not rec_path.exists():
+            return False, None
+
+        # Pattern 1: Padlen error (short recordings)
+        if skip_padlen:
+            n_samples = rec_tbl._get_n_samples(rec_path=rec_path) or 36
+            if n_samples < 35:
+                err_msg = f"padlen_short_recording ({n_samples} samples)"
+                return True, err_msg
+
+        # Pattern 2: SI 0.94.x incompatibility
+        if skip_si094:
+            version = (REC_VER_TBL & key).fetch1("spikeinterface")
+            if version.startswith("0.94."):
+                err_msg = f"si094_incompatibility (SI {version})"
+                return True, err_msg
+
+        # Pattern 3: Low sampling rate (Wn[0] < Wn[1] error)
+        if skip_low_sr:
+            samp_rate = rec_tbl._get_sampling_rate(rec_path=rec_path) or 0
+            nyquist = samp_rate / 2
+            freq_max = (
+                SpikeSortingPreprocessingParameters().fetch_params(key)
+            ).get("frequency_max", 0)
+            if samp_rate > 0 and freq_max > 0 and freq_max >= nyquist:
+                err_msg = (
+                    f"low_sampling_rate (freq_max={freq_max} Hz >= "
+                    f"Nyquist={nyquist:.1f} Hz)"
+                )
+                return True, err_msg
+
+        # Add more xfail patterns here as discovered
+        # Each should have a corresponding skip_* parameter
+
+        return False, None
+
     def insert(
         self,
         rows: List[dict],
         at_creation: Optional[bool] = False,
-        force_attempt=False,
+        force_attempt: bool = False,
+        skip_xfail: bool = True,
+        skip_padlen: bool = True,
+        skip_si094: bool = True,
+        skip_low_sr: bool = True,
         **kwargs,
     ) -> None:
-        """Custom insert to ensure dependencies are added to each row."""
+        """Custom insert to ensure dependencies are added to each row.
 
+        Parameters
+        ----------
+        rows : list of dict
+            Recording keys to insert
+        at_creation : bool, optional
+            Mark entries as logged at creation time. Default False.
+        force_attempt : bool, optional
+            Force insertion even if version mismatch. Default False.
+        skip_xfail : bool, optional
+            Skip entries matching known xfail patterns. Default True.
+        skip_padlen : bool, optional
+            Skip short recordings (<35 samples). Default True.
+        skip_si094 : bool, optional
+            Skip SI 0.94.x incompatible recordings. Default True.
+        skip_low_sr : bool, optional
+            Skip recordings with freq_max >= Nyquist frequency. Default True.
+        **kwargs
+            Additional arguments passed to DataJoint insert
+        """
         if not rows:
             return
         if not isinstance(rows, (list, tuple)):
@@ -234,13 +344,26 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             at_creation = False  # pragma: no cover
 
         inserts = []
+        xfail_kwargs = dict(
+            skip_padlen=skip_padlen,
+            skip_si094=skip_si094,
+            skip_low_sr=skip_low_sr,
+        )
         for row in rows:
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
+
+            # Check xfail patterns if enabled
+            if not force_attempt and skip_xfail:
+                is_xfail, reason = check_xfail(key_pk, **xfail_kwargs)
+                if is_xfail:
+                    key_pk["xfail_reason"] = reason
+
             key_pk.update(self.env_dict)
             key_pk.setdefault("logged_at_creation", at_creation)
             inserts.append(key_pk)
+
         super().insert(inserts, **kwargs)
 
         if not inserts:
@@ -446,7 +569,12 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         rec_key = {k: v for k, v in key.items() if k != "env_id"}
         if self & rec_key & "matched=1":
             logger.info(f"Already matched {rec_key['nwb_file_name']}")
-            (RecordingRecomputeSelection & key).delete(safemode=False)
+            try:
+                (RecordingRecomputeSelection & key).super_delete(
+                    warn=False, safemode=False
+                )
+            except Exception:
+                logger.warning("Failed to delete recompute selection entry.")
             return  # pragma: no cover
 
         # Skip recompute for files logged at creation
@@ -455,6 +583,18 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if parent.get("logged_at_creation", True):
             logger.info(f"Skipping logged_at_creation {log_key}")
             self.insert1({**key, "matched": True})
+            return
+
+        # Skip recompute for known xfail patterns
+        if parent.get("xfail_reason", None):
+            logger.info(f"Skipping xfail {log_key}: {parent['xfail_reason']}")
+            self.insert1(
+                {
+                    **key,
+                    "matched": False,
+                    "err_msg": f"xfail: {parent['xfail_reason']}",
+                }
+            )
             return
 
         old_hasher, new_hasher = self._hash_both(key, strict=True)
@@ -497,7 +637,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         """
         restr = restr or "matched=0"
         total_size = 0
-        for key in tqdm(self & restr, desc="Calculating disk space"):
+        for key in tqdm(
+            self & restr, desc="Calculating disk space", disable=not VERBOSE
+        ):
             old, new = self._get_paths(key)
             this = old if which == "old" else new
             if this.exists():
@@ -520,13 +662,24 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         )
 
         if dry_run:
+            total_size = 0
+            for key in tqdm(query, total=len(query), desc="Calculating size"):
+                old, _ = self._get_paths(key)
+                if not old.exists():
+                    continue
+                total_size += sum(
+                    f.stat().st_size for f in old.glob("**/*") if f.is_file()
+                )
+
+            total_human = bytes_to_human_readable(total_size)
+            msg += f"\nTotal size: {total_human}"
             logger.info(msg)
-            return
+            return total_human
 
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
             return
 
-        for key in query.proj():
+        for key in tqdm(query.proj(), total=len(query), desc="Deleting files"):
             old, new = self._get_paths(key)
             logger.info(f"Deleting old: {old}, new: {new}")
             shutil_rmtree(old, ignore_errors=True)

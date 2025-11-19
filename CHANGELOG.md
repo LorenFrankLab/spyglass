@@ -8,9 +8,28 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Alter Decoding v1 table
 from spyglass.decoding.v1.core import DecodingParameters
 
 DecodingParameters().alter()
+
+# Alter v0 recompute table
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+
+# Alter v1 recompute table
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
 ```
 
 ### Documentation
@@ -34,6 +53,7 @@ DecodingParameters().alter()
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
+- Log expected recompute failures #14XX
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423

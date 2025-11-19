@@ -39,6 +39,11 @@ from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 schema = dj.schema("spikesorting_v1_recompute")
 
 
+def check_xfail(*args, **kwargs) -> Tuple[bool, Optional[str]]:
+    """Module-level wrapper for xfail checking."""
+    return RecordingRecomputeSelection()._check_xfail(*args, **kwargs)
+
+
 @schema
 class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     definition = """
@@ -159,6 +164,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     rounding=4: int # rounding for float ElectricalSeries
     ---
     logged_at_creation=0: bool # whether the attempt was logged at creation
+    xfail_reason=NULL   : varchar(127) # reason for expected failure, if any
     """
 
     # --- Insert helpers ---
@@ -173,7 +179,15 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         return UserEnvironment().insert_current_env()
 
     def insert(
-        self, rows, limit=None, at_creation=False, force_attempt=False, **kwargs
+        self,
+        rows,
+        limit=None,
+        at_creation=False,
+        force_attempt=False,
+        skip_xfail: bool = True,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+        **kwargs,
     ) -> None:
         """Custom insert to ensure dependencies are added to each row.
 
@@ -188,6 +202,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         force_attempt : bool, optional
             Whether to force an attempt to insert rows even if the environment
             does not match. Default is False.
+        skip_xfail : bool, optional
+            Skip entries matching known xfail patterns. Default True.
+        skip_probe : bool, optional
+            Skip entries with missing probe metadata. Default True.
+        skip_pynwb_api : bool, optional
+            Skip entries with PyNWB API incompatibilities. Default True.
         """
 
         if not self.env_dict.get("env_id"):  # likely not using conda
@@ -211,8 +231,26 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
+
+            # Check xfail patterns if enabled
+            xfail_reason = None
+            if not force_attempt and skip_xfail:
+                is_xfail, reason = self._check_xfail(
+                    key_pk,
+                    skip_probe=skip_probe,
+                    skip_pynwb_api=skip_pynwb_api,
+                )
+                if is_xfail:
+                    xfail_reason = reason
+
             full_key = self.dict_to_full_key(row)
-            full_key.update(dict(self.env_dict, logged_at_creation=at_creation))
+            full_key.update(
+                dict(
+                    self.env_dict,
+                    logged_at_creation=at_creation,
+                    xfail_reason=xfail_reason,
+                )
+            )
             inserts.append(full_key)
 
         if not len(inserts):
@@ -270,6 +308,50 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
 
         self.insert(inserts, at_creation=False, **kwargs)
+
+    # --- Xfail detection ---
+
+    def _check_xfail(
+        self,
+        key: dict,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if entry matches known xfail (expected failure) patterns.
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with recording_id, etc.
+        skip_probe : bool, optional
+            Check for missing probe metadata. Default True.
+        skip_pynwb_api : bool, optional
+            Check for PyNWB API incompatibilities. Default True.
+
+        Returns
+        -------
+        is_xfail : bool
+            True if entry matches any enabled xfail pattern
+        reason : str or None
+            Description of xfail pattern matched, or None
+        """
+        file_pk = (SpikeSortingRecording & key).fetch1("KEY")
+        prev_runs = RecordingRecompute & file_pk & "matched=0"
+
+        # Pattern 1: Missing probe information
+        if skip_probe:
+            # Check if this NWB file is known to have missing probe info
+            # based on previous recompute failures
+            if bool(prev_runs & 'err_msg LIKE "%probe info%"'):
+                return True, "missing_probe_info"
+
+        # Pattern 2: PyNWB API incompatibility (dtype keyword)
+        if skip_pynwb_api:
+            # Check if there are existing failures with dtype errors
+            if bool(prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'):
+                return (True, "pynwb_api_incompatible")
+
+        return False, None
 
     # --- Gatekeep recompute attempts ---
 
@@ -547,9 +629,22 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         parent = self.get_parent_key(key)
 
+        # Skip recompute for files with xfail reasons
+        if parent.get("xfail_reason"):
+            logger.info(f"Skipping xfail entry: {parent.get('xfail_reason')}")
+            self.insert1(
+                dict(
+                    key,
+                    matched=False,
+                    err_msg=f"xfail: {parent['xfail_reason']}",
+                )
+            )
+            return
+
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
             self.insert1(dict(key, matched=True))
+            return
 
         # Ensure not duplicate work for lesser precision
         if self._is_lower_rounding(key) and not force_check:
@@ -557,6 +652,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 f"Match at higher precision. Assuming match for {key}\n\t"
                 + "Run with force_check=True to recompute."
             )
+            return
 
         old_hasher, new_hasher = self._hash_both(key)
 
@@ -612,8 +708,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         )
 
         if dry_run:
+            restr = query.fetch("KEY", as_dict=True)
+            space = self.get_disk_space(which="old", restr=restr)
+            msg += f"\n{space}"
             logger.info(msg)
-            return
+            return space
 
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
             return
