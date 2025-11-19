@@ -180,6 +180,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         decoding_interval,
     ):
 
+        # Run decoder (external dependency - can be mocked in tests)
         classifier, results = self._run_decoder(
             key=key,
             decoding_params=decoding_params,

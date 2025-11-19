@@ -129,6 +129,7 @@ def gen_export_selection(
     ExportSelection.super_delete(warn=False, safemode=False)
 
 
+@pytest.mark.very_slow
 def test_export_selection_files(gen_export_selection, export_tbls):
     ExportSelection, _ = export_tbls
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
@@ -208,6 +209,7 @@ def populate_export(export_tbls, gen_export_selection):
     Export.super_delete(warn=False, safemode=False)
 
 
+@pytest.mark.slow
 def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
