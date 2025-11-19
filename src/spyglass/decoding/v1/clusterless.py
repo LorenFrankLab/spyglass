@@ -111,8 +111,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             & {"decoding_param_name": key["decoding_param_name"]}
         ).fetch1()
 
-        decoding_params = model_params.get("decoding_params", dict())
-        decoding_kwargs = model_params.get("decoding_kwargs", dict())
+        decoding_params = model_params.get("decoding_params") or dict()
+        decoding_kwargs = model_params.get("decoding_kwargs") or dict()
 
         # Get position data
         (
