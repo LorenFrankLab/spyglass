@@ -446,8 +446,8 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         return hasher if return_hasher else hasher.hash
 
-    def load_recording(self, key):
-        """Load the recording data from the file."""
+    def _fetch_recording_path(self, key):
+        """Fetch the recording path for a given key."""
         query = self & key
         if not len(query) == 1:
             query = self & {
@@ -457,24 +457,32 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             raise ValueError(f"Expected 1 entry, got {len(query)}: {query}")
 
         path = query.fetch1("recording_path")
+
+        _ = self._validate_recording_path(path, key, make_if_missing=True)
+
+        return path
+
+    def _validate_recording_path(self, path, key, make_if_missing=True):
+        """Validate that the recording path exists."""
         path_obj = Path(path)
 
-        # Protect against partial deletes, interrupted shutil.rmtree, etc.
-        # Error lets user decide if they want to backup before deleting
+        if not path_obj.exists() and make_if_missing:
+            logger.info(f"Recording path does not exist, recomputing: {path}")
+            SpikeSortingRecording()._make_file(key)
+
+        if not path_obj.exists():
+            raise FileNotFoundError(f"Recording path does not exist: {path}")
+
         normal_file_count = 21
         file_count = sum(1 for f in path_obj.rglob("*") if f.is_file())
-        if path_obj.exists() and file_count < normal_file_count:
+        if file_count < normal_file_count:
             raise RuntimeError(
                 f"Files missing! Please delete folder and rerun: {path}"
             )
 
-        if not path_obj.exists():
-            SpikeSortingRecording()._make_file(key)
-        if not path_obj.exists():
-            raise FileNotFoundError(
-                f"Recording could not be recomputed: {path}"
-            )
-
+    def load_recording(self, key):
+        """Load the recording data from the file."""
+        path = self._fetch_recording_path(key)
         return si.load_extractor(path)
 
     def update_ids(self):

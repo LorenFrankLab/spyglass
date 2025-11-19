@@ -124,6 +124,7 @@ def pytest_configure(config):
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
     SERVER = DockerMySQLManager(
         container_name=config.option.container_name,

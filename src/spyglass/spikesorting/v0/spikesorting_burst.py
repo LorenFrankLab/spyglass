@@ -166,7 +166,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
                 "curation_id",
             ]
         }
-        waves = Waveforms.load_waveforms(Waveforms, sg_key)
+        waves = Waveforms().load_waveforms(sg_key)
         self._waves_cache[key_hash] = waves
         return waves
 
@@ -257,7 +257,7 @@ class BurstPair(SpyglassMixin, dj.Computed):
             params = BurstPairParams().get_params(key)
 
         ccgs, bins = compute_correlograms(
-            waveform_or_sorting_extractor=Curation.get_curated_sorting(key),
+            waveform_or_sorting_extractor=Curation().get_curated_sorting(key),
             load_if_exists=False,
             window_ms=params.get("correl_window_ms", 100.0),
             bin_ms=params.get("correl_bin_ms", 5.0),
