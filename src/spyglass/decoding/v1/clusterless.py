@@ -9,7 +9,6 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
-import copy
 import uuid
 from pathlib import Path
 
@@ -96,34 +95,24 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     classifier_path: filepath@analysis # path to the classifier file
     """
 
-    def make(self, key):
-        """Populate the ClusterlessDecoding table.
-
+    def make_fetch(self, key):
+        """
         1. Fetches...
             position data from PositionGroup table
             waveform features and spike times from UnitWaveformFeatures table
             decoding parameters from DecodingParameters table
             encoding/decoding intervals from IntervalList table
-        2. Decodes via ClusterlessDetector from non_local_detector package
-        3. Optionally estimates decoding parameters
-        4. Saves the decoding results (initial conditions, discrete state
-            transitions) and classifier to disk. May include discrete transition
-            coefficients if available.
-        5. Inserts into ClusterlessDecodingV1 table and DecodingOutput merge
-            table.
         """
-        orig_key = copy.deepcopy(key)
+        nwb_dict = {"nwb_file_name": key["nwb_file_name"]}
 
         # Get model parameters
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
         ).fetch1()
-        decoding_params, decoding_kwargs = (
-            model_params["decoding_params"],
-            model_params["decoding_kwargs"],
-        )
-        decoding_kwargs = decoding_kwargs or {}
+
+        decoding_params = model_params.get("decoding_params", dict())
+        decoding_kwargs = model_params.get("decoding_kwargs", dict())
 
         # Get position data
         (
@@ -142,11 +131,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Get the encoding and decoding intervals
         encoding_interval = (
             IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["encoding_interval"],
-            }
+            & dict(nwb_dict, interval_list_name=key["encoding_interval"])
         ).fetch1("valid_times")
+
         is_training = np.zeros(len(position_info), dtype=bool)
         for interval_start, interval_end in encoding_interval:
             is_training[
@@ -158,16 +145,40 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         is_training[
             position_info[position_variable_names].isna().values.max(axis=1)
         ] = False
+
         if "is_training" not in decoding_kwargs:
             decoding_kwargs["is_training"] = is_training
 
         decoding_interval = (
             IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["decoding_interval"],
-            }
+            & dict(nwb_dict, interval_list_name=key["decoding_interval"])
         ).fetch1("valid_times")
+
+        return [
+            decoding_params,
+            decoding_kwargs,
+            position_info,
+            position_variable_names,
+            spike_times,
+            spike_waveform_features,
+            encoding_interval,
+            is_training,
+            decoding_interval,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        spike_waveform_features,
+        encoding_interval,
+        is_training,
+        decoding_interval,
+    ):
 
         # Decode
         classifier = ClusterlessDetector(**decoding_params)
@@ -274,12 +285,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 classifier.discrete_transition_coefficients_
             )
 
-        # Insert results
-        # in future use https://github.com/rly/ndx-xarray and analysis nwb file?
-
-        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
-
         # Make sure the results directory exists
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
         results_dir = Path(config["SPYGLASS_ANALYSIS_DIR"]) / nwb_file_name
         results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -292,21 +299,23 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             # if the results_path already exists, try a different uuid
             path_exists = results_path.exists()
 
-        classifier.save_results(
-            results,
-            results_path,
-        )
-        key["results_path"] = results_path
-
+        classifier.save_results(results, results_path)
         classifier_path = results_path.with_suffix(".pkl")
         classifier.save_model(classifier_path)
-        key["classifier_path"] = classifier_path
 
-        self.insert1(key)
+        self_insert = dict(
+            key, results_path=results_path, classifier_path=classifier_path
+        )
+
+        return [self_insert]
+
+    def make_insert(self, key: dict, self_insert: dict):
+
+        self.insert1(self_insert)
 
         from spyglass.decoding.decoding_merge import DecodingOutput
 
-        DecodingOutput.insert1(orig_key, skip_duplicates=True)
+        DecodingOutput.insert1(key, skip_duplicates=True)
 
     def fetch_results(self) -> xr.Dataset:
         """Retrieve the decoding results

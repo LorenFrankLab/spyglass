@@ -66,6 +66,7 @@ DecodingParameters().alter()
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+    - Separate `ClusterlessDecodingV1` to tripart `make` #14XX
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
