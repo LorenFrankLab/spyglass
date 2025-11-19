@@ -477,7 +477,6 @@ class LFP(SpyglassMixin, dj.Imported):
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
         lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
-        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
@@ -576,12 +575,14 @@ class LFP(SpyglassMixin, dj.Imported):
             nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
 
-        return [lfp_valid_times, added_key]
+        return [lfp_valid_times, added_key, lfp_file_name]
 
-    def make_insert(self, key, lfp_valid_times, added_key):
+    def make_insert(self, key, lfp_valid_times, added_key, lfp_file_name):
         if lfp_valid_times is None and added_key is None:
             return
 
+        # add the analysis nwb file entry
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         # add an interval list for the LFP valid times, skipping duplicates
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
         self.insert1(dict(key, **added_key))
