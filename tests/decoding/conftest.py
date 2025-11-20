@@ -795,8 +795,42 @@ def mock_clusterless_decoder():
         while preserving all the Spyglass logic in make().
         """
         classifier = create_fake_classifier()
-        results = create_fake_decoding_results(
-            n_time=len(position_info), n_position_bins=50, n_states=2
+        
+        # Simulate multiple intervals to test the concatenation logic
+        results_list = []
+        interval_labels = []
+        
+        for interval_idx, (interval_start, interval_end) in enumerate(
+            decoding_interval
+        ):
+            # Get time points for this interval
+            interval_time = position_info.loc[
+                interval_start:interval_end
+            ].index.to_numpy()
+            
+            if interval_time.size == 0:
+                continue
+                
+            # Create fake results for this interval
+            interval_results = create_fake_decoding_results(
+                n_time=len(interval_time), n_position_bins=50, n_states=2
+            )
+            # Update time coordinates to match actual interval times
+            interval_results = interval_results.assign_coords(
+                time=interval_time
+            )
+            results_list.append(interval_results)
+            interval_labels.extend([interval_idx] * len(interval_time))
+        
+        # Concatenate along time dimension (as the real code now does)
+        if len(results_list) == 1:
+            results = results_list[0]
+        else:
+            results = xr.concat(results_list, dim="time")
+        
+        # Add interval_labels coordinate (as the real code now does)
+        results = results.assign_coords(
+            interval_labels=("time", interval_labels)
         )
 
         # Add metadata (same as real implementation)
@@ -945,8 +979,42 @@ def mock_sorted_spikes_decoder():
     ):
         """Mocked version that returns fake results instantly."""
         classifier = create_fake_classifier()
-        results = create_fake_decoding_results(
-            n_time=len(position_info), n_position_bins=50, n_states=2
+        
+        # Simulate multiple intervals to test the concatenation logic
+        results_list = []
+        interval_labels = []
+        
+        for interval_idx, (interval_start, interval_end) in enumerate(
+            decoding_interval
+        ):
+            # Get time points for this interval
+            interval_time = position_info.loc[
+                interval_start:interval_end
+            ].index.to_numpy()
+            
+            if interval_time.size == 0:
+                continue
+                
+            # Create fake results for this interval
+            interval_results = create_fake_decoding_results(
+                n_time=len(interval_time), n_position_bins=50, n_states=2
+            )
+            # Update time coordinates to match actual interval times
+            interval_results = interval_results.assign_coords(
+                time=interval_time
+            )
+            results_list.append(interval_results)
+            interval_labels.extend([interval_idx] * len(interval_time))
+        
+        # Concatenate along time dimension (as the real code now does)
+        if len(results_list) == 1:
+            results = results_list[0]
+        else:
+            results = xr.concat(results_list, dim="time")
+        
+        # Add interval_labels coordinate (as the real code now does)
+        results = results.assign_coords(
+            interval_labels=("time", interval_labels)
         )
 
         # Add metadata (same as real implementation)

@@ -300,7 +300,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
             # We treat each decoding interval as a separate sequence
             results = []
-            for interval_start, interval_end in decoding_interval:
+            interval_labels = []
+            for interval_idx, (interval_start, interval_end) in enumerate(
+                decoding_interval
+            ):
                 interval_time = position_info.loc[
                     interval_start:interval_end
                 ].index.to_numpy()
@@ -310,19 +313,27 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                         f"Interval {interval_start}:{interval_end} is empty"
                     )
                     continue
-                results.append(
-                    classifier.predict(
-                        position_time=interval_time,
-                        position=position_info.loc[interval_start:interval_end][
-                            position_variable_names
-                        ].to_numpy(),
-                        spike_times=spike_times,
-                        spike_waveform_features=spike_waveform_features,
-                        time=interval_time,
-                        **predict_kwargs,
-                    )
+                interval_result = classifier.predict(
+                    position_time=interval_time,
+                    position=position_info.loc[interval_start:interval_end][
+                        position_variable_names
+                    ].to_numpy(),
+                    spike_times=spike_times,
+                    spike_waveform_features=spike_waveform_features,
+                    time=interval_time,
+                    **predict_kwargs,
                 )
-            results = xr.concat(results, dim="intervals")
+                results.append(interval_result)
+                # Track which interval each time point belongs to
+                interval_labels.extend(
+                    [interval_idx] * len(interval_result.time)
+                )
+            # Concatenate along time dimension instead of intervals dimension
+            results = xr.concat(results, dim="time")
+            # Add interval_labels as a coordinate for groupby/selection operations
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
+            )
 
         # Save discrete transition and initial conditions
         results["initial_conditions"] = xr.DataArray(
