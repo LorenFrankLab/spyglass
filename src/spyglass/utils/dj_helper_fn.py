@@ -360,10 +360,6 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         tbl.proj(nwb2load_filepath=attr_name), **arg
     )
 
-    # Fix for custom analysis tables #1435
-    if attrs and "nwb2load_filepath" not in attrs:
-        attrs = list(attrs) + ["nwb2load_filepath"]
-
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
