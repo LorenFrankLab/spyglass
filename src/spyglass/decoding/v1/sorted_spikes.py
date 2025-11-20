@@ -195,7 +195,9 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier : SortedSpikesDetector
             Fitted classifier instance
         results : xr.Dataset
-            Decoding results with posteriors
+            Decoding results with posteriors. Results from multiple intervals
+            are concatenated along the time dimension with an interval_labels
+            coordinate to track which interval each time point belongs to.
         """
         classifier = SortedSpikesDetector(**decoding_params)
 

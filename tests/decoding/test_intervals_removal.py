@@ -69,7 +69,8 @@ def test_no_intervals_dimension_clusterless(
 
     # Verify that interval_labels exists as a coordinate or variable
     assert (
-        "interval_labels" in results.coords or "interval_labels" in results.data_vars
+        "interval_labels" in results.coords
+        or "interval_labels" in results.data_vars
     ), (
         "Results should have 'interval_labels' to track which interval "
         "each time point belongs to"
@@ -128,15 +129,15 @@ def test_interval_labels_tracking_clusterless(
         interval_labels = results["interval_labels"]
 
     # Verify interval_labels has same length as time
-    assert len(interval_labels) == len(results.time), (
-        "interval_labels should have same length as time dimension"
-    )
+    assert len(interval_labels) == len(
+        results.time
+    ), "interval_labels should have same length as time dimension"
 
     # Verify interval_labels are integers starting from 0
     unique_labels = np.unique(interval_labels)
-    assert np.all(unique_labels == np.arange(len(unique_labels))), (
-        "interval_labels should be consecutive integers starting from 0"
-    )
+    assert np.all(
+        unique_labels == np.arange(len(unique_labels))
+    ), "interval_labels should be consecutive integers starting from 0"
 
 
 def test_groupby_interval_labels_clusterless(
@@ -186,15 +187,15 @@ def test_groupby_interval_labels_clusterless(
 
     # Test groupby operation
     grouped = results.groupby("interval_labels")
-    
+
     # Verify groupby works
     assert grouped is not None, "Should be able to groupby interval_labels"
-    
+
     # Verify we can iterate through groups
     for label, group in grouped:
-        assert isinstance(label, (int, np.integer)), (
-            "Group labels should be integers"
-        )
+        assert isinstance(
+            label, (int, np.integer)
+        ), "Group labels should be integers"
         assert "time" in group.dims, "Each group should have time dimension"
 
 
@@ -255,7 +256,8 @@ def test_no_intervals_dimension_sorted_spikes(
 
     # Verify that interval_labels exists
     assert (
-        "interval_labels" in results.coords or "interval_labels" in results.data_vars
+        "interval_labels" in results.coords
+        or "interval_labels" in results.data_vars
     ), (
         "Results should have 'interval_labels' to track which interval "
         "each time point belongs to"
