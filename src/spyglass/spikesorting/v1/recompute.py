@@ -16,6 +16,7 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 """
 
 import atexit
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from typing import Optional, Tuple, Union
@@ -372,6 +373,8 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     ---
     matched: bool
     err_msg=null: varchar(255)
+    created_at=null : datetime # timestamp when original file was created
+    deleted=0: bool # whether the old file has been deleted after a match
     """
 
     class Name(dj.Part):
@@ -482,6 +485,16 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         )
 
         return (str(old), str(new)) if as_str else (old, new)
+
+    def _get_file_created_at(self, key) -> str:
+        """Get file creation timestamp from filesystem.
+
+        Default to now() if file does not exist.
+        """
+        old, _ = self._get_paths(key)
+        if not old.exists():
+            return datetime.now()
+        return datetime.fromtimestamp(old.stat().st_mtime)
 
     # --- Database checks ---
 
@@ -630,6 +643,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         parent = self.get_parent_key(key)
 
         # Skip recompute for files with xfail reasons
+        created_key = dict(created_at=self._get_file_created_at(key))
         if parent.get("xfail_reason"):
             logger.info(f"Skipping xfail entry: {parent.get('xfail_reason')}")
             self.insert1(
@@ -637,13 +651,14 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                     key,
                     matched=False,
                     err_msg=f"xfail: {parent['xfail_reason']}",
+                    **created_key,
                 )
             )
             return
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
-            self.insert1(dict(key, matched=True))
+            self.insert1(dict(key, matched=True, **created_key))
             return
 
         # Ensure not duplicate work for lesser precision
@@ -660,7 +675,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         if new_hasher.hash == old_hasher.hash:
-            self.insert1(dict(key, matched=True))
+            self.insert1(dict(key, matched=True, **created_key))
             return
 
         names, hashes = [], []
@@ -675,7 +690,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             if old_hash != new_hash:
                 hashes.append(dict(key, name=obj))
 
-        self.insert1(dict(key, matched=False))
+        self.insert1(dict(key, matched=False, **created_key))
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
@@ -698,9 +713,31 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 total_size += this.stat().st_size
         return f"Total: {bytes_to_human_readable(total_size)}"
 
-    def delete_files(self, restriction=True, dry_run=True) -> None:
-        """If successfully recomputed, delete files for a given restriction."""
+    def delete_files(
+        self, restriction=True, dry_run=True, days_since_creation=7
+    ) -> None:
+        """Delete old files for successfully recomputed entries.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply to matched entries. Default True (all matched).
+        dry_run : bool, optional
+            If True, only show what would be deleted without deleting. Default True.
+        days_since_creation : int, optional
+            Skip files created within this many days. Default 7.
+        """
+        # Apply base restrictions
         query = self.with_names & "matched=1" & restriction
+
+        # Skip recently created files
+        if days_since_creation > 0:
+            date_templ = "created_at < DATE_SUB(CURDATE(), INTERVAL {} DAY)"
+            query = query & date_templ.format(days_since_creation)
+            logger.info(
+                f"Excluding files created within {days_since_creation} days"
+            )
+
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
@@ -721,6 +758,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             old, new = self._get_paths(key)
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
+            self.update1(dict(key, deleted=1))
 
     def delete(self, *args, **kwargs) -> None:
         """Delete recompute attempts when deleting rows."""
@@ -737,3 +775,31 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 path.unlink(missing_ok=True)
             kwargs["safemode"] = False  # pragma: no cover
             super().delete(*args, **kwargs)
+
+    def update_secondary(self, restriction=True) -> None:
+        """Update secondary attrs for existing entries.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply. Default True (all entries).
+        """
+        query = self & restriction
+        total = len(query)
+
+        if total == 0:
+            logger.info("No entries to update")
+            return
+
+        logger.info(
+            f"Updating created_at for {total} entries from file timestamps"
+        )
+
+        for key in tqdm(query, total=total):
+            created_at = self._get_file_created_at(key)
+            old, _ = self._get_paths(key)
+            self.update1(
+                dict(key, created_at=created_at, deleted=not old.exists())
+            )
+
+        logger.info("Update complete")

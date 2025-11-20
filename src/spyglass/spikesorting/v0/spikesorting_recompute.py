@@ -18,6 +18,7 @@ Use check_xfail() to test entries against known expected failure patterns.
 
 import json
 import re
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
@@ -419,6 +420,8 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     ---
     matched:bool
     err_msg=null: varchar(255)
+    created_at=null: datetime # Timestamp when the original file was created
+    deleted=0: bool # whether the old file has been deleted after a match
     """
 
     _hasher_cache = dict()
@@ -510,6 +513,23 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         return (str(old), str(new)) if as_str else (old, new)
 
+    def _get_file_created_at(self, key: dict):
+        """Get directory creation timestamp from filesystem.
+
+        Defaults to current time if file not found.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key for the recording.
+        """
+
+        old, _ = self._get_paths(key)
+
+        if not old.exists():
+            return datetime.now()
+        return datetime.fromtimestamp(old.stat().st_mtime)
+
     def _hash_both(
         self, key: dict, strict: bool = False
     ) -> Union[Tuple[DirectoryHasher, DirectoryHasher], Tuple[None, str]]:
@@ -580,9 +600,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         # Skip recompute for files logged at creation
         parent = self._parent_key(key)
         log_key = key.get("nwb_file_name", key)
+        created_key = dict(created_at=self._get_file_created_at(key))
         if parent.get("logged_at_creation", True):
             logger.info(f"Skipping logged_at_creation {log_key}")
-            self.insert1({**key, "matched": True})
+            self.insert1({**key, "matched": True, **created_key})
             return
 
         # Skip recompute for known xfail patterns
@@ -593,6 +614,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                     **key,
                     "matched": False,
                     "err_msg": f"xfail: {parent['xfail_reason']}",
+                    **created_key,
                 }
             )
             return
@@ -600,11 +622,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher, new_hasher = self._hash_both(key, strict=True)
 
         if isinstance(new_hasher, str):  # pragma: no cover
-            self.insert1({**key, "matched": False, "err_msg": new_hasher})
+            self.insert1(
+                {**key, "matched": False, "err_msg": new_hasher, **created_key}
+            )
             return  # pragma: no cover
 
         if old_hasher.hash == new_hasher.hash:
-            self.insert1({**key, "matched": True})
+            self.insert1({**key, "matched": True, **created_key})
             return
 
         # only show file name if available
@@ -621,7 +645,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             if old_hasher.cache[file] != new_hasher.cache[file]:
                 hashes.append(dict(key, name=file))
 
-        self.insert1(dict(key, matched=False))
+        self.insert1(dict(key, matched=False, **created_key))
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
@@ -652,9 +676,30 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         self,
         restriction: Optional[Union[str, dict]] = True,
         dry_run: Optional[bool] = True,
+        days_since_creation: int = 7,
     ) -> None:
-        """If successfully recomputed, delete files for a given restriction."""
+        """Delete old files for successfully recomputed entries.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply to matched entries. Default True (all matched).
+        dry_run : bool, optional
+            If True, only show what would be deleted. Default True.
+        days_since_creation : int, optional
+            Skip files created within this many days. Default 7.
+        """
+        # Apply base restrictions
         query = self & "matched=1" & restriction
+
+        # Skip recently created files
+        if days_since_creation > 0:
+            date_temp = "created_at < DATE_SUB(CURDATE(), INTERVAL {} DAY)"
+            query = query & date_temp.format(days_since_creation)
+            logger.info(
+                f"Excluding files created within {days_since_creation} days"
+            )
+
         file_names = query.fetch("nwb_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
@@ -698,3 +743,32 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 shutil_rmtree(dir, ignore_errors=True)
 
         super().delete(*args, **kwargs)
+
+    def update_secondary(
+        self, restriction: Optional[Union[str, dict]] = True
+    ) -> None:
+        """Update secondary keys for entries matching restriction.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply to entries. Default True (all entries).
+        """
+
+        query = self & restriction & "created_at IS NULL"
+        total = len(query)
+
+        if total == 0:
+            logger.warning("No entries found matching restriction")
+            return
+
+        logger.info(
+            f"Updating created_at for {total} entries from filesystem..."
+        )
+
+        for key in tqdm(query, total=total):
+            created_at = self._get_file_created_at(key)
+            old, _new = self._get_paths(key)
+            self.update1(
+                dict(key, created_at=created_at, deleted=not old.exists())
+            )

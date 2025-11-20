@@ -53,11 +53,12 @@ RecordingRecomputeSelection().alter()
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
-- Log expected recompute failures #14XX
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423
 - Pin `ndx-optogenetics` to 0.2.0 #1458
+- Log expected recompute failures #1470
+- Track file created/deletion status of recomputes #1470
 
 ### Pipelines
 
