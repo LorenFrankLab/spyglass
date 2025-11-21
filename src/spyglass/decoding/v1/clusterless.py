@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import ClusterlessDetector
+from scipy.ndimage import label
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
@@ -267,6 +268,14 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 spike_waveform_features=spike_waveform_features,
                 time=position_info.index.to_numpy(),
                 **decoding_kwargs,
+            )
+            # Add interval_labels coordinate for consistency with predict branch
+            # label() returns 1-indexed labels; subtract 1 for 0-indexed intervals
+            # Result: -1 = outside intervals, 0, 1, 2... = interval index
+            labels, _ = label(~is_missing)
+            interval_labels = labels - 1
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
             )
         else:
             VALID_FIT_KWARGS = [
