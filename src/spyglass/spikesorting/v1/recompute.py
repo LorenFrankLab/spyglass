@@ -56,10 +56,31 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     # expected nwb_deps: core, hdmf_common, hdmf_experimental, spyglass
     #                    ndx_franklab_novela, ndx_optogenetics, ndx_pose
 
+    _required_matches = [
+        "core",
+        "hdmf_common",
+        "hdmf_experimental",
+        "ndx_franklab_novela",
+    ]
+
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
         return sort_dict(self.namespace_dict(pynwb.get_manager().type_map))
+
+    def _dicts_match(
+        self,
+        dict_a: dict,
+        dict_b: dict,
+        required_keys: list = None,
+    ) -> bool:
+        """Check if two dicts match on required keys."""
+        if required_keys is None:
+            required_keys = self._required_matches
+        for key in required_keys:
+            if dict_a.get(key) != dict_b.get(key):
+                return False
+        return True
 
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
@@ -71,9 +92,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if sort_dict(key_deps) != self.nwb_deps:  # comment out to debug
-                continue
-            restr.append(self.dict_to_pk(key))
+            if self._dicts_match(self.nwb_deps, key_deps):
+                restr.append(self.dict_to_pk(key))
         return self & restr
 
     def _has_key(self, key: dict) -> bool:
@@ -148,6 +168,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             script = f.get("general/source_script")
             if script is not None:  # after `=`, remove quotes
                 script = str(script[()]).split("=")[1].strip().replace("'", "")
+            if " " in script:  # has more of conda env
+                script = script.split(" ")[0]
             nwb_deps["spyglass"] = script
 
         self.insert1(dict(key, nwb_deps=nwb_deps), allow_direct_insert=True)
@@ -300,7 +322,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 "rounding": rounding or self.default_rounding,
             }
             for key in source.fetch("KEY", as_dict=True)
-            if len(RecordingRecompute & key) == 0
+            if not bool(RecordingRecompute & key)
         ]
         if not inserts:
             logger.info(f"No rows to insert from:\n\t{source}")
@@ -364,6 +386,82 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     def _has_matching_env(self, key) -> bool:
         """Check current env for matching pynwb and pip versions."""
         return REC_VER_TBL._has_matching_env(key) and bool(self.this_env & key)
+
+    def remove_matched(
+        self,
+        restriction: Optional[Union[str, dict]] = True,
+        dry_run: bool = True,
+    ) -> int:
+        """Remove selection entries for files already successfully matched.
+
+        This method cleans up redundant entries in RecordingRecomputeSelection
+        for files that have already been successfully matched in
+        RecordingRecompute (potentially in a different environment).
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Additional restriction to apply. Default True (all entries).
+        dry_run : bool, optional
+            If True, only show what would be deleted without deleting.
+            Default True.
+
+        Returns
+        -------
+        int
+            Number of entries that were (or would be) deleted.
+
+        Example
+        -------
+        >>> # Remove all redundant selection entries
+        >>> RecordingRecomputeSelection().remove_matched(dry_run=False)
+        """
+        from tqdm import tqdm
+
+        # Get all successfully matched entries (excluding env_id)
+        matched_entries = RecordingRecompute & "matched=1"
+
+        # Get primary keys excluding env_id
+        pk_fields = [
+            k for k in SpikeSortingRecording.primary_key if k != "env_id"
+        ]
+
+        # Get unique matched file keys
+        matched_keys = (dj.U(*pk_fields) & matched_entries).fetch(
+            "KEY", as_dict=True
+        )
+
+        if not matched_keys:
+            logger.info("No matched entries found in RecordingRecompute")
+            return 0
+
+        # Find selection entries that match these files
+        redundant = self & restriction & matched_keys
+        count = len(redundant)
+
+        prefix = "DRY RUN: " if dry_run else ""
+        logger.info(
+            f"{prefix}Found {count} selection entries for already-matched files"
+        )
+
+        if dry_run:
+            # Show sample of what would be deleted
+            sample = redundant.fetch("KEY", as_dict=True, limit=10)
+            logger.info(f"{prefix}Sample entries (up to 10):")
+            for i, key in enumerate(sample, 1):
+                analysis_file = key.get("analysis_file_name", "unknown")
+                env_id = key.get("env_id", "unknown")
+                logger.info(f"  {i}. {analysis_file} (env: {env_id})")
+            if count > 10:
+                logger.info(f"  ... and {count - 10} more")
+            return count
+
+        # Actually delete the redundant entries
+        logger.info(f"Deleting {count} redundant selection entries...")
+        redundant.delete(safemode=False)
+        logger.info(f"Deleted {count} redundant entries")
+
+        return count
 
 
 @schema
@@ -638,6 +736,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         """Attempt to recompute an analysis file and compare to the original."""
         rec_dict = dict(recording_id=key["recording_id"])
         if self & rec_dict & "matched=1":
+            logger.info("Previous match found. Skipping recompute.")
             return
 
         parent = self.get_parent_key(key)
@@ -658,6 +757,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
+            logger.info("Skipping entry logged at creation.")
             self.insert1(dict(key, matched=True, **created_key))
             return
 
@@ -672,9 +772,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher, new_hasher = self._hash_both(key)
 
         if new_hasher is None:  # Error occurred during recompute
+            logger.error(f"V1 Recompute failed: {new_hasher.path.name}")
             return
 
         if new_hasher.hash == old_hasher.hash:
+            logger.info(f"V1 Recompute match: {new_hasher.path.name}")
             self.insert1(dict(key, matched=True, **created_key))
             return
 
@@ -705,8 +807,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             Restriction for RecordingRecompute. Default is "matched=0".
         """
         restr = restr or "matched=0"
+        query = self & restr & "deleted=0"
         total_size = 0
-        for key in tqdm(self & restr, desc="Calculating disk space"):
+        for key in tqdm(query, desc="Calculating disk space"):
             old, new = self._get_paths(key)
             this = old if which == "old" else new
             if this.exists():
@@ -723,12 +826,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         restriction : bool, str, dict, optional
             Restriction to apply to matched entries. Default True (all matched).
         dry_run : bool, optional
-            If True, only show what would be deleted without deleting. Default True.
+            If True, only show what would be deleted without deleting.
+            Default True.
         days_since_creation : int, optional
             Skip files created within this many days. Default 7.
         """
         # Apply base restrictions
-        query = self.with_names & "matched=1" & restriction
+        query = self.with_names & "matched=1 AND deleted=0" & restriction
 
         # Skip recently created files
         if days_since_creation > 0:

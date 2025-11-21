@@ -412,6 +412,77 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """Restricted table matching pynwb env and pip env."""
         return self & self.env_dict
 
+    def remove_matched(
+        self,
+        restriction: Optional[Union[str, dict]] = True,
+        dry_run: bool = True,
+    ) -> int:
+        """Remove selection entries for files already successfully matched.
+
+        This method cleans up redundant entries in RecordingRecomputeSelection
+        for files that have already been successfully matched in
+        RecordingRecompute (potentially in a different environment).
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Additional restriction to apply. Default True (all entries).
+        dry_run : bool, optional
+            If True, only show what would be deleted without deleting. Default True.
+
+        Returns
+        -------
+        int
+            Number of entries that were (or would be) deleted.
+
+        Example
+        -------
+        >>> # Remove all redundant selection entries
+        >>> RecordingRecomputeSelection().remove_matched(dry_run=False)
+        """
+        # Get all successfully matched entries (excluding env_id)
+        matched_entries = RecordingRecompute & "matched=1"
+
+        # Get primary keys excluding env_id
+        pk_fields = [
+            k for k in SpikeSortingRecording.primary_key if k != "env_id"
+        ]
+
+        # Get unique matched file keys
+        matched_keys = (dj.U(*pk_fields) & matched_entries).fetch(
+            "KEY", as_dict=True
+        )
+
+        if not matched_keys:
+            logger.info("No matched entries found in RecordingRecompute")
+            return 0
+
+        # Find selection entries that match these files
+        redundant = self & restriction & matched_keys
+        count = len(redundant)
+
+        prefix = "DRY RUN: " if dry_run else ""
+        logger.info(
+            f"{prefix}Found {count} selection entries for already-matched files"
+        )
+
+        if dry_run:
+            # Show sample of what would be deleted
+            sample = redundant.fetch("KEY", as_dict=True, limit=10)
+            logger.info(f"{prefix}Sample entries (up to 10):")
+            for i, key in enumerate(sample, 1):
+                nwb_file = key.get("nwb_file_name", "unknown")
+                env_id = key.get("env_id", "unknown")
+                logger.info(f"  {i}. {nwb_file} (env: {env_id})")
+            if count > 10:
+                logger.info(f"  ... and {count - 10} more")
+            return count
+
+        # Actually delete the redundant entries
+        redundant.delete()
+
+        return count
+
 
 @schema
 class RecordingRecompute(SpyglassMixin, dj.Computed):
@@ -690,7 +761,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             Skip files created within this many days. Default 7.
         """
         # Apply base restrictions
-        query = self & "matched=1" & restriction
+        query = self & "matched=1 AND deleted=0" & restriction
 
         # Skip recently created files
         if days_since_creation > 0:
