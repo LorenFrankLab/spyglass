@@ -1,6 +1,4 @@
 import pytest
-import pandas as pd
-import numpy as np
 
 
 def test_decode_param_fetch(decode_v1, decode_clusterless_params_insert):
