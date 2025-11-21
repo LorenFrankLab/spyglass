@@ -285,6 +285,8 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                     [interval_idx] * len(interval_result.time)
                 )
             # Concatenate along time dimension instead of intervals dimension
+            if not results:
+                raise ValueError("All decoding intervals are empty")
             results = xr.concat(results, dim="time")
             # Add interval_labels as a coordinate for groupby/selection operations
             results = results.assign_coords(
