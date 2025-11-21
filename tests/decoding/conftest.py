@@ -777,6 +777,7 @@ def mock_clusterless_decoder():
     the real _run_decoder method.
     """
     import xarray as xr
+    from scipy.ndimage import label
 
     def _mock_run_decoder(
         self,
@@ -793,45 +794,81 @@ def mock_clusterless_decoder():
 
         This mocks the expensive non_local_detector operations (~220s)
         while preserving all the Spyglass logic in make().
+
+        Handles both estimate_decoding_params=True and False branches:
+        - True: Returns results for ALL time points, with interval_labels
+                using scipy.ndimage.label approach (-1 for outside intervals)
+        - False: Returns results only for interval time points, with
+                interval_labels using enumerate approach (0, 1, 2, ...)
         """
         classifier = create_fake_classifier()
 
-        # Simulate multiple intervals to test the concatenation logic
-        results_list = []
-        interval_labels = []
+        if key.get("estimate_decoding_params", False):
+            # estimate_decoding_params=True branch:
+            # Results span ALL time points in position_info
+            all_time = position_info.index.to_numpy()
 
-        for interval_idx, (interval_start, interval_end) in enumerate(
-            decoding_interval
-        ):
-            # Get time points for this interval
-            interval_time = position_info.loc[
-                interval_start:interval_end
-            ].index.to_numpy()
+            # Create is_missing mask (same as real code)
+            is_missing = np.ones(len(position_info), dtype=bool)
+            for interval_start, interval_end in decoding_interval:
+                is_missing[
+                    np.logical_and(
+                        position_info.index >= interval_start,
+                        position_info.index <= interval_end,
+                    )
+                ] = False
 
-            if interval_time.size == 0:
-                continue
-
-            # Create fake results for this interval
-            interval_results = create_fake_decoding_results(
-                n_time=len(interval_time), n_position_bins=50, n_states=2
+            # Create fake results for all time points
+            results = create_fake_decoding_results(
+                n_time=len(all_time), n_position_bins=50, n_states=2
             )
-            # Update time coordinates to match actual interval times
-            interval_results = interval_results.assign_coords(
-                time=interval_time
-            )
-            results_list.append(interval_results)
-            interval_labels.extend([interval_idx] * len(interval_time))
+            results = results.assign_coords(time=all_time)
 
-        # Concatenate along time dimension (as the real code now does)
-        if len(results_list) == 1:
-            results = results_list[0]
+            # Create interval_labels using scipy.ndimage.label (same as real code)
+            labels_arr, _ = label(~is_missing)
+            interval_labels = labels_arr - 1
+
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
+            )
         else:
-            results = xr.concat(results_list, dim="time")
+            # estimate_decoding_params=False branch:
+            # Results only for time points within intervals
+            results_list = []
+            interval_labels = []
 
-        # Add interval_labels coordinate (as the real code now does)
-        results = results.assign_coords(
-            interval_labels=("time", interval_labels)
-        )
+            for interval_idx, (interval_start, interval_end) in enumerate(
+                decoding_interval
+            ):
+                # Get time points for this interval
+                interval_time = position_info.loc[
+                    interval_start:interval_end
+                ].index.to_numpy()
+
+                if interval_time.size == 0:
+                    continue
+
+                # Create fake results for this interval
+                interval_results = create_fake_decoding_results(
+                    n_time=len(interval_time), n_position_bins=50, n_states=2
+                )
+                # Update time coordinates to match actual interval times
+                interval_results = interval_results.assign_coords(
+                    time=interval_time
+                )
+                results_list.append(interval_results)
+                interval_labels.extend([interval_idx] * len(interval_time))
+
+            # Concatenate along time dimension (as the real code now does)
+            if len(results_list) == 1:
+                results = results_list[0]
+            else:
+                results = xr.concat(results_list, dim="time")
+
+            # Add interval_labels coordinate (as the real code now does)
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
+            )
 
         # Add metadata (same as real implementation)
         # initial_conditions: shape (n_states,) with explicit dims
@@ -966,6 +1003,7 @@ def mock_detector_load_model(mock_results_storage):
 def mock_sorted_spikes_decoder():
     """Mock the _run_decoder helper for SortedSpikesDecodingV1."""
     import xarray as xr
+    from scipy.ndimage import label
 
     def _mock_run_decoder(
         self,
@@ -977,45 +1015,82 @@ def mock_sorted_spikes_decoder():
         spike_times,
         decoding_interval,
     ):
-        """Mocked version that returns fake results instantly."""
+        """Mocked version that returns fake results instantly.
+
+        Handles both estimate_decoding_params=True and False branches:
+        - True: Returns results for ALL time points, with interval_labels
+                using scipy.ndimage.label approach (-1 for outside intervals)
+        - False: Returns results only for interval time points, with
+                interval_labels using enumerate approach (0, 1, 2, ...)
+        """
         classifier = create_fake_classifier()
 
-        # Simulate multiple intervals to test the concatenation logic
-        results_list = []
-        interval_labels = []
+        if key.get("estimate_decoding_params", False):
+            # estimate_decoding_params=True branch:
+            # Results span ALL time points in position_info
+            all_time = position_info.index.to_numpy()
 
-        for interval_idx, (interval_start, interval_end) in enumerate(
-            decoding_interval
-        ):
-            # Get time points for this interval
-            interval_time = position_info.loc[
-                interval_start:interval_end
-            ].index.to_numpy()
+            # Create is_missing mask (same as real code)
+            is_missing = np.ones(len(position_info), dtype=bool)
+            for interval_start, interval_end in decoding_interval:
+                is_missing[
+                    np.logical_and(
+                        position_info.index >= interval_start,
+                        position_info.index <= interval_end,
+                    )
+                ] = False
 
-            if interval_time.size == 0:
-                continue
-
-            # Create fake results for this interval
-            interval_results = create_fake_decoding_results(
-                n_time=len(interval_time), n_position_bins=50, n_states=2
+            # Create fake results for all time points
+            results = create_fake_decoding_results(
+                n_time=len(all_time), n_position_bins=50, n_states=2
             )
-            # Update time coordinates to match actual interval times
-            interval_results = interval_results.assign_coords(
-                time=interval_time
-            )
-            results_list.append(interval_results)
-            interval_labels.extend([interval_idx] * len(interval_time))
+            results = results.assign_coords(time=all_time)
 
-        # Concatenate along time dimension (as the real code now does)
-        if len(results_list) == 1:
-            results = results_list[0]
+            # Create interval_labels using scipy.ndimage.label (same as real code)
+            labels_arr, _ = label(~is_missing)
+            interval_labels = labels_arr - 1
+
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
+            )
         else:
-            results = xr.concat(results_list, dim="time")
+            # estimate_decoding_params=False branch:
+            # Results only for time points within intervals
+            results_list = []
+            interval_labels = []
 
-        # Add interval_labels coordinate (as the real code now does)
-        results = results.assign_coords(
-            interval_labels=("time", interval_labels)
-        )
+            for interval_idx, (interval_start, interval_end) in enumerate(
+                decoding_interval
+            ):
+                # Get time points for this interval
+                interval_time = position_info.loc[
+                    interval_start:interval_end
+                ].index.to_numpy()
+
+                if interval_time.size == 0:
+                    continue
+
+                # Create fake results for this interval
+                interval_results = create_fake_decoding_results(
+                    n_time=len(interval_time), n_position_bins=50, n_states=2
+                )
+                # Update time coordinates to match actual interval times
+                interval_results = interval_results.assign_coords(
+                    time=interval_time
+                )
+                results_list.append(interval_results)
+                interval_labels.extend([interval_idx] * len(interval_time))
+
+            # Concatenate along time dimension (as the real code now does)
+            if len(results_list) == 1:
+                results = results_list[0]
+            else:
+                results = xr.concat(results_list, dim="time")
+
+            # Add interval_labels coordinate (as the real code now does)
+            results = results.assign_coords(
+                interval_labels=("time", interval_labels)
+            )
 
         # Add metadata (same as real implementation)
         # initial_conditions: shape (n_states,) with explicit dims
