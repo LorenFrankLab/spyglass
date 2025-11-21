@@ -228,6 +228,9 @@ class PositionGroup(SpyglassMixin, dj.Manual):
             min_time = min([df.index.min() for df in position_info])
         if max_time is None:
             max_time = max([df.index.max() for df in position_info])
+        # sort_index() required: merge_ids may be fetched in non-chronological
+        # order (e.g., alphabetically by UUID), causing .loc[min:max] to return
+        # empty on unsorted index. See: github.com/LorenFrankLab/spyglass/issues/1471
         position_info = (
             pd.concat(position_info, axis=0).sort_index().loc[min_time:max_time]
         )
