@@ -343,11 +343,15 @@ def decode_interval(common, mini_dict):
     raw_begin = (common.IntervalList & 'interval_list_name LIKE "raw%"').fetch1(
         "valid_times"
     )[0][0]
+    # Use a subset of the encoding interval (raw_begin+2 to raw_begin+13)
+    # This creates gaps at start and end, ensuring that when
+    # estimate_decoding_params=True, there are time points outside the
+    # decoding interval that will get interval_labels=-1
     common.IntervalList.insert1(
         {
             **mini_dict,
             "interval_list_name": decode_interval_name,
-            "valid_times": [[raw_begin, raw_begin + 15]],
+            "valid_times": [[raw_begin + 2, raw_begin + 13]],
         },
         skip_duplicates=True,
     )
