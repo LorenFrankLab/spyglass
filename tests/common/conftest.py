@@ -111,7 +111,7 @@ def dio_only_nwb(raw_dir, common):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_dict():
     return dict(
         name="test_virus_1",
@@ -122,7 +122,7 @@ def virus_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def virus_injection_dict(virus_dict):
     return dict(
         name="injection_1",
@@ -140,7 +140,7 @@ def virus_injection_dict(virus_dict):
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_model_dict():
     return dict(
         name="test_source_model",
@@ -151,7 +151,7 @@ def excitation_source_model_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def excitation_source_dict():
     return dict(
         name="test_source",
@@ -161,7 +161,7 @@ def excitation_source_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def fiber_model_dict():
     return dict(
         name="test_fiber_model",
@@ -177,7 +177,7 @@ def fiber_model_dict():
     )
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="session")  # Elevated from function scope for performance
 def fiber_implant_dict():
     return dict(
         implanted_fiber_description="Test fiber implant",
