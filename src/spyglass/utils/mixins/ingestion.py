@@ -253,11 +253,15 @@ class IngestionMixin(BaseMixin):
 
         # validate that new entries are consistent with existing entries
         if self._expected_duplicates:
-            self.validate_duplicates(entries)
+            entries_to_insert = self.validate_duplicates(entries)
+        else:
+            entries_to_insert = entries
 
         # run insertions
         if not dry_run:
-            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
+            self._run_nwbfile_insert(
+                entries_to_insert, nwb_file_name=nwb_file_name
+            )
 
         return entries
 
@@ -279,7 +283,7 @@ class IngestionMixin(BaseMixin):
         for table, table_entries in entries.items():
             table.insert(
                 table_entries,
-                skip_duplicates=expect_dupes(table),
+                skip_duplicates=False,
                 allow_direct_insert=True,
             )
             self._insert_logline(nwb_file_name, len(table_entries), table)
@@ -348,10 +352,23 @@ class IngestionMixin(BaseMixin):
         entry_dict : dict or Dict[dj.Table, List[dict]]
             The new entry or dict of table entries to validate against existing
             entries in the database.
+
+        Returns
+        -------
+        dict or Dict[dj.Table, List[dict]]
+            The new entries to insert after validation. Avoids need to flag
+            skip_duplicates
         """
+        entries_to_insert = dict()
         for table, table_entries in entry_dict.items():
-            for entry in self._adjust_keys_for_entry(table_entries):
+            entries_to_insert[table] = []
+            for entry, table_entry in zip(
+                self._adjust_keys_for_entry(table_entries), table_entries
+            ):
                 self.validate1_duplicate(table, entry)
+                if not (table & entry):
+                    entries_to_insert[table].append(table_entry)
+        return entries_to_insert
 
     def validate1_duplicate(self, tbl, new_key):
         """If matching primary key, check for consistency in secondary keys.
