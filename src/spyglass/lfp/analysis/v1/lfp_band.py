@@ -462,10 +462,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             }
         ).fetch("valid_times")
         lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
-        lfp_valid_times.set_key(**key, pipeline="lfp band")
+        lfp_band_valid_times.set_key(**key, pipeline="lfp band")
         if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
             # add an interval list for the LFP valid times
-            IntervalList.insert1(lfp_valid_times.as_dict)
+            IntervalList.insert1(lfp_band_valid_times.as_dict)
         else:
             # check that the valid times are the same
             assert np.isclose(
