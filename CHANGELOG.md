@@ -65,6 +65,7 @@ DecodingParameters().alter()
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
     - Handle epoch formats with varying zero-padding #1459
+    - Reduce lock conflicts between users during ingestion #1483
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
