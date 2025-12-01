@@ -880,7 +880,7 @@ def mock_clusterless_decoder():
         # initial_conditions: shape (n_states,) with explicit dims
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
-            dims=("state",),
+            dims=("states",),
             name="initial_conditions",
         )
         # discrete_state_transitions: shape (n_states, n_states) with explicit dims
@@ -888,7 +888,7 @@ def mock_clusterless_decoder():
         # Don't set coords - xarray will create default integer indices
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
-            dims=("state_from", "state_to"),
+            dims=("states_from", "states_to"),
             name="discrete_state_transitions",
         )
 
@@ -1102,7 +1102,7 @@ def mock_sorted_spikes_decoder():
         # initial_conditions: shape (n_states,) with explicit dims
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
-            dims=("state",),
+            dims=("states",),
             name="initial_conditions",
         )
         # discrete_state_transitions: shape (n_states, n_states) with explicit dims
@@ -1110,7 +1110,7 @@ def mock_sorted_spikes_decoder():
         # Don't set coords - xarray will create default integer indices
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
-            dims=("state_from", "state_to"),
+            dims=("states_from", "states_to"),
             name="discrete_state_transitions",
         )
 

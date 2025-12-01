@@ -309,7 +309,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
-            dims=("states", "states"),
+            dims=("states_from", "states_to"),
             name="discrete_state_transitions",
         )
         if (
