@@ -320,7 +320,7 @@ def check_prerequisites(
             print("  To fix:")
             print("    1. Free up disk space in this location")
             print(
-                f"    2. Choose different directory: python scripts/install.py --base-dir /other/path"
+                "    2. Choose different directory: python scripts/install.py --base-dir /other/path"
             )
             print(
                 "    3. Use minimal install (needs 10 GB): python scripts/install.py --minimal"
@@ -1254,7 +1254,7 @@ def create_database_config(
     # Atomic move (on same filesystem)
     shutil.move(str(tmp_path), str(config_file))
     print_success(f"Configuration saved to: {config_file}")
-    print(f"  Permissions: Owner read/write only (secure)")
+    print("  Permissions: Owner read/write only (secure)")
 
     # Enhanced success message with next steps
     print()
@@ -2196,8 +2196,9 @@ except Exception as e:
     try:
         # Pass new password via environment variable for security
         import os
+
         env = os.environ.copy()
-        env['SPYGLASS_NEW_PASSWORD'] = new_password
+        env["SPYGLASS_NEW_PASSWORD"] = new_password
 
         result = subprocess.run(
             ["conda", "run", "-n", env_name, "python", "-c", python_code],
