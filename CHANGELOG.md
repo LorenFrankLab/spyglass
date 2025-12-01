@@ -68,6 +68,8 @@ DecodingParameters().alter()
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+- LFP
+    - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
