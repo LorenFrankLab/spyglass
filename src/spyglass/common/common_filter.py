@@ -255,11 +255,11 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
             start = all[0]
 
         if stop > all[-1]:
-            logger.warning(
-                timestamp_warn
-                + "stop time larger than last timestamp, "
-                + f"substituting last: {stop} < {all[-1]}"
-            )
+            # logger.warning(
+            #     timestamp_warn
+            #     + "stop time larger than last timestamp, "
+            #     + f"substituting last: {stop} < {all[-1]}"
+            # )
             stop = all[-1]
 
         frm, to = np.searchsorted(all, (start, stop))
