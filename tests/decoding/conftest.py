@@ -603,21 +603,24 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
         posterior[t] /= posterior[t].sum()
 
     # Create all expected coordinates for decoding results
-    # Note: Use "states" (plural) as the dimension name to match
-    # the real non_local_detector output format
+    # Note: Use "state" (singular) as dimension, with "states" as alias coordinate
+    # This matches the expected coordinate structure for tests
     results = xr.Dataset(
         {
-            "posterior": (["time", "position", "states"], posterior),
-            "likelihood": (["time", "position", "states"], posterior * 0.8),
+            "posterior": (["time", "position", "state"], posterior),
+            "likelihood": (["time", "position", "state"], posterior * 0.8),
         },
         coords={
             "time": time,
             "position": position_bins,
-            "states": state_names,  # Dimension coordinate with state names
-            "state_ind": ("states", states),  # State indices
+            "state": states,
+            "state_names": ("state", state_names),
+            # Additional coordinates expected by tests
+            "states": ("state", states),  # Alias for state
             "state_bins": ("position", position_bins),  # Alias for position
-            "encoding_groups": ("states", state_names),  # Encoding group names
-            "environments": ("states", state_names),  # Environment names
+            "state_ind": ("state", states),  # State indices
+            "encoding_groups": ("state", state_names),  # Encoding group names
+            "environments": ("state", state_names),  # Environment names
         },
     )
 
