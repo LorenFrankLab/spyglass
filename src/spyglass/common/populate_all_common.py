@@ -179,7 +179,7 @@ def populate_all_common(
     from spyglass.position.v1.imported_pose import ImportedPose
     from spyglass.spikesorting.imported import ImportedSpikeSorting
 
-    declare_all_merge_tables()
+    _ = declare_all_merge_tables()
 
     error_constants = dict(
         dj_user=dj.config["database.user"],

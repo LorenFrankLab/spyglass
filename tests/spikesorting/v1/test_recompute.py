@@ -6,6 +6,7 @@ import pytest
 from tests.conftest import VERBOSE
 
 
+@pytest.mark.slow
 def test_recompute(spike_v1, pop_rec, common):
     key = spike_v1.SpikeSortingRecording().fetch(
         "analysis_file_name", as_dict=True
@@ -53,6 +54,7 @@ def recomp_tbl(recomp_module, recomp_selection, spike_v1, pop_rec):
     yield recomp_tbl
 
 
+@pytest.mark.slow
 def test_recompute_env(recomp_tbl):
     """Test recompute to temp_dir"""
 
@@ -74,6 +76,7 @@ def test_delete_dry_run(caplog, recomp_tbl):
     assert "DRY" in caplog.text, "Dry run delete failed to log"
 
 
+@pytest.mark.slow
 def test_recheck(recomp_tbl):
     """Test that recheck works."""
     key = recomp_tbl.fetch("KEY")[0]
