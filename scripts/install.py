@@ -158,6 +158,36 @@ def print_manual_password_instructions(env_name: str) -> None:
     print("  python -c 'import datajoint as dj; dj.set_password()'")
 
 
+def prompt_yes_no(prompt: str, default_yes: bool = False) -> bool:
+    """Prompt user for yes/no confirmation.
+
+    Parameters
+    ----------
+    prompt : str
+        Question to ask user (without the [Y/n] suffix)
+    default_yes : bool
+        If True, default is yes when user presses Enter.
+        If False, default is no.
+
+    Returns
+    -------
+    bool
+        True if user answered yes, False otherwise
+
+    Examples
+    --------
+    >>> if prompt_yes_no("Continue?", default_yes=True):
+    ...     print("Continuing...")
+    >>> if prompt_yes_no("Delete files?", default_yes=False):
+    ...     print("Deleting...")
+    """
+    suffix = "[Y/n]" if default_yes else "[y/N]"
+    response = input(f"{prompt} {suffix}: ").strip().lower()
+    if not response:
+        return default_yes
+    return response in ["y", "yes"]
+
+
 def show_progress_message(operation: str, estimated_minutes: int) -> None:
     """Show progress message for long-running operation.
 
@@ -511,10 +541,9 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
                     )
                     continue
 
-                response = (
-                    input("Directory exists. Use it? [Y/n]: ").strip().lower()
-                )
-                if response in ["n", "no"]:
+                if not prompt_yes_no(
+                    "Directory exists. Use it?", default_yes=True
+                ):
                     continue
 
             # Validate write permissions
@@ -639,10 +668,10 @@ def create_conda_environment(
 
     if env_name in result.stdout:
         if not force:
-            response = input(
-                f"Environment '{env_name}' exists. Overwrite? [y/N]: "
-            )
-            if response.lower() not in ["y", "yes"]:
+            if not prompt_yes_no(
+                f"Environment '{env_name}' exists. Overwrite?",
+                default_yes=False,
+            ):
                 print_success(f"Using existing environment '{env_name}'")
                 print(
                     "  Package installation will continue (updates if needed)"
@@ -1677,8 +1706,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print("    • Standard MySQL: 3306")
             print("    • SSH tunnel: Check your tunnel configuration")
 
-            retry = input("\n  Continue anyway? [y/N]: ").strip().lower()
-            if retry not in ["y", "yes"]:
+            if not prompt_yes_no("\n  Continue anyway?", default_yes=False):
                 return None
         elif port_reachable:
             print("  ✓ Port is reachable")
@@ -1688,8 +1716,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
         if use_tls:
             print_warning(f"TLS will be enabled for remote host '{host}'")
-            tls_response = input("  Disable TLS? [y/N]: ").strip().lower()
-            if tls_response in ["y", "yes"]:
+            if prompt_yes_no("  Disable TLS?", default_yes=False):
                 use_tls = False
                 print_warning(
                     "TLS disabled (not recommended for remote connections)"
@@ -2245,8 +2272,9 @@ def handle_database_setup_interactive(env_name: str) -> None:
                 else:
                     print(f"  Error: {reason}")
 
-                retry = input("\nTry different option? [Y/n]: ").strip().lower()
-                if retry in ["n", "no"]:
+                if not prompt_yes_no(
+                    "\nTry different option?", default_yes=True
+                ):
                     print_warning("Skipping database setup")
                     print("  Configure later: docker compose up -d")
                     print("  Or manually: see docs/DATABASE.md")
@@ -2370,8 +2398,7 @@ def change_database_password(
     print("you should change your password now for security.")
     print()
 
-    change = input("Change password? [Y/n]: ").strip().lower()
-    if change in ["n", "no"]:
+    if not prompt_yes_no("Change password?", default_yes=True):
         print_warning("Keeping current password")
         return None
 
@@ -2386,8 +2413,7 @@ def change_database_password(
         confirm_password = getpass.getpass("  Confirm password: ")
         if new_password != confirm_password:
             print_error("Passwords do not match")
-            retry = input("  Try again? [Y/n]: ").strip().lower()
-            if retry in ["n", "no"]:
+            if not prompt_yes_no("  Try again?", default_yes=True):
                 return None
             continue
 
@@ -2590,12 +2616,10 @@ def setup_database_remote(
         )
         print()
 
-        retry = input("Retry with different settings? [y/N]: ").strip().lower()
-        if retry in ["y", "yes"]:
+        if prompt_yes_no("Retry with different settings?", default_yes=False):
             return setup_database_remote(env_name)  # Recursive retry
-        else:
-            print_warning("Database setup cancelled")
-            return False
+        print_warning("Database setup cancelled")
+        return False
 
     # Offer password change for new lab members (only for non-localhost)
     if config["host"] not in LOCALHOST_ADDRESSES:
