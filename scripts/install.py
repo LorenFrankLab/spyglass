@@ -2815,6 +2815,107 @@ def run_dry_run(args: argparse.Namespace) -> None:
     print("=" * 60)
 
 
+def run_config_only(args: argparse.Namespace) -> None:
+    """Generate only the .datajoint_config.json file without environment setup.
+
+    This mode is useful for:
+    - Regenerating config after manual changes
+    - Setting up config on a system where spyglass is already installed
+    - Creating config for Frank Lab members on existing environments
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments containing database and path options
+    """
+    print("\n" + "=" * 60)
+    print("CONFIG-ONLY MODE - Generating configuration file")
+    print("=" * 60 + "\n")
+
+    # Get base directory
+    base_dir = get_base_directory(args.base_dir)
+
+    # Determine database settings
+    if args.docker:
+        # Docker mode: localhost with default credentials
+        host = "localhost"
+        port = args.db_port
+        user = args.db_user
+        password = args.db_password or os.getenv(
+            "SPYGLASS_DB_PASSWORD", DEFAULT_MYSQL_PASSWORD
+        )
+    elif args.remote or args.db_host:
+        # Remote mode: use provided credentials
+        host = args.db_host
+        if not host:
+            host = input("Database host: ").strip()
+            if not host:
+                raise ValueError("Database host is required for --remote mode")
+        port = args.db_port
+        user = args.db_user
+        password = args.db_password or os.getenv("SPYGLASS_DB_PASSWORD")
+        if not password:
+            import getpass
+
+            password = getpass.getpass("Database password: ")
+            if not password:
+                raise ValueError("Database password is required")
+    else:
+        # Interactive mode
+        print("Database configuration:")
+        print("  1. Local Docker database (localhost)")
+        print("  2. Remote database (e.g., lmf-db.cin.ucsf.edu)")
+        choice = input("\nChoice [1/2]: ").strip() or "1"
+
+        if choice == "1":
+            host = "localhost"
+            port = args.db_port
+            user = args.db_user
+            password = args.db_password or DEFAULT_MYSQL_PASSWORD
+        else:
+            host = input("Database host: ").strip()
+            port = args.db_port
+            user = (
+                input(f"Database user [{args.db_user}]: ").strip()
+                or args.db_user
+            )
+            import getpass
+
+            password = getpass.getpass("Database password: ")
+
+    # Validate database config
+    valid, errors = validate_database_config(host, port, user, password)
+    if not valid:
+        for error in errors:
+            print_error(error)
+        raise ValueError("Invalid database configuration")
+
+    # Create the configuration
+    print_step(f"Creating configuration for {host}:{port}")
+    create_database_config(
+        host=host,
+        port=port,
+        user=user,
+        password=password,
+        base_dir=base_dir,
+    )
+
+    config_file = Path.home() / ".datajoint_config.json"
+    print()
+    print("=" * 60)
+    print_success(f"Configuration created: {config_file}")
+    print("=" * 60)
+    print()
+    print("Configuration summary:")
+    print(f"  Database: {host}:{port}")
+    print(f"  User: {user}")
+    print(f"  Base directory: {base_dir}")
+    print(f"  TLS: {'enabled' if determine_tls(host) else 'disabled'}")
+    print()
+    print("To test your configuration:")
+    print('  python -c "import datajoint as dj; dj.conn()"')
+
+
 def run_installation(args: argparse.Namespace) -> None:
     """Main installation flow.
 
@@ -2839,6 +2940,11 @@ def run_installation(args: argparse.Namespace) -> None:
     # Handle dry-run mode
     if args.dry_run:
         run_dry_run(args)
+        return
+
+    # Handle config-only mode
+    if args.config_only:
+        run_config_only(args)
         return
 
     print_installation_header()
@@ -2878,6 +2984,8 @@ Examples:
   python scripts/install.py --minimal        # Minimal install
   python scripts/install.py --full --docker  # Full with local database
   python scripts/install.py --remote         # Connect to remote database
+  python scripts/install.py --config-only --remote --db-host lmf-db.cin.ucsf.edu --db-user alice --base-dir ~/data
+                                             # Generate config only (no env)
 
 Environment Variables:
   SPYGLASS_BASE_DIR - Set base directory (skips prompt)
@@ -2934,6 +3042,11 @@ Environment Variables:
         "--force",
         action="store_true",
         help="Overwrite existing environment without prompting",
+    )
+    parser.add_argument(
+        "--config-only",
+        action="store_true",
+        help="Only generate .datajoint_config.json (skip environment setup)",
     )
 
     args = parser.parse_args()
