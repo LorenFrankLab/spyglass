@@ -1,117 +1,118 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+requires = [ "hatch-vcs", "hatchling" ]
 
 [project]
 name = "spyglass-neuro"
 description = "Neuroscience data analysis framework for reproducible research"
 readme = "README.md"
-requires-python = ">=3.9,<3.13"
+keywords = [
+  "data analysis",
+  "datajoint",
+  "electrophysiology",
+  "kachery",
+  "neuroscience",
+  "nwb",
+  "reproducible",
+  "research",
+  "sortingview",
+  "spike sorting",
+  "spikeinterface",
+]
 license = { file = "LICENSE" }
 authors = [
-    { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
-    { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
-    { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
-    { name = "Ryan Ly", email = "rly@lbl.gov" },
-    { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
-    { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
-    { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
+  { name = "Loren Frank", email = "loren.frank@ucsf.edu" },
+  { name = "Kyu Hyun Lee", email = "kyuhyun.lee@ucsf.edu" },
+  { name = "Eric Denovellis", email = "eric.denovellis@ucsf.edu" },
+  { name = "Ryan Ly", email = "rly@lbl.gov" },
+  { name = "Daniel Gramling", email = "daniel.gramling@ucsf.edu" },
+  { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
+  { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
 ]
+requires-python = ">=3.9,<3.13"
 classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
 ]
-keywords = [
-    "neuroscience",
-    "research",
-    "electrophysiology",
-    "reproducible",
-    "data analysis",
-    "spike sorting",
-    "spikeinterface",
-    "datajoint",
-    "nwb",
-    "kachery",
-    "sortingview",
-]
-dynamic = ["version"]
+dynamic = [ "version" ]
 dependencies = [
-    "black[jupyter]",
-    "bottleneck",
-    "dask",
-    "datajoint>=0.14.5",
-    # "ghostipy", # removed from list bc M1 users need to install pyfftw first
-    "hdmf>=3.4.6",
-    "ipympl",
-    "kachery-cloud",
-    "matplotlib",
-    "ndx_franklab_novela>=0.1.0",
-    "ndx-pose",
-    "ndx-optogenetics==0.2.0",
-    "non_local_detector",
-    "numpy",
-    "opencv-python",
-    "panel>=1.4.0",
-    "position_tools>=0.1.0",
-    "probeinterface<0.3.0", # Bc some probes fail space checks
-    "pubnub<6.4.0",  # TODO: remove this when sortingview is updated
-    "pydotplus",
-    "pynwb>=2.5.0,<3",
-    "ripple_detection",
-    "seaborn",
-    "sortingview>=0.11",
-    "spikeinterface>=0.99.1,<0.100",
-    "track_linearization>=2.3",
+  "black[jupyter]",
+  "bottleneck",
+  "dask",
+  "datajoint>=0.14.5",
+  # "ghostipy", # removed from list bc M1 users need to install pyfftw first
+  "hdmf>=3.4.6",
+  "ipympl",
+  "matplotlib",
+  "ndx-franklab-novela>=0.1",
+  "ndx-optogenetics==0.2.0",
+  "ndx-pose",
+  "non-local-detector",
+  "numpy",
+  "opencv-python",
+  "panel>=1.4",
+  "position-tools>=0.1",
+  "probeinterface<0.3",            # Bc some probes fail space checks
+  "pubnub<6.4",                    # TODO: remove this when sortingview is updated
+  "pydotplus",
+  "pynwb>=2.5,<3",
+  "ripple-detection",
+  "seaborn",
+  "sortingview>=0.11",
+  "spikeinterface>=0.99.1,<0.100",
+  "track-linearization>=2.3",
 ]
 
-[project.optional-dependencies]
-dlc = [
-    "ffmpeg",
-    "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+optional-dependencies.dlc = [
+  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "ffmpeg",
 ]
-moseq-gpu = [
-    "jax[cuda12]",
-    "jax-moseq[cuda12]",
-    "keypoint-moseq",
+optional-dependencies.docs = [
+  "hatch",                  # Get version from env
+  "jupytext",               # Convert notebooks to .py
+  "mike",                   # Docs versioning
+  "mkdocs",                 # Docs core
+  "mkdocs-exclude",         # Docs exclude files
+  "mkdocs-exclude-search",  # Docs exclude files in search
+  "mkdocs-gen-files",       # Docs API generator
+  "mkdocs-jupyter",         # Docs render notebooks
+  "mkdocs-literate-nav",    # Dynamic page list for API docs
+  "mkdocs-material",        # Docs theme
+  "mkdocs-mermaid2-plugin", # Docs mermaid diagrams
+  "mkdocstrings[python]",   # Docs API docstrings
 ]
-moseq-cpu = [
-    "jax[cpu]",
-    "jax-moseq",
-    "keypoint-moseq",
+optional-dependencies.moseq-cpu = [
+  "jax[cpu]",
+  "jax-moseq",
+  "keypoint-moseq",
 ]
-
-test = [
-    "codecov",                # for code coverage badge
-    "docker",                 # for tests in a container
-    "ghostipy",
-    "kachery",                # database access
-    "kachery-client",
-    "kachery-cloud>=0.4.0",
-    "opencv-python-headless", # for headless testing of Qt
-    "pre-commit",             # linting
-    "pytest",                 # unit testing
-    "pytest-cov",             # code coverage
-    "pytest-xvfb",            # for headless testing of Qt
+optional-dependencies.moseq-gpu = [
+  "jax[cuda12]",
+  "jax-moseq[cuda12]",
+  "keypoint-moseq",
 ]
-docs = [
-    "hatch",                 # Get version from env
-    "jupytext",              # Convert notebooks to .py
-    "mike",                  # Docs versioning
-    "mkdocs",                # Docs core
-    "mkdocs-exclude",        # Docs exclude files
-    "mkdocs-exclude-search", # Docs exclude files in search
-    "mkdocs-gen-files",      # Docs API generator
-    "mkdocs-jupyter",        # Docs render notebooks
-    "mkdocs-literate-nav",   # Dynamic page list for API docs
-    "mkdocs-material",       # Docs theme
-    "mkdocstrings[python]",  # Docs API docstrings
-    "mkdocs-mermaid2-plugin",# Docs mermaid diagrams
+optional-dependencies.test = [
+  "codecov",                # for code coverage badge
+  "docker",                 # for tests in a container
+  "ghostipy",
+  "kachery",                # database access
+  "kachery-client",
+  "kachery-cloud>=0.4",
+  "netcdf4",                # for decoding mocking
+  "opencv-python-headless", # for headless testing of Qt
+  "pre-commit",             # linting
+  "pytest",                 # unit testing
+  "pytest-cov",             # code coverage
+  "pytest-xvfb",            # for headless testing of Qt
 ]
-
-[project.urls]
-"Homepage" = "https://github.com/LorenFrankLab/spyglass"
-"Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
+urls."Bug Tracker" = "https://github.com/LorenFrankLab/spyglass/issues"
+urls."Homepage" = "https://github.com/LorenFrankLab/spyglass"
 
 [tool.hatch.version]
 source = "vcs"
@@ -122,14 +123,19 @@ source = "vcs"
 version-file = "src/spyglass/_version.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = [".git_archival.txt"]
+exclude = [ ".git_archival.txt" ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spyglass"]
-exclude = []
+packages = [ "src/spyglass" ]
+exclude = [  ]
 
 [tool.black]
 line-length = 80
+
+[tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
+line-length = 80
+
+lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
 skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
@@ -139,28 +145,28 @@ ignore-words-list = 'nevers'
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = [
-    "-s", # no capture
-    # "-v", # verbose output
-    # "--sw", # stepwise: resume with next test after failure
-    # "--pdb", # drop into debugger on failure
-    "-p no:warnings",
-    # "--no-teardown", # don't teardown the database after tests
-    # "--quiet-spy",   # don't show logging from spyglass
-    # "--no-dlc",      # don't run DLC tests
-    "--show-capture=no",
-    "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
-    "--doctest-modules",                              # run doctests in all modules
-    "--cov=spyglass",
-    "--cov-report=term-missing",
-    "--no-cov-on-fail",
+  "-s", # no capture
+  # "-v", # verbose output
+  # "--sw", # stepwise: resume with next test after failure
+  # "--pdb", # drop into debugger on failure
+  "-p no:warnings",
+  # "--no-teardown",  # don't teardown the database after tests
+  # "--quiet-spy",   # don't show logging from spyglass
+  # "--no-dlc",      # don't run DLC tests
+  "--show-capture=no",
+  "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
+  "--doctest-modules",                              # run doctests in all modules
+  "--cov=spyglass",
+  "--cov-report=term-missing",
+  "--no-cov-on-fail",
 ]
-testpaths = ["tests"]
+testpaths = [ "tests" ]
 log_level = "INFO"
 env = [
-    "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
-    "DISPLAY = :0",                # QT fails headless without this
-    "TF_ENABLE_ONEDNN_OPTS = 0",   # TF disable approx calcs
-    "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
+  "QT_QPA_PLATFORM = offscreen", # QT fails headless without this
+  "DISPLAY = :0",                # QT fails headless without this
+  "TF_ENABLE_ONEDNN_OPTS = 0",   # TF disable approx calcs
+  "TF_CPP_MIN_LOG_LEVEL = 2",    # Disable TF warnings
 ]
 filterwarnings = [
   "ignore::ResourceWarning:.*",
@@ -168,34 +174,43 @@ filterwarnings = [
   "ignore::UserWarning:.*",
   "ignore::MissingRequiredBuildWarning:.*",
 ]
+markers = [
+  # Speed-based markers (based on total time: setup + call + teardown)
+  "fast: Tests that complete in <1 second",
+  "medium: Tests that complete in 1-10 seconds",
+  "slow: Tests that complete in 10-60 seconds",
+  "very_slow: Tests that complete in >60 seconds (top bottlenecks)",
 
-[tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
-source = ["*/src/spyglass/*"]
-omit = [ # which submodules have no tests
-    "*/__init__.py",
-    "*/_version.py",
-    # "*/behavior/*",
-    "*/cli/*",
-    # "*/common/*",
-    "*/data_import/*",
-    "*/decoding/v0/*",
-    "*/figurl_views/*",
-    # "*/decoding/*",
-    # "*/lfp/*",
-    # "*/linearization/*",
-    "*/lock/*",
-    "*/mua/*",
-    # "*/position/*",
-    "*/ripple/*",
-    "*/sharing/*",
-    # "*/spikesorting/*",
-    # "*/utils/*",
-    "settings.py",
-    "*/moseq/*",
+  # Type-based markers
+  "unit: Pure unit tests with no I/O dependencies",
+  "integration: Integration tests involving multiple components",
+  "io_heavy: I/O-intensive tests (database and/or NWB files)",
+  "database: Tests requiring database operations",
+  "nwb: Tests requiring NWB file I/O",
+
+  # Special markers
+  "serial: Tests that must run serially (not parallel-safe)",
 ]
 
-[tool.ruff] # CB: Propose replacing flake8 with ruff to delete setup.cfg
-line-length = 80
-
-[tool.ruff.lint]
-ignore = ["F401", "E402", "E501"]
+[tool.coverage.run] # NOTE: changes need to be mirrored in tests/.coveragerc
+source = [ "*/src/spyglass/*" ]
+omit = [ # which submodules have no tests
+  "*/__init__.py",
+  "*/_version.py",
+  # "*/behavior/*",
+  # "*/common/*",
+  "*/data_import/*",
+  "*/decoding/v0/*",
+  # "*/decoding/*",
+  "*/figurl_views/*",
+  # "*/lfp/*",
+  # "*/linearization/*",
+  "*/lock/*",
+  "*/mua/*",
+  # "*/position/*",
+  "*/ripple/*",
+  "*/sharing/*",
+  # "*/spikesorting/*",
+  # "*/utils/*",
+  "settings.py",
+]
