@@ -1,4 +1,7 @@
 import atexit
+import hashlib
+import socket
+import subprocess
 import time
 
 import datajoint as dj
@@ -33,19 +36,17 @@ class DockerMySQLManager:
 
     def __init__(
         self,
-        image_name="datajoint/mysql",
-        mysql_version="8.0",
-        container_name="spyglass-pytest",
-        port=None,
-        null_server=False,
-        restart=True,
-        shutdown=True,
-        verbose=False,
+        image_name: str = "datajoint/mysql",
+        mysql_version: str = "8.0",
+        null_server: bool = False,
+        restart: bool = True,
+        shutdown: bool = True,
+        verbose: bool = False,
+        container_name: str = None,
+        port: int = None,
     ) -> None:
         self.image_name = image_name
         self.mysql_version = mysql_version
-        self.container_name = container_name
-        self.port = port or "330" + self.mysql_version[0]
         self.client = None if null_server else docker.from_env()
         self.null_server = null_server
         self.password = "tutorial"
@@ -55,12 +56,65 @@ class DockerMySQLManager:
         self.logger = logger
         self.logger.setLevel("INFO" if verbose else "ERROR")
 
+        if container_name is None or port is None:
+            container_name, port = self._container_name_from_branch()
+
+        self.container_name = container_name
+        self.port = port
+
         if not self.null_server:
             if shutdown:
                 atexit.register(self.stop)  # stop container on python exit
             if restart:
                 self.stop()  # stop container if it exists
             self.start()
+
+    def _container_name_from_branch(self) -> tuple:
+        """Generate container name from current git branch."""
+        # default is 3308, as a holdover from mysql version testing
+        defaults = "spyglass-pytest", 3300 + int(self.mysql_version[0])
+
+        if self.null_server:
+            return defaults
+
+        try:
+            branch_name = (
+                subprocess.check_output(["git", "branch", "--show-current"])
+                .decode("utf-8")
+                .strip()
+            )
+        except Exception as e:
+            logger.error(f"Failed to get git branch name: {e}")
+            return defaults
+
+        container_name = f"spyglass-pytest-{branch_name}"
+        port = self.string_to_port(container_name)
+
+        while self.port_in_use(port):
+            port += 1
+
+        return container_name, port
+
+    @staticmethod
+    def string_to_port(
+        name: str, min_port: int = 10240, max_port: int = 60000
+    ) -> int:
+        """Deterministically convert a string to a valid TCP port number."""
+        h = hashlib.sha256(name.encode()).hexdigest()
+        val = int(h, 16)
+        port_range = max_port - min_port + 1
+        return min_port + (val % port_range)
+
+    @staticmethod
+    def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+        """Check if a port is currently in use on the given host."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+                return False  # port is available
+            except OSError:
+                return True  # port is in use
 
     @property
     def container(self) -> docker.models.containers.Container:

@@ -8,8 +8,10 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
+FirFilterParameters().alter()
 DecodingParameters().alter()
 ```
 
@@ -19,6 +21,7 @@ DecodingParameters().alter()
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
+- Add support for bandstop filter type #1464
 
 ### Infrastructure
 
@@ -36,8 +39,10 @@ DecodingParameters().alter()
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465, #1484
 - Pin `ndx-optogenetics` to 0.2.0 #1458
+- Cleanup bug when fetching raw files from DANDI #1469
+- Refactor pytests for speed, run fast tests on push #1440
 
 ### Pipelines
 
@@ -61,6 +66,7 @@ DecodingParameters().alter()
     - Allow multiple VideoFile entries during ingestion #1462
     - Add the table `RawCompassDirection` for importing orientation
       data from NWB files #1466
+    - Handle epoch formats with varying zero-padding #1459
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
