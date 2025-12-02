@@ -11,6 +11,7 @@ python scripts/install.py
 ```
 
 This interactive installer will:
+
 1. Check prerequisites (Python version, conda/mamba)
 2. Create conda environment
 3. Install Spyglass package
@@ -24,11 +25,13 @@ This interactive installer will:
 Cross-platform installation script that automates the setup process.
 
 **Interactive Mode:**
+
 ```bash
 python scripts/install.py
 ```
 
 **Non-Interactive Mode:**
+
 ```bash
 # Minimal installation
 python scripts/install.py --minimal
@@ -44,6 +47,7 @@ python scripts/install.py --base-dir /data/spyglass
 ```
 
 **Environment Variables:**
+
 ```bash
 # Set base directory (skips prompt)
 export SPYGLASS_BASE_DIR=/data/spyglass
@@ -51,6 +55,7 @@ python scripts/install.py
 ```
 
 **Options:**
+
 - `--minimal` - Install minimal dependencies only (~5 min, ~8 GB)
 - `--full` - Install all dependencies (~15 min, ~18 GB)
 - `--docker` - Set up local Docker database
@@ -70,11 +75,13 @@ python scripts/install.py
 Validates that Spyglass is properly installed and configured.
 
 **Usage:**
+
 ```bash
 python scripts/validate.py
 ```
 
 **Checks:**
+
 1. Python version ≥3.9
 2. Conda/mamba available
 3. Spyglass can be imported
@@ -82,18 +89,21 @@ python scripts/validate.py
 5. Database connection (if configured)
 
 **Exit Codes:**
+
 - `0` - All checks passed
 - `1` - One or more checks failed
 
 ## Installation Types
 
 ### Minimal Installation
+
 - Core dependencies only
 - Suitable for basic usage
 - Disk space: ~8 GB
 - Install time: ~5 minutes
 
 ### Full Installation
+
 - All pipeline dependencies
 - Includes LFP, position, spikesorting
 - Disk space: ~18 GB
@@ -104,12 +114,14 @@ Note: DeepLabCut, Moseq, and Decoding require separate installation.
 ## Requirements
 
 **System Requirements:**
+
 - Python 3.9 or later
 - conda or mamba package manager
 - Git (recommended)
 - Docker (optional, for local database)
 
 **Platform Support:**
+
 - macOS (Intel & Apple Silicon)
 - Linux
 - Windows (via WSL or native)
@@ -127,11 +139,13 @@ python scripts/install.py --docker  # Auto-uses Compose
 ```
 
 Or directly:
+
 ```bash
 docker compose up -d
 ```
 
 This creates a container named `spyglass-db` with:
+
 - Host: localhost
 - Port: 3306
 - User: root
@@ -140,12 +154,14 @@ This creates a container named `spyglass-db` with:
 - Persistent storage via Docker volume
 
 **Benefits:**
+
 - One-command setup
 - Infrastructure as code (version controlled)
 - Easy to customize via `.env` file
 - Built-in health checks
 
 **Customization:**
+
 ```bash
 # Create .env file to customize settings
 cp .env.example .env
@@ -163,6 +179,7 @@ python scripts/install.py --remote
 ```
 
 You'll be prompted to enter:
+
 - Host (e.g., db.example.com)
 - Port (default: 3306)
 - User (default: root)
@@ -186,6 +203,7 @@ python scripts/install.py --remote \
 ```
 
 **Security Notes:**
+
 - Passwords are hidden during interactive input (using `getpass`)
 - For automation, use `SPYGLASS_DB_PASSWORD` env var instead of `--db-password`
 - TLS is automatically enabled for remote hosts
@@ -223,11 +241,13 @@ python scripts/install.py --skip-validation
 The installer respects the following configuration priority:
 
 1. **CLI arguments** (highest priority)
+
    ```bash
    python scripts/install.py --base-dir /custom/path
    ```
 
 2. **Environment variables**
+
    ```bash
    export SPYGLASS_BASE_DIR=/custom/path
    python scripts/install.py
@@ -241,11 +261,13 @@ The installer respects the following configuration priority:
 ### Environment Already Exists
 
 If the installer detects an existing environment:
+
 ```
 Environment 'spyglass' exists. Overwrite? [y/N]:
 ```
 
 **Options:**
+
 - Answer `n` to use the existing environment (installation continues)
 - Answer `y` to remove and recreate the environment
 - Use `--env-name different-name` to create a separate environment
@@ -267,17 +289,20 @@ mamba env create -f environment.yml
 ### Docker Issues
 
 Check Docker is running:
+
 ```bash
 docker info
 ```
 
 If Docker is not available:
+
 - Install from https://docs.docker.com/get-docker/
 - Or configure database manually (see docs/DATABASE.md)
 
 ### Database Connection Fails
 
 Verify configuration:
+
 ```bash
 # Check config file exists
 ls ~/.datajoint_config.json
@@ -289,6 +314,7 @@ python -c "import datajoint as dj; dj.conn().ping(); print('✓ Connected')"
 ### Import Errors
 
 Ensure environment is activated:
+
 ```bash
 conda activate spyglass
 python -c "import spyglass; print(spyglass.__version__)"
@@ -356,11 +382,13 @@ The installer must follow this order to avoid circular dependencies:
 ### Why Inline Docker Code?
 
 The installer uses inline Docker operations instead of importing from `spyglass.utils.docker` because:
+
 - Spyglass is not installed yet when the installer runs
 - Cannot create circular dependency (installer → spyglass → installer)
 - Must be self-contained with stdlib only
 
 The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
+
 - Testing infrastructure (`tests/container.py`)
 - Post-installation database management
 - Other spyglass code
@@ -387,6 +415,7 @@ The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
 ## Support
 
 For issues:
+
 1. Check validation output: `python scripts/validate.py`
 2. See docs/TROUBLESHOOTING.md (coming soon)
 3. File issue at https://github.com/LorenFrankLab/spyglass/issues

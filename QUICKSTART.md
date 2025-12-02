@@ -99,9 +99,11 @@ jupyter notebook 01_Concepts.ipynb
 Need something different? The installer supports these options:
 
 ```bash
-python scripts/install.py --full           # All optional dependencies
-python scripts/install.py --pipeline=dlc   # DeepLabCut pipeline
-python scripts/install.py --no-database    # Skip database setup
+python scripts/install.py --minimal        # Core dependencies only (~5 min)
+python scripts/install.py --full           # All optional dependencies (~15 min)
+python scripts/install.py --docker         # Set up local Docker database
+python scripts/install.py --remote         # Connect to existing database
+python scripts/install.py --env-name myenv # Custom environment name
 python scripts/install.py --help           # See all options
 ```
 

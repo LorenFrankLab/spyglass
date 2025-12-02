@@ -9,7 +9,7 @@ The easiest way to set up a database is using the installer with Docker Compose:
 ```bash
 cd spyglass
 python scripts/install.py
-# Choose option 1 (Docker Compose) when prompted
+# Choose "Docker" option when prompted for database setup
 ```
 
 This automatically:

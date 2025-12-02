@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional, Tuple
 
 # Color codes for cross-platform output
+# Windows fallback uses ASCII symbols instead of empty strings for accessibility
 COLORS = (
     {
         "green": "\033[92m",
@@ -39,7 +40,14 @@ COLORS = (
         "reset": "\033[0m",
     }
     if sys.platform != "win32"
-    else {k: "" for k in ["green", "yellow", "red", "blue", "reset"]}
+    else {"green": "", "yellow": "", "red": "", "blue": "", "reset": ""}
+)
+
+# Status symbols - Windows uses ASCII fallback for compatibility
+SYMBOLS = (
+    {"success": "✓", "error": "✗", "warning": "⚠", "step": "▶"}
+    if sys.platform != "win32"
+    else {"success": "[OK]", "error": "[X]", "warning": "[!]", "step": "->"}
 )
 
 # System constants
@@ -47,10 +55,12 @@ BYTES_PER_GB = 1024**3
 LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
 CURRENT_SCHEMA_VERSION = "1.0.0"  # Config schema version compatibility
 
-# Disk space requirements (GB)
+# Disk space requirements (GB) - includes packages + working space buffer
+# Minimal: ~8 GB packages + ~2 GB working space = 10 GB total
+# Full: ~18 GB packages + ~7 GB working space = 25 GB total
 DISK_SPACE_REQUIREMENTS = {
-    "minimal": 10,
-    "full": 25,
+    "minimal": {"packages": 8, "total": 10},
+    "full": {"packages": 18, "total": 25},
 }
 
 # MySQL health check configuration
@@ -97,7 +107,7 @@ def print_step(msg: str) -> None:
     msg : str
         Message to display
     """
-    print(f"{COLORS['blue']}▶{COLORS['reset']} {msg}")
+    print(f"{COLORS['blue']}{SYMBOLS['step']}{COLORS['reset']} {msg}")
 
 
 def print_success(msg: str) -> None:
@@ -108,7 +118,7 @@ def print_success(msg: str) -> None:
     msg : str
         Success message to display
     """
-    print(f"{COLORS['green']}✓{COLORS['reset']} {msg}")
+    print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}")
 
 
 def print_warning(msg: str) -> None:
@@ -119,7 +129,7 @@ def print_warning(msg: str) -> None:
     msg : str
         Warning message to display
     """
-    print(f"{COLORS['yellow']}⚠{COLORS['reset']} {msg}")
+    print(f"{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}")
 
 
 def print_error(msg: str) -> None:
@@ -130,7 +140,7 @@ def print_error(msg: str) -> None:
     msg : str
         Error message to display
     """
-    print(f"{COLORS['red']}✗{COLORS['reset']} {msg}")
+    print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}")
 
 
 def show_progress_message(operation: str, estimated_minutes: int) -> None:
@@ -297,9 +307,13 @@ def check_prerequisites(
 
     # Disk space check (if base_dir provided)
     if base_dir:
-        # Add buffer: minimal needs ~10GB (8 + 2), full needs ~25GB (18 + 7)
-        required_space = {"minimal": 10, "full": 25}
-        required_gb = required_space.get(install_type, 10)
+        # Use centralized disk space requirements
+        space_req = DISK_SPACE_REQUIREMENTS.get(
+            install_type, DISK_SPACE_REQUIREMENTS["minimal"]
+        )
+        required_gb = space_req["total"]
+        packages_gb = space_req["packages"]
+        buffer_gb = required_gb - packages_gb
 
         sufficient, available_gb = check_disk_space(required_gb, base_dir)
 
@@ -308,22 +322,25 @@ def check_prerequisites(
                 f"Disk space: {available_gb} GB available (need {required_gb} GB)"
             )
         else:
+            needed_to_free = required_gb - available_gb
             print_error(
                 "Insufficient disk space - installation cannot continue"
             )
             print(f"  Checking: {base_dir}")
             print(f"  Available: {available_gb} GB")
             print(
-                f"  Required:  {required_gb} GB ({install_type} installation)"
+                f"  Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
             )
+            print(f"  Need to free: {needed_to_free} GB")
             print()
             print("  To fix:")
-            print("    1. Free up disk space in this location")
+            print(f"    1. Free at least {needed_to_free} GB in this location")
             print(
                 "    2. Choose different directory: python scripts/install.py --base-dir /other/path"
             )
+            min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
             print(
-                "    3. Use minimal install (needs 10 GB): python scripts/install.py --minimal"
+                f"    3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
             )
             raise RuntimeError("Insufficient disk space")
 
@@ -437,6 +454,9 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
 
     # 3. Interactive prompt
     print("\nWhere should Spyglass store data?")
+    print("  This will store raw NWB files, analysis results, and video data.")
+    print("  Typical usage: 10-100+ GB depending on your experiments.")
+    print()
     default = Path.home() / "spyglass_data"
     print(f"  Default: {default}")
     print(
@@ -520,9 +540,17 @@ def prompt_install_type() -> Tuple[str, str]:
     print("Installation Type")
     print("=" * 60)
 
+    # Get disk space values from constants for consistency
+    min_pkg = DISK_SPACE_REQUIREMENTS["minimal"]["packages"]
+    min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
+    full_pkg = DISK_SPACE_REQUIREMENTS["full"]["packages"]
+    full_total = DISK_SPACE_REQUIREMENTS["full"]["total"]
+
     print("\n1. Minimal (Recommended for getting started)")
     print("   ├─ Install time: ~5 minutes")
-    print("   ├─ Disk space: ~8 GB")
+    print(
+        f"   ├─ Disk space: ~{min_pkg} GB packages ({min_total} GB total with buffer)"
+    )
     print("   ├─ Includes:")
     print("   │  • Core Spyglass functionality")
     print("   │  • Common data tables")
@@ -533,7 +561,9 @@ def prompt_install_type() -> Tuple[str, str]:
 
     print("\n2. Full (For advanced analysis)")
     print("   ├─ Install time: ~15 minutes")
-    print("   ├─ Disk space: ~18 GB")
+    print(
+        f"   ├─ Disk space: ~{full_pkg} GB packages ({full_total} GB total with buffer)"
+    )
     print("   ├─ Includes: Everything in Minimal, plus:")
     print("   │  • Advanced spike sorting (Kilosort, etc.)")
     print("   │  • Ripple detection")
@@ -1366,7 +1396,10 @@ def validate_port(port: int) -> Tuple[bool, str]:
         return False, f"Port must be an integer, got {type(port).__name__}"
 
     if port < 1 or port > 65535:
-        return False, f"Port must be between 1 and 65535, got {port}"
+        return (
+            False,
+            f"Port {port} is out of valid range (1-65535). MySQL typically uses 3306.",
+        )
 
     if port < 1024:
         return (
@@ -1434,10 +1467,28 @@ def validate_database_config(
         errors.append("Username cannot be empty")
     elif len(user) > 32:
         errors.append(f"Username too long ({len(user)} chars, max 32)")
+    elif not re.match(r"^[a-zA-Z0-9_@.-]+$", user):
+        # MySQL usernames allow alphanumeric, underscore, @, dot, hyphen
+        errors.append(
+            f"Username '{user}' contains invalid characters.\n"
+            "  Valid: letters, numbers, underscore, @, dot, hyphen"
+        )
 
     # Validate password (basic checks only - actual auth is server-side)
+    # Defense in depth: warn about shell metacharacters that could cause issues
     if not password:
         errors.append("Password cannot be empty")
+    else:
+        # Characters that could cause shell escaping issues if mishandled
+        shell_metacharacters = ["`", "$", "\\", '"', "'", ";", "&", "|"]
+        found_dangerous = [c for c in shell_metacharacters if c in password]
+        if found_dangerous:
+            # Warning, not error - password might legitimately contain these
+            print_warning(
+                f"Password contains special characters: {found_dangerous}\n"
+                "  This should work, but if you encounter issues, consider\n"
+                "  using a password without: ` $ \\ \" ' ; & |"
+            )
 
     return len(errors) == 0, errors
 
@@ -1547,6 +1598,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         if not validate_hostname(host):
             print_error(f"Invalid hostname: {host}")
             print("  Hostname cannot contain spaces or invalid characters")
+            print("  Valid examples: localhost, db.example.com, 192.168.1.100")
             return None
         port_str = input("  Port [3306]: ").strip() or "3306"
         user = input("  User [root]: ").strip() or "root"
@@ -1644,12 +1696,13 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
     compose_available = is_docker_compose_available_inline()
 
     # Option 1: Remote database (primary use case - joining existing lab)
+    # Use clearer terminology: "if you have credentials" instead of "lab members"
     options.append(
         DatabaseOption(
             number="1",
             name="Remote",
-            status="✓ Available (Recommended for lab members)",
-            description="Connect to lab's existing database",
+            status=f"{SYMBOLS['success']} Recommended if you have database credentials",
+            description="Connect to existing database (lab server, cloud, etc.)",
         )
     )
 
@@ -1659,8 +1712,8 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
             DatabaseOption(
                 number="2",
                 name="Docker",
-                status="✓ Available",
-                description="Local trial database (for testing)",
+                status=f"{SYMBOLS['success']} Available",
+                description="Local trial database (for testing/tutorials)",
             )
         )
     else:
@@ -1668,18 +1721,18 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
             DatabaseOption(
                 number="2",
                 name="Docker",
-                status="✗ Not available",
+                status=f"{SYMBOLS['error']} Not available",
                 description="Requires Docker Desktop",
             )
         )
 
-    # Option 3: Skip setup
+    # Option 3: Skip setup - add hint about recovery
     options.append(
         DatabaseOption(
             number="3",
             name="Skip",
-            status="✓ Available",
-            description="Configure manually later",
+            status=f"{SYMBOLS['success']} Available",
+            description="Configure later (see docs/DATABASE.md or run installer again)",
         )
     )
 
@@ -1716,8 +1769,13 @@ def prompt_database_setup() -> str:
 
     print("\nOptions:")
     for opt in options:
-        # Color status based on availability
-        status_color = COLORS["green"] if "✓" in opt.status else COLORS["red"]
+        # Color status based on availability (check for success/error symbols)
+        if SYMBOLS["error"] in opt.status:
+            status_color = COLORS["red"]
+        elif SYMBOLS["success"] in opt.status:
+            status_color = COLORS["green"]
+        else:
+            status_color = COLORS["reset"]
         print(
             f"  {opt.number}. {opt.name:20} {status_color}{opt.status}{COLORS['reset']}"
         )
@@ -1725,7 +1783,9 @@ def prompt_database_setup() -> str:
 
     # If Docker not available, guide user
     if not compose_available:
-        print(f"\n{COLORS['yellow']}⚠{COLORS['reset']} Docker is not available")
+        print(
+            f"\n{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} Docker is not available"
+        )
         print("  To enable Docker setup:")
         print(
             "    1. Install Docker Desktop: https://docs.docker.com/get-docker/"
@@ -2670,7 +2730,92 @@ def print_completion_message(env_name: str, validation_passed: bool) -> None:
     )
 
 
-def run_installation(args) -> None:
+def run_dry_run(args: argparse.Namespace) -> None:
+    """Show what would be done without making changes.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments
+    """
+    print("\n" + "=" * 60)
+    print("DRY RUN MODE - No changes will be made")
+    print("=" * 60 + "\n")
+
+    # Determine installation type
+    if args.minimal:
+        env_file, install_type = "environment-min.yml", "minimal"
+    elif args.full:
+        env_file, install_type = "environment.yml", "full"
+    else:
+        env_file, install_type = "environment-min.yml", "minimal (default)"
+
+    # Determine base directory
+    base_dir = (
+        args.base_dir
+        or os.getenv("SPYGLASS_BASE_DIR")
+        or str(Path.home() / "spyglass_data")
+    )
+
+    # Determine database setup
+    if args.docker:
+        db_setup = "Docker Compose (local database)"
+    elif args.remote:
+        db_host = args.db_host or "<interactive prompt>"
+        db_setup = f"Remote database ({db_host}:{args.db_port})"
+    else:
+        db_setup = "Interactive prompt"
+
+    # Get disk space requirements
+    space_req = DISK_SPACE_REQUIREMENTS.get(
+        install_type.split()[0], DISK_SPACE_REQUIREMENTS["minimal"]
+    )
+
+    print("Would perform the following steps:\n")
+
+    print(f"1. {SYMBOLS['step']} Check prerequisites")
+    print(
+        f"     Python version: {sys.version_info.major}.{sys.version_info.minor}"
+    )
+    print(f"     Required disk space: {space_req['total']} GB")
+    print()
+
+    print(f"2. {SYMBOLS['step']} Create conda environment")
+    print(f"     Environment name: {args.env_name}")
+    print(f"     Environment file: {env_file}")
+    print(f"     Install type: {install_type}")
+    print()
+
+    print(f"3. {SYMBOLS['step']} Install spyglass package")
+    print("     Command: pip install -e .")
+    print()
+
+    print(f"4. {SYMBOLS['step']} Create directory structure")
+    print(f"     Base directory: {base_dir}")
+    print(
+        "     Subdirectories: raw, analysis, recording, sorting, waveforms, etc."
+    )
+    print()
+
+    print(f"5. {SYMBOLS['step']} Setup database")
+    print(f"     Method: {db_setup}")
+    print()
+
+    print(f"6. {SYMBOLS['step']} Create configuration file")
+    print(f"     Location: {Path.home() / '.datajoint_config.json'}")
+    print()
+
+    if not args.skip_validation:
+        print(f"7. {SYMBOLS['step']} Validate installation")
+        print("     Run: python scripts/validate.py")
+        print()
+
+    print("=" * 60)
+    print("To perform installation, run without --dry-run flag")
+    print("=" * 60)
+
+
+def run_installation(args: argparse.Namespace) -> None:
     """Main installation flow.
 
     Orchestrates the complete installation process in a specific order
@@ -2691,6 +2836,11 @@ def run_installation(args) -> None:
     5. Setup database (inline code, NO spyglass imports)
     6. Validate (runs IN the new environment, CAN import spyglass)
     """
+    # Handle dry-run mode
+    if args.dry_run:
+        run_dry_run(args)
+        return
+
     print_installation_header()
 
     # Step 1: Determine installation type
