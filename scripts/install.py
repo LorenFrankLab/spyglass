@@ -143,6 +143,21 @@ def print_error(msg: str) -> None:
     print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}")
 
 
+def print_manual_password_instructions(env_name: str) -> None:
+    """Print instructions for manual password change.
+
+    Used when automatic password change fails for any reason.
+
+    Parameters
+    ----------
+    env_name : str
+        Name of the conda environment
+    """
+    print("\nYou can change it manually later:")
+    print(f"  conda activate {env_name}")
+    print("  python -c 'import datajoint as dj; dj.set_password()'")
+
+
 def show_progress_message(operation: str, estimated_minutes: int) -> None:
     """Show progress message for long-running operation.
 
@@ -694,21 +709,41 @@ def install_spyglass_package(env_name: str) -> None:
         subprocess.run(
             ["conda", "run", "-n", env_name, "pip", "install", "-e", "."],
             check=True,
+            capture_output=True,
+            text=True,
         )
         print_success("Spyglass installed")
     except subprocess.CalledProcessError as e:
+        # Analyze error to provide specific guidance
+        error_output = e.stderr if e.stderr else str(e)
+        error_lower = error_output.lower()
+
+        # Determine most likely cause and provide targeted advice
+        if "no space left" in error_lower or "disk" in error_lower:
+            primary_cause = "Disk space is full"
+            primary_fix = "Free up disk space: df -h shows usage by filesystem"
+        elif "connection" in error_lower or "timeout" in error_lower:
+            primary_cause = "Network connection issue"
+            primary_fix = "Check internet connection and retry"
+        elif "permission" in error_lower or "access" in error_lower:
+            primary_cause = "Permission denied"
+            primary_fix = "Check write permissions in the install directory"
+        else:
+            primary_cause = "Package installation failed"
+            primary_fix = (
+                f"Update pip: conda run -n {env_name} pip install --upgrade pip"
+            )
+
         raise RuntimeError(
-            "Failed to install spyglass package.\n\n"
-            "This usually happens when:\n"
-            "  - Network connection was interrupted\n"
-            "  - Pip or setuptools is outdated\n"
-            "  - Disk space is full\n"
-            "  - Permission issues with the install directory\n\n"
-            "To fix:\n"
-            f"  1. Check network connection\n"
-            f"  2. Update pip: conda run -n {env_name} pip install --upgrade pip\n"
-            "  3. Check disk space: df -h\n"
-            "  4. See error output above for specific details"
+            f"Failed to install spyglass package.\n\n"
+            f"Most likely cause: {primary_cause}\n"
+            f"Recommended fix: {primary_fix}\n\n"
+            f"If that doesn't help, try these steps:\n"
+            f"  1. Update pip: conda run -n {env_name} pip install --upgrade pip\n"
+            f"  2. Check disk space: df -h\n"
+            f"  3. Check network connection\n"
+            f"  4. Retry the installation\n\n"
+            f"Error details: {error_output[:500]}"
         ) from e
 
 
@@ -1592,7 +1627,13 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     print("  (Press Ctrl+C to cancel)")
 
     try:
-        host = input("  Host [localhost]: ").strip() or "localhost"
+        host = input("  Host (e.g., db.lab.edu): ").strip()
+
+        # Require explicit host for remote database
+        if not host:
+            print_error("Host is required for remote database connection")
+            print("  Ask your lab admin for the database hostname")
+            return None
 
         # Validate hostname format
         if not validate_hostname(host):
@@ -1951,12 +1992,21 @@ def setup_database_compose() -> Tuple[bool, str]:
         )
         if result.returncode != 0:
             error_output = result.stderr.decode()
+            error_lower = error_output.lower()
             print_error(f"Failed to pull Docker images: {error_output}")
-            print("\n  This usually happens when:")
-            print("    - Network connection is slow or interrupted")
-            print("    - Docker Hub is experiencing issues")
-            print("    - Disk space is insufficient (~500 MB needed)")
-            print("\n  To fix:")
+
+            # Prioritize causes by likelihood (network issues most common)
+            if "no space" in error_lower or "disk" in error_lower:
+                print("\n  Most likely cause: Insufficient disk space")
+                print("  Fix: Free up space with: docker system prune -a")
+            elif "timeout" in error_lower or "connection" in error_lower:
+                print("\n  Most likely cause: Network connection issue")
+                print("  Fix: Check internet connection and retry")
+            else:
+                print("\n  Most likely cause: Network or Docker Hub issue")
+                print("  Fix: Wait a moment and retry")
+
+            print("\n  Other steps to try:")
             print("    1. Check internet connection")
             print("    2. Check disk space: docker system df")
             print("    3. Retry: docker compose pull")
@@ -2371,6 +2421,7 @@ try:
     dj.conn()
 
     # Change password using ALTER USER with proper parameterization
+    # Note: '%%' allows user from any host - doubled to escape Python string formatting
     conn = dj.conn()
     with conn.cursor() as cursor:
         cursor.execute("ALTER USER %s@'%%' IDENTIFIED BY %s",
@@ -2403,30 +2454,22 @@ except Exception as e:
             return new_password
         else:
             print_error(f"Failed to change password: {result.stderr}")
-            print("\nYou can change it manually later:")
-            print(f"  conda activate {env_name}")
-            print("  python -c 'import datajoint as dj; dj.set_password()'")
+            print_manual_password_instructions(env_name)
             return None
 
     except subprocess.TimeoutExpired:
         print_error("Password change timed out")
-        print("\nYou can change it manually later:")
-        print(f"  conda activate {env_name}")
-        print("  python -c 'import datajoint as dj; dj.set_password()'")
+        print_manual_password_instructions(env_name)
         return None
 
     except subprocess.CalledProcessError as e:
         print_error(f"Password change command failed: {e}")
-        print("\nYou can change it manually later:")
-        print(f"  conda activate {env_name}")
-        print("  python -c 'import datajoint as dj; dj.set_password()'")
+        print_manual_password_instructions(env_name)
         return None
 
     except OSError as e:
         print_error(f"Failed to run password change: {e}")
-        print("\nYou can change it manually later:")
-        print(f"  conda activate {env_name}")
-        print("  python -c 'import datajoint as dj; dj.set_password()'")
+        print_manual_password_instructions(env_name)
         return None
 
 

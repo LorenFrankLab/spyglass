@@ -69,7 +69,7 @@ If joining a lab, you'll be prompted to change your password during installation
 conda activate spyglass
 
 # Run validation
-python scripts/validate.py -v
+python scripts/validate.py
 ```
 
 **That's it!** Setup complete in ~5-10 minutes.
