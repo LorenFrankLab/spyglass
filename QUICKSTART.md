@@ -139,5 +139,59 @@ python scripts/install.py
 
 ---
 
+## For Lab Administrators
+
+If you're setting up Spyglass for your lab, you can pre-configure lab-wide
+settings so new members don't need to enter them manually.
+
+### Lab-Wide vs User-Specific Settings
+
+| Setting | Lab-Wide | User-Specific |
+|---------|----------|---------------|
+| Database host | ✅ | |
+| Database port | ✅ | |
+| Base data directory | ✅ | |
+| Kachery zone | ✅ | |
+| Database username | | ✅ |
+| Database password | | ✅ |
+
+### Option 1: Environment Variables (Recommended)
+
+Add to your shared machine's profile (e.g., `/etc/profile.d/spyglass.sh`):
+
+```bash
+# Lab-wide Spyglass configuration
+export SPYGLASS_BASE_DIR="/your/lab/shared/data"
+```
+
+New members run the installer and only need to enter their credentials:
+
+```bash
+python scripts/install.py --remote \
+  --db-host your-db-server.edu \
+  --db-user $USER
+# Password prompted securely
+```
+
+### Option 2: Lab-Specific Setup Script
+
+Create a wrapper script for your lab. See `scripts/setup_franklab.sh` for an
+example that pre-configures Frank Lab settings.
+
+```bash
+# For Frank Lab members:
+./scripts/setup_franklab.sh
+```
+
+### What to Tell New Lab Members
+
+1. SSH to your shared server
+2. Clone the repository: `git clone https://github.com/LorenFrankLab/spyglass.git`
+3. Run the installer (or your lab's setup script)
+4. Enter their database username and temporary password
+5. Change their password when prompted
+
+---
+
 **Next tutorial**: [01_Concepts.ipynb](notebooks/01_Concepts.ipynb)
 **Full documentation**: [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)

@@ -84,6 +84,37 @@ and settings stay in sync.
 python scripts/validate_spyglass.py
 ```
 
+### `setup_franklab.sh` - Frank Lab Setup
+
+Pre-configured installer wrapper for Frank Lab members. Auto-detects whether
+you're on a lab server or personal laptop.
+
+```bash
+./scripts/setup_franklab.sh              # Auto-detect server vs laptop
+./scripts/setup_franklab.sh --user alice # With username
+./scripts/setup_franklab.sh --local      # Force laptop mode
+```
+
+**Scenarios:**
+
+| Location | Data Directory | Use Case |
+|----------|----------------|----------|
+| Frank Lab server | `/stelmo/nwb` | Shared data, full access |
+| Personal laptop | `~/spyglass_data` | Remote work, local data |
+
+**Pre-configured settings:**
+
+- Database host: `lmf-db.cin.ucsf.edu`
+- Database port: `3306`
+- TLS: enabled
+
+**User enters:**
+
+- Database username
+- Database password (prompted to change after connection)
+
+This script is an example for other labs to create their own setup wrappers.
+
 **Usage:**
 
 ```bash
