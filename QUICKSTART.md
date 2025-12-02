@@ -4,7 +4,7 @@ Get from zero to analyzing neural data with Spyglass in just a few commands.
 
 ## Choose Your Path
 
-### 👥 Joining an Existing Lab? (Recommended)
+### Joining an Existing Lab? (Recommended)
 
 If you received database credentials from your lab admin, this is you!
 The installer will:
@@ -16,7 +16,7 @@ The installer will:
 
 **Time**: ~5 minutes | **Database**: Connect to lab's existing database
 
-### 🧪 Trying Spyglass Locally?
+### Trying Spyglass Locally?
 
 Want to explore Spyglass features without joining a lab?
 The installer can:
@@ -87,9 +87,10 @@ jupyter notebook 01_Concepts.ipynb
 - See [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/) for details
 
 ### Join community
-- 📖 [Documentation](https://lorenfranklab.github.io/spyglass/)
-- 💬 [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
-- 🐛 [Report Issues](https://github.com/LorenFrankLab/spyglass/issues)
+
+- **Documentation**: [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
+- **Discussions**: [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
+- **Report Issues**: [GitHub Issues](https://github.com/LorenFrankLab/spyglass/issues)
 
 ---
 

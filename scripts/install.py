@@ -667,7 +667,19 @@ def install_spyglass_package(env_name: str) -> None:
         )
         print_success("Spyglass installed")
     except subprocess.CalledProcessError as e:
-        raise RuntimeError("Failed to install spyglass package") from e
+        raise RuntimeError(
+            "Failed to install spyglass package.\n\n"
+            "This usually happens when:\n"
+            "  - Network connection was interrupted\n"
+            "  - Pip or setuptools is outdated\n"
+            "  - Disk space is full\n"
+            "  - Permission issues with the install directory\n\n"
+            "To fix:\n"
+            f"  1. Check network connection\n"
+            f"  2. Update pip: conda run -n {env_name} pip install --upgrade pip\n"
+            "  3. Check disk space: df -h\n"
+            "  4. See error output above for specific details"
+        ) from e
 
 
 # Docker operations (inline - cannot import from spyglass before it's installed)
@@ -1330,6 +1342,106 @@ def validate_hostname(hostname: str) -> bool:
     return True
 
 
+def validate_port(port: int) -> Tuple[bool, str]:
+    """Validate port number is in valid range.
+
+    Parameters
+    ----------
+    port : int
+        Port number to validate
+
+    Returns
+    -------
+    valid : bool
+        True if port is valid, False otherwise
+    message : str
+        Error or warning message
+
+    Notes
+    -----
+    Valid ports are 1024-65535 (non-privileged).
+    Ports 1-1023 require root access on Unix systems.
+    """
+    if not isinstance(port, int):
+        return False, f"Port must be an integer, got {type(port).__name__}"
+
+    if port < 1 or port > 65535:
+        return False, f"Port must be between 1 and 65535, got {port}"
+
+    if port < 1024:
+        return (
+            False,
+            f"Port {port} is privileged (requires root). Use port 1024-65535.",
+        )
+
+    return True, ""
+
+
+def validate_database_config(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+) -> Tuple[bool, list[str]]:
+    """Validate database configuration parameters.
+
+    Performs comprehensive validation of database connection parameters
+    before attempting to connect or save configuration.
+
+    Parameters
+    ----------
+    host : str
+        Database hostname or IP address
+    port : int
+        Database port number
+    user : str
+        Database username
+    password : str
+        Database password
+
+    Returns
+    -------
+    valid : bool
+        True if all parameters are valid
+    errors : list of str
+        List of validation error messages (empty if valid)
+
+    Examples
+    --------
+    >>> valid, errors = validate_database_config("localhost", 3306, "root", "pass")
+    >>> if not valid:
+    ...     for err in errors:
+    ...         print(f"Error: {err}")
+    """
+    errors = []
+
+    # Validate hostname
+    if not host:
+        errors.append("Hostname cannot be empty")
+    elif not validate_hostname(host):
+        errors.append(
+            f"Invalid hostname '{host}': cannot contain spaces, "
+            "control characters, or consecutive dots"
+        )
+
+    # Validate port
+    port_valid, port_msg = validate_port(port)
+    if not port_valid:
+        errors.append(port_msg)
+
+    # Validate username
+    if not user:
+        errors.append("Username cannot be empty")
+    elif len(user) > 32:
+        errors.append(f"Username too long ({len(user)} chars, max 32)")
+
+    # Validate password (basic checks only - actual auth is server-side)
+    if not password:
+        errors.append("Password cannot be empty")
+
+    return len(errors) == 0, errors
+
+
 def is_port_available(host: str, port: int) -> Tuple[bool, str]:
     """Check if port is available or reachable.
 
@@ -1444,13 +1556,16 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
         password = getpass.getpass("  Password: ")
 
-        # Parse port
+        # Parse and validate port
         try:
             port = int(port_str)
-            if not (1 <= port <= 65535):
-                raise ValueError("Port must be between 1 and 65535")
-        except ValueError as e:
-            print_error(f"Invalid port: {e}")
+        except ValueError:
+            print_error(f"Invalid port: '{port_str}' is not a number")
+            return None
+
+        port_valid, port_msg = validate_port(port)
+        if not port_valid:
+            print_error(port_msg)
             return None
 
         # Check if port is reachable
@@ -1775,7 +1890,17 @@ def setup_database_compose() -> Tuple[bool, str]:
             timeout=300,  # 5 minutes for image pull
         )
         if result.returncode != 0:
-            print_error(f"Failed to pull images: {result.stderr.decode()}")
+            error_output = result.stderr.decode()
+            print_error(f"Failed to pull Docker images: {error_output}")
+            print("\n  This usually happens when:")
+            print("    - Network connection is slow or interrupted")
+            print("    - Docker Hub is experiencing issues")
+            print("    - Disk space is insufficient (~500 MB needed)")
+            print("\n  To fix:")
+            print("    1. Check internet connection")
+            print("    2. Check disk space: docker system df")
+            print("    3. Retry: docker compose pull")
+            print("    4. If persistent, try: docker system prune")
             return False, "pull_failed"
 
         # Start services
@@ -1895,10 +2020,14 @@ def setup_database_compose() -> Tuple[bool, str]:
         print_error("Docker Compose command timed out")
         cleanup_failed_compose_setup_inline()
         return False, "timeout"
-    except Exception as e:
-        print_error(f"Unexpected error: {e}")
+    except (OSError, IOError) as e:
+        print_error(f"File system error during Docker setup: {e}")
         cleanup_failed_compose_setup_inline()
         return False, str(e)
+    except json.JSONDecodeError as e:
+        print_error(f"Failed to parse Docker Compose output: {e}")
+        cleanup_failed_compose_setup_inline()
+        return False, "json_parse_error"
 
 
 def test_database_connection(
@@ -1967,8 +2096,9 @@ def test_database_connection(
         print("  Connection will be tested during validation")
         return True, None  # Allow to proceed
 
-    except Exception as e:
-        error_msg = str(e)
+    except OSError as e:
+        # Network/socket errors
+        error_msg = f"Network error: {e}"
         print_error(f"Database connection failed: {error_msg}")
         return False, error_msg
 
@@ -2225,8 +2355,15 @@ except Exception as e:
         print("  python -c 'import datajoint as dj; dj.set_password()'")
         return None
 
-    except Exception as e:
-        print_error(f"Failed to change password: {e}")
+    except subprocess.CalledProcessError as e:
+        print_error(f"Password change command failed: {e}")
+        print("\nYou can change it manually later:")
+        print(f"  conda activate {env_name}")
+        print("  python -c 'import datajoint as dj; dj.set_password()'")
+        return None
+
+    except OSError as e:
+        print_error(f"Failed to run password change: {e}")
         print("\nYou can change it manually later:")
         print(f"  conda activate {env_name}")
         print("  python -c 'import datajoint as dj; dj.set_password()'")
@@ -2282,12 +2419,6 @@ def setup_database_remote(
         # Non-interactive mode - use provided parameters
         import os
 
-        # Validate hostname format
-        if not validate_hostname(host):
-            print_error(f"Invalid hostname: {host}")
-            print("  Hostname cannot contain spaces or invalid characters")
-            return False
-
         # Check environment variable for password if not provided
         if password is None:
             password = os.environ.get("SPYGLASS_DB_PASSWORD")
@@ -2300,6 +2431,14 @@ def setup_database_remote(
         # Use defaults for optional parameters
         if port is None:
             port = 3306
+
+        # Validate all database configuration parameters
+        valid, errors = validate_database_config(host, port, user, password)
+        if not valid:
+            print_error("Invalid database configuration:")
+            for err in errors:
+                print(f"  - {err}")
+            return False
 
         # Check if port is reachable (for remote hosts only)
         if host not in LOCALHOST_ADDRESSES:
@@ -2406,9 +2545,129 @@ def validate_installation(env_name: str) -> bool:
         print_success("Validation passed")
         return True
     except subprocess.CalledProcessError:
-        print_warning("Some validation checks failed")
-        print("  Review errors above and see docs/TROUBLESHOOTING.md")
+        print_warning("Some optional validation checks did not pass")
+        print(
+            "\n  Core installation succeeded, but some features may need attention."
+        )
+        print("  Many warnings are not critical for getting started.")
+        print("\n  Common non-critical warnings:")
+        print("    - Database connection: Configure later if needed")
+        print("    - Optional packages: Install when you need them")
+        print("\n  To investigate:")
+        print(f"    1. Activate environment: conda activate {env_name}")
+        print("    2. Run detailed validation: python scripts/validate.py -v")
+        print("    3. See docs/TROUBLESHOOTING.md for specific issues")
         return False
+
+
+def print_installation_header() -> None:
+    """Print installation header banner."""
+    print(f"\n{COLORS['blue']}{'='*60}{COLORS['reset']}")
+    print(f"{COLORS['blue']}  Spyglass Installation{COLORS['reset']}")
+    print(f"{COLORS['blue']}{'='*60}{COLORS['reset']}\n")
+
+
+def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
+    """Determine installation type from CLI args or interactive prompt.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments
+
+    Returns
+    -------
+    env_file : str
+        Path to environment YAML file
+    install_type : str
+        Installation type identifier ("minimal" or "full")
+    """
+    if args.minimal:
+        return "environment-min.yml", "minimal"
+    elif args.full:
+        return "environment.yml", "full"
+    else:
+        return prompt_install_type()
+
+
+def setup_environment(
+    env_file: str,
+    install_type: str,
+    base_dir: Path,
+    args: argparse.Namespace,
+) -> None:
+    """Set up conda environment and install spyglass.
+
+    Parameters
+    ----------
+    env_file : str
+        Path to environment YAML file
+    install_type : str
+        Installation type ("minimal" or "full")
+    base_dir : Path
+        Base directory for Spyglass data
+    args : argparse.Namespace
+        Parsed command-line arguments
+    """
+    check_prerequisites(install_type, base_dir)
+    create_conda_environment(env_file, args.env_name, force=args.force)
+    install_spyglass_package(args.env_name)
+
+
+def setup_database(args: argparse.Namespace) -> None:
+    """Handle database setup based on CLI args or interactive prompt.
+
+    Parameters
+    ----------
+    args : argparse.Namespace
+        Parsed command-line arguments
+    """
+    if args.docker:
+        handle_database_setup_cli(args.env_name, "docker")
+    elif args.remote:
+        import os
+
+        db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
+        handle_database_setup_cli(
+            args.env_name,
+            "remote",
+            db_host=args.db_host,
+            db_port=args.db_port,
+            db_user=args.db_user,
+            db_password=db_password,
+        )
+    else:
+        handle_database_setup_interactive(args.env_name)
+
+
+def print_completion_message(env_name: str, validation_passed: bool) -> None:
+    """Print installation completion message with next steps.
+
+    Parameters
+    ----------
+    env_name : str
+        Name of the conda environment
+    validation_passed : bool
+        Whether validation checks passed
+    """
+    print(f"\n{COLORS['green']}{'='*60}{COLORS['reset']}")
+    if validation_passed:
+        print(f"{COLORS['green']}Installation complete!{COLORS['reset']}")
+        print(f"{COLORS['green']}{'='*60}{COLORS['reset']}\n")
+    else:
+        print(
+            f"{COLORS['yellow']}Installation complete with warnings{COLORS['reset']}"
+        )
+        print(f"{COLORS['yellow']}{'='*60}{COLORS['reset']}\n")
+        print("Core installation succeeded but some features may not work.")
+        print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
+
+    print("Next steps:")
+    print(f"  1. Activate environment: conda activate {env_name}")
+    print("  2. Start tutorial:       jupyter notebook notebooks/")
+    print(
+        "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
+    )
 
 
 def run_installation(args) -> None:
@@ -2422,10 +2681,6 @@ def run_installation(args) -> None:
     args : argparse.Namespace
         Parsed command-line arguments containing installation options
 
-    Returns
-    -------
-    None
-
     Notes
     -----
     CRITICAL ORDER:
@@ -2436,79 +2691,27 @@ def run_installation(args) -> None:
     5. Setup database (inline code, NO spyglass imports)
     6. Validate (runs IN the new environment, CAN import spyglass)
     """
-    print(f"\n{COLORS['blue']}{'='*60}{COLORS['reset']}")
-    print(f"{COLORS['blue']}  Spyglass Installation{COLORS['reset']}")
-    print(f"{COLORS['blue']}{'='*60}{COLORS['reset']}\n")
+    print_installation_header()
 
-    # Determine installation type
-    if args.minimal:
-        env_file = "environment-min.yml"
-        install_type = "minimal"
-    elif args.full:
-        env_file = "environment.yml"
-        install_type = "full"
-    else:
-        env_file, install_type = prompt_install_type()
+    # Step 1: Determine installation type
+    env_file, install_type = determine_installation_type(args)
 
-    # 1. Get base directory first (CLI arg > env var > prompt)
+    # Step 2: Get base directory (CLI arg > env var > prompt)
     base_dir = get_base_directory(args.base_dir)
 
-    # 2. Check prerequisites with disk space validation (no spyglass imports)
-    check_prerequisites(install_type, base_dir)
+    # Step 3: Set up environment and install package
+    setup_environment(env_file, install_type, base_dir, args)
 
-    # 3. Create environment (no spyglass imports)
-    create_conda_environment(env_file, args.env_name, force=args.force)
+    # Step 4: Database setup (inline code - no spyglass imports)
+    setup_database(args)
 
-    # 3. Install package (pip install makes spyglass available)
-    install_spyglass_package(args.env_name)
-
-    # 4. Database setup (INLINE CODE - no spyglass imports!)
-    #    This happens AFTER spyglass is installed but doesn't use it
-    #    because docker operations are self-contained
-    if args.docker:
-        # Docker explicitly requested via CLI
-        handle_database_setup_cli(args.env_name, "docker")
-    elif args.remote:
-        # Remote database explicitly requested via CLI
-        # Support non-interactive mode with CLI args or env vars
-        import os
-
-        db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
-        handle_database_setup_cli(
-            args.env_name,
-            "remote",
-            db_host=args.db_host,
-            db_port=args.db_port,
-            db_user=args.db_user,
-            db_password=db_password,
-        )
-    else:
-        # Interactive prompt with retry logic
-        handle_database_setup_interactive(args.env_name)
-
-    # 5. Validation (runs in new environment, CAN import spyglass)
+    # Step 5: Validation (runs in new environment, CAN import spyglass)
     validation_passed = True
     if not args.skip_validation:
         validation_passed = validate_installation(args.env_name)
 
-    # Success message - conditional based on validation
-    print(f"\n{COLORS['green']}{'='*60}{COLORS['reset']}")
-    if validation_passed:
-        print(f"{COLORS['green']}✓ Installation complete!{COLORS['reset']}")
-        print(f"{COLORS['green']}{'='*60}{COLORS['reset']}\n")
-    else:
-        print(
-            f"{COLORS['yellow']}⚠ Installation complete with warnings{COLORS['reset']}"
-        )
-        print(f"{COLORS['yellow']}{'='*60}{COLORS['reset']}\n")
-        print("Core installation succeeded but some features may not work.")
-        print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
-    print("Next steps:")
-    print(f"  1. Activate environment: conda activate {args.env_name}")
-    print("  2. Start tutorial:       jupyter notebook notebooks/")
-    print(
-        "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
-    )
+    # Step 6: Show completion message
+    print_completion_message(args.env_name, validation_passed)
 
 
 def main() -> None:
@@ -2590,8 +2793,23 @@ Environment Variables:
     except KeyboardInterrupt:
         print("\n\nInstallation cancelled by user.")
         sys.exit(1)
-    except Exception as e:
+    except RuntimeError as e:
+        # Expected errors from our code (prerequisites, validation, etc.)
         print_error(f"Installation failed: {e}")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        # Process execution failures
+        print_error(f"Command failed: {e}")
+        print("  Check the output above for details")
+        sys.exit(1)
+    except (OSError, IOError) as e:
+        # File system errors
+        print_error(f"File system error: {e}")
+        print("  Check disk space and permissions")
+        sys.exit(1)
+    except ValueError as e:
+        # Configuration/validation errors
+        print_error(f"Invalid configuration: {e}")
         sys.exit(1)
 
 
