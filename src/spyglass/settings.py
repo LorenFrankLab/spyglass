@@ -506,7 +506,7 @@ class SpyglassConfig:
             + "\n\t".join(
                 [
                     f"{k}: {v if k != 'database.password' else '***'}"
-                    for k, v in dj.config._conf.items()
+                    for k, v in dj.config.items()
                 ]
             )
             + "\n"

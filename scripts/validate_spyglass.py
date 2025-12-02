@@ -22,7 +22,21 @@ from spyglass.settings import SpyglassConfig
 
 
 def get_installer_config_structure(base_dir: Path) -> dict:
-    """Get config structure that installer would create."""
+    """Get the configuration structure that install.py would create.
+
+    Replicates the config generation logic from install.py::create_database_config()
+    to allow comparison with settings.py output.
+
+    Parameters
+    ----------
+    base_dir : Path
+        Base directory for Spyglass data storage
+
+    Returns
+    -------
+    dict
+        Configuration dictionary matching install.py output structure
+    """
     from install import load_directory_schema
 
     dir_schema = load_directory_schema()
@@ -93,7 +107,21 @@ def get_installer_config_structure(base_dir: Path) -> dict:
 
 
 def get_settings_config_structure(base_dir: Path) -> dict:
-    """Get config structure that settings.py generates."""
+    """Get the configuration structure that settings.py generates.
+
+    Uses SpyglassConfig._generate_dj_config() to produce a config dictionary
+    for comparison with install.py output.
+
+    Parameters
+    ----------
+    base_dir : Path
+        Base directory for Spyglass data storage
+
+    Returns
+    -------
+    dict
+        Configuration dictionary matching settings.py output structure
+    """
     sg_config = SpyglassConfig()
 
     config = sg_config._generate_dj_config(
@@ -109,7 +137,23 @@ def get_settings_config_structure(base_dir: Path) -> dict:
 
 
 def get_all_keys(d: dict, prefix: str = "") -> set:
-    """Recursively get all keys in nested dictionary."""
+    """Recursively get all keys in a nested dictionary.
+
+    Traverses the dictionary tree and returns flattened key paths
+    using dot notation (e.g., "custom.spyglass_dirs.base").
+
+    Parameters
+    ----------
+    d : dict
+        Dictionary to extract keys from
+    prefix : str, optional
+        Prefix for nested keys, used during recursion (default: "")
+
+    Returns
+    -------
+    set
+        Set of all key paths in dot notation
+    """
     keys = set()
     for k, v in d.items():
         full_key = f"{prefix}.{k}" if prefix else k
@@ -119,8 +163,19 @@ def get_all_keys(d: dict, prefix: str = "") -> set:
     return keys
 
 
-def compare_configs():
-    """Compare config structures and report differences."""
+def compare_configs() -> int:
+    """Compare configuration structures from install.py and settings.py.
+
+    Creates temporary directory, generates configs from both sources,
+    and reports any missing or extra keys. This ensures the installer
+    produces configs compatible with SpyglassConfig.
+
+    Returns
+    -------
+    int
+        Exit code: 0 if configs match or only have extra keys,
+        1 if installer is missing required keys
+    """
     print("=" * 80)
     print("Config Structure Comparison: install.py vs settings.py")
     print("=" * 80)
