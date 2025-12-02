@@ -2,6 +2,10 @@
 
 This directory contains streamlined installation and validation scripts for Spyglass.
 
+> **Note**: This `scripts/` directory is for **user-facing** installation and
+> setup. For **admin-facing** database maintenance operations (cleanup,
+> migrations, batch jobs), see `maintenance_scripts/` in the repository root.
+
 ## Quick Start
 
 Install Spyglass in one command:
