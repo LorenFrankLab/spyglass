@@ -130,7 +130,7 @@ python scripts/install.py
 1. Check error messages for specific issues
 2. If using Docker database, ensure Docker Desktop is running
 3. If database connection fails, verify credentials with your lab admin
-4. Try skipping database: `python scripts/install.py --no-database`
+4. Skip database setup and configure later: choose "Skip" when prompted
 
 ### Need help?
 
