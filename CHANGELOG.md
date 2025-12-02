@@ -15,6 +15,45 @@ FirFilterParameters().alter()
 DecodingParameters().alter()
 ```
 
+### Breaking Changes
+
+#### Decoding Results Structure
+
+The `intervals` dimension has been removed from decoding results. Results from
+multiple decoding intervals are now concatenated along the `time` dimension with
+an `interval_labels` coordinate tracking which interval each time point belongs
+to.
+
+**Why**: Eliminates NaN padding when intervals have different lengths, reducing
+memory usage significantly.
+
+**Migration guide**:
+
+```python
+# OLD (before v0.5.6):
+results.isel(intervals=0)  # Get first interval
+for i in range(results.sizes['intervals']):  # Iterate intervals
+    interval_data = results.isel(intervals=i)
+
+# NEW (v0.5.6+):
+results.where(results.interval_labels == 0, drop=True)  # Get first interval
+for label in np.unique(results.interval_labels.values):  # Iterate intervals
+    if label >= 0:  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+        interval_data = results.where(results.interval_labels == label, drop=True)
+
+# Or use groupby:
+for label, interval_data in results.groupby('interval_labels'):
+    if label >= 0:
+        # process interval_data
+        pass
+```
+
+**interval_labels values**:
+
+- `0, 1, 2, ...` - Sequential interval indices (0-indexed)
+- `-1` - Time points outside any decoding interval (only when
+  `estimate_decoding_params=True`)
+
 ### Documentation
 
 - Delete extra pyscripts that were renamed # 1363
@@ -68,6 +107,10 @@ DecodingParameters().alter()
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+    - **BREAKING**: Remove `intervals` dimension from decoding results. Results
+      from multiple intervals are now concatenated along the `time` dimension
+      with an `interval_labels` coordinate to track interval membership. This
+      eliminates NaN padding and reduces memory usage. See migration guide below.
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379

@@ -19,14 +19,17 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from non_local_detector.models.base import ClusterlessDetector
-from scipy.ndimage import label
 from track_linearization import get_linearized_position
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.decoding.v1.core import DecodingParameters  # noqa: F401
 from spyglass.decoding.v1.core import PositionGroup
-from spyglass.decoding.v1.utils import _get_interval_range
+from spyglass.decoding.v1.utils import (
+    _get_interval_range,
+    concatenate_interval_results,
+    create_interval_labels,
+)
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )  # noqa: F401
@@ -200,15 +203,15 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
     def _run_decoder(
         self,
-        key,
-        decoding_params,
-        decoding_kwargs,
-        position_info,
-        position_variable_names,
-        spike_times,
-        spike_waveform_features,
-        decoding_interval,
-    ):
+        key: dict,
+        decoding_params: dict,
+        decoding_kwargs: dict,
+        position_info: pd.DataFrame,
+        position_variable_names: list[str],
+        spike_times: list[np.ndarray],
+        spike_waveform_features: list[np.ndarray],
+        decoding_interval: np.ndarray,
+    ) -> tuple[ClusterlessDetector, xr.Dataset]:
         """Run ClusterlessDetector (external dependency).
 
         This method wraps all calls to the non_local_detector package,
@@ -224,23 +227,43 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             Additional kwargs for fit/predict
         position_info : pd.DataFrame
             Position data with time index
-        position_variable_names : list
+        position_variable_names : list[str]
             Names of position columns to use
-        spike_times : list
+        spike_times : list[np.ndarray]
             Spike times for each unit
-        spike_waveform_features : list
+        spike_waveform_features : list[np.ndarray]
             Waveform features for each unit
-        decoding_interval : array
-            Time intervals for decoding
+        decoding_interval : np.ndarray
+            Time intervals for decoding, shape (n_intervals, 2)
 
         Returns
         -------
         classifier : ClusterlessDetector
             Fitted classifier instance
         results : xr.Dataset
-            Decoding results with posteriors. Results from multiple intervals
-            are concatenated along the time dimension with an interval_labels
-            coordinate to track which interval each time point belongs to.
+            Decoding results with posteriors.
+
+            **Structure (changed in v0.5.6)**: Results from multiple intervals
+            are concatenated along the ``time`` dimension (not ``intervals``).
+
+            **interval_labels coordinate**:
+                - Tracks which interval each time point belongs to
+                - Values: 0, 1, 2, ... for the 1st, 2nd, 3rd decoding interval
+                - If estimate_decoding_params=True, value -1 indicates time
+                  points outside any decoding interval (treated as missing)
+
+            **Common operations**::
+
+                # Get data from first interval
+                results.where(results.interval_labels == 0, drop=True)
+
+                # Group by interval
+                results.groupby('interval_labels')
+
+        Raises
+        ------
+        ValueError
+            If all decoding intervals are empty (no valid time points)
         """
         classifier = ClusterlessDetector(**decoding_params)
 
@@ -259,6 +282,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                         position_info.index <= interval_end,
                     )
                 ] = False
+
+            # Validate that at least some time points are in decoding intervals
+            if np.all(is_missing):
+                raise ValueError(
+                    "All decoding intervals are empty - no valid time points.\n"
+                    f"Decoding intervals: {decoding_interval.tolist()}\n"
+                    f"Position data range: "
+                    f"[{position_info.index.min()}, {position_info.index.max()}]"
+                )
+
             if "is_missing" not in decoding_kwargs:
                 decoding_kwargs["is_missing"] = is_missing
             results = classifier.estimate_parameters(
@@ -270,10 +303,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 **decoding_kwargs,
             )
             # Add interval_labels coordinate for consistency with predict branch
-            # label() returns 1-indexed labels; subtract 1 for 0-indexed intervals
-            # Result: -1 = outside intervals, 0, 1, 2... = interval index
-            labels, _ = label(~is_missing)
-            interval_labels = labels - 1
+            interval_labels = create_interval_labels(is_missing)
             results = results.assign_coords(
                 interval_labels=("time", interval_labels)
             )
@@ -310,11 +340,8 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             }
 
             # We treat each decoding interval as a separate sequence
-            results = []
-            interval_labels = []
-            for interval_idx, (interval_start, interval_end) in enumerate(
-                decoding_interval
-            ):
+            interval_results = []
+            for interval_start, interval_end in decoding_interval:
                 interval_time = position_info.loc[
                     interval_start:interval_end
                 ].index.to_numpy()
@@ -334,19 +361,10 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                     time=interval_time,
                     **predict_kwargs,
                 )
-                results.append(interval_result)
-                # Track which interval each time point belongs to
-                interval_labels.extend(
-                    [interval_idx] * len(interval_result.time)
-                )
-            # Concatenate along time dimension instead of intervals dimension
-            if not results:
-                raise ValueError("All decoding intervals are empty")
-            results = xr.concat(results, dim="time")
-            # Add interval_labels as a coordinate for groupby/selection operations
-            results = results.assign_coords(
-                interval_labels=("time", interval_labels)
-            )
+                interval_results.append(interval_result)
+
+            # Concatenate along time with interval_labels coordinate
+            results = concatenate_interval_results(interval_results)
 
         # Save discrete transition and initial conditions
         results["initial_conditions"] = xr.DataArray(
