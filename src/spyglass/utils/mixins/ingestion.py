@@ -362,9 +362,11 @@ class IngestionMixin(BaseMixin):
         entries_to_insert = dict()
         for table, table_entries in entry_dict.items():
             entries_to_insert[table] = []
-            for entry, table_entry in zip(
-                self._adjust_keys_for_entry(table_entries), table_entries
-            ):
+            for table_entry in table_entries:
+                adjusted_entries = self._adjust_keys_for_entry([table_entry])
+                if not adjusted_entries:
+                    continue  # entry filtered out by adjustment
+                entry = adjusted_entries[0]
                 self.validate1_duplicate(table, entry)
                 if not (table & entry):
                     entries_to_insert[table].append(table_entry)
