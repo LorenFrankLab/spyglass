@@ -350,7 +350,7 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             IntervalList()
             & {
                 "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": interval_list_name,
+                "interval_list_name": str(interval_list_name),
             }
         ).fetch_interval()
 
