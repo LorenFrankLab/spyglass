@@ -375,12 +375,11 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
         """Add IntervalList entry to the generated entries."""
         super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
         self_key = super_ins[self][0]
-        valid_times = self_key.pop("valid_times")  # remove from self key
         interval_insert = {
             k: v for k, v in self_key.items() if k in IntervalList.heading.names
         }
         return {
-            IntervalList: [dict(interval_insert, valid_times=valid_times)],
+            IntervalList: [interval_insert],
             **super_ins,
         }
 
