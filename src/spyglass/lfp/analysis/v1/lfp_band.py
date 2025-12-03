@@ -729,16 +729,39 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             A restriction to apply to the LFPBandV1 table, by default None
         """
 
-        for key in (self & restriction).proj():
-            self._fix1_1481(key)
+        fixed_keys = [
+            key
+            for key in (self & restriction).proj()
+            if self._fix1_1481(key) is not None
+        ]
 
-    def _fix1_1481(self, key: dict) -> None:
+        if not fixed_keys:
+            logger.info("No entries needed to be fixed for the 1481 bug.")
+            return
+
+        from spyglass.ripple.v1.ripple import RippleTimesV1
+
+        logger.info(
+            f"Fixing {len(fixed_keys)} entries in the RippleTimesV1 table "
+            "due to the 1481 bug. See github issue #1481 for more details."
+        )
+        (RippleTimesV1 & fixed_keys).delete(safemode=False)
+        RippleTimesV1().populate(
+            fixed_keys, suppress_errors=False, display_progress=True
+        )
+
+    def _fix1_1481(self, key: dict) -> Optional[dict]:
         """Fixes a single entry in the LFPBandV1 table for the 1481 bug
 
         Parameters
         ----------
         key : dict
             The key of the entry to fix
+
+        Returns
+        -------
+        Optional[dict]
+            The key if it was fixed, None otherwise
         """
         # get the NWB object with the lfp data
         lfp_key = {"merge_id": key["lfp_merge_id"]}
@@ -817,3 +840,5 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
         lfp_band_valid_times.set_key(**key, pipeline="lfp band")
         IntervalList().update1(lfp_band_valid_times.as_dict)
+
+        return key
