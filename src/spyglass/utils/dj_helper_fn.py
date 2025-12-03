@@ -370,7 +370,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             continue
 
         # Full dict caused issues with dlc tables using dicts in secondary keys
-        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_only_pk = {
+            k: v
+            for k, v in rec_dict.items()
+            if k in query_table.heading.primary_key
+        }
         rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
