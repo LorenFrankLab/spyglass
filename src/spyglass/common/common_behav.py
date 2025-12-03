@@ -378,6 +378,9 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
         interval_insert = {
             k: v for k, v in self_key.items() if k in IntervalList.heading.names
         }
+        self_key.pop(
+            "valid_times", None
+        )  # remove valid_times from the insert to this table
         return {
             IntervalList: [interval_insert],
             **super_ins,
