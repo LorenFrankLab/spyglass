@@ -15,8 +15,8 @@ def import_compass_nwb(
     from spyglass.common import Nwbfile
 
     nwbfile = mock_NWBFile(
-        identifier="compass_direction_bug_demo",
-        session_description="Mock NWB file demonstrating Spyglass CompassDirection import bug",
+        identifier="compass_direction_import_demo",
+        session_description="Mock NWB file demonstrating Spyglass CompassDirection import",
     )
     mock_Subject(nwbfile=nwbfile)
     behavior_module = nwbfile.create_processing_module(

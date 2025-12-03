@@ -387,7 +387,7 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
         }
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        """Insert entries from NWB file, renaming interval lists by time ordering."""
+        """Insert entries from NWB file, generating interval list names ordered by time."""
         self._compass_import_enumerator = 1  # reset enumerator
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
