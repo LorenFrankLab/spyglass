@@ -428,6 +428,7 @@
 # +
 import datajoint as dj
 from spyglass.settings import SpyglassConfig
+from pathlib import Path
 
 username = "your username"  # replace with username made for you in the spyglass database
 initial_password = (
@@ -456,7 +457,6 @@ dj.admin.set_password(new_password, update_config=True)
 
 # save the configuration
 SpyglassConfig().save_dj_config(
-    save_method="global",  # global or local
     base_dir=spyglass_base_dir,
     database_user=username,
     database_password=new_password,
@@ -466,8 +466,8 @@ SpyglassConfig().save_dj_config(
 )
 
 # ensure the configuration is saved for future use
-dj.config.save_global()
-dj.config.save_local()
+your_config = Path.home() / ".datajoint_config.json"
+print(f"Config exists: {your_config.exists()}")
 # -
 
 # <details><summary>Legacy config</summary>

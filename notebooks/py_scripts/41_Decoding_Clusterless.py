@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -47,12 +47,6 @@
 # +
 from pathlib import Path
 import datajoint as dj
-
-dj.config.load(
-    Path("../dj_local_conf.json").absolute()
-)  # load config for database connection info
-
-# +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 from spyglass.decoding.v1.waveform_features import (
