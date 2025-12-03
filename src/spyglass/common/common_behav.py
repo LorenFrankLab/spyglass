@@ -308,6 +308,7 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
     """
 
     _nwb_table = Nwbfile
+    _compass_import_enumerator = 1
 
     @property
     def _source_nwb_object_type(self):
@@ -320,17 +321,29 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
                 "name": "name",
                 "compass_object_id": "object_id",
                 "valid_times": self.generate_valid_intervals_from_timeseries,
-                "interval_list_name": lambda obj: f"compass {obj.object_id} valid times",  # unique placeholder name
+                "interval_list_name": self.enumerated_interval_name,
             }
         }
 
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
-        """Get all CompassDirection spatial series from NWB file."""
+        """Get all CompassDirection spatial series from NWB file, ordered by time."""
         compass_objects = super().get_nwb_objects(nwb_file, nwb_file_name)
         spatial_series = sum(
             [list(obj.spatial_series.values()) for obj in compass_objects], []
         )
+        start_times = [ss.get_timestamps()[0] for ss in spatial_series]
+        order = np.argsort(start_times)
+        spatial_series = [spatial_series[i] for i in order]
+
         return spatial_series
+
+    def enumerated_interval_name(
+        self, obj: pynwb.behavior.SpatialSeries
+    ) -> str:
+        """Generate a unique interval list name for each compass direction object."""
+        name = f"compass {self._compass_import_enumerator} valid times"
+        self._compass_import_enumerator += 1
+        return name
 
     @staticmethod
     def generate_valid_intervals_from_timeseries(
@@ -373,42 +386,8 @@ class RawCompassDirection(SpyglassIngestion, dj.Manual):
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         """Insert entries from NWB file, renaming interval lists by time ordering."""
-        inserts = super().insert_from_nwbfile(
-            nwb_file_name, config, dry_run=True
-        )
-
-        # rename interval list names ordered by time of each compass entry
-        interval_entries = inserts.get(IntervalList, [])
-        compass_entries = inserts.get(self, [])
-
-        old_names = []
-        start_times = []
-        for entry in interval_entries:
-            old_names.append(entry["interval_list_name"])
-            start_times.append(entry["valid_times"][0][0])
-        order = np.argsort(start_times)
-        new_names = [
-            f"compass {i+1} valid times" for i in range(len(old_names))
-        ]
-        name_mapping = {
-            old_names[order[i]]: new_names[i] for i in range(len(old_names))
-        }
-        for entry in interval_entries:
-            entry["interval_list_name"] = name_mapping[
-                entry["interval_list_name"]
-            ]
-        for entry in compass_entries:
-            entry["interval_list_name"] = name_mapping[
-                entry["interval_list_name"]
-            ]
-
-        entries = {
-            IntervalList: interval_entries,
-            self: compass_entries,
-        }
-        if not dry_run:
-            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
-        return entries
+        self._compass_import_enumerator = 1  # reset enumerator
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
 
 @schema
