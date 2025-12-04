@@ -43,6 +43,7 @@ DecodingParameters().alter()
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
+- Allow for permissive name selection when identifying objects in ingestion nwb #1490
 
 ### Pipelines
 
