@@ -180,7 +180,7 @@ class IngestionMixin(BaseMixin):
     @staticmethod
     def sanitize_nwb_object_name(name: str) -> str:
         """Sanitize NWB object name for use in table logging."""
-        return name.lower().replace(" ", "_") if name else None
+        return name.lower().replace(" ", "") if name else None
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
         """Log line for insert_from_nwbfile."""
