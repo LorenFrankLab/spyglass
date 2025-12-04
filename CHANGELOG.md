@@ -39,7 +39,8 @@ DecodingParameters().alter()
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465, #1484
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
+  #1484, #1489
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
