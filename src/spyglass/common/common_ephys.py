@@ -585,6 +585,7 @@ class LFP(SpyglassMixin, dj.Imported):
         AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         # add an interval list for the LFP valid times, skipping duplicates
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         self.insert1(dict(key, **added_key))
 
     def nwb_object(self, key):
