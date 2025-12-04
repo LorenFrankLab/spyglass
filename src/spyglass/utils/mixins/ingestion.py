@@ -163,13 +163,24 @@ class IngestionMixin(BaseMixin):
         ]
 
         if self._source_nwb_object_name:
+            if isinstance(self._source_nwb_object_name, str):
+                self._source_nwb_object_name = [self._source_nwb_object_name]
             matching_objects = [
                 obj
                 for obj in matching_objects
-                if getattr(obj, "name", None) == self._source_nwb_object_name
+                if self.sanitize_nwb_object_name(getattr(obj, "name", None))
+                in [
+                    self.sanitize_nwb_object_name(name)
+                    for name in self._source_nwb_object_name
+                ]
             ]
 
         return matching_objects
+
+    @staticmethod
+    def sanitize_nwb_object_name(name: str) -> str:
+        """Sanitize NWB object name for use in table logging."""
+        return name.lower().replace(" ", "_") if name else None
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
         """Log line for insert_from_nwbfile."""
