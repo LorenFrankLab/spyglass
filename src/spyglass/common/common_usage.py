@@ -633,8 +633,7 @@ class Export(SpyglassMixin, dj.Computed):
                 update_analysis_for_dandi_standard(file, **kwargs)
             return
         with Pool(processes=n_processes) as pool:
-            # pool.map(make_file_obj_id_unique, file_list)
-            print("SKIPPING make_file_obj_id_unique in parallel")
+            pool.map(make_file_obj_id_unique, file_list)
             pool.map(update_analysis_for_dandi_standard, file_list)
 
     def _make_fileset_ids_unique(self, key, n_processes=1):
