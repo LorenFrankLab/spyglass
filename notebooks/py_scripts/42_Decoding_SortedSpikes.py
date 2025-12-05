@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -27,15 +27,6 @@
 #
 #
 
-# +
-from pathlib import Path
-import datajoint as dj
-
-dj.config.load(
-    Path("../dj_local_conf.json").absolute()
-)  # load config for database connection info
-# -
-
 # ## SortedSpikesGroup
 #
 # `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple
@@ -46,6 +37,8 @@ dj.config.load(
 #
 
 # +
+from pathlib import Path
+import datajoint as dj
 from spyglass.spikesorting.analysis.v1.group import UnitSelectionParams
 
 UnitSelectionParams().insert_default()

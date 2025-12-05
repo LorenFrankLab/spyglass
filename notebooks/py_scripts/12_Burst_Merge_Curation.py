@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -16,13 +16,6 @@
 
 # %load_ext autoreload
 # %autoreload 2
-
-# +
-import datajoint as dj
-import os
-
-dj.config.load("your_config_file.json")
-dj.conn()
 
 # +
 import warnings
