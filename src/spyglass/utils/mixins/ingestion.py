@@ -376,7 +376,7 @@ class IngestionMixin(BaseMixin):
                 }
                 if not (table & primary_entry):
                     # New entry, safe to insert
-                    entries_to_insert[table].append(entry)
+                    entries_to_insert[table].append(table_entry)
                     continue
                 # Existing entry, validate consistency
                 self.validate1_duplicate(table, entry)
