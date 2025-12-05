@@ -936,18 +936,47 @@ class RestrGraph(AbstractGraph):
 
         to_visit = self.leaves - self.visited
 
-        for table in tqdm(
-            to_visit,
-            desc="RestrGraph: cascading restrictions",
-            total=len(to_visit),
-            disable=not (show_progress or self.verbose),
-        ):
-            self.visited.clear()
+        if len(to_visit) == 0:
+            if warn:
+                self._log_truncate("No new leaves to cascade")
+            self.cascaded = True
+            return
+
+        if len(to_visit) == 1:
+            table = to_visit.pop()
             restr = self._get_restr(table)
             self._log_truncate(
                 f"Start  {direction:<4}: {self._camel(table)}, {restr}"
             )
             self.cascade1(table, restr, direction=direction, replace=False)
+
+        else:
+            # Run the cascade of each leaf separately to avoid order dependence
+            # Then combine results with __add__
+            self.cascaded = True  # set now so can be added with (+)
+            cascaded_leaves = []
+            for table in tqdm(
+                to_visit,
+                desc="RestrGraph: cascading restrictions",
+                total=len(to_visit),
+                disable=not (show_progress or self.verbose),
+            ):
+                leaf_graph = RestrGraph(
+                    seed_table=self.seed_table,
+                    leaves=[
+                        {
+                            "table_name": table,
+                            "restriction": self._get_restr(table),
+                        }
+                    ],
+                    include_files=False,  # only need after merging the leaf graphs
+                    direction=direction,
+                    verbose=self.verbose,
+                    cascade=True,
+                )
+                cascaded_leaves.append(leaf_graph)
+            print("adding cascaded leaves")
+            self = self + cascaded_leaves
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
         self.cascade_files()  # Otherwise attempts to re-cascade, recursively
@@ -1048,11 +1077,36 @@ class RestrGraph(AbstractGraph):
             self._set_node(table, "restr", restriction)
         return self
 
+    def _graph_union_list(self, other: "List") -> "RestrGraph":
+        if not all(isinstance(x, RestrGraph) for x in other):
+            raise TypeError("All items in list must be RestrGraph objects.")
+        if not self.cascaded and all([x.cascaded for x in other]):
+            raise ValueError("All RestrGraphs must be cascaded before union.")
+
+        other_dicts_list = [x.as_dict for x in other]
+        all_table_names = []
+        for other_dicts in other_dicts_list:
+            all_table_names += [d["table_name"] for d in other_dicts]
+        all_table_names = set(all_table_names)
+        for table in all_table_names:
+            new_restr_list = self._get_restr_list(table)
+            for other_graph in other:
+                new_restr_list += other_graph._get_restr_list(table)
+            self._set_node(table, "restr_list", new_restr_list)
+            ft = self._get_ft(table)
+            restriction = self._coerce_to_condition(ft, ft & new_restr_list)
+            self._set_node(table, "restr", restriction)
+        return self
+
     def __add__(self, other: "RestrGraph") -> "RestrGraph":
         """Return union of two RestrGraphs."""
-        if not isinstance(other, RestrGraph):
-            raise TypeError(f"Cannot OR RestrGraph with {type(other)}")
-        return self._graph_union(other)
+        if isinstance(other, RestrGraph):
+            return self._graph_union(other)
+
+        elif isinstance(other, List):
+            return self._graph_union_list(other)
+
+        raise TypeError(f"Cannot OR RestrGraph with {type(other)}")
 
     # ----------------------------- File Handling -----------------------------
 
