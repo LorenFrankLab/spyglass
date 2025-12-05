@@ -178,7 +178,7 @@ class IngestionMixin(BaseMixin):
         return matching_objects
 
     @staticmethod
-    def sanitize_nwb_object_name(name: str) -> str:
+    def sanitize_nwb_object_name(name: Optional[str]) -> Optional[str]:
         """Sanitize NWB object name for use in table logging."""
         return name.lower().replace(" ", "") if name else None
 
