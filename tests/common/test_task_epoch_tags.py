@@ -172,3 +172,15 @@ def test_task_epoch_get_epoch_interval_name(common, caplog):
     result = get_epoch("fake_epoch", session_intervals)
     assert result is None, "Should return None for non-matching epoch"
     assert "for epoch fake_epoch" in caplog.text
+
+
+def test_franklab_task_epoch_tags(common):
+    """Test task epoch tags in the franklab format are handled correctly."""
+    epoch = 1
+    session_intervals = ["01_s1", "02_r1", "03_s2", "04_r2"]
+    interval_name = common.TaskEpoch.get_epoch_interval_name(
+        epoch, session_intervals
+    )
+    assert (
+        interval_name == "01_s1"
+    ), "Failed to prioritize 2-digit zero-padded format"
