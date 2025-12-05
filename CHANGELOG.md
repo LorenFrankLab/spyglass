@@ -66,6 +66,8 @@ DecodingParameters().alter()
     - Improve error transparency on duplicate `Electrode` ids #1454
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
+    - Add the table `RawCompassDirection` for importing orientation
+      data from NWB files #1466
     - Handle epoch formats with varying zero-padding #1459
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362

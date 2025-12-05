@@ -5,8 +5,10 @@ from typing import Dict, List, Union
 
 import datajoint as dj
 import ndx_franklab_novela
+import numpy as np
 import pandas as pd
 import pynwb
+from pynwb.behavior import CompassDirection
 
 from spyglass.common.common_device import CameraDevice
 from spyglass.common.common_ephys import Raw  # noqa: F401
@@ -15,11 +17,13 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
+    estimate_sampling_rate,
+    get_valid_intervals,
 )
 
 schema = dj.schema("common_behav")
@@ -287,6 +291,105 @@ class RawPosition(SpyglassMixin, dj.Imported):
             return next(iter(ret.values()))
 
         return pd.concat(ret, axis=1)
+
+
+@schema
+class RawCompassDirection(SpyglassIngestion, dj.Manual):
+    """
+    Table to store raw CompassDirection data from NWB files.
+    """
+
+    definition = """
+    -> Session
+    -> IntervalList
+    ---
+    compass_object_id: varchar(40)  # the object id of the compass direction object
+    name: varchar(80)              # name of the compass direction object
+    """
+
+    _nwb_table = Nwbfile
+    _compass_import_enumerator = 1
+
+    @property
+    def _source_nwb_object_type(self):
+        return CompassDirection
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "name": "name",
+                "compass_object_id": "object_id",
+                "valid_times": self.generate_valid_intervals_from_timeseries,
+                "interval_list_name": self.enumerated_interval_name,
+            }
+        }
+
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Get all CompassDirection spatial series from NWB file, ordered by time."""
+        compass_objects = super().get_nwb_objects(nwb_file, nwb_file_name)
+        spatial_series = sum(
+            [list(obj.spatial_series.values()) for obj in compass_objects], []
+        )
+        start_times = [ss.get_timestamps()[0] for ss in spatial_series]
+        order = np.argsort(start_times)
+        spatial_series = [spatial_series[i] for i in order]
+
+        return spatial_series
+
+    def enumerated_interval_name(
+        self, obj: pynwb.behavior.SpatialSeries
+    ) -> str:
+        """Generate a unique interval list name for each compass direction object."""
+        name = f"compass {self._compass_import_enumerator} valid times"
+        self._compass_import_enumerator += 1
+        return name
+
+    @staticmethod
+    def generate_valid_intervals_from_timeseries(
+        nwb_obj: pynwb.behavior.SpatialSeries,
+    ):
+        """Generate valid intervals from spatial series.
+
+        Parameters
+        ----------
+        nwb_obj : pynwb.behavior.SpatialSeries
+            The pynwb.behavior.SpatialSeries NWB object.
+        Returns
+        -------
+        valid_times : list
+            List of valid time intervals.
+        """
+        timestamps = nwb_obj.get_timestamps()
+        sampling_rate = estimate_sampling_rate(
+            timestamps, filename=nwb_obj.name
+        )
+        valid_times = get_valid_intervals(
+            timestamps=timestamps,
+            sampling_rate=sampling_rate,
+            min_valid_len=int(sampling_rate),
+        )
+        return valid_times
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        self_key.pop(
+            "valid_times", None
+        )  # remove valid_times from the insert to this table
+        return {
+            IntervalList: [interval_insert],
+            **super_ins,
+        }
+
+    def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
+        """Insert entries from NWB file, generating interval list names ordered by time."""
+        self._compass_import_enumerator = 1  # reset enumerator
+        return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
 
 @schema
