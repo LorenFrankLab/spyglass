@@ -294,6 +294,7 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
+                print(f"Key {key} missing     required attribute {attr.name}.")
                 return False
         return True
 
@@ -361,15 +362,25 @@ class IngestionMixin(BaseMixin):
         """
         entries_to_insert = dict()
         for table, table_entries in entry_dict.items():
+            if isinstance(table, type):
+                table = table()  # instantiate table object if class provided
+
             entries_to_insert[table] = []
             for table_entry in table_entries:
-                adjusted_entries = self._adjust_keys_for_entry([table_entry])
+                adjusted_entries = table._adjust_keys_for_entry([table_entry])
                 if not adjusted_entries:
                     continue  # entry filtered out by adjustment
                 entry = adjusted_entries[0]
+                primary_entry = {
+                    k: v for k, v in entry.items() if k in table.primary_key
+                }
+                if not (table & primary_entry):
+                    # New entry, safe to insert
+                    entries_to_insert[table].append(entry)
+                    continue
+                # Existing entry, validate consistency
                 self.validate1_duplicate(table, entry)
-                if not (table & entry):
-                    entries_to_insert[table].append(table_entry)
+
         return entries_to_insert
 
     def validate1_duplicate(self, tbl, new_key):
