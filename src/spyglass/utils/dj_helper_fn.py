@@ -360,10 +360,6 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
         tbl.proj(nwb2load_filepath=attr_name), **arg
     )
 
-    # Fix for custom analysis tables #1435
-    if attrs and "nwb2load_filepath" not in attrs:
-        attrs = list(attrs) + ["nwb2load_filepath"]
-
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
@@ -374,7 +370,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             continue
 
         # Full dict caused issues with dlc tables using dicts in secondary keys
-        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_only_pk = {
+            k: v
+            for k, v in rec_dict.items()
+            if k in query_table.heading.primary_key
+        }
         rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
