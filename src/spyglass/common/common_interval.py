@@ -31,6 +31,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
     """
 
     # See #630, #664. Excessive key length.
+    _source_nwb_object_name = "epochs"
 
     @property
     def _source_nwb_object_type(self):
