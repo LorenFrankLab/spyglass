@@ -1,6 +1,65 @@
 import numpy as np
+import xarray as xr
+from scipy.ndimage import label
 
 from spyglass.common.common_interval import IntervalList
+
+
+def create_interval_labels(
+    is_missing: np.ndarray,
+) -> np.ndarray:
+    """Create interval labels from a missing data mask.
+
+    Uses scipy.ndimage.label to identify contiguous regions of valid data
+    (where is_missing=False) and assigns sequential integer labels.
+
+    Parameters
+    ----------
+    is_missing : np.ndarray
+        Boolean mask where True indicates time points outside intervals
+
+    Returns
+    -------
+    interval_labels : np.ndarray
+        Integer labels where:
+        - -1 indicates time points outside any interval
+        - 0, 1, 2, ... indicate the 1st, 2nd, 3rd interval index
+    """
+    # label() returns 1-indexed labels (0=outside, 1=first region, 2=second, ...)
+    # We want: -1=outside, 0=first interval, 1=second interval, ...
+    raw_labels, _ = label(~is_missing)
+    return raw_labels - 1
+
+
+def concatenate_interval_results(
+    interval_results: list[xr.Dataset],
+) -> xr.Dataset:
+    """Concatenate results from multiple intervals along time dimension.
+
+    Parameters
+    ----------
+    interval_results : list[xr.Dataset]
+        Results from each decoding interval
+
+    Returns
+    -------
+    xr.Dataset
+        Concatenated results with interval_labels coordinate
+
+    Raises
+    ------
+    ValueError
+        If interval_results is empty
+    """
+    if not interval_results:
+        raise ValueError("All decoding intervals are empty")
+
+    interval_labels = []
+    for interval_idx, result in enumerate(interval_results):
+        interval_labels.extend([interval_idx] * len(result.time))
+
+    concatenated = xr.concat(interval_results, dim="time")
+    return concatenated.assign_coords(interval_labels=("time", interval_labels))
 
 
 def _get_interval_range(key):
