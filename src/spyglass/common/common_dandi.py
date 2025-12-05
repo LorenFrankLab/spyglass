@@ -8,6 +8,7 @@ import fsspec
 import h5py
 import pynwb
 from fsspec.implementations.cached import CachingFileSystem
+from tqdm import tqdm
 
 from spyglass.common.common_usage import Export, ExportSelection
 from spyglass.settings import export_dir, raw_dir
@@ -164,18 +165,8 @@ class DandiPath(SpyglassMixin, dj.Manual):
                     "Directory must be removed prior to dandi export to ensure "
                     + f"dandi-compatability: {dandi_dir}"
                 )
-
         os.makedirs(destination_dir, exist_ok=False)
-        # for file in source_files:
-        #     if os.path.exists(f"{destination_dir}/{os.path.basename(file)}"):
-        #         continue
-        #     if skip_raw_files and raw_dir in file:
-        #         continue
-        #     # copy the file if it has external links so can be safely edited
-        #     if nwb_has_external_links(file):
-        #         shutil.copy(file, f"{destination_dir}/{os.path.basename(file)}")
-        #     else:
-        #         os.symlink(file, f"{destination_dir}/{os.path.basename(file)}")
+
         logger.info(
             f"Compiling dandiset in {destination_dir} from {len(source_files)} files"
         )
@@ -223,9 +214,7 @@ class DandiPath(SpyglassMixin, dj.Manual):
             files_mode=FileOperationMode.COPY,
             jobs=n_organize_processes,
         )
-
-        # get the dandi name translations
-        translations = lookup_dandi_translation(destination_dir, dandiset_dir)
+        logger.info("ORGANIZATION COMPLETE")
 
         # upload the dandiset to the dandi server
         logger.info("Uploading dandiset")
@@ -237,18 +226,24 @@ class DandiPath(SpyglassMixin, dj.Manual):
             jobs=n_upload_processes,
         )
         logger.info(f"Dandiset {dandiset_id} uploaded")
+
         # insert the translations into the dandi table
+        logger.info("Translating dandiset after organization")
+        # get the dandi name translations
+        translations = lookup_dandi_translation(destination_dir, dandiset_dir)
         translations = [
             {
                 **(
-                    Export.File() & key & f"file_path LIKE '%{t['filename']}'"
+                    Export.File() & key & f"file_path LIKE '%{local_name}'"
                 ).fetch1(),
-                **t,
+                "filename": local_name,
+                "dandi_path": dandi_path,
                 "dandiset_id": dandiset_id,
                 "dandi_instance": dandi_instance,
             }
-            for t in translations
+            for local_name, dandi_path in translations.items()
         ]
+        logger.info("TRANSLATION COMPLETE")
         self.insert(translations, ignore_extra_fields=True)
 
     def write_mysqldump(self, export_key: dict):
@@ -342,18 +337,19 @@ def lookup_dandi_translation(source_dir: str, dandiset_dir: str):
         dictionary of filename to dandi_path translations
     """
     # get the obj_id and dandipath for each nwb file in the dandiset
+    logger.info("Looking up dandi path translations")
     dandi_name_dict = {}
-    for dandi_file in Path(dandiset_dir).rglob("*.nwb"):
+    for dandi_file in tqdm(Path(dandiset_dir).rglob("*.nwb")):
         dandi_path = dandi_file.relative_to(dandiset_dir).as_posix()
-        with pynwb.NWBHDF5IO(dandi_file, "r") as io:
-            nwb = io.read()
-            dandi_name_dict[nwb.object_id] = dandi_path
+        with h5py.File(dandi_file, "r") as f:
+            obj_id = f.attrs["object_id"]
+            dandi_name_dict[obj_id] = dandi_path
     # for each file in the source_dir, lookup the dandipath based on the obj_id
     name_translation = {}
-    for file in Path(source_dir).glob("*"):
-        with pynwb.NWBHDF5IO(file, "r") as io:
-            nwb = io.read()
-            dandi_path = dandi_name_dict[nwb.object_id]
+    for file in tqdm(Path(source_dir).glob("*")):
+        with h5py.File(file, "r") as f:
+            obj_id = f.attrs["object_id"]
+            dandi_path = dandi_name_dict[obj_id]
             name_translation[file.name] = dandi_path
     return name_translation
 
