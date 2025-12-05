@@ -13,7 +13,17 @@ from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
+
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()  # See issue #1481
 ```
+
+### Breaking Changes
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Documentation
 
