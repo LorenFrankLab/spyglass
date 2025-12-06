@@ -253,11 +253,15 @@ class IngestionMixin(BaseMixin):
 
         # validate that new entries are consistent with existing entries
         if self._expected_duplicates:
-            self.validate_duplicates(entries)
+            entries_to_insert = self.validate_duplicates(entries)
+        else:
+            entries_to_insert = entries
 
         # run insertions
         if not dry_run:
-            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
+            self._run_nwbfile_insert(
+                entries_to_insert, nwb_file_name=nwb_file_name
+            )
 
         return entries
 
@@ -279,7 +283,7 @@ class IngestionMixin(BaseMixin):
         for table, table_entries in entries.items():
             table.insert(
                 table_entries,
-                skip_duplicates=expect_dupes(table),
+                skip_duplicates=False,
                 allow_direct_insert=True,
             )
             self._insert_logline(nwb_file_name, len(table_entries), table)
@@ -290,6 +294,7 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
+                print(f"Key {key} missing     required attribute {attr.name}.")
                 return False
         return True
 
@@ -348,10 +353,35 @@ class IngestionMixin(BaseMixin):
         entry_dict : dict or Dict[dj.Table, List[dict]]
             The new entry or dict of table entries to validate against existing
             entries in the database.
+
+        Returns
+        -------
+        dict or Dict[dj.Table, List[dict]]
+            The new entries to insert after validation. Avoids need to flag
+            skip_duplicates
         """
+        entries_to_insert = dict()
         for table, table_entries in entry_dict.items():
-            for entry in self._adjust_keys_for_entry(table_entries):
+            if isinstance(table, type):
+                table = table()  # instantiate table object if class provided
+
+            entries_to_insert[table] = []
+            for table_entry in table_entries:
+                adjusted_entries = table._adjust_keys_for_entry([table_entry])
+                if not adjusted_entries:
+                    continue  # entry filtered out by adjustment
+                entry = adjusted_entries[0]
+                primary_entry = {
+                    k: v for k, v in entry.items() if k in table.primary_key
+                }
+                if not (table & primary_entry):
+                    # New entry, safe to insert
+                    entries_to_insert[table].append(table_entry)
+                    continue
+                # Existing entry, validate consistency
                 self.validate1_duplicate(table, entry)
+
+        return entries_to_insert
 
     def validate1_duplicate(self, tbl, new_key):
         """If matching primary key, check for consistency in secondary keys.
