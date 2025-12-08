@@ -307,9 +307,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         self.insert(task_epoch_inserts, allow_direct_insert=True)
 
     @classmethod
-    def get_epoch_interval_name(
-        cls, epoch, session_intervals, _two_digit_only=False
-    ):
+    def get_epoch_interval_name(cls, epoch, session_intervals):
         """Get the interval name for a given epoch based on matching number.
 
         This method implements flexible matching to handle various epoch tag
@@ -317,6 +315,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         1. Exact match (e.g., "1")
         2. Two-digit zero-padded (e.g., "01")
         3. Three-digit zero-padded (e.g., "001")
+        If multiple matches are found, the two-digit only match is prioritized if
+        present. If no unique match is found, a warning is logged.
 
         Parameters
         ----------
@@ -324,9 +324,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             The epoch number to search for
         session_intervals : list of str
             List of interval names from IntervalList
-        _two_digit_only : bool, optional
-            If True, only check for two-digit zero-padded format. Used internally
-            to always trigger prioritization of this format, by default False
 
         Returns
         -------
@@ -346,23 +343,26 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         if epoch in session_intervals:
             return epoch
 
-        if _two_digit_only:
-            possible_formats = [
-                str(epoch).zfill(2),  # Prioritize 2-digit zero-pad (e.g., "01")
-            ]
-        else:
-            # First prioritize check for two-digit only:
-            if interval_name := cls.get_epoch_interval_name(
-                epoch, session_intervals, _two_digit_only=True
-            ):
-                return interval_name
+        two_digit_matches = [
+            interval
+            for interval in session_intervals
+            if str(epoch).zfill(2) in interval
+        ]
+        if len(set(two_digit_matches)) == 1:
+            return two_digit_matches[0]
 
-            # Try multiple formats:
-            possible_formats = [
-                str(epoch),  # Try exact match first (e.g., "1")
-                str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
-                str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
-            ]
+        # First prioritize check for two-digit only:
+        if interval_name := cls.get_epoch_interval_name(
+            epoch, session_intervals, _two_digit_only=True
+        ):
+            return interval_name
+
+        # Try multiple formats:
+        possible_formats = [
+            str(epoch),  # Try exact match first (e.g., "1")
+            str(epoch).zfill(2),  # Try 2-digit zero-pad (e.g., "01")
+            str(epoch).zfill(3),  # Try 3-digit zero-pad (e.g., "001")
+        ]
         unique_formats = list(dict.fromkeys(possible_formats))
 
         # Find matches for any format, remove duplicates preserving order
