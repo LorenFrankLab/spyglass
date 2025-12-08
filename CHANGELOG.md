@@ -13,7 +13,17 @@ from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
+
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()  # See issue #1481
 ```
+
+### Breaking Changes
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Documentation
 
@@ -72,6 +82,8 @@ DecodingParameters().alter()
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+- LFP
+    - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
