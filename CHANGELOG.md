@@ -44,6 +44,7 @@ DecodingParameters().alter()
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
+- Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
@@ -66,6 +67,8 @@ DecodingParameters().alter()
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
     - Handle epoch formats with varying zero-padding #1459, #1492
+    - Add the table `RawCompassDirection` for importing orientation
+      data from NWB files #1466
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
