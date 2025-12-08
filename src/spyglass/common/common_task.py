@@ -351,12 +351,6 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         if len(set(two_digit_matches)) == 1:
             return two_digit_matches[0]
 
-        # First prioritize check for two-digit only:
-        if interval_name := cls.get_epoch_interval_name(
-            epoch, session_intervals
-        ):
-            return interval_name
-
         # Try multiple formats:
         possible_formats = [
             str(epoch),  # Try exact match first (e.g., "1")
