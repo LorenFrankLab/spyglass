@@ -243,23 +243,6 @@ See [issue #1000](https://github.com/LorenFrankLab/spyglass/issues/1000) and
 [PR #1001](https://github.com/LorenFrankLab/spyglass/pull/1001) for more
 information.
 
-### Disable Transaction Protection
-
-By default, DataJoint wraps the `populate` function in a transaction to ensure
-data integrity (see
-[Transactions](https://docs.datajoint.io/python/definition/05-Transactions.html)).
-
-This can cause issues when populating large tables if another user attempts to
-declare/modify a table while the transaction is open (see
-[issue #1030](https://github.com/LorenFrankLab/spyglass/issues/1030) and
-[DataJoint issue #1170](https://github.com/datajoint/datajoint-python/issues/1170)).
-
-Tables with `_use_transaction` set to `False` will not be wrapped in a
-transaction when calling `populate`. Transaction protection is replaced by a
-hash of upstream data to ensure no changes are made to the table during the
-unprotected populate. The additional time required to hash the data is a
-trade-off for already time-consuming populates, but avoids blocking other users.
-
 ## Miscellaneous Helper functions
 
 `file_like` allows you to restrict a table using a substring of a file name.

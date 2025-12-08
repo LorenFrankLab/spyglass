@@ -45,6 +45,7 @@ DecodingParameters().alter()
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
 - Allow for permissive name selection when identifying objects in ingestion nwb #1490
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
 
@@ -63,7 +64,6 @@ DecodingParameters().alter()
         from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
-    - Improve error transparency on duplicate `Electrode` ids #1454
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
     - Handle epoch formats with varying zero-padding #1459
