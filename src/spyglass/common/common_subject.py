@@ -39,7 +39,10 @@ class Subject(SpyglassIngestion, dj.Manual):
     @staticmethod
     def standardized_sex_string(subject, warn=True):
         """Takes subject.sex and returns 'M', 'F', or 'U'."""
-        sex_field = getattr(subject, "sex", "U") or "U"
+        if isinstance(subject, dict):
+            sex_field = subject.get("sex", "U") or "U"
+        else:
+            sex_field = getattr(subject, "sex", "U") or "U"
         if (sex := sex_field[0].upper()) in ("M", "F", "U"):
             return sex
         elif warn:
