@@ -353,7 +353,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
         # First prioritize check for two-digit only:
         if interval_name := cls.get_epoch_interval_name(
-            epoch, session_intervals, _two_digit_only=True
+            epoch, session_intervals
         ):
             return interval_name
 
