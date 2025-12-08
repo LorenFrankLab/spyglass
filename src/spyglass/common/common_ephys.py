@@ -465,9 +465,7 @@ class LFP(SpyglassMixin, dj.Imported):
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
-    _use_transaction, _allow_insert = False, True
-
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate the LFP table with data from the NWB file.
 
         1. Fetches the raw data and sampling rate from the Raw table.
@@ -476,15 +474,14 @@ class LFP(SpyglassMixin, dj.Imported):
         4. Applies LFP 0-400 Hz filter from FirFilterParameters table.
         5. Generates a new analysis NWB file with the LFP data.
         """
-        # get the NWB object with the data; FIX: change to fetch with
-        # additional infrastructure
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
+        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
             "sampling_rate", "interval_list_name"
         )
-        sampling_rate = int(np.round(sampling_rate))
 
         valid_times = (
             IntervalList()
@@ -493,6 +490,48 @@ class LFP(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch_interval()
+
+        # get the LFP filter that matches the raw data
+        # there should only be one
+        filter = (
+            FirFilterParameters()
+            & dict(
+                filter_name="LFP 0-400 Hz", filter_sampling_rate=sampling_rate
+            )
+        ).fetch(as_dict=True)[0]
+
+        return [
+            lfp_file_name,
+            lfp_file_abspath,
+            electrode_keys,
+            rawdata,
+            sampling_rate,
+            interval_list_name,
+            valid_times,
+            filter,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        lfp_file_name,
+        lfp_file_abspath,
+        electrode_keys,
+        rawdata,
+        sampling_rate,
+        interval_list_name,
+        valid_times,
+        filter,
+    ):
+
+        filter_coeff = filter["filter_coeff"]
+        if len(filter_coeff) == 0:
+            logger.error(
+                "Error in LFP: no filter found with data sampling rate of "
+                + f"{sampling_rate}"
+            )
+            return [None] * 2  # Number reflects expected values for make_insert
+
         # keep only the intervals > 1 second long
         orig_len = len(valid_times)
         valid_times = valid_times.by_length(min_length=1.0)
@@ -502,34 +541,13 @@ class LFP(SpyglassMixin, dj.Imported):
         )
 
         # target 1 KHz sampling rate
+        sampling_rate = int(np.round(sampling_rate))
         decimation = sampling_rate // 1000
 
-        # get the LFP filter that matches the raw data
-        filter = (
-            FirFilterParameters()
-            & {"filter_name": "LFP 0-400 Hz"}
-            & {"filter_sampling_rate": sampling_rate}
-        ).fetch(as_dict=True)
-
-        # there should only be one filter that matches, so we take the first of
-        # the dictionaries
-
-        key["filter_name"] = filter[0]["filter_name"]
-        key["filter_sampling_rate"] = filter[0]["filter_sampling_rate"]
-
-        filter_coeff = filter[0]["filter_coeff"]
-        if len(filter_coeff) == 0:
-            logger.error(
-                "Error in LFP: no filter found with data sampling rate of "
-                + f"{sampling_rate}"
-            )
-            return None
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
             timestamp_interval,
@@ -542,24 +560,33 @@ class LFP(SpyglassMixin, dj.Imported):
             decimation,
         )
 
-        # now that the LFP is filtered and in the file, add the file to the
-        # AnalysisNwbfile table
-
-        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
-
-        key["analysis_file_name"] = lfp_file_name
-        key["lfp_object_id"] = lfp_object_id
-        key["lfp_sampling_rate"] = sampling_rate // decimation
+        # tri-part make doesn't allow modifying keys
+        added_key = dict(
+            filter_name=filter["filter_name"],
+            filter_sampling_rate=sampling_rate,
+            analysis_file_name=lfp_file_name,
+            lfp_object_id=lfp_object_id,
+            lfp_sampling_rate=sampling_rate // decimation,
+        )
 
         # finally, censor the valid times to account for the downsampling
         lfp_valid_times = valid_times.censor(timestamp_interval)
         lfp_valid_times.set_key(
             nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
+
+        return [lfp_valid_times, added_key, lfp_file_name]
+
+    def make_insert(self, key, lfp_valid_times, added_key, lfp_file_name):
+        if lfp_valid_times is None and added_key is None:
+            return
+
+        # add the analysis nwb file entry
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         # add an interval list for the LFP valid times, skipping duplicates
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
-        self.insert1(key)
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
+        self.insert1(dict(key, **added_key))
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
