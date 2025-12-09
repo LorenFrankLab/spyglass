@@ -489,7 +489,7 @@ class AnalysisMixin(BaseMixin):
                 cls()._ext_tbl & f"filepath LIKE '%{analysis_nwb_file_name}'"
             )
             if len(query) == 1:  # Else try the standard way
-                return Path(cls()._analysis_dir) / query.fetch1("filepath")
+                return str(Path(cls()._analysis_dir) / query.fetch1("filepath"))
             cls()._logger.warning(
                 f"Found {len(query)} files for: {analysis_nwb_file_name}"
             )
