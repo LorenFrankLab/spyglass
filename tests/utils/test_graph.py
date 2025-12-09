@@ -24,6 +24,100 @@ def restr_graph(leaf, verbose, lin_merge_key):
     )
 
 
+@pytest.fixture(scope="function")
+def add_graph_rgs(add_graph_tables):
+    """Return two RestrGraph objects to test addition."""
+    from spyglass.utils.dj_graph import RestrGraph
+
+    tables = add_graph_tables
+
+    restr_1 = "a_id < 2"
+    restr_2 = {
+        "a_id": 2,
+    }
+    restr_3 = {
+        "a_id": 3,
+    }
+
+    rg_1 = RestrGraph(
+        seed_table=add_graph_tables["B1"],
+        leaves={tables["B1"].full_table_name: restr_1},
+        direction="up",
+        cascade=True,
+    )
+    rg_1.cascade()
+
+    rg_2 = RestrGraph(
+        seed_table=add_graph_tables["B2"],
+        direction="up",
+        cascade=True,
+    )
+    rg_2.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_2)
+    rg_2.cascade()
+
+    rg_3 = RestrGraph(
+        seed_table=add_graph_tables["B2"],
+        direction="up",
+        cascade=True,
+    )
+    rg_3.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_3)
+    rg_3.cascade()
+
+    yield rg_1, rg_2, rg_3
+
+
+def test_rg_add(add_graph_rgs, add_graph_tables):
+    """Test adding tables to RestrGraph."""
+    tables = add_graph_tables
+    rg_1, rg_2, _ = add_graph_rgs
+
+    assert (
+        len(rg_1._get_ft(tables["A"].full_table_name, with_restr=True)) == 2
+    ), "Unexpected restricted table length for rg_1."
+    assert (
+        len(rg_2._get_ft(tables["A"].full_table_name, with_restr=True)) == 1
+    ), "Unexpected restricted table length for rg_2."
+
+    rg_union = rg_1 + rg_2
+
+    assert (
+        len(rg_union._get_ft(tables["A"].full_table_name, with_restr=True)) == 3
+    ), (
+        "Unexpected parent restricted table length for union of rg_1 and rg_2."
+        + f" IDs: {rg_union._get_ft(tables['A'].full_table_name, with_restr=True).fetch('a_id')}"
+    )
+    assert (
+        len(rg_union._get_ft(tables["B1"].full_table_name, with_restr=True))
+        == 2
+    ), "Unexpected child restricted table length for union of rg_1 and rg_2."
+
+
+def test_rg_add_list(add_graph_rgs, add_graph_tables):
+    """Test adding tables to RestrGraph."""
+    tables = add_graph_tables
+    rg_1, rg_2, rg_3 = add_graph_rgs
+
+    assert (
+        len(rg_1._get_ft(tables["A"].full_table_name, with_restr=True)) == 2
+    ), "Unexpected restricted table length for rg_1."
+    assert (
+        len(rg_2._get_ft(tables["A"].full_table_name, with_restr=True)) == 1
+    ), "Unexpected restricted table length for rg_2."
+
+    rg_union = rg_1 + [rg_2, rg_3]
+
+    assert (
+        len(rg_union._get_ft(tables["A"].full_table_name, with_restr=True)) == 4
+    ), (
+        "Unexpected parent restricted table length for union of rg_1 and rg_2."
+        + f" IDs: {rg_union._get_ft(tables['A'].full_table_name, with_restr=True).fetch('a_id')}"
+    )
+    assert (
+        len(rg_union._get_ft(tables["B1"].full_table_name, with_restr=True))
+        == 2
+    ), "Unexpected child restricted table length for union of rg_1 and rg_2."
+
+
 def test_rg_repr(restr_graph, leaf):
     """Test that the repr of a RestrGraph object is as expected."""
     repr_got = repr(restr_graph)

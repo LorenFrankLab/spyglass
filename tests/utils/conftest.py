@@ -285,3 +285,41 @@ def graph_tables_many_to_one(graph_tables):
     PkSkNode.insert(new_inserts, **insert_kwargs)
 
     yield graph_tables
+
+
+@pytest.fixture(scope="module")
+def add_graph_tables(SpyglassMixin):
+    schema = dj.Schema("test_add_graphs")
+
+    @schema
+    class A(SpyglassMixin, dj.Lookup):
+        definition = """
+        a_id: int
+        ---
+        a_attr: int
+        """
+        contents = [(i, i + 10) for i in range(5)]
+
+    @schema
+    class B1(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 20) for i in range(5)]
+
+    @schema
+    class B2(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 30) for i in range(5)]
+
+    return {
+        "A": A(),
+        "B1": B1(),
+        "B2": B2(),
+    }
