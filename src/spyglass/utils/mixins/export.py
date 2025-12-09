@@ -43,6 +43,18 @@ class ExportMixin:
 
         return ret
 
+    @cached_property
+    def _maximum_export_restriction_size(self):
+        """Get maximum restriction size from ExportSelection table definition."""
+        from spyglass.common.common_usage import ExportSelection
+
+        restr_size = int(
+            ExportSelection.Table.definition.split("restriction")[-1]
+            .split("(")[1]
+            .split(")")[0]
+        )
+        return restr_size
+
     def compare_versions(
         self, version: str, other: str = None, msg: str = None
     ) -> None:
@@ -254,7 +266,7 @@ class ExportMixin:
         if not (
             isinstance(restr_str, str)
             and (
-                (len(restr_str) > 2048)
+                (len(restr_str) > self._maximum_export_restriction_size)
                 or "SELECT" in restr_str
                 or self._is_projected()
             )
@@ -270,7 +282,8 @@ class ExportMixin:
         else:
             # handle excessive restrictions caused by long OR list of dicts
             logger.debug(
-                f"Restriction too long ({len(restr_str)} > 2048)."
+                f"Restriction too long ({len(restr_str)} > "
+                + f"{self._maximum_export_restriction_size})."
                 + "Attempting to chunk restriction by subsets of entry keys."
             )
         # get list of entry keys
@@ -290,8 +303,8 @@ class ExportMixin:
     def _insert_entries_log(self, entries):
         """Inserts table access log given list of entry keys.
 
-        If the restriction string exceeds 2048 characters, the entries
-        are chunked into smaller groups to fit within the limit.
+        If the restriction string exceeds _maximum_export_restriction_size characters,
+        the entries are chunked into smaller groups to fit within the limit.
         Parameters
         ----------
         entries : List[dict]
@@ -303,17 +316,22 @@ class ExportMixin:
         all_entries_restr_str = make_condition(
             self.undo_projection(), entries, set()
         )
-        if len(all_entries_restr_str) <= 2048:
+        if len(all_entries_restr_str) <= self._maximum_export_restriction_size:
             self._insert_log(all_entries_restr_str)
             return
 
         if len(entries) == 1:
             raise RuntimeError(
-                "Single entry restriction exceeds 2048 characters.\n\t"
+                "Single entry restriction exceeds maximum restriction size of "
+                + f"{self._maximum_export_restriction_size} characters.\n\t"
                 + f"Restriction: {all_entries_restr_str}"
             )
         chunk_size = max(
-            int(2048 // (len(all_entries_restr_str) / len(entries)) - 1),
+            int(
+                self._maximum_export_restriction_size
+                // (len(all_entries_restr_str) / len(entries))
+                - 1
+            ),
             1,
         )
         for i in range(len(entries) // chunk_size + 1):
@@ -326,9 +344,10 @@ class ExportMixin:
     def _insert_log(self, restr_str):
         """Executes insert log entry for export table and restriction."""
 
-        if len(restr_str) > 2048:
+        if len(restr_str) > self._maximum_export_restriction_size:
             raise RuntimeError(
-                "Export cannot handle restrictions > 2048.\n\t"
+                "Export cannot handle restrictions > "
+                + f"{self._maximum_export_restriction_size}.\n\t"
                 + "If required, please open an issue on GitHub.\n\t"
                 + f"Restriction: {restr_str}"
             )
