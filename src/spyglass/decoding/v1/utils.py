@@ -1,3 +1,5 @@
+from typing import List, Tuple
+
 import numpy as np
 import numpy.typing as npt
 import xarray as xr
@@ -16,12 +18,12 @@ def create_interval_labels(
 
     Parameters
     ----------
-    is_missing : np.ndarray
+    is_missing : npt.NDArray[np.bool_], shape (n_time,)
         Boolean mask where True indicates time points outside intervals
 
     Returns
     -------
-    interval_labels : np.ndarray
+    interval_labels : npt.NDArray[np.intp], shape (n_time,)
         Integer labels where:
         - -1 indicates time points outside any interval
         - 0, 1, 2, ... indicate the 1st, 2nd, 3rd interval index
@@ -33,13 +35,13 @@ def create_interval_labels(
 
 
 def concatenate_interval_results(
-    interval_results: list[xr.Dataset],
+    interval_results: List[xr.Dataset],
 ) -> xr.Dataset:
     """Concatenate results from multiple intervals along time dimension.
 
     Parameters
     ----------
-    interval_results : list[xr.Dataset]
+    interval_results : List[xr.Dataset], length n_intervals
         Results from each decoding interval
 
     Returns
@@ -63,7 +65,7 @@ def concatenate_interval_results(
     return concatenated.assign_coords(interval_labels=("time", interval_labels))
 
 
-def _get_interval_range(key: dict) -> tuple[float, float]:
+def _get_interval_range(key: dict) -> Tuple[float, float]:
     """Return maximum range of model times in encoding/decoding intervals
 
     Parameters
@@ -73,7 +75,7 @@ def _get_interval_range(key: dict) -> tuple[float, float]:
 
     Returns
     -------
-    Tuple[float, float]
+    tuple[float, float]
         The minimum and maximum times for the model
     """
     encoding_interval = (
