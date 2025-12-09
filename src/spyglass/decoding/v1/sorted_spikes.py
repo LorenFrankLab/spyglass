@@ -226,11 +226,15 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         classifier = SortedSpikesDetector(**decoding_params)
 
         if key["estimate_decoding_params"]:
-            # if estimating parameters, then we need to treat times outside
-            # decoding interval as missing this means that times outside the
-            # decoding interval will not use the spiking data a better approach
-            # would be to treat the intervals as multiple sequences (see
-            # https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
+            # When estimating parameters, treat times outside decoding intervals
+            # as missing. This means:
+            # 1. Spike data at those times is ignored
+            # 2. Only state transitions and previous time steps determine the
+            #    posterior
+            # 3. Longer gaps may lead to less reliable predictions
+            #
+            # Alternative approach: Treat intervals as multiple independent
+            # sequences (see https://en.wikipedia.org/wiki/Baum%E2%80%93Welch_algorithm#Multiple_sequences)
 
             is_missing = np.ones(len(position_info), dtype=bool)
             for interval_start, interval_end in decoding_interval:
@@ -317,12 +321,22 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 )
                 interval_results.append(interval_result)
 
+            # Validate that at least one interval had valid time points
+            if not interval_results:
+                raise ValueError(
+                    "All decoding intervals are empty - no valid time points.\n"
+                    f"Decoding intervals: {decoding_interval.tolist()}\n"
+                    f"Position data range: "
+                    f"[{position_info.index.min()}, {position_info.index.max()}]"
+                )
+
             # Concatenate along time with interval_labels coordinate
             results = concatenate_interval_results(interval_results)
 
         # Save discrete transition and initial conditions
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
+            dims=("states",),
             name="initial_conditions",
         )
         results["discrete_state_transitions"] = xr.DataArray(
