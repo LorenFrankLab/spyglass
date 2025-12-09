@@ -45,6 +45,7 @@ DecodingParameters().alter()
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
 - Allow for permissive name selection when identifying objects in ingestion nwb #1490
+- Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
@@ -66,6 +67,8 @@ DecodingParameters().alter()
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
+    - Add the table `RawCompassDirection` for importing orientation
+      data from NWB files #1466
     - Handle epoch formats with varying zero-padding #1459
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
