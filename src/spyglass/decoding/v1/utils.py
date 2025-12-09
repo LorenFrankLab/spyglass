@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.typing as npt
 import xarray as xr
 from scipy.ndimage import label
 
@@ -6,8 +7,8 @@ from spyglass.common.common_interval import IntervalList
 
 
 def create_interval_labels(
-    is_missing: np.ndarray,
-) -> np.ndarray:
+    is_missing: npt.NDArray[np.bool_],
+) -> npt.NDArray[np.intp]:
     """Create interval labels from a missing data mask.
 
     Uses scipy.ndimage.label to identify contiguous regions of valid data
@@ -62,7 +63,7 @@ def concatenate_interval_results(
     return concatenated.assign_coords(interval_labels=("time", interval_labels))
 
 
-def _get_interval_range(key):
+def _get_interval_range(key: dict) -> tuple[float, float]:
     """Return maximum range of model times in encoding/decoding intervals
 
     Parameters
