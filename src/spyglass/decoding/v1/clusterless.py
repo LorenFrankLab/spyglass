@@ -382,7 +382,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Save discrete transition and initial conditions
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
-            dims=("states",),
+            dims=("state_labels",),
             name="initial_conditions",
         )
         results["discrete_state_transitions"] = xr.DataArray(
