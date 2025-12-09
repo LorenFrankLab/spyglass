@@ -1,49 +1,107 @@
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
 
 
-def test_concat_sort_index_slice_unsorted_data():
-    """Unit test verifying sort_index is required before .loc[] slice.
+def test_fetch_position_info_non_chronological_merge_ids():
+    """Test fetch_position_info handles non-chronological merge_id order.
 
-    Regression test for bug where pd.concat followed by .loc[min:max] on
-    unsorted index returns empty DataFrame. This test explicitly constructs
-    unsorted data to guarantee the bug scenario is exercised, independent
-    of fixture data ordering.
+    Regression test for https://github.com/LorenFrankLab/spyglass/issues/1471
 
-    See: https://github.com/LorenFrankLab/spyglass/issues/1471
+    This test mocks the internal data fetching to guarantee that position data
+    is returned in non-chronological order (later times first), which would
+    cause an empty DataFrame without the sort_index() fix.
     """
-    # Simulate out-of-order position data (second chunk has earlier times)
-    # This mimics when merge_ids are fetched alphabetically rather than
-    # chronologically
-    df1 = pd.DataFrame(
-        {"x": [1.0, 2.0], "y": [10.0, 20.0]}, index=[10.0, 11.0]
-    )  # Later times
-    df2 = pd.DataFrame(
-        {"x": [3.0, 4.0], "y": [30.0, 40.0]}, index=[5.0, 6.0]
-    )  # Earlier times
+    from spyglass.decoding.v1.core import PositionGroup
 
-    min_time, max_time = 5.0, 11.0
-
-    # Without sort_index, .loc[] on unsorted index returns empty DataFrame
-    unsorted = pd.concat([df1, df2], axis=0)
-    assert (
-        not unsorted.index.is_monotonic_increasing
-    ), "Sanity check: concat result should be unsorted"
-    assert (
-        len(unsorted.loc[min_time:max_time]) == 0
-    ), "Sanity check: unsorted .loc[] slice returns empty"
-
-    # With sort_index, .loc[] returns all data correctly
-    sorted_result = (
-        pd.concat([df1, df2], axis=0).sort_index().loc[min_time:max_time]
+    # Create mock position dataframes in NON-chronological order
+    # First merge_id returns LATER times (simulating alphabetically-first UUID)
+    df_later = pd.DataFrame(
+        {
+            "position_x": [100.0, 110.0, 120.0],
+            "position_y": [200.0, 210.0, 220.0],
+            "velocity_x": [1.0, 1.1, 1.2],
+            "velocity_y": [2.0, 2.1, 2.2],
+        },
+        index=[10.0, 11.0, 12.0],  # Later times: 10-12s
     )
-    assert len(sorted_result) == 4, "Sorted slice should contain all 4 rows"
+    df_later.index.name = "time"
+
+    # Second merge_id returns EARLIER times (simulating alphabetically-second UUID)
+    df_earlier = pd.DataFrame(
+        {
+            "position_x": [50.0, 60.0, 70.0],
+            "position_y": [150.0, 160.0, 170.0],
+            "velocity_x": [0.5, 0.6, 0.7],
+            "velocity_y": [1.5, 1.6, 1.7],
+        },
+        index=[5.0, 6.0, 7.0],  # Earlier times: 5-7s
+    )
+    df_earlier.index.name = "time"
+
+    # Mock PositionGroup instance
+    mock_self = MagicMock(spec=PositionGroup)
+
+    # Configure mock to return test data
+    mock_self.__and__ = MagicMock(return_value=mock_self)
+    mock_self.fetch1.side_effect = [
+        {"nwb_file_name": "test.nwb", "position_group_name": "test_group"},
+        ["position_x", "position_y"],  # position_variables
+        np.nan,  # upsample_rate (no upsampling)
+    ]
+
+    # Mock Position table to return two merge_ids
+    mock_position = MagicMock()
+    mock_position.fetch.return_value = ["merge_id_1", "merge_id_2"]
+    mock_self.Position.__and__.return_value = mock_position
+
+    # Track which dataframe to return (non-chronological order)
+    dataframes = [df_later, df_earlier]  # Later times first!
+    df_index = [0]
+
+    def mock_fetch1_dataframe():
+        df = dataframes[df_index[0]]
+        df_index[0] += 1
+        return df
+
+    # Patch PositionOutput to return our mock dataframes
+    with patch("spyglass.decoding.v1.core.PositionOutput") as mock_pos_output:
+        mock_pos_output.__and__ = MagicMock(return_value=mock_pos_output)
+        mock_pos_output.return_value.fetch1_dataframe = mock_fetch1_dataframe
+        mock_pos_output.fetch1_dataframe = mock_fetch1_dataframe
+
+        # Call the actual method
+        result, variables = PositionGroup.fetch_position_info(mock_self)
+
+    # Verify the result is NOT empty (the bug would return empty DataFrame)
+    assert len(result) == 6, f"Expected 6 rows, got {len(result)}"
+
+    # Verify the index is sorted chronologically
     assert (
-        sorted_result.index.is_monotonic_increasing
-    ), "Result should be sorted"
+        result.index.is_monotonic_increasing
+    ), "Result index should be sorted chronologically"
+
+    # Verify the data spans the full time range
+    assert result.index.min() == 5.0, "Min time should be 5.0"
+    assert result.index.max() == 12.0, "Max time should be 12.0"
+
+    # Verify the order is correct (earlier data first after sorting)
     np.testing.assert_array_equal(
-        sorted_result.index.values, [5.0, 6.0, 10.0, 11.0]
+        result.index.values,
+        [5.0, 6.0, 7.0, 10.0, 11.0, 12.0],
+    )
+
+    # Verify data integrity - first 3 rows should be from df_earlier
+    np.testing.assert_array_equal(
+        result["position_x"].values[:3],
+        [50.0, 60.0, 70.0],
+    )
+    # Last 3 rows should be from df_later
+    np.testing.assert_array_equal(
+        result["position_x"].values[3:],
+        [100.0, 110.0, 120.0],
     )
 
 
@@ -66,27 +124,3 @@ def test_upsampled_pos_group(pop_pos_group_upsampled):
     ret = pop_pos_group_upsampled.fetch_position_info()[0]
     sample_freq = ret.index.to_series().diff().mode().iloc[0]
     pytest.approx(sample_freq, 0.001) == 1 / 250, "Upsampled data not at 250 Hz"
-
-
-def test_position_group_non_chronological_order(pop_pos_group):
-    """Test that fetch_position_info handles non-chronological merge_id order.
-
-    This test verifies that when position data from multiple merge_ids is
-    concatenated, the result is properly sorted by time index before slicing.
-    This prevents returning an empty dataframe when merge_ids are not in
-    chronological order.
-    """
-    # Fetch position info - internally may not be in chronological order
-    position_info, position_variables = pop_pos_group.fetch_position_info()
-
-    # Verify the dataframe is not empty
-    assert len(position_info) > 0, "Position info should not be empty"
-
-    # Verify the index is sorted (monotonically increasing)
-    assert (
-        position_info.index.is_monotonic_increasing
-    ), "Position info index should be sorted in chronological order"
-
-    # Verify position variables are present
-    assert position_variables is not None
-    assert len(position_variables) > 0
