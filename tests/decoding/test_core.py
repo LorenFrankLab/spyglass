@@ -69,7 +69,6 @@ def test_fetch_position_info_non_chronological_merge_ids():
     # Patch PositionOutput to return our mock dataframes
     with patch("spyglass.decoding.v1.core.PositionOutput") as mock_pos_output:
         mock_pos_output.__and__ = MagicMock(return_value=mock_pos_output)
-        mock_pos_output.return_value.fetch1_dataframe = mock_fetch1_dataframe
         mock_pos_output.fetch1_dataframe = mock_fetch1_dataframe
 
         # Call the actual method
