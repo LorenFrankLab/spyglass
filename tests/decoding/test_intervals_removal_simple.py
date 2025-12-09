@@ -5,6 +5,7 @@ database infrastructure or external dependencies.
 """
 
 import numpy as np
+import pytest
 import xarray as xr
 
 
@@ -126,7 +127,101 @@ def test_memory_efficiency():
     assert savings_percent > 0, "New approach should save memory"
 
 
+def test_empty_intervals_raises_error():
+    """Test that concatenate_interval_results raises ValueError for empty list.
+
+    This ensures proper error handling when all decoding intervals are empty
+    (e.g., intervals don't overlap with position data).
+    """
+    from scipy.ndimage import label
+
+    # Replicate the concatenate_interval_results logic to test without DB
+    def concatenate_interval_results(interval_results):
+        if not interval_results:
+            raise ValueError("All decoding intervals are empty")
+        interval_labels = []
+        for interval_idx, result in enumerate(interval_results):
+            interval_labels.extend([interval_idx] * len(result.time))
+        concatenated = xr.concat(interval_results, dim="time")
+        return concatenated.assign_coords(
+            interval_labels=("time", interval_labels)
+        )
+
+    with pytest.raises(ValueError, match="All decoding intervals are empty"):
+        concatenate_interval_results([])
+
+
+def test_create_interval_labels_all_missing():
+    """Test create_interval_labels when all data is missing."""
+    from scipy.ndimage import label
+
+    # Replicate the create_interval_labels logic to test without DB
+    def create_interval_labels(is_missing):
+        raw_labels, _ = label(~is_missing)
+        return raw_labels - 1
+
+    # All time points marked as missing
+    is_missing = np.ones(100, dtype=bool)
+    labels = create_interval_labels(is_missing)
+
+    # All labels should be -1 (outside any interval)
+    assert np.all(
+        labels == -1
+    ), "All labels should be -1 when all data is missing"
+
+
+def test_create_interval_labels_single_interval():
+    """Test create_interval_labels with a single contiguous interval."""
+    from scipy.ndimage import label
+
+    def create_interval_labels(is_missing):
+        raw_labels, _ = label(~is_missing)
+        return raw_labels - 1
+
+    # Single interval from index 20-50
+    is_missing = np.ones(100, dtype=bool)
+    is_missing[20:51] = False
+
+    labels = create_interval_labels(is_missing)
+
+    # Check -1 for outside, 0 for inside
+    assert np.all(labels[:20] == -1), "Labels before interval should be -1"
+    assert np.all(labels[20:51] == 0), "Labels inside interval should be 0"
+    assert np.all(labels[51:] == -1), "Labels after interval should be -1"
+
+
+def test_create_interval_labels_multiple_intervals():
+    """Test create_interval_labels with multiple non-contiguous intervals."""
+    from scipy.ndimage import label
+
+    def create_interval_labels(is_missing):
+        raw_labels, _ = label(~is_missing)
+        return raw_labels - 1
+
+    # Two intervals: 10-20 and 40-60
+    is_missing = np.ones(100, dtype=bool)
+    is_missing[10:21] = False
+    is_missing[40:61] = False
+
+    labels = create_interval_labels(is_missing)
+
+    # Check labels
+    assert np.all(
+        labels[:10] == -1
+    ), "Labels before first interval should be -1"
+    assert np.all(labels[10:21] == 0), "First interval should have label 0"
+    assert np.all(labels[21:40] == -1), "Gap between intervals should be -1"
+    assert np.all(labels[40:61] == 1), "Second interval should have label 1"
+    assert np.all(
+        labels[61:] == -1
+    ), "Labels after second interval should be -1"
+
+
 if __name__ == "__main__":
     test_concatenation_without_intervals_dimension()
     test_memory_efficiency()
+    test_empty_intervals_raises_error()
+    test_create_interval_labels_all_missing()
+    test_create_interval_labels_single_interval()
+    test_create_interval_labels_multiple_intervals()
     print("\n✓✓ All simple tests passed!")

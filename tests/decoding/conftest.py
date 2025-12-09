@@ -1,6 +1,7 @@
+from unittest.mock import patch
+
 import numpy as np
 import pytest
-from unittest.mock import patch
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -651,11 +652,12 @@ def mock_detector_io_globally(mock_results_storage):
     netcdf4 engine specification to avoid engine detection errors.
     """
     from unittest.mock import patch
+
+    import xarray as xr
     from non_local_detector.models.base import (
         ClusterlessDetector,
         SortedSpikesDetector,
     )
-    import xarray as xr
 
     def _mock_load_results(filename):
         """Load results with explicit netcdf4 engine."""
@@ -717,11 +719,11 @@ def mock_save_decoder_results_globally(mock_results_storage):
     1. Writing netCDF files with explicit netcdf4 engine
     2. Storing actual data in memory for loading via mock_detector_io_globally
     """
-    from unittest.mock import patch
-    from pathlib import Path
-    import uuid
-    import pickle
     import os
+    import pickle
+    import uuid
+    from pathlib import Path
+    from unittest.mock import patch
 
     def _mock_save_results(self, classifier, results, key):
         """Mocked version that creates files with explicit netcdf4 engine."""
@@ -905,10 +907,10 @@ def mock_decoder_save(mock_results_storage):
     the real _save_decoder_results method. Creates netCDF files using
     the netcdf4 engine explicitly to avoid engine detection issues.
     """
-    from pathlib import Path
-    import uuid
-    import pickle
     import os
+    import pickle
+    import uuid
+    from pathlib import Path
 
     def _mock_save_results(self, classifier, results, key):
         """Mocked version that creates files with explicit netcdf4 engine."""
@@ -942,62 +944,6 @@ def mock_decoder_save(mock_results_storage):
         return results_path_str, classifier_path_str
 
     return _mock_save_results
-
-
-@pytest.fixture
-def mock_detector_load_results(mock_results_storage):
-    """Mock the detector load_results methods to use netcdf4 engine.
-
-    This mocks both ClusterlessDetector.load_results and
-    SortedSpikesDetector.load_results to read netCDF files with
-    explicit netcdf4 engine specification.
-    """
-    import xarray as xr
-
-    def _mock_load_results(filename):
-        """Load results from disk with explicit netcdf4 engine."""
-        # Convert Path to string if needed
-        filename_str = str(filename)
-
-        # Try loading from memory first (for tests that use in-memory storage)
-        if filename_str in mock_results_storage["results"]:
-            return mock_results_storage["results"][filename_str]
-
-        # Load from disk with explicit engine
-        try:
-            return xr.open_dataset(filename_str, engine="netcdf4")
-        except (FileNotFoundError, OSError) as e:
-            # OSError with "Unknown file format" means old pickle file exists
-            if "Unknown file format" in str(e):
-                raise FileNotFoundError(
-                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
-                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
-                )
-            raise FileNotFoundError(
-                f"Mock result not found: {filename_str}. "
-                "This usually means the test setup didn't properly mock "
-                "the _save_decoder_results method."
-            )
-
-    return _mock_load_results
-
-
-@pytest.fixture
-def mock_detector_load_model(mock_results_storage):
-    """Mock the detector load_model methods to use in-memory storage."""
-
-    def _mock_load_model(filename):
-        """Load classifier from in-memory storage instead of disk."""
-        filename_str = str(filename)
-
-        if filename_str in mock_results_storage["classifiers"]:
-            return mock_results_storage["classifiers"][filename_str]
-
-        raise FileNotFoundError(
-            f"Mock classifier not found in memory: {filename_str}"
-        )
-
-    return _mock_load_model
 
 
 # ============================================================================
