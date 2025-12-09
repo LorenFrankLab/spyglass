@@ -161,7 +161,7 @@ class ExportMixin:
         ), "table_to_undo must be a projection of table"
 
         anti_alias_dict = {
-            attr.attribute_expression.strip("`"): attr.name
+            attr.original_name : attr.name
             for attr in self.heading.attributes.values()
             if attr.attribute_expression is not None
         }
