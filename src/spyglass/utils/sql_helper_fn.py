@@ -4,6 +4,7 @@ from os import system as os_system
 from pathlib import Path
 from typing import List
 
+import datajoint as dj
 import yaml
 from datajoint import FreeTable
 from datajoint import config as dj_config
@@ -135,8 +136,6 @@ class SQLDumpHelper:
 
             prev_db = None
             for table in tables_by_db:
-                if not (where := table.where_clause()):
-                    continue
                 database, table_name = (
                     table.full_table_name.replace("`", "")
                     .replace("#", "\\#")
@@ -194,7 +193,6 @@ class SQLDumpHelper:
         self, file, table: FreeTable, dump_cmd: str, key_list=None
     ):
         MAX_WHERE_LENGTH = 100000
-        import datajoint as dj
 
         database, table_name = (
             table.full_table_name.replace("`", "")
@@ -206,7 +204,6 @@ class SQLDumpHelper:
         if not where:
             return
         where = bash_escape_sql(where)
-        print(table_name, len(where))
         if len(where) <= MAX_WHERE_LENGTH:
             file.write(
                 dump_cmd.format(
