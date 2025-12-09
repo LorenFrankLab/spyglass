@@ -302,6 +302,13 @@ class AbstractGraph(ABC):
         return restriction
 
     @lru_cache(maxsize=128)
+    def _get_ft_with_restr(self, table, restr):
+        if not (ft := self._get_node(table).get("ft")):
+            ft = FreeTable(self.connection, table)
+            self._set_node(table, "ft", ft)
+
+        return ft & restr
+
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
         table = ensure_names(table)
@@ -312,11 +319,7 @@ class AbstractGraph(ABC):
         else:
             restr = True
 
-        if not (ft := self._get_node(table).get("ft")):
-            ft = FreeTable(self.connection, table)
-            self._set_node(table, "ft", ft)
-
-        return ft & restr
+        return self._get_ft_with_restr(table, restr)
 
     def _has_out_prefix(self, table):
         return (
@@ -1000,34 +1003,48 @@ class RestrGraph(AbstractGraph):
             New un-cascaded RestrGraph representing the intersection of self and other.
         """
         if self.cascaded:
-            graph1_df = pd.DataFrame(self.as_dict)
+            # graph1_df = pd.DataFrame(self.as_dict)
+            graph_1_tables = [
+                tbl for tbl in self.included_tables if self._get_restr(tbl)
+            ]
         else:
             # If not cascaded, apply intersection to leaves only
-            graph1_df = pd.DataFrame(
-                [
-                    {
-                        "table_name": leaf,
-                        "restriction": self._get_restr(leaf),
-                    }
-                    for leaf in self.leaves
-                ]
-            )
+            # graph1_df = pd.DataFrame(
+            #     [
+            #         {
+            #             "table_name": leaf,
+            #             "restriction": self._get_restr(leaf),
+            #         }
+            #         for leaf in self.leaves
+            #     ]
+            # )
+            graph_1_tables = self.leaves
+
         other.enforce_restr_strings()
-        graph2_df = pd.DataFrame(other.as_dict)
+        # graph2_df = pd.DataFrame(other.as_dict)
+        graph_2_tables = [
+            tbl for tbl in other.included_tables if other._get_restr(tbl)
+        ]
+        if not graph_1_tables or not graph_2_tables:
+            # If either graph has no tables with restrictions, return empty RestrGraph
+            return RestrGraph(
+                seed_table=self.seed_table,
+                leaves=[],
+                include_files=self.include_files,
+                cascade=False,
+                verbose=self.verbose,
+            )
+
         table_dicts = []
 
-        for table in graph1_df.table_name:
-            if table not in graph2_df.table_name.values:
+        for table in graph_1_tables:
+            if table not in graph_2_tables:
                 continue
             ft = self._get_ft(table)
             intersect_restriction = ft & dj.AndList(
                 [
-                    graph1_df[graph1_df.table_name == table][
-                        "restriction"
-                    ].values[0],
-                    graph2_df[graph2_df.table_name == table][
-                        "restriction"
-                    ].values[0],
+                    self._get_restr(table),
+                    other._get_restr(table),
                 ]
             )
 
