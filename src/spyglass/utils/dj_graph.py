@@ -446,12 +446,15 @@ class AbstractGraph(ABC):
         ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
+            if not bool(ret):
+                result = "EMPTY"
+            elif not bool(ft2 - ret):
+                result = "FULL"
+            else:
+                result = "partial"
+            self._log_truncate(f"Bridge Link: {path}: result {result}")
+            logger.debug(ret)
             pass
-            # is_empty = len(ret) == 0
-            # is_full = len(ft2) == len(ret)
-            # result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
-            # self._log_truncate(f"Bridge Link: {path}: result {result}")
-            # logger.debug(join)
 
         return ret
 
