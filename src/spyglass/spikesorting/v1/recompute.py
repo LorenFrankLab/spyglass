@@ -33,8 +33,8 @@ from spyglass.settings import analysis_dir, temp_dir
 from spyglass.spikesorting.v1.recording import SpikeSortingRecording
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
-from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
+from spyglass.utils.recompute import H5pyComparator, sort_dict
 
 schema = dj.schema("spikesorting_v1_recompute")
 
