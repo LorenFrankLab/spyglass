@@ -36,6 +36,7 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
         class CustomDownstream(SpyglassMixin, dj.Manual):
             definition = """
             foreign_id: int auto_increment
+            ---
             -> AnalysisNwbfile
             """
 
