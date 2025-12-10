@@ -36,6 +36,8 @@ DecodingParameters().alter()
     from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
