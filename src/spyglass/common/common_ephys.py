@@ -289,7 +289,12 @@ class Raw(SpyglassIngestion, dj.Imported):
 
     _nwb_table = Nwbfile
     _only_ingest_first = True
-    _source_nwb_object_name = "e-series"
+    _source_nwb_object_name = [
+        "e-series",
+        "electricalseries",
+        "ephys",
+        "electrophysiology",
+    ]
 
     @property
     def _source_nwb_object_type(self):
