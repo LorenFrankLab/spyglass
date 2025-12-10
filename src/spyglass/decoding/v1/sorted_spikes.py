@@ -334,13 +334,12 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
             results = concatenate_interval_results(interval_results)
 
         # Save discrete transition and initial conditions
-        # Use the existing 'states' coordinate from results
-        states = results.coords["states"]
-        state_names = states.values
+        # Use existing coordinates from results
+        state_names = results.coords["states"].values
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
-            dims=("states",),
-            coords={"states": states},
+            dims=("state_bins",),
+            coords={"state_bins": results.coords["state_bins"]},
             name="initial_conditions",
         )
         results["discrete_state_transitions"] = xr.DataArray(
