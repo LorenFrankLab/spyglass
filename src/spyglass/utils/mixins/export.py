@@ -161,7 +161,7 @@ class ExportMixin:
         ), "table_to_undo must be a projection of table"
 
         anti_alias_dict = {
-            attr.original_name : attr.name
+            attr.original_name: attr.name
             for attr in self.heading.attributes.values()
             if attr.attribute_expression is not None
         }
@@ -324,6 +324,7 @@ class ExportMixin:
             raise RuntimeError(
                 "Single entry restriction exceeds maximum restriction size of "
                 + f"{self._maximum_export_restriction_size} characters.\n\t"
+                + "Cannot proceed with export logging.\n\t"
                 + f"Restriction: {all_entries_restr_str}"
             )
         chunk_size = max(
