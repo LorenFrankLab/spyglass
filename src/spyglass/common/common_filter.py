@@ -32,7 +32,7 @@ def _import_ghostipy():
 class FirFilterParameters(SpyglassMixin, dj.Manual):
     """Filter parameters for filtering continuous time data.
 
-    Parameters
+    Attributes
     ----------
     filter_name: str
         The name of the filter.
@@ -58,7 +58,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
     filter_name: varchar(80)           # descriptive name of this filter
     filter_sampling_rate: int          # sampling rate for this filter
     ---
-    filter_type: enum("lowpass", "highpass", "bandpass")
+    filter_type: enum("lowpass", "highpass", "bandpass", "bandstop") # type of filter
     filter_low_stop = 0: float     # lowest freq for stop band for low filt
     filter_low_pass = 0: float     # lowest freq for pass band of low filt
     filter_high_pass = 0: float    # highest freq for pass band for high filt
@@ -103,7 +103,12 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         Exception:
             Raises an exception if an unexpected filter type is encountered.
         """
-        VALID_FILTERS = {"lowpass": 2, "highpass": 2, "bandpass": 4}
+        VALID_FILTERS = {
+            "lowpass": 2,  # low_stop, low_pass
+            "highpass": 2,  # high_stop, high_pass
+            "bandpass": 4,  # low_stop, low_pass, high_pass, high_stop
+            "bandstop": 4,  # low_stop, low_pass, high_pass, high_stop
+        }
         FILTER_ERR = "Error in Filter.add_filter: "
         FILTER_N_ERR = FILTER_ERR + "filter {} requires {} band_frequencies."
 
@@ -112,6 +117,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
         #   low pass : [high_pass high_stop]
         #   high pass: [low stop low pass]
         #   band pass: [low_stop low_pass high_pass high_stop].
+        #   band stop: [low_stop low_pass high_pass high_stop].
         if filter_type not in VALID_FILTERS:
             logger.error(
                 FILTER_ERR
@@ -164,7 +170,7 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 "filter_low_stop": band_edges[0],
                 "filter_low_pass": band_edges[1],
             }
-        else:
+        elif filter_type == "bandpass":
             desired = [0, 1, 1, 0]
             pass_stop_dict = {
                 "filter_low_stop": band_edges[0],
@@ -172,6 +178,16 @@ class FirFilterParameters(SpyglassMixin, dj.Manual):
                 "filter_high_pass": band_edges[2],
                 "filter_high_stop": band_edges[3],
             }
+        elif filter_type == "bandstop":
+            desired = [1, 0, 0, 1]
+            pass_stop_dict = {
+                "filter_low_stop": band_edges[0],
+                "filter_low_pass": band_edges[1],
+                "filter_high_pass": band_edges[2],
+                "filter_high_stop": band_edges[3],
+            }
+        else:
+            raise ValueError(f"Unhandled filter_type: {filter_type}")
 
         # create 1d array for coefficients
         filterdict.update(

@@ -74,6 +74,8 @@ class VideoMaker:
         # key_hash supports resume from previous run
         self.temp_dir = Path(temp_dir) / f"dlc_vid_{key_hash}"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+        if not self.temp_dir.exists():  # pragma: no cover
+            raise FileNotFoundError(f"Could not create {self.temp_dir}")
         logger.debug(f"Temporary directory: {self.temp_dir}")
 
         if not Path(video_filename).exists():
@@ -109,6 +111,7 @@ class VideoMaker:
         self.timeout = 30 if test_mode else 300
 
         self.ffmpeg_log_args = ["-hide_banner", "-loglevel", "error"]
+
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         prev_backend = matplotlib.get_backend()
@@ -123,7 +126,12 @@ class VideoMaker:
         )
         self.process_frames()
         plt.close(self.fig)
-        logger.info(f"Finished video: {self.output_video_filename}")
+
+        if Path(self.output_video_filename).exists():
+            logger.info(f"Finished video: {self.output_video_filename}")
+        else:
+            logger.error(f"Failed to create: {self.output_video_filename}")
+
         logger.debug(f"Dropped frames: {self.dropped_frames}")
 
         if not debug:
@@ -186,6 +194,9 @@ class VideoMaker:
 
         if self.debug:  # If debugging, limit frames to available data
             self.n_frames = min(len(self.position_mean), self.n_frames)
+
+        if self.n_frames == 0:  # pragma: no cover
+            raise ValueError("No frames to process!")  # pragma: no cover
 
         self.pad_len = len(str(self.n_frames))
 
@@ -490,11 +501,18 @@ class VideoMaker:
         ]
         ret = subprocess.run(ffmpeg_cmd, stderr=subprocess.PIPE)
 
+        if ret.returncode != 0:  # pragma: no cover
+            logger.error(f"Error extracting frames: {ret.stderr}")
+        if not self.temp_dir.glob("orig_*.png"):  # pragma: no cover
+            raise FileNotFoundError("No frames were extracted!")
+
         extracted = len(list(self.temp_dir.glob("orig_*.png")))
         logger.debug(f"Extracted  frames: {start_frame}, len: {extracted}")
-        if extracted < self.batch_size - 1:
+
+        frame_diff = end_frame - start_frame + 1  # may be less than batch size
+        if extracted < frame_diff:
             logger.warning(
-                f"Could not extract frames: {extracted} / {self.batch_size-1}"
+                f"Could not extract frames: {extracted} / {frame_diff}"
             )
             one_err = "\n".join(str(ret.stderr).split("\\")[-3:-1])
             logger.debug(f"\nExtract Error: {one_err}")
@@ -536,9 +554,16 @@ class VideoMaker:
         except subprocess.CalledProcessError as e:  # pragma: no cover
             logger.error(f"Err stitching video: {e.stderr}")  # pragma: no cover
 
+        if not Path(output_partial_video).exists():  # pragma: no cover
+            logger.error(f"Partial video not created: {output_partial_video}")
+
     def concat_partial_videos(self):
         """Concatenate all the partial videos into one final video."""
         partial_vids = sorted(self.temp_dir.glob("partial_*.mp4"))
+
+        if not partial_vids:  # pragma: no cover
+            raise FileNotFoundError("No partial videos to concatenate!")
+
         logger.debug(f"Concat part vids: {len(partial_vids)}")
         concat_list_path = self.temp_dir / "concat_list.txt"
         with open(concat_list_path, "w") as f:
@@ -568,6 +593,7 @@ class VideoMaker:
             )
         except subprocess.CalledProcessError as e:
             logger.error(f"Error stitching partial video: {e.stderr}")
+            raise  # pragma: no cover
 
 
 def make_video(**kwargs):

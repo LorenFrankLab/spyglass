@@ -17,7 +17,7 @@ schema = dj.schema("position_v1_dlc_training")
 class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
     """Parameters for training a DLC model.
 
-    Parameters
+    Attributes
     ----------
     dlc_training_params_name : str
         Descriptive name of parameter set
@@ -119,20 +119,48 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
     """
 
     log_path = None
-    _use_transaction, _allow_insert = False, True
 
     # To continue from previous training snapshot,
     # devs suggest editing pose_cfg.yml
     # https://github.com/DeepLabCut/DeepLabCut/issues/70
 
-    def make(self, key):
+    def make_fetch(self, key):
         """Launch training for each entry in DLCModelTrainingSelection."""
         config_path = (DLCProject & key).fetch1("config_path")
         self.log_path = Path(config_path).parent / "log.log"
-        self._logged_make(key)
+        return self._logged_make_fetch(key)
 
-    @file_log(logger, console=True)  # THIS WORKS
-    def _logged_make(self, key):
+    @file_log(logger, console=True)
+    def _logged_make_fetch(self, key):
+
+        model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
+        config_path, project_name = (DLCProject() & key).fetch1(
+            "config_path", "project_name"
+        )
+        params = (DLCModelTrainingParams & key).fetch1("params")
+        training_filelist = [  # don't overwrite origin video_sets
+            Path(fp).as_posix()
+            for fp in (DLCProject.File & key).fetch("file_path")
+        ]
+
+        return [
+            model_prefix,
+            config_path,
+            project_name,
+            params,
+            training_filelist,
+        ]
+
+    @file_log(logger, console=True)
+    def make_compute(
+        self,
+        key,
+        model_prefix,
+        config_path,
+        project_name,
+        params,
+        training_filelist,
+    ):
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
@@ -145,14 +173,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 GetModelFolder as get_model_folder,
             )
 
-        model_prefix = (DLCModelTrainingSelection & key).fetch1("model_prefix")
-        config_path, project_name = (DLCProject() & key).fetch1(
-            "config_path", "project_name"
-        )
-
         dlc_config = read_config(config_path)
         project_path = dlc_config["project_path"]
-        key["project_path"] = project_path
 
         # ---- Build and save DLC configuration (yaml) file ----
         dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(
@@ -160,16 +182,13 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         )
         dlc_config.update(
             {
-                **(DLCModelTrainingParams & key).fetch1("params"),
+                **params,
                 "project_path": Path(project_path).as_posix(),
                 "modelprefix": model_prefix,
                 "train_fraction": dlc_config["TrainingFraction"][
                     int(dlc_config.get("trainingsetindex", 0))
                 ],
-                "training_filelist_datajoint": [  # don't overwrite origin video_sets
-                    Path(fp).as_posix()
-                    for fp in (DLCProject.File & key).fetch("file_path")
-                ],
+                "training_filelist_datajoint": training_filelist,
             }
         )
 
@@ -182,6 +201,8 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             if k in get_param_names(create_training_dataset)
         }
         logger.info("creating training dataset")
+
+        # NOTE: if DLC > 3, this will raise engine error
         create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
         # ---- Trigger DLC model training job ----
         train_network_kwargs = {
@@ -200,6 +221,13 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 train_network(dlc_cfg_filepath, **train_network_kwargs)
         except KeyboardInterrupt:  # pragma: no cover
             logger.info("DLC training stopped via Keyboard Interrupt")
+        except Exception as e:
+            msg = str(e)
+            hit_end_of_train = ("CancelledError" in msg) and (
+                "fifo_queue_enqueue" in msg
+            )
+            if not hit_end_of_train:
+                raise
 
         snapshots = (
             project_path
@@ -221,23 +249,29 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
                 latest_snapshot = int(snapshot.stem[9:])
                 max_modified_time = modified_time
 
-        self.insert1(
-            {
-                **key,
-                "latest_snapshot": latest_snapshot,
-                "config_template": dlc_config,
-            }
+        self_insert = dict(
+            key,
+            project_path=project_path,
+            latest_snapshot=latest_snapshot,
+            config_template=dlc_config,
         )
-        from .position_dlc_model import DLCModelSource
-
         dlc_model_name = (
             f"{key['project_name']}_"
             + f"{key['dlc_training_params_name']}_{key['training_id']:02d}"
         )
-        DLCModelSource.insert_entry(
+        model_source_kwargs = dict(
             dlc_model_name=dlc_model_name,
             project_name=key["project_name"],
             source="FromUpstream",
             key=key,
             skip_duplicates=True,
         )
+
+        return [self_insert, model_source_kwargs]
+
+    @file_log(logger, console=True)
+    def make_insert(self, key, self_insert, model_source_kwargs):
+        from .position_dlc_model import DLCModelSource
+
+        self.insert1(self_insert)
+        DLCModelSource.insert_entry(**model_source_kwargs)

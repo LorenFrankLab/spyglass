@@ -332,7 +332,7 @@ class DLCPosV1(SpyglassMixin, dj.Computed):
 class DLCPosVideoParams(SpyglassMixin, dj.Manual):
     """Parameters for the video generation.
 
-    Parameters
+    Attributes
     ----------
     dlc_pos_video_params_name : str
         Name of the parameter set.
@@ -487,10 +487,12 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             else None
         )
         frames = params.get("frames", None)
+        percent_frames = params.get("percent_frames", None)
 
         if limit := params.get("limit", None):  # new int param for debugging
             output_video_filename = Path(".") / f"TEST_VID_{limit}.mp4"
             video_frame_inds = video_frame_inds[:limit]
+            percent_frames = 1
             pos_info_df = pos_info_df.head(limit)
 
         video_maker = make_video(
@@ -505,7 +507,7 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
             position_time=np.asarray(pos_info_df.index),
             processor=params.get("processor", "matplotlib"),
             frames=np.arange(frames[0], frames[1]) if frames else None,
-            percent_frames=params.get("percent_frames", None),
+            percent_frames=percent_frames,
             output_video_filename=output_video_filename,
             cm_to_pixels=meters_per_pixel * M_TO_CM,
             crop=pose_estimation_params.get("cropping"),

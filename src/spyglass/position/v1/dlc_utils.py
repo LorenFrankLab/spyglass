@@ -6,7 +6,7 @@ import os
 import pwd
 import subprocess
 import sys
-from collections import abc
+from collections.abc import Sequence
 from functools import reduce
 from itertools import combinations, groupby
 from operator import itemgetter
@@ -221,7 +221,7 @@ def get_dlc_root_data_dir():  # pragma: no cover
             "/nimbus/deeplabcut/output/",
             "/cumulus/deeplabcut/",
         ]
-    elif not isinstance(dlc_root_dirs, abc.Sequence):
+    elif not isinstance(dlc_root_dirs, Sequence):
         return list(dlc_root_dirs)
     else:
         return dlc_root_dirs

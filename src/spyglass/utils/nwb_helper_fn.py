@@ -30,8 +30,16 @@ def _open_nwb_file(nwb_file_path, source="local"):
     elif source == "dandi":
         from ..common.common_dandi import DandiPath
 
+        if DandiPath().has_file_path(nwb_file_path):
+            path_to_load = nwb_file_path
+        elif DandiPath().has_raw_path(nwb_file_path):
+            path_to_load = DandiPath().raw_from_path(nwb_file_path)["filename"]
+        else:
+            raise ValueError(
+                f"File not found in Dandi: {Path(nwb_file_path).name}"
+            )
         io, nwbfile = DandiPath().fetch_file_from_dandi(
-            nwb_file_path=nwb_file_path
+            nwb_file_path=path_to_load
         )
     else:
         raise ValueError(f"Invalid open_nwb source: {source}")
@@ -99,12 +107,10 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     # Dandi fallback SB 2024-04-03
     from ..common.common_dandi import DandiPath
 
-    if DandiPath().has_file_path(file_path=nwb_file_path):
+    if DandiPath().has_file_path(
+        file_path=nwb_file_path
+    ) or DandiPath().has_raw_path(file_path=nwb_file_path):
         return _open_nwb_file(nwb_file_path, source="dandi")
-
-    if DandiPath().has_raw_path(file_path=nwb_file_path):
-        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
-        return _open_nwb_file(raw, source="dandi")
 
     if hasattr(query_expression, "_make_file"):
         # if the query_expression has a _make_file method, call it to
@@ -395,7 +401,9 @@ def get_valid_intervals(
 
     if total_time < min_valid_len:
         half_total_time = total_time / 2
-        logger.warning(f"Setting minimum valid interval to {half_total_time}")
+        logger.warning(
+            f"Setting minimum valid interval to {half_total_time:.4f}"
+        )
         min_valid_len = half_total_time
 
     # get rid of NaN elements
@@ -579,13 +587,16 @@ def get_all_spatial_series(nwbf, verbose=False, incl_times=True) -> dict:
     if pos_interface is None:
         return None
 
-    return _get_pos_dict(
+    pos_dict = _get_pos_dict(
         position=pos_interface.spatial_series,
         epoch_groups=_get_epoch_groups(pos_interface),
         session_id=nwbf.session_id,
         verbose=verbose,
         incl_times=incl_times,
     )
+    if len(pos_dict) == 0:
+        return None
+    return pos_dict
 
 
 def get_nwb_copy_filename(nwb_file_name):

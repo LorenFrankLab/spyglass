@@ -6,7 +6,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Type, Union
+from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -95,8 +95,9 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
-def declare_all_merge_tables():
+def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     """Ensures all merge tables in the spyglass core package are declared.
+
     - Prevents circular imports
     - Prevents errors from table declaration within a transaction
     - Run during nwb insertion
@@ -107,6 +108,8 @@ def declare_all_merge_tables():
     from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
         SpikeSortingOutput,
     )
+
+    return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -354,6 +357,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     query_table = query_expression.join(
         tbl.proj(nwb2load_filepath=attr_name), **arg
     )
+
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
@@ -364,7 +368,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             continue
 
         # Full dict caused issues with dlc tables using dicts in secondary keys
-        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_only_pk = {
+            k: v
+            for k, v in rec_dict.items()
+            if k in query_table.heading.primary_key
+        }
         rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
@@ -434,24 +442,46 @@ def _resolve_external_table(
         ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
+    from spyglass.common.common_nwbfile import AnalysisRegistry
     from spyglass.common.common_nwbfile import schema as common_schema
 
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
-    external_table = common_schema.external[location]
-    if not (
-        external_query := (external_table & f"filepath LIKE '%{file_name}'")
-    ):
+
+    file_restr = f"filepath LIKE '%{file_name}'"
+
+    to_updates = []
+    if location == "analysis":  # Update for each custom Analysis external
+        for external in AnalysisRegistry().get_externals():
+            restr_external = external & file_restr
+            if not bool(restr_external):
+                continue
+            if len(restr_external) > 1:
+                raise ValueError(
+                    "Multiple entries found in external table for file: "
+                    + f"{file_name}, cannot resolve."
+                )
+            to_updates.append(restr_external)
+
+    elif location == "raw":
+        restr_external = common_schema.external["raw"] & file_restr
+        to_updates.append(restr_external)
+
+    if not to_updates:
+        logger.warning(
+            f"No entries found in external tables for file: {file_name}"
+        )
         return
-    external_key = external_query.fetch1()
-    external_key.update(
-        {
-            "size": Path(filepath).stat().st_size,
-            "contents_hash": dj.hash.uuid_from_file(filepath),
-        }
+
+    update_vals = dict(
+        size=Path(filepath).stat().st_size,
+        contents_hash=dj.hash.uuid_from_file(filepath),
     )
-    external_table.update1(external_key)
+    for to_update in to_updates:
+        key = to_update.fetch1()
+        key.update(update_vals)
+        to_update.update1(key)
 
 
 def make_file_obj_id_unique(nwb_path: str):
