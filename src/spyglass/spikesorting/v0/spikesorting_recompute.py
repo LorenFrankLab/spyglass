@@ -34,7 +34,7 @@ from spyglass.spikesorting.v0.spikesorting_recording import (  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.nwb_hash import DirectoryHasher
-from spyglass.utils.recompute import H5pyComparator, sort_dict
+from spyglass.utils.recompute_helper_fn import H5pyComparator, sort_dict
 
 schema = dj.schema("spikesorting_recompute_v0")
 
