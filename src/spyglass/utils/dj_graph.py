@@ -448,7 +448,7 @@ class AbstractGraph(ABC):
         if self.verbose:  # For debugging. Not required for typical use.
             if not bool(ret):
                 result = "EMPTY"
-            elif not bool(ft2 - ret):
+            elif not bool(ft2 - ret.proj()):
                 result = "FULL"
             else:
                 result = "partial"
