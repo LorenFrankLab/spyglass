@@ -496,7 +496,7 @@ class AnalysisMixin(BaseMixin):
 
         # If an entry exists in the database get the stored datajoint filepath
         file_key = {"analysis_file_name": analysis_nwb_file_name}
-        query = cls() & file_key
+        query = cls().restrict(file_key, log_export=False)
         if bool(query):
             try:  # runs if file exists locally
                 return query.fetch1("analysis_file_abs_path", log_export=False)
