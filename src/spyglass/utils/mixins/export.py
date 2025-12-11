@@ -268,13 +268,13 @@ class ExportMixin(FetchMixin):
             return
 
         if "SELECT" in restr_str:
-            logger.debug(
+            self._logger.debug(
                 "Restriction contains subquery. Exporting entry restrictions instead"
             )
 
         else:
             # handle excessive restrictions caused by long OR list of dicts
-            logger.debug(
+            self._logger.debug(
                 f"Restriction too long ({len(restr_str)} > "
                 + f"{self._maximum_export_restriction_size})."
                 + "Attempting to chunk restriction by subsets of entry keys."
