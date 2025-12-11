@@ -133,7 +133,6 @@ def test_empty_intervals_raises_error():
     This ensures proper error handling when all decoding intervals are empty
     (e.g., intervals don't overlap with position data).
     """
-    from scipy.ndimage import label
 
     # Replicate the concatenate_interval_results logic to test without DB
     def concatenate_interval_results(interval_results):
