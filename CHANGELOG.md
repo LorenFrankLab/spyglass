@@ -76,6 +76,7 @@ DecodingParameters().alter()
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
     - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
         merge IDs are fetched in non-chronological order #1471
+    - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
