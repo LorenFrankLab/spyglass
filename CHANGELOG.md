@@ -68,6 +68,7 @@ DecodingParameters().alter()
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
     - Handle epoch formats with varying zero-padding #1459, #1492
+    - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation
       data from NWB files #1466
 - Decoding
