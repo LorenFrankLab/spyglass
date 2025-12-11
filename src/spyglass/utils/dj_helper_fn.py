@@ -282,16 +282,13 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     file_name_str, file_path_fn = tbl_map[which]
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
+    tbl_inst = instance_table(tbl)
+
     nwb_files = (
-        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
+        query_expression.join(tbl_inst.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -301,6 +298,15 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     #     )
 
     return nwb_files, file_path_fn
+
+
+def instance_table(table: Union[str, Type[dj.Table]]) -> dj.Table:
+    """Instantiate a DataJoint table from its class, if uninstantiated."""
+    if isinstance(table, str):
+        return dj.FreeTable(dj.conn(), table)
+    if isinstance(table, type) and issubclass(table, dj.Table):
+        return table()
+    return table
 
 
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
@@ -349,15 +355,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             get_nwb_file(file_path, query_expression)
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+    tbl_inst = instance_table(tbl)
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), **arg
+        tbl_inst.proj(nwb2load_filepath=attr_name), **arg
     )
 
     rec_dicts = query_table.fetch(*attrs, **kwargs)
