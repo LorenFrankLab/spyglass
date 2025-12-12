@@ -27,7 +27,10 @@ def _load_utils_directly():
     or from an installed package (site-packages/).
     """
     # Try source directory first (for local development)
-    src_path = Path(__file__).parent.parent.parent / "src/spyglass/decoding/v1/utils.py"
+    src_path = (
+        Path(__file__).parent.parent.parent
+        / "src/spyglass/decoding/v1/utils.py"
+    )
     if src_path.exists():
         utils_path = src_path
     else:
@@ -38,7 +41,9 @@ def _load_utils_directly():
                 utils_path = candidate
                 break
         else:
-            raise ImportError("Could not find spyglass.decoding.v1.utils module")
+            raise ImportError(
+                "Could not find spyglass.decoding.v1.utils module"
+            )
 
     spec = importlib.util.spec_from_file_location("utils", utils_path)
     utils = importlib.util.module_from_spec(spec)
