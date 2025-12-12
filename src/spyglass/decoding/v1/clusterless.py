@@ -9,6 +9,7 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
+import inspect
 import uuid
 from pathlib import Path
 
@@ -29,9 +30,7 @@ from spyglass.decoding.v1.utils import (
     concatenate_interval_results,
     create_interval_labels,
 )
-from spyglass.decoding.v1.waveform_features import (
-    UnitWaveformFeatures,
-)  # noqa: F401
+from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -325,17 +324,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 interval_labels=("time", interval_labels)
             )
         else:
-            VALID_FIT_KWARGS = [
-                "is_training",
-                "encoding_group_labels",
-                "environment_labels",
-                "discrete_transition_covariate_data",
-            ]
+            sig = inspect.signature(classifier.fit)
+            valid_fit_kwargs = list(sig.parameters.keys())
 
             fit_kwargs = {
                 k: value
                 for k, value in decoding_kwargs.items()
-                if k in VALID_FIT_KWARGS
+                if k in valid_fit_kwargs
             }
 
             classifier.fit(
@@ -345,15 +340,12 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 spike_waveform_features=spike_waveform_features,
                 **fit_kwargs,
             )
-            VALID_PREDICT_KWARGS = [
-                "is_missing",
-                "discrete_transition_covariate_data",
-                "return_causal_posterior",
-            ]
+            sig = inspect.signature(classifier.predict)
+            valid_predict_kwargs = list(sig.parameters.keys())
             predict_kwargs = {
                 k: value
                 for k, value in decoding_kwargs.items()
-                if k in VALID_PREDICT_KWARGS
+                if k in valid_predict_kwargs
             }
 
             # We treat each decoding interval as a separate sequence
@@ -799,5 +791,7 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 position_info[position_variable_names].to_numpy(),
                 position_info[orientation_name].to_numpy(),
                 map_position,
+                classifier.environments[0].track_graphDD,
+            )
                 classifier.environments[0].track_graphDD,
             )
