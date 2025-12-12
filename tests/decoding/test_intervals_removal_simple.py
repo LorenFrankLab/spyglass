@@ -3,16 +3,52 @@
 Tests the create_interval_labels and concatenate_interval_results functions
 from spyglass.decoding.v1.utils. These tests validate the xarray concatenation
 logic without requiring database infrastructure.
+
+Note: We use importlib to load the utils module directly to avoid triggering
+database connections that occur when importing through spyglass.decoding.__init__.
 """
+
+import importlib.util
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
 import xarray as xr
 
-from spyglass.decoding.v1.utils import (
-    concatenate_interval_results,
-    create_interval_labels,
-)
+
+def _load_utils_directly():
+    """Load utils module directly to avoid database connection during import.
+
+    The normal import path (spyglass.decoding.v1.utils) triggers __init__.py
+    which imports DecodingOutput -> ClusterlessDecodingV1 -> database connection.
+
+    This function finds the utils.py file whether running from source (src/)
+    or from an installed package (site-packages/).
+    """
+    # Try source directory first (for local development)
+    src_path = Path(__file__).parent.parent.parent / "src/spyglass/decoding/v1/utils.py"
+    if src_path.exists():
+        utils_path = src_path
+    else:
+        # Fall back to installed package location
+        for path in sys.path:
+            candidate = Path(path) / "spyglass/decoding/v1/utils.py"
+            if candidate.exists():
+                utils_path = candidate
+                break
+        else:
+            raise ImportError("Could not find spyglass.decoding.v1.utils module")
+
+    spec = importlib.util.spec_from_file_location("utils", utils_path)
+    utils = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(utils)
+    return utils
+
+
+_utils = _load_utils_directly()
+create_interval_labels = _utils.create_interval_labels
+concatenate_interval_results = _utils.concatenate_interval_results
 
 
 def test_concatenation_without_intervals_dimension():

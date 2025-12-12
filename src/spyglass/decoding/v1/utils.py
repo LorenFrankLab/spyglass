@@ -5,8 +5,6 @@ import numpy.typing as npt
 import xarray as xr
 from scipy.ndimage import label
 
-from spyglass.common.common_interval import IntervalList
-
 
 def create_interval_labels(
     is_missing: npt.NDArray[np.bool_],
@@ -78,6 +76,9 @@ def _get_interval_range(key: dict) -> Tuple[float, float]:
     tuple[float, float]
         The minimum and maximum times for the model
     """
+    # Lazy import to avoid database connection at module load time
+    from spyglass.common.common_interval import IntervalList
+
     encoding_interval = (
         IntervalList
         & {
