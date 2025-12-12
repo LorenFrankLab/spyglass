@@ -1,12 +1,18 @@
-"""Simple unit test for intervals dimension removal.
+"""Unit tests for intervals dimension removal utilities.
 
-This test validates the xarray concatenation logic without requiring
-database infrastructure or external dependencies.
+Tests the create_interval_labels and concatenate_interval_results functions
+from spyglass.decoding.v1.utils. These tests validate the xarray concatenation
+logic without requiring database infrastructure.
 """
 
 import numpy as np
 import pytest
 import xarray as xr
+
+from spyglass.decoding.v1.utils import (
+    concatenate_interval_results,
+    create_interval_labels,
+)
 
 
 def test_concatenation_without_intervals_dimension():
@@ -133,32 +139,12 @@ def test_empty_intervals_raises_error():
     This ensures proper error handling when all decoding intervals are empty
     (e.g., intervals don't overlap with position data).
     """
-
-    # Replicate the concatenate_interval_results logic to test without DB
-    def concatenate_interval_results(interval_results):
-        if not interval_results:
-            raise ValueError("All decoding intervals are empty")
-        interval_labels = []
-        for interval_idx, result in enumerate(interval_results):
-            interval_labels.extend([interval_idx] * len(result.time))
-        concatenated = xr.concat(interval_results, dim="time")
-        return concatenated.assign_coords(
-            interval_labels=("time", interval_labels)
-        )
-
     with pytest.raises(ValueError, match="All decoding intervals are empty"):
         concatenate_interval_results([])
 
 
 def test_create_interval_labels_all_missing():
     """Test create_interval_labels when all data is missing."""
-    from scipy.ndimage import label
-
-    # Replicate the create_interval_labels logic to test without DB
-    def create_interval_labels(is_missing):
-        raw_labels, _ = label(~is_missing)
-        return raw_labels - 1
-
     # All time points marked as missing
     is_missing = np.ones(100, dtype=bool)
     labels = create_interval_labels(is_missing)
@@ -171,12 +157,6 @@ def test_create_interval_labels_all_missing():
 
 def test_create_interval_labels_single_interval():
     """Test create_interval_labels with a single contiguous interval."""
-    from scipy.ndimage import label
-
-    def create_interval_labels(is_missing):
-        raw_labels, _ = label(~is_missing)
-        return raw_labels - 1
-
     # Single interval from index 20-50
     is_missing = np.ones(100, dtype=bool)
     is_missing[20:51] = False
@@ -191,12 +171,6 @@ def test_create_interval_labels_single_interval():
 
 def test_create_interval_labels_multiple_intervals():
     """Test create_interval_labels with multiple non-contiguous intervals."""
-    from scipy.ndimage import label
-
-    def create_interval_labels(is_missing):
-        raw_labels, _ = label(~is_missing)
-        return raw_labels - 1
-
     # Two intervals: 10-20 and 40-60
     is_missing = np.ones(100, dtype=bool)
     is_missing[10:21] = False
