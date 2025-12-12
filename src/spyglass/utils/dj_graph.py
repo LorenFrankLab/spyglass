@@ -1638,6 +1638,7 @@ class TableChain(RestrGraph):
                 if table is not start:
                     self._set_restr(table, False, replace=True)
 
+        self.cascaded = True
         return self._get_ft(end, with_restr=True)
 
     def restrict_by(self, *args, **kwargs) -> None:
