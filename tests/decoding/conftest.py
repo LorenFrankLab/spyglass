@@ -548,12 +548,17 @@ class FakeClassifier:
     """Minimal classifier interface for mocking.
 
     Module-level class so it's picklable for mock_decoder_save.
+
+    In non_local_detector, state_bins is a MultiIndex combining position and state,
+    so n_state_bins = n_position_bins * n_states. The initial_conditions_ has shape
+    (n_state_bins,) and discrete_state_transitions_ has shape (n_states, n_states).
     """
 
-    def __init__(self):
-        # 2 states (e.g., "continuous" and "fragmented")
-        # initial_conditions_: shape (n_states,)
-        self.initial_conditions_ = np.array([0.5, 0.5])
+    def __init__(self, n_state_bins=100, n_states=2):
+        # initial_conditions_: shape (n_state_bins,) - one value per (position, state) combination
+        # Initialize with uniform distribution
+        self.initial_conditions_ = np.ones(n_state_bins) / n_state_bins
+
         # discrete_state_transitions_: shape (n_states, n_states)
         self.discrete_state_transitions_ = np.array([[0.9, 0.1], [0.1, 0.9]])
 
@@ -579,49 +584,58 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     -------
     results : xr.Dataset
         Fake decoding results matching expected structure with proper dimensions
+
+    Notes
+    -----
+    In non_local_detector, state_bins is a MultiIndex combining (position, state),
+    so n_state_bins = n_position_bins * n_states. The posterior has shape
+    (n_time, n_state_bins) in the flattened form.
     """
     import xarray as xr
 
     time = np.linspace(0, 10, n_time)
     position_bins = np.linspace(0, 100, n_position_bins)
     states = np.arange(n_states)
-    state_names = ["continuous", "fragmented"][:n_states]
+    state_names = ["Continuous", "Fragmented"][:n_states]
+
+    # n_state_bins is the product of position bins and states
+    n_state_bins = n_position_bins * n_states
+
+    # Create state_bins coordinate values (flattened position x state)
+    # This mimics the MultiIndex structure in non_local_detector
+    state_bins_values = np.arange(n_state_bins)
 
     # Create realistic-looking posterior probabilities
+    # Shape: (n_time, n_state_bins) - flattened across position and state
     position_mean = n_position_bins // 2
     position_std = n_position_bins // 10
 
-    # Posterior shape: (n_time, n_position_bins, n_states)
-    posterior = np.zeros((n_time, n_position_bins, n_states))
+    posterior = np.zeros((n_time, n_state_bins))
     for t in range(n_time):
         for s in range(n_states):
+            # Each state gets a slice of state_bins
+            start_idx = s * n_position_bins
+            end_idx = (s + 1) * n_position_bins
             # Gaussian-like posterior for each state
-            posterior[t, :, s] = np.exp(
+            posterior[t, start_idx:end_idx] = np.exp(
                 -((np.arange(n_position_bins) - position_mean) ** 2)
                 / (2 * position_std**2)
             )
-        # Normalize across position and state
+        # Normalize across all state_bins
         posterior[t] /= posterior[t].sum()
 
-    # Create all expected coordinates for decoding results
-    # Note: Use "state" (singular) as dimension, with "states" as alias coordinate
-    # This matches the expected coordinate structure for tests
+    # Create results matching non_local_detector output structure
+    # Primary dimensions: time, state_bins
     results = xr.Dataset(
         {
-            "posterior": (["time", "position", "state"], posterior),
-            "likelihood": (["time", "position", "state"], posterior * 0.8),
+            "acausal_posterior": (["time", "state_bins"], posterior),
+            "causal_posterior": (["time", "state_bins"], posterior * 0.9),
         },
         coords={
             "time": time,
-            "position": position_bins,
-            "state": states,
-            "state_names": ("state", state_names),
-            # Additional coordinates expected by tests
-            "states": ("state", states),  # Alias for state
-            "state_bins": ("position", position_bins),  # Alias for position
-            "state_ind": ("state", states),  # State indices
-            "encoding_groups": ("state", state_names),  # Encoding group names
-            "environments": ("state", state_names),  # Environment names
+            "state_bins": state_bins_values,
+            # states coordinate with state names
+            "states": ("states", state_names),
         },
     )
 
@@ -879,7 +893,7 @@ def mock_clusterless_decoder():
             )
 
         # Add metadata (same as real implementation)
-        # initial_conditions: shape (n_states,) with explicit dims
+        # initial_conditions: shape (n_state_bins,) where n_state_bins = n_position_bins * n_states
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
             dims=("state_bins",),
@@ -887,8 +901,6 @@ def mock_clusterless_decoder():
             name="initial_conditions",
         )
         # discrete_state_transitions: shape (n_states, n_states) with explicit dims
-        # Use different dim names to avoid "duplicate dimension" warning
-        # Don't set coords - xarray will create default integer indices
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
             dims=("states_from", "states_to"),
@@ -1046,7 +1058,7 @@ def mock_sorted_spikes_decoder():
             )
 
         # Add metadata (same as real implementation)
-        # initial_conditions: shape (n_states,) with explicit dims
+        # initial_conditions: shape (n_state_bins,) where n_state_bins = n_position_bins * n_states
         results["initial_conditions"] = xr.DataArray(
             classifier.initial_conditions_,
             dims=("state_bins",),
@@ -1054,8 +1066,6 @@ def mock_sorted_spikes_decoder():
             name="initial_conditions",
         )
         # discrete_state_transitions: shape (n_states, n_states) with explicit dims
-        # Use different dim names to avoid "duplicate dimension" warning
-        # Don't set coords - xarray will create default integer indices
         results["discrete_state_transitions"] = xr.DataArray(
             classifier.discrete_state_transitions_,
             dims=("states_from", "states_to"),
