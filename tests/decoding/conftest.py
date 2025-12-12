@@ -44,14 +44,16 @@ def mock_netcdf_saves():
 
 @pytest.fixture(scope="session")
 def result_coordinates():
+    """Expected coordinates in decoding results.
+
+    Note: interval_labels is added by the new concatenation approach
+    that removed the intervals dimension.
+    """
     return {
-        "encoding_groups",
+        "interval_labels",
         "states",
-        "state",
         "state_bins",
-        "state_ind",
         "time",
-        "environments",
     }
 
 
