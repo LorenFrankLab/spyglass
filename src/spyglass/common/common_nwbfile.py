@@ -1,11 +1,7 @@
 import os
-import random
 import re
-import string
-import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
-from uuid import uuid4
 
 import datajoint as dj
 import h5py
@@ -326,6 +322,15 @@ class AnalysisRegistry(dj.Manual):
             key = f"`{key}_nwbfile`.`analysis_nwbfile`"
         if isinstance(key, str):
             key = {"full_table_name": key}
+
+        # TODO: Add common case to table on registry declaration
+        common_map = {
+            Nwbfile().full_table_name: Nwbfile,
+            AnalysisNwbfile().full_table_name: AnalysisNwbfile,
+        }
+
+        if key["full_table_name"] in common_map:
+            return common_map[key["full_table_name"]]
 
         if not (self & key):
             logger.warning(f"Entry not found: {key['full_table_name']}")

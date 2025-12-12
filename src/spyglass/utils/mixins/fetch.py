@@ -25,34 +25,31 @@ class FetchMixin(BaseMixin):
             Nwbfile,
         )
 
-        attr_val = getattr(self, "_nwb_table", None)
-
         # ---------- Overwrite AnalysisNwbfile if using a custom one ----------
-        if not attr_val:
+        def get_prefix(name: str) -> str:
+            return name.split("_")[0].strip("`")
 
-            def get_prefix(name: str) -> str:
-                return name.split("_")[0].strip("`")
-
-            analysis_parents = [
-                p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
-            ]
-            if len(analysis_parents) > 1:
-                raise ValueError(
-                    f"{self.__class__.__name__} has multiple AnalysisNwbfile "
-                    "parents. This is not permitted."
-                )
-            if (
-                len(analysis_parents) == 1
-                and get_prefix(analysis_parents[0]) != "common"
-            ):
-                this_prefix = get_prefix(analysis_parents[0])
-                AnalysisNwbfile = AnalysisRegistry().get_class(this_prefix)
+        analysis_parents = [
+            p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
+        ]
+        if len(analysis_parents) > 1:
+            raise ValueError(
+                f"{self.__class__.__name__} has multiple AnalysisNwbfile "
+                "parents. This is not permitted."
+            )
+        if len(analysis_parents) == 1:
+            this_prefix = get_prefix(analysis_parents[0])
+            # TODO: add common to registry at declaration?
+            if this_prefix == "common":
+                return (AnalysisNwbfile, "analysis_file_abs_path")
+            return (
+                AnalysisRegistry().get_class(this_prefix),
+                "analysis_file_abs_path",
+            )
         # --------------------------------------------------------------------
 
-        resolved = attr_val or (
-            AnalysisNwbfile
-            if "-> AnalysisNwbfile" in self.definition
-            else Nwbfile if "-> Nwbfile" in self.definition else None
+        resolved = getattr(self, "_nwb_table", None) or (
+            Nwbfile if "-> Nwbfile" in self.definition else None
         )
 
         if not resolved:
@@ -69,6 +66,7 @@ class FetchMixin(BaseMixin):
         return (
             resolved,
             table_dict[resolved],
+            # table_dict.get(resolved, "analysis_file_abs_path"),
         )
 
     def fetch_nwb(self, *attrs, **kwargs):

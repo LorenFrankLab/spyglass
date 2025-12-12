@@ -98,6 +98,15 @@ class AnalysisMixin(BaseMixin):
     _creation_times = {}
     _cached_analysis_dir = None
 
+    def __repr__(self) -> str:
+        """String representation of the AnalysisNwbfile table.
+
+        Overrides the default to include the database name.
+        """
+        super_repr = super().__repr__()
+        database = getattr(self, "database", "unknown_nwbfile")
+        return super_repr.replace("common_nwbfile", database)
+
     # ---------------------------- Table management ----------------------------
     @property
     def _enforced_definition(self) -> str:

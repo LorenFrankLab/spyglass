@@ -63,7 +63,7 @@ DecodingParameters().alter()
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #XXXX
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
