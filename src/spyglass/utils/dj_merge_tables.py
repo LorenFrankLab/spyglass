@@ -564,8 +564,9 @@ class Merge(ExportMixin, dj.Manual):
                     [
                         (
                             self
-                            & self._merge_restrict_parts(file)
-                            & source_restr
+                            & dj.AndList(
+                                [self._merge_restrict_parts(file), source_restr]
+                            )
                         ).fetch1(self._reserved_pk)
                         for file in nwb_list
                     ]
