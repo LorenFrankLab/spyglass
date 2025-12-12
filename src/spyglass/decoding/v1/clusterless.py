@@ -30,7 +30,9 @@ from spyglass.decoding.v1.utils import (
     concatenate_interval_results,
     create_interval_labels,
 )
-from spyglass.decoding.v1.waveform_features import UnitWaveformFeatures  # noqa: F401
+from spyglass.decoding.v1.waveform_features import (
+    UnitWaveformFeatures,
+)  # noqa: F401
 from spyglass.position.position_merge import PositionOutput  # noqa: F401
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart, logger
@@ -791,7 +793,5 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 position_info[position_variable_names].to_numpy(),
                 position_info[orientation_name].to_numpy(),
                 map_position,
-                classifier.environments[0].track_graphDD,
-            )
                 classifier.environments[0].track_graphDD,
             )
