@@ -3,61 +3,27 @@
 Tests the create_interval_labels and concatenate_interval_results functions
 from spyglass.decoding.v1.utils. These tests validate the xarray concatenation
 logic without requiring database infrastructure.
-
-Note: We use importlib to load the utils module directly to avoid triggering
-database connections that occur when importing through spyglass.decoding.__init__.
 """
-
-import importlib.util
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 import xarray as xr
 
 
-def _load_utils_directly():
-    """Load utils module directly to avoid database connection during import.
-
-    The normal import path (spyglass.decoding.v1.utils) triggers __init__.py
-    which imports DecodingOutput -> ClusterlessDecodingV1 -> database connection.
-
-    This function finds the utils.py file whether running from source (src/)
-    or from an installed package (site-packages/).
-    """
-    # Try source directory first (for local development)
-    src_path = (
-        Path(__file__).parent.parent.parent
-        / "src/spyglass/decoding/v1/utils.py"
+@pytest.fixture
+def interval_utils():
+    """Import utils module inside fixture to defer database connection."""
+    from spyglass.decoding.v1.utils import (
+        concatenate_interval_results,
+        create_interval_labels,
     )
-    if src_path.exists():
-        utils_path = src_path
-    else:
-        # Fall back to installed package location
-        for path in sys.path:
-            candidate = Path(path) / "spyglass/decoding/v1/utils.py"
-            if candidate.exists():
-                utils_path = candidate
-                break
-        else:
-            raise ImportError(
-                "Could not find spyglass.decoding.v1.utils module"
-            )
 
-    spec = importlib.util.spec_from_file_location("utils", utils_path)
-    utils = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(utils)
-    return utils
+    return create_interval_labels, concatenate_interval_results
 
 
-_utils = _load_utils_directly()
-create_interval_labels = _utils.create_interval_labels
-concatenate_interval_results = _utils.concatenate_interval_results
-
-
-def test_concatenation_without_intervals_dimension():
+def test_concatenation_without_intervals_dimension(interval_utils):
     """Test that concatenating along time instead of intervals works correctly."""
+    create_interval_labels, concatenate_interval_results = interval_utils
 
     # Simulate two intervals with different lengths (like real decoding)
     interval1_time = np.arange(0, 10, 0.1)
@@ -124,11 +90,10 @@ def test_concatenation_without_intervals_dimension():
         interval2_time
     ), f"Interval 1 should have {len(interval2_time)} time points"
 
-    print("✓ All checks passed!")
 
-
-def test_memory_efficiency():
+def test_memory_efficiency(interval_utils):
     """Test that new approach uses less memory than intervals dimension."""
+    create_interval_labels, concatenate_interval_results = interval_utils
 
     # Create two intervals with different lengths
     interval1_data = xr.Dataset(
@@ -168,24 +133,25 @@ def test_memory_efficiency():
     new_bytes = new_approach.nbytes
     savings_percent = ((old_bytes - new_bytes) / old_bytes) * 100
 
-    print(
-        f"✓ Memory savings: {savings_percent:.1f}% ({old_bytes} -> {new_bytes} bytes)"
-    )
     assert savings_percent > 0, "New approach should save memory"
 
 
-def test_empty_intervals_raises_error():
+def test_empty_intervals_raises_error(interval_utils):
     """Test that concatenate_interval_results raises ValueError for empty list.
 
     This ensures proper error handling when all decoding intervals are empty
     (e.g., intervals don't overlap with position data).
     """
+    create_interval_labels, concatenate_interval_results = interval_utils
+
     with pytest.raises(ValueError, match="All decoding intervals are empty"):
         concatenate_interval_results([])
 
 
-def test_create_interval_labels_all_missing():
+def test_create_interval_labels_all_missing(interval_utils):
     """Test create_interval_labels when all data is missing."""
+    create_interval_labels, concatenate_interval_results = interval_utils
+
     # All time points marked as missing
     is_missing = np.ones(100, dtype=bool)
     labels = create_interval_labels(is_missing)
@@ -196,8 +162,10 @@ def test_create_interval_labels_all_missing():
     ), "All labels should be -1 when all data is missing"
 
 
-def test_create_interval_labels_single_interval():
+def test_create_interval_labels_single_interval(interval_utils):
     """Test create_interval_labels with a single contiguous interval."""
+    create_interval_labels, concatenate_interval_results = interval_utils
+
     # Single interval from index 20-50
     is_missing = np.ones(100, dtype=bool)
     is_missing[20:51] = False
@@ -210,8 +178,10 @@ def test_create_interval_labels_single_interval():
     assert np.all(labels[51:] == -1), "Labels after interval should be -1"
 
 
-def test_create_interval_labels_multiple_intervals():
+def test_create_interval_labels_multiple_intervals(interval_utils):
     """Test create_interval_labels with multiple non-contiguous intervals."""
+    create_interval_labels, concatenate_interval_results = interval_utils
+
     # Two intervals: 10-20 and 40-60
     is_missing = np.ones(100, dtype=bool)
     is_missing[10:21] = False
@@ -229,13 +199,3 @@ def test_create_interval_labels_multiple_intervals():
     assert np.all(
         labels[61:] == -1
     ), "Labels after second interval should be -1"
-
-
-if __name__ == "__main__":
-    test_concatenation_without_intervals_dimension()
-    test_memory_efficiency()
-    test_empty_intervals_raises_error()
-    test_create_interval_labels_all_missing()
-    test_create_interval_labels_single_interval()
-    test_create_interval_labels_multiple_intervals()
-    print("\n✓✓ All simple tests passed!")
