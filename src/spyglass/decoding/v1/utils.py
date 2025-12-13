@@ -37,10 +37,17 @@ def concatenate_interval_results(
 ) -> xr.Dataset:
     """Concatenate results from multiple intervals along time dimension.
 
+    All datasets must have compatible structure (same variables, compatible
+    coordinates except time). Time coordinates will be concatenated and an
+    interval_labels coordinate will be added to track which interval each
+    time point belongs to.
+
     Parameters
     ----------
     interval_results : List[xr.Dataset], length n_intervals
-        Results from each decoding interval
+        Results from each decoding interval. Each dataset must have a 'time'
+        dimension and coordinate. Empty datasets should be filtered out before
+        calling this function.
 
     Returns
     -------
@@ -50,14 +57,28 @@ def concatenate_interval_results(
     Raises
     ------
     ValueError
-        If interval_results is empty
+        If interval_results is empty or contains empty datasets
     """
     if not interval_results:
         raise ValueError("All decoding intervals are empty")
 
-    interval_labels = []
+    # Validate each result has time points
+    for i, result in enumerate(interval_results):
+        if len(result.time) == 0:
+            raise ValueError(
+                f"Interval {i} has empty time dimension - "
+                f"should not be included in interval_results list"
+            )
+
+    # Pre-allocate with known size for efficiency
+    total_length = sum(len(result.time) for result in interval_results)
+    interval_labels = np.empty(total_length, dtype=np.intp)
+
+    offset = 0
     for interval_idx, result in enumerate(interval_results):
-        interval_labels.extend([interval_idx] * len(result.time))
+        n_times = len(result.time)
+        interval_labels[offset : offset + n_times] = interval_idx
+        offset += n_times
 
     concatenated = xr.concat(interval_results, dim="time")
     return concatenated.assign_coords(interval_labels=("time", interval_labels))

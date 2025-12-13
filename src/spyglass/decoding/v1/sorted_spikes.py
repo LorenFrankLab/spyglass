@@ -9,6 +9,7 @@ speeds. eLife 10, e64505 (2021).
 """
 
 import copy
+import inspect
 import uuid
 from pathlib import Path
 from typing import Optional, Union
@@ -215,8 +216,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 # Get data from first interval
                 results.where(results.interval_labels == 0, drop=True)
 
-                # Group by interval
-                results.groupby('interval_labels')
+                # Get only data inside intervals (exclude -1 if estimate_decoding_params=True)
+                results.where(results.interval_labels >= 0, drop=True)
+
+                # Group by interval (includes -1 group if estimate_decoding_params=True)
+                for label, data in results.groupby('interval_labels'):
+                    if label >= 0:  # Skip outside-interval data if needed
+                        process(data)
 
         Raises
         ------
@@ -269,17 +275,13 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 interval_labels=("time", interval_labels)
             )
         else:
-            VALID_FIT_KWARGS = [
-                "is_training",
-                "encoding_group_labels",
-                "environment_labels",
-                "discrete_transition_covariate_data",
-            ]
+            sig = inspect.signature(classifier.fit)
+            valid_fit_kwargs = list(sig.parameters.keys())
 
             fit_kwargs = {
                 k: value
                 for k, value in decoding_kwargs.items()
-                if k in VALID_FIT_KWARGS
+                if k in valid_fit_kwargs
             }
             classifier.fit(
                 position_time=position_info.index.to_numpy(),
@@ -287,15 +289,12 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
                 spike_times=spike_times,
                 **fit_kwargs,
             )
-            VALID_PREDICT_KWARGS = [
-                "is_missing",
-                "discrete_transition_covariate_data",
-                "return_causal_posterior",
-            ]
+            sig = inspect.signature(classifier.predict)
+            valid_predict_kwargs = list(sig.parameters.keys())
             predict_kwargs = {
                 k: value
                 for k, value in decoding_kwargs.items()
-                if k in VALID_PREDICT_KWARGS
+                if k in valid_predict_kwargs
             }
 
             # We treat each decoding interval as a separate sequence

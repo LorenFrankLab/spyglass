@@ -271,8 +271,13 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 # Get data from first interval
                 results.where(results.interval_labels == 0, drop=True)
 
-                # Group by interval
-                results.groupby('interval_labels')
+                # Get only data inside intervals (exclude -1 if estimate_decoding_params=True)
+                results.where(results.interval_labels >= 0, drop=True)
+
+                # Group by interval (includes -1 group if estimate_decoding_params=True)
+                for label, data in results.groupby('interval_labels'):
+                    if label >= 0:  # Skip outside-interval data if needed
+                        process(data)
 
         Raises
         ------
