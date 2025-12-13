@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List
 
 import numpy as np
 import numpy.typing as npt
@@ -84,7 +84,7 @@ def concatenate_interval_results(
     return concatenated.assign_coords(interval_labels=("time", interval_labels))
 
 
-def _get_interval_range(key: dict) -> Tuple[float, float]:
+def _get_interval_range(key: dict) -> tuple[float, float]:
     """Return maximum range of model times in encoding/decoding intervals
 
     Parameters
