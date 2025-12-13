@@ -156,8 +156,8 @@ class AnalysisRegistry(dj.Manual):
 
     Key Methods:
         get_class(prefix) - Get AnalysisNwbfile class for a specific team prefix
-        get_all_classes() - Get all registered AnalysisNwbfile classes
         get_tracked_files() - Get all files tracked across all custom tables
+        clear_cache() - Clear the class cache (useful for testing)
 
     Usage:
         from spyglass.common import AnalysisRegistry
@@ -167,6 +167,12 @@ class AnalysisRegistry(dj.Manual):
 
         # Get a specific team's table
         MyTeamAnalysis = AnalysisRegistry().get_class("myteam")
+
+        # Get an instance
+        my_team_analysis = MyTeamAnalysis()
+
+        # Use enhanced helper methods
+        my_team_analysis.get_prefix()  # 'myteam'
     """
 
     definition = """
@@ -175,6 +181,9 @@ class AnalysisRegistry(dj.Manual):
     created_at = CURRENT_TIMESTAMP: timestamp  # when registered
     created_by : varchar(32)                   # who registered
     """
+
+    # Class-level cache for dynamic table classes
+    _class_cache: dict = {}
 
     def insert1(self, key: Union[str, dict], **kwargs) -> None:
         """Auto-add created_by if not provided.
@@ -190,9 +199,9 @@ class AnalysisRegistry(dj.Manual):
         if isinstance(key, str):
             key = {"full_table_name": key}
 
-        if self & dict(full_table_name=key["full_table_name"]):
+        if query := self & key:
             logger.debug(f"Entry already exists: {key['full_table_name']}")
-            return
+            return query
 
         if "created_by" not in key:
             key["created_by"] = dj.config["database.user"]
@@ -207,7 +216,7 @@ class AnalysisRegistry(dj.Manual):
     ) -> tuple[str, str, str, str]:
         """Parse full table name into components.
 
-        Extracts database, table name, prefix, and suffix from a full table name.
+        Extracts database, table name, prefix, and suffix from a full name.
 
         Parameters
         ----------
@@ -242,7 +251,7 @@ class AnalysisRegistry(dj.Manual):
     def _is_valid_entry(
         self, full_table_name: str, raise_err: bool = True
     ) -> bool:
-        """Check if the given table name corresponds to a valid SpyglassAnalysis.
+        """Check if the given table name corresponds to a valid SpyglassAnalysis
 
         Parameters
         ----------
@@ -279,8 +288,57 @@ class AnalysisRegistry(dj.Manual):
 
         return err is None
 
-    def _get_tbl_from_name(self, full_name: str) -> SpyglassAnalysis:
-        """Return the DataJoint table object for the given full_table_name.
+    @classmethod
+    def _create_class(cls, full_name: str) -> type:
+        """Create an enhanced custom analysis table class.
+
+        Returns a class with:
+        - All AnalysisMixin methods
+        - Cached for reuse
+        - Helper methods for common operations
+        - Better repr and documentation
+
+        Parameters
+        ----------
+        full_name : str
+            Full table name (e.g., "`myteam_nwbfile`.`analysis_nwbfile`")
+
+        Returns
+        -------
+        type
+            Enhanced table class with helper methods
+        """
+        camel_name = dj.utils.to_camel_case(full_name.split(".")[-1])
+        prefix = full_name.split("_")[0].strip("`")
+
+        class EnhancedAnalysisNwbfile(SpyglassAnalysis, dj.FreeTable):
+            f"""Custom AnalysisNwbfile table for {prefix}.
+
+            Automatically created by AnalysisRegistry for schema {full_name}.
+            Provides same functionality as common AnalysisNwbfile but with
+            isolated database locks.
+            """
+
+            _full_table_name = full_name
+            _prefix = prefix
+
+            def __init__(self):
+                super().__init__(dj.conn(), full_name)
+
+            def __repr__(self) -> str:
+                """Enhanced repr showing custom table info."""
+                return f"<{camel_name} (custom '{prefix}' analysis table)>"
+
+        # Set the class name dynamically
+        EnhancedAnalysisNwbfile.__name__ = camel_name
+        EnhancedAnalysisNwbfile.__qualname__ = camel_name
+
+        return EnhancedAnalysisNwbfile
+
+    def _get_tbl_from_name(self, full_name: str) -> type:
+        """Return cached or create enhanced table class.
+
+        Now uses caching and creates enhanced classes with helper methods.
 
         Parameters
         ----------
@@ -289,20 +347,20 @@ class AnalysisRegistry(dj.Manual):
 
         Returns
         -------
-        table_obj : dj.FreeTable
-            The DataJoint table object for the given full_table_name.
+        type
+            Enhanced table class with caching
         """
-        camel_name = dj.utils.to_camel_case(full_name.split(".")[-1])
+        # Check cache first
+        if full_name in self._class_cache:
+            return self._class_cache[full_name]
 
-        return type(
-            camel_name,
-            (SpyglassAnalysis, dj.FreeTable),
-            {
-                "__init__": lambda self: dj.FreeTable.__init__(
-                    self, dj.conn(), full_name
-                )
-            },
-        )
+        # Create enhanced class
+        cls = self._create_class(full_name)
+
+        # Cache it
+        self._class_cache[full_name] = cls
+
+        return cls
 
     def get_class(self, key: Union[str, Dict]) -> Optional[type]:
         """Return the class object for the given full_table_name, uninitialized.
@@ -310,7 +368,7 @@ class AnalysisRegistry(dj.Manual):
         Parameters
         ----------
         key : str or dict
-            The full_table_name as a string or a dict with the key
+            The prefix or full_table_name as a string or a dict with the key
             'full_table_name'.
 
         Returns
@@ -352,6 +410,21 @@ class AnalysisRegistry(dj.Manual):
             for key in self.fetch(as_dict=True)
             if self._is_valid_entry(key["full_table_name"], raise_err=False)
         ]
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear the class cache.
+
+        Useful for testing or when custom tables are modified.
+        After clearing, the next call to get_class() will recreate
+        the class objects.
+
+        Examples
+        --------
+        >>> AnalysisRegistry.clear_cache()
+        >>> # Next get_class() call will create fresh class instances
+        """
+        cls._class_cache.clear()
 
     def get_externals(
         self, store: str = "analysis"

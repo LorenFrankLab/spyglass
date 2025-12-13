@@ -86,6 +86,9 @@ class AnalysisMixin(BaseMixin):
         get_file_path() - Get absolute path to analysis file
         cleanup() - Remove orphaned files across all custom tables
         _copy_to_common() - Copy entries to common table during export
+        get_prefix() - Get database prefix (e.g., 'myteam')
+        fetch_abs_paths() - Batch fetch absolute file paths
+
 
     The build() method returns an AnalysisFileBuilder context manager that
     enforces the CREATE → POPULATE → REGISTER lifecycle, preventing common
@@ -97,15 +100,34 @@ class AnalysisMixin(BaseMixin):
 
     _creation_times = {}
     _cached_analysis_dir = None
+    _prefix: Optional[str] = None
 
-    def __repr__(self) -> str:
-        """String representation of the AnalysisNwbfile table.
+    def get_prefix(self) -> str:
+        """Get the database prefix for this analysis table.
 
-        Overrides the default to include the database name.
+        Returns the first part of the schema name before the underscore.
+        For example, 'myteam_nwbfile' returns 'myteam'.
+
+        Returns
+        -------
+        str
+            Database prefix (e.g., 'common', 'myteam', username)
+
+        Examples
+        --------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> AnalysisNwbfile().get_prefix()
+        'common'
+
+        >>> from spyglass.common.custom_nwbfile import AnalysisNwbfile
+        >>> AnalysisNwbfile().get_prefix()
+        'yourusername'
         """
-        super_repr = super().__repr__()
-        database = getattr(self, "database", "unknown_nwbfile")
-        return super_repr.replace("common_nwbfile", database)
+        if self._prefix is not None:
+            return self._prefix
+        if database := getattr(self, "database", None):
+            self._prefix = database.split("_")[0]
+        return self._prefix
 
     # ---------------------------- Table management ----------------------------
     @property
@@ -528,6 +550,31 @@ class AnalysisMixin(BaseMixin):
             if not analysis_file_base_path.exists():
                 os.mkdir(str(analysis_file_base_path))
             return str(analysis_file_base_path / analysis_nwb_file_name)
+
+    def get_abs_paths(self, **kwargs) -> list:
+        """Fetch absolute paths for all analysis files in this restriction.
+
+        Convenience method for batch path operations. Fetches all file names
+        and resolves them to absolute paths.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional arguments passed to fetch()
+
+        Returns
+        -------
+        list of str
+            Absolute paths to analysis files
+
+        Examples
+        --------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> paths = (AnalysisNwbfile & restriction).get_abs_paths()
+        >>> # ['/data/analysis/file1.nwb', '/data/analysis/file2.nwb']
+        """
+        file_names = self.fetch("analysis_file_name", **kwargs)
+        return [self.get_abs_path(fn) for fn in file_names]
 
     def add_nwb_object(
         self,

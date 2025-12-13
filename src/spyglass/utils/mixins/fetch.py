@@ -15,42 +15,67 @@ class FetchMixin(BaseMixin):
 
     @cached_property
     def _nwb_table_tuple(self) -> tuple:
-        """NWBFile table class.
+        """NWB file table class and attribute name.
+
+        Automatically detects the appropriate NWB table type by inspecting
+        foreign keys and parent relationships. Supports:
+        - Raw data files (Nwbfile)
+        - Common analysis files (AnalysisNwbfile)
+        - Custom analysis files (team-specific tables)
 
         Used to determine fetch_nwb behavior. Also used in Merge.fetch_nwb.
-        Implemented as a cached_property to avoid circular imports."""
-        from spyglass.common.common_nwbfile import (  # noqa F401
+        Implemented as a cached_property to avoid circular imports.
+
+        Returns
+        -------
+        tuple
+            (table_class, attribute_name) for NWB file fetching
+        """
+        from spyglass.common.common_nwbfile import (
             AnalysisNwbfile,
             AnalysisRegistry,
             Nwbfile,
         )
 
-        # ---------- Overwrite AnalysisNwbfile if using a custom one ----------
+        # Helper function to extract prefix from parent name
         def get_prefix(name: str) -> str:
             return name.split("_")[0].strip("`")
 
+        # Check for custom AnalysisNwbfile parent
         analysis_parents = [
             p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
         ]
+
         if len(analysis_parents) > 1:
             raise ValueError(
                 f"{self.__class__.__name__} has multiple AnalysisNwbfile "
                 "parents. This is not permitted."
             )
-        if len(analysis_parents) == 1:
-            this_prefix = get_prefix(analysis_parents[0])
-            # TODO: add common to registry at declaration?
-            if this_prefix == "common":
-                return (AnalysisNwbfile, "analysis_file_abs_path")
-            return (
-                AnalysisRegistry().get_class(this_prefix),
-                "analysis_file_abs_path",
-            )
-        # --------------------------------------------------------------------
 
-        resolved = getattr(self, "_nwb_table", None) or (
-            Nwbfile if "-> Nwbfile" in self.definition else None
-        )
+        if len(analysis_parents) == 1:
+            # Common AnalysisNwbfile
+            if "common_nwbfile" in analysis_parents[0]:
+                return (AnalysisNwbfile, "analysis_file_abs_path")
+
+            # Custom AnalysisNwbfile
+            custom_class = AnalysisRegistry().get_class(analysis_parents[0])
+            if custom_class is None:
+                raise ValueError(
+                    f"Custom analysis table '{analysis_parents[0]}' "
+                    "not found in registry"
+                )
+            return (custom_class, "analysis_file_abs_path")
+
+        # Check for explicit _nwb_table attribute
+        resolved = getattr(self, "_nwb_table", None)
+
+        # Fallback: Check definition for Nwbfile foreign key
+        if not resolved:
+            if "-> Nwbfile" in self.definition:
+                resolved = Nwbfile
+            else:
+                # Default to AnalysisNwbfile if no clear indication
+                resolved = AnalysisNwbfile
 
         if not resolved:
             raise NotImplementedError(
@@ -58,16 +83,15 @@ class FetchMixin(BaseMixin):
                 "(Analysis)Nwbfile foreign key or _nwb_table attribute."
             )
 
+        # Determine attribute name based on table type
         table_dict = {
             AnalysisNwbfile: "analysis_file_abs_path",
             Nwbfile: "nwb_file_abs_path",
         }
 
-        return (
-            resolved,
-            table_dict[resolved],
-            # table_dict.get(resolved, "analysis_file_abs_path"),
-        )
+        attr_name = table_dict.get(resolved, "analysis_file_abs_path")
+
+        return (resolved, attr_name)
 
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
