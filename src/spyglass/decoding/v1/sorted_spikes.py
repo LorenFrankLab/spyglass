@@ -475,10 +475,16 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
         )
         min_time, max_time = _get_interval_range(key)
 
-        return pd.concat(
-            [linear_position_df.set_index(position_df.index), position_df],
-            axis=1,
-        ).loc[min_time:max_time]
+        # sort_index() for defensive programming - ensures chronological order
+        # before .loc[] slice. See: github.com/LorenFrankLab/spyglass/issues/1471
+        return (
+            pd.concat(
+                [linear_position_df.set_index(position_df.index), position_df],
+                axis=1,
+            )
+            .sort_index()
+            .loc[min_time:max_time]
+        )
 
     @classmethod
     def fetch_spike_data(

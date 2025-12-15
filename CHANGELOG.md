@@ -39,10 +39,14 @@ DecodingParameters().alter()
 - Allow rechecking of recomputes #1380, #1413
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465, #1484
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
+  #1484, #1489
 - Pin `ndx-optogenetics` to 0.2.0 #1458
 - Cleanup bug when fetching raw files from DANDI #1469
 - Refactor pytests for speed, run fast tests on push #1440
+- Allow for permissive name selection when identifying objects in ingestion nwb #1490
+- Update fixes for accessing files from DANDI #1477
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
 
 ### Pipelines
 
@@ -61,13 +65,18 @@ DecodingParameters().alter()
         from NWB #1433
     - Add custom/dynamic `AnalysisNwbfile` creation #1435
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
-    - Improve error transparency on duplicate `Electrode` ids #1454
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
-    - Handle epoch formats with varying zero-padding #1459
+    - Handle epoch formats with varying zero-padding #1459, #1492
+    - Reduce lock conflicts between users during ingestion #1483
+    - Add the table `RawCompassDirection` for importing orientation
+      data from NWB files #1466
 - Decoding
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+    - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
+        merge IDs are fetched in non-chronological order #1471
+    - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
 - Position
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
