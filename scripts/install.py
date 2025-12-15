@@ -1861,10 +1861,6 @@ def prompt_database_setup() -> str:
         return choice_map[choice]
 
 
-# Backwards compatibility alias for cleanup
-cleanup_failed_compose_setup_inline = DockerManager.cleanup
-
-
 def setup_database_compose() -> Tuple[bool, str]:
     """Set up database using Docker Compose.
 
