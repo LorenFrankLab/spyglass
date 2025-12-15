@@ -1999,7 +1999,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             Console.fail()
             error_msg = result.stderr.decode()
             Console.error(f"Failed to start services: {error_msg}")
-            cleanup_failed_compose_setup_inline()
+            DockerManager.cleanup()
             return False, "start_failed"
         Console.done()
 
@@ -2055,7 +2055,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             Console.error("MySQL did not become ready within 60 seconds")
             print("\n  Check logs:")
             print("    docker compose logs mysql")
-            cleanup_failed_compose_setup_inline()
+            DockerManager.cleanup()
             return False, "timeout"
 
         # Read actual port/password from .env if it exists
@@ -2096,19 +2096,19 @@ def setup_database_compose() -> Tuple[bool, str]:
 
     except subprocess.CalledProcessError as e:
         Console.error(f"Docker Compose command failed: {e}")
-        cleanup_failed_compose_setup_inline()
+        DockerManager.cleanup()
         return False, str(e)
     except subprocess.TimeoutExpired:
         Console.error("Docker Compose command timed out")
-        cleanup_failed_compose_setup_inline()
+        DockerManager.cleanup()
         return False, "timeout"
     except (OSError, IOError) as e:
         Console.error(f"File system error during Docker setup: {e}")
-        cleanup_failed_compose_setup_inline()
+        DockerManager.cleanup()
         return False, str(e)
     except json.JSONDecodeError as e:
         Console.error(f"Failed to parse Docker Compose output: {e}")
-        cleanup_failed_compose_setup_inline()
+        DockerManager.cleanup()
         return False, "json_parse_error"
 
 
