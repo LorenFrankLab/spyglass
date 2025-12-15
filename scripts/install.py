@@ -343,47 +343,48 @@ def check_prerequisites(
         Console.success("Git available", indent=True)
 
     # Disk space check (if base_dir provided)
-    if base_dir:
-        # Use centralized disk space requirements
-        space_req = DISK_SPACE_REQUIREMENTS.get(
-            install_type, DISK_SPACE_REQUIREMENTS["minimal"]
+    if not base_dir:
+        return
+
+    # Use centralized disk space requirements
+    space_req = DISK_SPACE_REQUIREMENTS.get(
+        install_type, DISK_SPACE_REQUIREMENTS["minimal"]
+    )
+    required_gb = space_req["total"]
+    packages_gb = space_req["packages"]
+    buffer_gb = required_gb - packages_gb
+
+    sufficient, available_gb = check_disk_space(required_gb, base_dir)
+
+    if sufficient:
+        Console.success(
+            f"Disk space: {available_gb} GB available (need {required_gb} GB)",
+            indent=True,
         )
-        required_gb = space_req["total"]
-        packages_gb = space_req["packages"]
-        buffer_gb = required_gb - packages_gb
+        return
 
-        sufficient, available_gb = check_disk_space(required_gb, base_dir)
-
-        if sufficient:
-            Console.success(
-                f"Disk space: {available_gb} GB available (need {required_gb} GB)",
-                indent=True,
-            )
-        else:
-            needed_to_free = required_gb - available_gb
-            Console.error(
-                "Insufficient disk space - installation cannot continue",
-                indent=True,
-            )
-            print(f"    Checking: {base_dir}")
-            print(f"    Available: {available_gb} GB")
-            print(
-                f"    Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
-            )
-            print(f"    Need to free: {needed_to_free} GB")
-            print()
-            print("    To fix:")
-            print(
-                f"      1. Free at least {needed_to_free} GB in this location"
-            )
-            print(
-                "      2. Choose different directory: python scripts/install.py --base-dir /other/path"
-            )
-            min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
-            print(
-                f"      3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
-            )
-            raise RuntimeError("Insufficient disk space")
+    needed_to_free = required_gb - available_gb
+    Console.error(
+        "Insufficient disk space - installation cannot continue",
+        indent=True,
+    )
+    print(f"    Checking: {base_dir}")
+    print(f"    Available: {available_gb} GB")
+    print(
+        f"    Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
+    )
+    print(f"    Need to free: {needed_to_free} GB")
+    print()
+    print("    To fix:")
+    print(f"      1. Free at least {needed_to_free} GB in this location")
+    print(
+        "      2. Choose different directory: python scripts/install.py --base-dir /other/path"
+    )
+    min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
+    print(
+        f"      3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
+    )
+    raise RuntimeError("Insufficient disk space")
 
 
 # =============================================================================
@@ -2633,10 +2634,9 @@ def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
     """
     if args.minimal:
         return "environment_min.yml", "minimal"
-    elif args.full:
+    if args.full:
         return "environment.yml", "full"
-    else:
-        return prompt_install_type()
+    return prompt_install_type()
 
 
 def setup_environment(
@@ -2674,7 +2674,8 @@ def setup_database(args: argparse.Namespace) -> None:
     """
     if args.docker:
         handle_database_setup_cli(args.env_name, "docker")
-    elif args.remote:
+        return
+    if args.remote:
         import os
 
         db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
@@ -2686,8 +2687,8 @@ def setup_database(args: argparse.Namespace) -> None:
             db_user=args.db_user,
             db_password=db_password,
         )
-    else:
-        handle_database_setup_interactive(args.env_name)
+        return
+    handle_database_setup_interactive(args.env_name)
 
 
 def print_completion_message(env_name: str, validation_passed: bool) -> None:
