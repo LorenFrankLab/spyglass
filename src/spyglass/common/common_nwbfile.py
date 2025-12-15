@@ -320,10 +320,11 @@ class AnalysisRegistry(dj.Manual):
             """
 
             _full_table_name = full_name
-            _prefix = prefix
+            _analysis_prefix = prefix
 
             def __init__(self):
-                super().__init__(dj.conn(), full_name)
+                # Always pass connection and table name to FreeTable
+                super().__init__(conn=dj.conn(), full_table_name=full_name)
 
             def __repr__(self) -> str:
                 """Enhanced repr showing custom table info."""
