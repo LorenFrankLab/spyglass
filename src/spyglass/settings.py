@@ -30,91 +30,46 @@ class SpyglassConfig:
         dict
             Directory schema with prefixes (spyglass, kachery, dlc, moseq)
 
+        Raises
+        ------
+        FileNotFoundError
+            If config_schema.json is not found at repository root
+        ValueError
+            If schema is invalid or missing required keys
+
         Notes
         -----
         This method reads from config_schema.json at the repository root,
         which is the single source of truth for Spyglass directory structure.
-        Falls back to hard-coded defaults if file is not found (for backwards
-        compatibility during development).
         """
-        # Define fallback once to avoid duplication
-        fallback_schema = {
-            "spyglass": {
-                "raw": "raw",
-                "analysis": "analysis",
-                "recording": "recording",
-                "sorting": "spikesorting",
-                "waveforms": "waveforms",
-                "temp": "tmp",
-                "video": "video",
-                "export": "export",
-            },
-            "kachery": {
-                "cloud": ".kachery-cloud",
-                "storage": "kachery_storage",
-                "temp": "tmp",
-            },
-            "dlc": {
-                "project": "projects",
-                "video": "video",
-                "output": "output",
-            },
-            "moseq": {
-                "project": "projects",
-                "video": "video",
-            },
-        }
-
         schema_path = Path(__file__).parent.parent.parent / "config_schema.json"
 
         if not schema_path.exists():
-            logger.warning(
+            raise FileNotFoundError(
                 f"Config schema file not found at {schema_path}. "
-                "Using fallback default directory structure. "
-                "This is normal during development but should not happen "
-                "in production installations."
+                "This file is required for Spyglass to function. "
+                "Please ensure you have a complete Spyglass installation."
             )
-            return fallback_schema
 
-        try:
-            with open(schema_path) as f:
-                schema = json.load(f)
+        with open(schema_path) as f:
+            schema = json.load(f)
 
-            if not isinstance(schema, dict):
-                raise ValueError(f"Schema should be a dict, got {type(schema)}")
+        if not isinstance(schema, dict):
+            raise ValueError(f"Schema should be a dict, got {type(schema)}")
 
-            if "directory_schema" not in schema:
-                raise ValueError("Schema missing 'directory_schema' key")
+        if "directory_schema" not in schema:
+            raise ValueError("Schema missing 'directory_schema' key")
 
-            # Check schema version for compatibility
-            schema_version = schema.get("_schema_version", "1.0.0")
-            expected_version = "1.0.0"
-            if schema_version != expected_version:
-                logger.warning(
-                    f"Config schema version mismatch: expected {expected_version}, "
-                    f"got {schema_version}. This may cause compatibility issues."
-                )
-
-            return schema["directory_schema"]
-
-        except (OSError, IOError) as e:
-            logger.error(
-                f"Failed to read directory schema from {schema_path}: {e}. "
-                "Using fallback defaults."
+        # Check schema version for compatibility
+        schema_version = schema.get("_schema_version", "1.0.0")
+        expected_version = "1.0.0"
+        if schema_version != expected_version:
+            logger.warning(
+                f"Config schema version mismatch: expected {expected_version}, "
+                f"got {schema_version}. This may cause compatibility issues."
             )
-            return fallback_schema
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"Invalid JSON in directory schema {schema_path}: {e}. "
-                "Using fallback defaults."
-            )
-            return fallback_schema
-        except ValueError as e:
-            logger.error(
-                f"Schema validation failed for {schema_path}: {e}. "
-                "Using fallback defaults."
-            )
-            return fallback_schema
+
+        return schema["directory_schema"]
 
     def __init__(self, base_dir: str = None, **kwargs) -> None:
         """
