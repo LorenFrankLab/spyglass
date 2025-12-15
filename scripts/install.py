@@ -574,7 +574,7 @@ def prompt_install_type() -> Tuple[str, str]:
     Returns
     -------
     env_file : str
-        Path to environment YAML file ("environment-min.yml" or "environment.yml")
+        Path to environment YAML file ("environment_min.yml" or "environment.yml")
     install_type : str
         Installation type identifier ("minimal" or "full")
 
@@ -622,7 +622,7 @@ def prompt_install_type() -> Tuple[str, str]:
 
     # Map choices to (env_file, install_type)
     choice_map = {
-        "1": ("environment-min.yml", "minimal"),
+        "1": ("environment_min.yml", "minimal"),
         "2": ("environment.yml", "full"),
     }
 
@@ -2675,7 +2675,7 @@ def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
         Installation type identifier ("minimal" or "full")
     """
     if args.minimal:
-        return "environment-min.yml", "minimal"
+        return "environment_min.yml", "minimal"
     elif args.full:
         return "environment.yml", "full"
     else:
@@ -2776,11 +2776,11 @@ def run_dry_run(args: argparse.Namespace) -> None:
 
     # Determine installation type
     if args.minimal:
-        env_file, install_type = "environment-min.yml", "minimal"
+        env_file, install_type = "environment_min.yml", "minimal"
     elif args.full:
         env_file, install_type = "environment.yml", "full"
     else:
-        env_file, install_type = "environment-min.yml", "minimal (default)"
+        env_file, install_type = "environment_min.yml", "minimal (default)"
 
     # Determine base directory
     base_dir = (

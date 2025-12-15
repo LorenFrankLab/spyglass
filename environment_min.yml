@@ -1,5 +1,5 @@
 # Minimal Spyglass Environment - Core Dependencies Only
-# 1. Install: `mamba env create -f environment-min.yml`
+# 1. Install: `mamba env create -f environment_min.yml`
 # 2. Activate: `conda activate spyglass`
 # 3. For full features, use environment.yml instead
 #

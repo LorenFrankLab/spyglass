@@ -34,7 +34,7 @@ dependencies (Spyglass cannot be imported until after it's installed).
 │     └─→ If --dry-run: show plan and exit                          │ │
 │                                                                    │ │
 │  3. DETERMINE INSTALLATION TYPE                                    │ │
-│     ├─→ --minimal flag → environment-min.yml                       │ │
+│     ├─→ --minimal flag → environment_min.yml                       │ │
 │     ├─→ --full flag → environment.yml                              │ │
 │     └─→ Neither → Interactive prompt                               │ │
 │                                                                    │ │
@@ -84,7 +84,7 @@ dependencies (Spyglass cannot be imported until after it's installed).
 │  CLI Input                                                          │
 │     │                                                               │
 │     ├─→ --minimal ──────────→ Minimal Install                       │
-│     │                         • environment-min.yml                 │
+│     │                         • environment_min.yml                 │
 │     │                         • ~8 GB packages                      │
 │     │                         • ~5 min install time                 │
 │     │                         • Core functionality only             │
@@ -318,7 +318,7 @@ Configuration is read from authoritative sources:
 |---------|--------|
 | Python version | `pyproject.toml` |
 | Directory structure | `config_schema.json` |
-| Environment deps | `environment.yml` / `environment-min.yml` |
+| Environment deps | `environment.yml` / `environment_min.yml` |
 
 ---
 
@@ -376,7 +376,7 @@ python scripts/validate.py
 | `pyproject.toml` | Python version requirements |
 | `config_schema.json` | Directory structure schema |
 | `environment.yml` | Full dependencies |
-| `environment-min.yml` | Minimal dependencies |
+| `environment_min.yml` | Minimal dependencies |
 | `docker-compose.yml` | Database infrastructure |
 | `.env.example` | Docker configuration template |
 | `src/spyglass/settings.py` | Runtime config (loads schema) |

@@ -440,7 +440,7 @@ The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
 
 ## Related Files
 
-- `environment-min.yml` - Minimal dependencies
+- `environment_min.yml` - Minimal dependencies
 - `environment.yml` - Full dependencies
 - `src/spyglass/utils/docker.py` - Reusable Docker utilities
 - `tests/setup/test_install.py` - Unit tests

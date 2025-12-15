@@ -1042,7 +1042,7 @@ class TestInvalidCLIArguments:
         )
         # Script uses if/elif, so --minimal wins
         assert result.returncode == 0
-        assert "environment-min.yml" in result.stdout
+        assert "environment_min.yml" in result.stdout
 
     def test_docker_takes_precedence_over_remote(self, tmp_path):
         """When both --docker and --remote specified, --docker takes precedence."""
