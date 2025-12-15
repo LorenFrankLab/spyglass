@@ -102,121 +102,75 @@ class DatabaseOption(NamedTuple):
     description: str
 
 
-def print_step(msg: str) -> None:
-    """Print installation step message.
+# =============================================================================
+# Console Class - Terminal Output and User Interaction
+# =============================================================================
 
-    Parameters
-    ----------
-    msg : str
-        Message to display
+
+class Console:
+    """Handles all terminal output formatting and user interaction.
+
+    Provides consistent colored output, progress messages, and user prompts.
+    All methods are static since no instance state is needed.
     """
-    print(f"{COLORS['blue']}{SYMBOLS['step']}{COLORS['reset']} {msg}")
 
+    @staticmethod
+    def step(msg: str) -> None:
+        """Print installation step message."""
+        print(f"{COLORS['blue']}{SYMBOLS['step']}{COLORS['reset']} {msg}")
 
-def print_success(msg: str) -> None:
-    """Print success message.
+    @staticmethod
+    def success(msg: str) -> None:
+        """Print success message."""
+        print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}")
 
-    Parameters
-    ----------
-    msg : str
-        Success message to display
-    """
-    print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}")
+    @staticmethod
+    def warning(msg: str) -> None:
+        """Print warning message."""
+        print(f"{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}")
 
+    @staticmethod
+    def error(msg: str) -> None:
+        """Print error message."""
+        print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}")
 
-def print_warning(msg: str) -> None:
-    """Print warning message.
+    @staticmethod
+    def manual_password_instructions(env_name: str) -> None:
+        """Print instructions for manual password change."""
+        print("\nYou can change it manually later:")
+        print(f"  conda activate {env_name}")
+        print("  python -c 'import datajoint as dj; dj.set_password()'")
 
-    Parameters
-    ----------
-    msg : str
-        Warning message to display
-    """
-    print(f"{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}")
+    @staticmethod
+    def prompt_yes_no(prompt: str, default_yes: bool = False) -> bool:
+        """Prompt user for yes/no confirmation.
 
+        Parameters
+        ----------
+        prompt : str
+            Question to ask user (without the [Y/n] suffix)
+        default_yes : bool
+            If True, default is yes when user presses Enter.
 
-def print_error(msg: str) -> None:
-    """Print error message.
+        Returns
+        -------
+        bool
+            True if user answered yes, False otherwise
+        """
+        suffix = "[Y/n]" if default_yes else "[y/N]"
+        response = input(f"{prompt} {suffix}: ").strip().lower()
+        if not response:
+            return default_yes
+        return response in ["y", "yes"]
 
-    Parameters
-    ----------
-    msg : str
-        Error message to display
-    """
-    print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}")
-
-
-def print_manual_password_instructions(env_name: str) -> None:
-    """Print instructions for manual password change.
-
-    Used when automatic password change fails for any reason.
-
-    Parameters
-    ----------
-    env_name : str
-        Name of the conda environment
-    """
-    print("\nYou can change it manually later:")
-    print(f"  conda activate {env_name}")
-    print("  python -c 'import datajoint as dj; dj.set_password()'")
-
-
-def prompt_yes_no(prompt: str, default_yes: bool = False) -> bool:
-    """Prompt user for yes/no confirmation.
-
-    Parameters
-    ----------
-    prompt : str
-        Question to ask user (without the [Y/n] suffix)
-    default_yes : bool
-        If True, default is yes when user presses Enter.
-        If False, default is no.
-
-    Returns
-    -------
-    bool
-        True if user answered yes, False otherwise
-
-    Examples
-    --------
-    >>> if prompt_yes_no("Continue?", default_yes=True):
-    ...     print("Continuing...")
-    >>> if prompt_yes_no("Delete files?", default_yes=False):
-    ...     print("Deleting...")
-    """
-    suffix = "[Y/n]" if default_yes else "[y/N]"
-    response = input(f"{prompt} {suffix}: ").strip().lower()
-    if not response:
-        return default_yes
-    return response in ["y", "yes"]
-
-
-def show_progress_message(operation: str, estimated_minutes: int) -> None:
-    """Show progress message for long-running operation.
-
-    Displays estimated time and user-friendly messages to prevent
-    users from thinking the installer has frozen.
-
-    Parameters
-    ----------
-    operation : str
-        Description of the operation being performed
-    estimated_minutes : int
-        Estimated completion time in minutes
-
-    Returns
-    -------
-    None
-
-    Examples
-    --------
-    >>> show_progress_message("Installing packages", 10)
-    """
-    print_step(operation)
-    print(f"  Estimated time: ~{estimated_minutes} minute(s)")
-    print("  This may take a while - please be patient...")
-    if estimated_minutes > 10:
-        print("  Tip: This is a good time for a coffee break")
+    @staticmethod
+    def progress(operation: str, estimated_minutes: int) -> None:
+        """Show progress message for long-running operation."""
+        Console.step(operation)
+        print(f"  Estimated time: ~{estimated_minutes} minute(s)")
+        print("  This may take a while - please be patient...")
+        if estimated_minutes > 10:
+            print("  Tip: This is a good time for a coffee break")
 
 
 def get_required_python_version() -> Tuple[int, int]:
@@ -330,7 +284,7 @@ def check_prerequisites(
     --------
     >>> check_prerequisites("minimal", Path("/tmp/spyglass_data"))
     """
-    print_step("Checking prerequisites...")
+    Console.step("Checking prerequisites...")
 
     # Get Python version requirement from pyproject.toml
     min_version = get_required_python_version()
@@ -341,17 +295,17 @@ def check_prerequisites(
             f"Python {min_version[0]}.{min_version[1]}+ required, "
             f"found {sys.version_info.major}.{sys.version_info.minor}"
         )
-    print_success(f"Python {sys.version_info.major}.{sys.version_info.minor}")
+    Console.success(f"Python {sys.version_info.major}.{sys.version_info.minor}")
 
     # Conda/Mamba
-    conda_cmd = get_conda_command()
-    print_success(f"Package manager: {conda_cmd}")
+    conda_cmd = CondaManager.get_command()
+    Console.success(f"Package manager: {conda_cmd}")
 
     # Git (optional but recommended)
     if not shutil.which("git"):
-        print_warning("Git not found (recommended for development)")
+        Console.warning("Git not found (recommended for development)")
     else:
-        print_success("Git available")
+        Console.success("Git available")
 
     # Disk space check (if base_dir provided)
     if base_dir:
@@ -366,12 +320,12 @@ def check_prerequisites(
         sufficient, available_gb = check_disk_space(required_gb, base_dir)
 
         if sufficient:
-            print_success(
+            Console.success(
                 f"Disk space: {available_gb} GB available (need {required_gb} GB)"
             )
         else:
             needed_to_free = required_gb - available_gb
-            print_error(
+            Console.error(
                 "Insufficient disk space - installation cannot continue"
             )
             print(f"  Checking: {base_dir}")
@@ -393,24 +347,182 @@ def check_prerequisites(
             raise RuntimeError("Insufficient disk space")
 
 
-def get_conda_command() -> str:
-    """Get conda or mamba command.
+# =============================================================================
+# CondaManager Class - Conda Environment Operations
+# =============================================================================
 
-    Returns:
-        'mamba' if available, else 'conda'
 
-    Raises:
-        RuntimeError: If neither conda nor mamba found
+class CondaManager:
+    """Manages conda/mamba environment creation and package installation.
+
+    Attributes
+    ----------
+    env_name : str
+        Name of the conda environment to manage
     """
-    if shutil.which("mamba"):
-        return "mamba"
-    elif shutil.which("conda"):
-        return "conda"
-    else:
-        raise RuntimeError(
-            "conda or mamba not found. Install from:\n"
-            "  https://github.com/conda-forge/miniforge"
+
+    def __init__(self, env_name: str = "spyglass"):
+        self.env_name = env_name
+
+    @staticmethod
+    def get_command() -> str:
+        """Get conda or mamba command ('mamba' preferred if available)."""
+        if shutil.which("mamba"):
+            return "mamba"
+        elif shutil.which("conda"):
+            return "conda"
+        else:
+            raise RuntimeError(
+                "conda or mamba not found. Install from:\n"
+                "  https://github.com/conda-forge/miniforge"
+            )
+
+    def exists(self) -> bool:
+        """Check if the conda environment already exists."""
+        result = subprocess.run(
+            ["conda", "env", "list"], capture_output=True, text=True
         )
+        return self.env_name in result.stdout
+
+    def remove(self) -> None:
+        """Remove the conda environment."""
+        Console.step(f"Removing existing environment '{self.env_name}'...")
+        subprocess.run(
+            ["conda", "env", "remove", "-n", self.env_name, "-y"], check=True
+        )
+
+    def create(self, env_file: str, force: bool = False) -> None:
+        """Create conda environment from file.
+
+        Parameters
+        ----------
+        env_file : str
+            Name of environment YAML file (relative to REPO_ROOT)
+        force : bool
+            If True, overwrite existing environment without prompting
+        """
+        estimated_time = 5 if "min" in env_file else 15
+        Console.progress(
+            f"Creating environment '{self.env_name}' from {env_file}",
+            estimated_time,
+        )
+
+        if self.exists():
+            if not force:
+                if not Console.prompt_yes_no(
+                    f"Environment '{self.env_name}' exists. Overwrite?",
+                    default_yes=False,
+                ):
+                    Console.success(
+                        f"Using existing environment '{self.env_name}'"
+                    )
+                    print(
+                        "  Package installation will continue (updates if needed)"
+                    )
+                    print(
+                        "  To use a different name, run with: --env-name <name>"
+                    )
+                    return
+            self.remove()
+
+        conda_cmd = self.get_command()
+        print("  Installing packages... (this will take several minutes)")
+
+        env_file_path = REPO_ROOT / env_file
+
+        try:
+            process = subprocess.Popen(
+                [
+                    conda_cmd,
+                    "env",
+                    "create",
+                    "-f",
+                    str(env_file_path),
+                    "-n",
+                    self.env_name,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+
+            for line in process.stdout:
+                if any(
+                    kw in line
+                    for kw in ["Solving", "Downloading", "Extracting"]
+                ):
+                    print(".", end="", flush=True)
+
+            process.wait()
+            print()
+
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(
+                    process.returncode, conda_cmd
+                )
+
+            Console.success(f"Environment '{self.env_name}' created")
+
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(
+                f"Failed to create environment. Try:\n"
+                f"  1. Update conda: conda update conda\n"
+                f"  2. Clear cache: conda clean --all\n"
+                f"  3. Check {env_file} for conflicts"
+            ) from e
+
+    def install_package(self) -> None:
+        """Install spyglass package in development mode."""
+        Console.progress("Installing spyglass package", 1)
+
+        try:
+            subprocess.run(
+                [
+                    "conda",
+                    "run",
+                    "-n",
+                    self.env_name,
+                    "pip",
+                    "install",
+                    "-e",
+                    str(REPO_ROOT),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            Console.success("Spyglass installed")
+        except subprocess.CalledProcessError as e:
+            error_output = e.stderr if e.stderr else str(e)
+            error_lower = error_output.lower()
+
+            if "no space left" in error_lower or "disk" in error_lower:
+                primary_cause = "Disk space is full"
+                primary_fix = (
+                    "Free up disk space: df -h shows usage by filesystem"
+                )
+            elif "connection" in error_lower or "timeout" in error_lower:
+                primary_cause = "Network connection issue"
+                primary_fix = "Check internet connection and retry"
+            elif "permission" in error_lower or "access" in error_lower:
+                primary_cause = "Permission denied"
+                primary_fix = "Check write permissions in the install directory"
+            else:
+                primary_cause = "Package installation failed"
+                primary_fix = f"Update pip: conda run -n {self.env_name} pip install --upgrade pip"
+
+            raise RuntimeError(
+                f"Failed to install spyglass package.\n\n"
+                f"Most likely cause: {primary_cause}\n"
+                f"Recommended fix: {primary_fix}\n\n"
+                f"If that doesn't help, try these steps:\n"
+                f"  1. Update pip: conda run -n {self.env_name} pip install --upgrade pip\n"
+                f"  2. Check disk space: df -h\n"
+                f"  3. Check network connection\n"
+                f"  4. Retry the installation\n\n"
+                f"Error details: {error_output[:500]}"
+            ) from e
 
 
 def get_base_directory(cli_arg: Optional[str] = None) -> Path:
@@ -488,14 +600,14 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
     if cli_arg:
         base_path = Path(cli_arg).expanduser().resolve()
         validated_path = validate_and_test_write(base_path)
-        print_success(f"Using base directory from CLI: {validated_path}")
+        Console.success(f"Using base directory from CLI: {validated_path}")
         return validated_path
 
     # 2. Environment variable (second priority)
     if base_env := os.getenv("SPYGLASS_BASE_DIR"):
         base_path = Path(base_env).expanduser().resolve()
         validated_path = validate_and_test_write(base_path)
-        print_success(
+        Console.success(
             f"Using base directory from environment: {validated_path}"
         )
         return validated_path
@@ -517,10 +629,10 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
         if not response:
             try:
                 validated_path = validate_and_test_write(default)
-                print_success(f"Base directory validated: {validated_path}")
+                Console.success(f"Base directory validated: {validated_path}")
                 return validated_path
             except RuntimeError as e:
-                print_error(str(e))
+                Console.error(str(e))
                 continue
 
         try:
@@ -528,7 +640,7 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
 
             # Validate parent exists
             if not base_path.parent.exists():
-                print_error(
+                Console.error(
                     f"Parent directory does not exist: {base_path.parent}"
                 )
                 print(
@@ -539,26 +651,26 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
             # Warn if directory already exists
             if base_path.exists():
                 if not base_path.is_dir():
-                    print_error(
+                    Console.error(
                         f"Path exists but is not a directory: {base_path}"
                     )
                     continue
 
-                if not prompt_yes_no(
+                if not Console.prompt_yes_no(
                     "Directory exists. Use it?", default_yes=True
                 ):
                     continue
 
             # Validate write permissions
             validated_path = validate_and_test_write(base_path)
-            print_success(f"Base directory validated: {validated_path}")
+            Console.success(f"Base directory validated: {validated_path}")
             return validated_path
 
         except RuntimeError as e:
-            print_error(str(e))
+            Console.error(str(e))
             continue
         except (ValueError, OSError) as e:
-            print_error(f"Invalid path: {e}")
+            Console.error(f"Invalid path: {e}")
 
 
 def prompt_install_type() -> Tuple[str, str]:
@@ -630,309 +742,128 @@ def prompt_install_type() -> Tuple[str, str]:
         choice = input("\nChoice [1-2]: ").strip()
 
         if choice not in choice_map:
-            print_error("Please enter 1 or 2")
+            Console.error("Please enter 1 or 2")
             continue
 
         env_file, install_type = choice_map[choice]
-        print_success(f"Selected: {install_type.capitalize()} installation")
+        Console.success(f"Selected: {install_type.capitalize()} installation")
         return env_file, install_type
 
 
-def create_conda_environment(
-    env_file: str, env_name: str, force: bool = False
-) -> None:
-    """Create conda environment from file.
+# =============================================================================
+# DockerManager Class - Docker and Docker Compose Operations
+# =============================================================================
 
-    Parameters
-    ----------
-    env_file : str
-        Path to environment.yml file
-    env_name : str
-        Name for the environment
-    force : bool, optional
-        If True, overwrite existing environment without prompting (default: False)
 
-    Raises
-    ------
-    RuntimeError
-        If environment creation fails
+class DockerManager:
+    """Manages Docker and Docker Compose operations for database setup.
+
+    All methods are static since they operate on system state, not instance state.
+    These are self-contained because spyglass isn't installed yet when they run.
     """
-    # Estimate time based on environment type
-    estimated_time = 5 if "min" in env_file else 15
 
-    show_progress_message(
-        f"Creating environment '{env_name}' from {env_file}", estimated_time
-    )
-
-    # Check if environment already exists
-    result = subprocess.run(
-        ["conda", "env", "list"], capture_output=True, text=True
-    )
-
-    if env_name in result.stdout:
-        if not force:
-            if not prompt_yes_no(
-                f"Environment '{env_name}' exists. Overwrite?",
-                default_yes=False,
-            ):
-                print_success(f"Using existing environment '{env_name}'")
-                print(
-                    "  Package installation will continue (updates if needed)"
-                )
-                print("  To use a different name, run with: --env-name <name>")
-                return  # Skip environment creation, use existing
-
-        print_step(f"Removing existing environment '{env_name}'...")
-        subprocess.run(
-            ["conda", "env", "remove", "-n", env_name, "-y"], check=True
-        )
-
-    # Create environment with progress indication
-    conda_cmd = get_conda_command()
-    print("  Installing packages... (this will take several minutes)")
-
-    # Resolve env_file relative to REPO_ROOT (works from any directory)
-    env_file_path = REPO_ROOT / env_file
-
-    try:
-        # Use Popen to show real-time progress
-        process = subprocess.Popen(
-            [conda_cmd, "env", "create", "-f", str(env_file_path), "-n", env_name],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-
-        # Show dots to indicate progress
-        for line in process.stdout:
-            if (
-                "Solving environment" in line
-                or "Downloading" in line
-                or "Extracting" in line
-            ):
-                print(".", end="", flush=True)
-
-        process.wait()
-        print()  # New line after dots
-
-        if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, conda_cmd)
-
-        print_success(f"Environment '{env_name}' created")
-
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Failed to create environment. Try:\n"
-            f"  1. Update conda: conda update conda\n"
-            f"  2. Clear cache: conda clean --all\n"
-            f"  3. Check {env_file} for conflicts"
-        ) from e
-
-
-def install_spyglass_package(env_name: str) -> None:
-    """Install spyglass package in development mode.
-
-    Parameters
-    ----------
-    env_name : str
-        Name of the conda environment
-    """
-    show_progress_message("Installing spyglass package", 1)
-
-    try:
-        subprocess.run(
-            ["conda", "run", "-n", env_name, "pip", "install", "-e", str(REPO_ROOT)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        print_success("Spyglass installed")
-    except subprocess.CalledProcessError as e:
-        # Analyze error to provide specific guidance
-        error_output = e.stderr if e.stderr else str(e)
-        error_lower = error_output.lower()
-
-        # Determine most likely cause and provide targeted advice
-        if "no space left" in error_lower or "disk" in error_lower:
-            primary_cause = "Disk space is full"
-            primary_fix = "Free up disk space: df -h shows usage by filesystem"
-        elif "connection" in error_lower or "timeout" in error_lower:
-            primary_cause = "Network connection issue"
-            primary_fix = "Check internet connection and retry"
-        elif "permission" in error_lower or "access" in error_lower:
-            primary_cause = "Permission denied"
-            primary_fix = "Check write permissions in the install directory"
-        else:
-            primary_cause = "Package installation failed"
-            primary_fix = (
-                f"Update pip: conda run -n {env_name} pip install --upgrade pip"
+    @staticmethod
+    def is_available() -> bool:
+        """Check if Docker is available and daemon is running."""
+        if not shutil.which("docker"):
+            return False
+        try:
+            result = subprocess.run(
+                ["docker", "info"], capture_output=True, timeout=5
             )
+            return result.returncode == 0
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return False
 
-        raise RuntimeError(
-            f"Failed to install spyglass package.\n\n"
-            f"Most likely cause: {primary_cause}\n"
-            f"Recommended fix: {primary_fix}\n\n"
-            f"If that doesn't help, try these steps:\n"
-            f"  1. Update pip: conda run -n {env_name} pip install --upgrade pip\n"
-            f"  2. Check disk space: df -h\n"
-            f"  3. Check network connection\n"
-            f"  4. Retry the installation\n\n"
-            f"Error details: {error_output[:500]}"
-        ) from e
+    @staticmethod
+    def is_compose_available() -> bool:
+        """Check if Docker Compose is available."""
+        try:
+            result = subprocess.run(
+                ["docker", "compose", "version"],
+                capture_output=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            return False
 
+    @staticmethod
+    def get_compose_command() -> list[str]:
+        """Get the Docker Compose command prefix."""
+        return ["docker", "compose"]
 
-# Docker operations (inline - cannot import from spyglass before it's installed)
+    @staticmethod
+    def generate_env_file(
+        mysql_port: int = 3306,
+        mysql_password: str = "tutorial",
+        mysql_image: str = "datajoint/mysql:8.0",
+        env_path: Optional[str] = None,
+    ) -> None:
+        """Generate .env file for Docker Compose.
 
+        Only writes non-default values.
 
-def is_docker_available_inline() -> bool:
-    """Check if Docker is available (inline, no imports).
+        Parameters
+        ----------
+        mysql_port : int
+            MySQL port (default: 3306)
+        mysql_password : str
+            MySQL root password (default: "tutorial")
+        mysql_image : str
+            Docker image to use (default: "datajoint/mysql:8.0")
+        env_path : str, optional
+            Path to write .env file. If None, writes to REPO_ROOT/.env.
+        """
+        env_lines = ["# Spyglass Docker Compose Configuration", ""]
 
-    Checks both that docker command exists and daemon is running.
+        if mysql_password != "tutorial":
+            env_lines.append(f"MYSQL_ROOT_PASSWORD={mysql_password}")
+        if mysql_port != 3306:
+            env_lines.append(f"MYSQL_PORT={mysql_port}")
+        if mysql_image != "datajoint/mysql:8.0":
+            env_lines.append(f"MYSQL_IMAGE={mysql_image}")
 
-    Parameters
-    ----------
-    None
+        # If all defaults, don't create file
+        if len(env_lines) == 2:
+            return
 
-    Returns
-    -------
-    bool
-        True if Docker is available and running, False otherwise
+        target_path = Path(env_path) if env_path else REPO_ROOT / ".env"
+        with target_path.open("w") as f:
+            f.write("\n".join(env_lines) + "\n")
 
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    """
-    if not shutil.which("docker"):
-        return False
+    @staticmethod
+    def validate_env_file(env_path: Optional[str] = None) -> bool:
+        """Validate .env file is readable (missing is OK).
 
-    try:
-        result = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=5
-        )
-        return result.returncode == 0
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False
+        Parameters
+        ----------
+        env_path : str, optional
+            Path to .env file. If None, checks REPO_ROOT/.env.
+        """
+        target_path = Path(env_path) if env_path else REPO_ROOT / ".env"
+        if not target_path.exists():
+            return True
+        try:
+            with target_path.open("r") as f:
+                f.read()
+            return True
+        except (OSError, PermissionError):
+            return False
 
-
-def is_docker_compose_available_inline() -> bool:
-    """Check if Docker Compose is installed (inline, no imports).
-
-    Returns
-    -------
-    bool
-        True if 'docker compose' command is available, False otherwise
-
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    Checks for modern 'docker compose' (not legacy 'docker-compose').
-    """
-    try:
-        result = subprocess.run(
-            ["docker", "compose", "version"],
-            capture_output=True,
-            timeout=5,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
-def get_compose_command_inline() -> list[str]:
-    """Get the appropriate Docker Compose command (inline, no imports).
-
-    Returns
-    -------
-    list[str]
-        Command prefix for Docker Compose (e.g., ['docker', 'compose'])
-
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    Always returns modern 'docker compose' format.
-    """
-    return ["docker", "compose"]
-
-
-def generate_env_file_inline(
-    mysql_port: int = 3306,
-    mysql_password: str = "tutorial",
-    mysql_image: str = "datajoint/mysql:8.0",
-) -> None:
-    """Generate .env file for Docker Compose (inline, no imports).
-
-    Parameters
-    ----------
-    mysql_port : int, optional
-        MySQL port number (default: 3306)
-    mysql_password : str, optional
-        MySQL root password (default: 'tutorial')
-    mysql_image : str, optional
-        Docker image to use (default: 'datajoint/mysql:8.0')
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    OSError
-        If file cannot be written
-
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    Only writes non-default values to keep .env file minimal.
-    File is written to REPO_ROOT/.env (where docker-compose.yml lives).
-    """
-    env_lines = ["# Spyglass Docker Compose Configuration", ""]
-
-    # Only write non-default values
-    if mysql_password != "tutorial":
-        env_lines.append(f"MYSQL_ROOT_PASSWORD={mysql_password}")
-    if mysql_port != 3306:
-        env_lines.append(f"MYSQL_PORT={mysql_port}")
-    if mysql_image != "datajoint/mysql:8.0":
-        env_lines.append(f"MYSQL_IMAGE={mysql_image}")
-
-    # If all defaults, don't create file (compose will use defaults)
-    if len(env_lines) == 2:  # Only header lines
-        return
-
-    env_path = REPO_ROOT / ".env"
-    with env_path.open("w") as f:
-        f.write("\n".join(env_lines) + "\n")
-
-
-def validate_env_file_inline() -> bool:
-    """Validate .env file exists and is readable (inline, no imports).
-
-    Returns
-    -------
-    bool
-        True if file exists and is readable (or doesn't exist, which is OK),
-        False if file exists but has issues
-
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    Missing .env file is NOT an error (defaults will be used).
-    Checks REPO_ROOT/.env (where docker-compose.yml lives).
-    """
-    env_path = REPO_ROOT / ".env"
-
-    # Missing .env is fine - compose uses defaults
-    if not env_path.exists():
-        return True
-
-    # If it exists, make sure it's readable
-    try:
-        with env_path.open("r") as f:
-            f.read()
-        return True
-    except (OSError, PermissionError):
-        return False
+    @staticmethod
+    def cleanup() -> None:
+        """Clean up after failed Docker Compose setup (best-effort)."""
+        try:
+            compose_cmd = DockerManager.get_compose_command()
+            subprocess.run(
+                compose_cmd + ["down", "-v"],
+                capture_output=True,
+                timeout=30,
+                cwd=REPO_ROOT,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
 
 
 # ============================================================================
@@ -1036,7 +967,7 @@ def load_full_schema() -> Dict[str, Any]:
     # Check schema version for compatibility
     schema_version = schema.get("_schema_version")
     if schema_version and schema_version != CURRENT_SCHEMA_VERSION:
-        print_warning(
+        Console.warning(
             f"Schema version mismatch: expected {CURRENT_SCHEMA_VERSION}, "
             f"got {schema_version}. This may cause compatibility issues."
         )
@@ -1217,7 +1148,7 @@ def create_database_config(
         use_tls = determine_tls(host, schema=full_schema)
 
     # Build directory structure from JSON schema
-    print_step("Setting up Spyglass directories...")
+    Console.step("Setting up Spyglass directories...")
     dirs = build_directory_structure(
         base_dir, schema=dir_schema, create=True, verbose=True
     )
@@ -1285,7 +1216,7 @@ def create_database_config(
 
     # Handle existing config file with better UX
     if config_file.exists():
-        print_warning(f"Configuration file already exists: {config_file}")
+        Console.warning(f"Configuration file already exists: {config_file}")
         print("\nExisting database settings:")
         try:
             with config_file.open() as f:
@@ -1308,7 +1239,7 @@ def create_database_config(
         choice = input("\nChoice [B/o/k]: ").strip().lower() or "b"
 
         if choice in ["k", "keep"]:
-            print_warning(
+            Console.warning(
                 "Keeping existing configuration. Installation cancelled."
             )
             print("\nTo install with different settings:")
@@ -1320,16 +1251,16 @@ def create_database_config(
         elif choice in ["b", "backup"]:
             backup_file = config_file.with_suffix(".json.backup")
             shutil.copy2(config_file, backup_file)
-            print_success(f"Backed up existing config to {backup_file}")
+            Console.success(f"Backed up existing config to {backup_file}")
         elif choice not in ["o", "overwrite"]:
-            print_error("Invalid choice")
+            Console.error("Invalid choice")
             return
 
     # Save configuration with atomic write and secure permissions
     import tempfile
 
     # Security warning before saving
-    print_warning(
+    Console.warning(
         "Database password will be stored in plain text in config file.\n"
         "  For production environments:\n"
         "    1. Use environment variable SPYGLASS_DB_PASSWORD\n"
@@ -1358,12 +1289,12 @@ def create_database_config(
 
     # Atomic move (on same filesystem)
     shutil.move(str(tmp_path), str(config_file))
-    print_success(f"Configuration saved to: {config_file}")
+    Console.success(f"Configuration saved to: {config_file}")
     print("  Permissions: Owner read/write only (secure)")
 
     # Enhanced success message with next steps
     print()
-    print_success("✓ Spyglass configuration complete!")
+    Console.success("✓ Spyglass configuration complete!")
     print()
     print("Database connection:")
     print(f"  • Server: {host}:{port}")
@@ -1547,7 +1478,7 @@ def validate_database_config(
         found_dangerous = [c for c in shell_metacharacters if c in password]
         if found_dangerous:
             # Warning, not error - password might legitimately contain these
-            print_warning(
+            Console.warning(
                 f"Password contains special characters: {found_dangerous}\n"
                 "  This should work, but if you encounter issues, consider\n"
                 "  using a password without: ` $ \\ \" ' ; & |"
@@ -1659,13 +1590,13 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
         # Require explicit host for remote database
         if not host:
-            print_error("Host is required for remote database connection")
+            Console.error("Host is required for remote database connection")
             print("  Ask your lab admin for the database hostname")
             return None
 
         # Validate hostname format
         if not validate_hostname(host):
-            print_error(f"Invalid hostname: {host}")
+            Console.error(f"Invalid hostname: {host}")
             print("  Hostname cannot contain spaces or invalid characters")
             print("  Valid examples: localhost, db.example.com, 192.168.1.100")
             return None
@@ -1681,12 +1612,12 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         try:
             port = int(port_str)
         except ValueError:
-            print_error(f"Invalid port: '{port_str}' is not a number")
+            Console.error(f"Invalid port: '{port_str}' is not a number")
             return None
 
         port_valid, port_msg = validate_port(port)
         if not port_valid:
-            print_error(port_msg)
+            Console.error(port_msg)
             return None
 
         # Check if port is reachable
@@ -1695,7 +1626,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
         if host not in LOCALHOST_ADDRESSES and not port_reachable:
             # Remote host, port not reachable
-            print_warning(port_msg)
+            Console.warning(port_msg)
             print("\n  Possible causes:")
             print("    • Wrong port number (MySQL usually uses 3306)")
             print("    • Firewall blocking connections")
@@ -1705,7 +1636,9 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print("    • Standard MySQL: 3306")
             print("    • SSH tunnel: Check your tunnel configuration")
 
-            if not prompt_yes_no("\n  Continue anyway?", default_yes=False):
+            if not Console.prompt_yes_no(
+                "\n  Continue anyway?", default_yes=False
+            ):
                 return None
         elif port_reachable:
             print("  ✓ Port is reachable")
@@ -1714,10 +1647,10 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         use_tls = host not in LOCALHOST_ADDRESSES
 
         if use_tls:
-            print_warning(f"TLS will be enabled for remote host '{host}'")
-            if prompt_yes_no("  Disable TLS?", default_yes=False):
+            Console.warning(f"TLS will be enabled for remote host '{host}'")
+            if Console.prompt_yes_no("  Disable TLS?", default_yes=False):
                 use_tls = False
-                print_warning(
+                Console.warning(
                     "TLS disabled (not recommended for remote connections)"
                 )
 
@@ -1731,7 +1664,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
     except KeyboardInterrupt:
         print("\n")
-        print_warning("Database configuration cancelled")
+        Console.warning("Database configuration cancelled")
         return None
 
 
@@ -1760,7 +1693,7 @@ def get_database_options() -> Tuple[list[DatabaseOption], bool]:
     options = []
 
     # Check Docker Compose availability
-    compose_available = is_docker_compose_available_inline()
+    compose_available = DockerManager.is_compose_available()
 
     # Option 1: Remote database (primary use case - joining existing lab)
     # Use clearer terminology: "if you have credentials" instead of "lab members"
@@ -1877,42 +1810,19 @@ def prompt_database_setup() -> str:
         choice = input(f"\nChoice [{'/'.join(valid_choices)}]: ").strip()
 
         if choice not in choice_map:
-            print_error(f"Please enter {' or '.join(valid_choices)}")
+            Console.error(f"Please enter {' or '.join(valid_choices)}")
             continue
 
         # Handle Docker unavailability
         if choice == "2" and not compose_available:
-            print_error("Docker is not available")
+            Console.error("Docker is not available")
             continue
 
         return choice_map[choice]
 
 
-def cleanup_failed_compose_setup_inline() -> None:
-    """Clean up after failed Docker Compose setup (inline, no imports).
-
-    Stops and removes containers created by Docker Compose if setup fails.
-    This ensures a clean state for retry attempts.
-
-    Returns
-    -------
-    None
-
-    Notes
-    -----
-    This is self-contained because spyglass isn't installed yet.
-    Silently handles errors - cleanup is best-effort.
-    """
-    try:
-        compose_cmd = get_compose_command_inline()
-        subprocess.run(
-            compose_cmd + ["down", "-v"],
-            capture_output=True,
-            timeout=30,
-            cwd=REPO_ROOT,
-        )
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        pass  # Best-effort cleanup
+# Backwards compatibility alias for cleanup
+cleanup_failed_compose_setup_inline = DockerManager.cleanup
 
 
 def setup_database_compose() -> Tuple[bool, str]:
@@ -1944,17 +1854,17 @@ def setup_database_compose() -> Tuple[bool, str]:
     """
     import time
 
-    print_step("Setting up database with Docker Compose...")
+    Console.step("Setting up database with Docker Compose...")
 
     # Check Docker Compose availability
-    if not is_docker_compose_available_inline():
+    if not DockerManager.is_compose_available():
         return False, "compose_unavailable"
 
     # Check if port 3306 is available
     port = 3306  # Default port (could be customized via .env)
     port_available, port_msg = is_port_available("localhost", port)
     if not port_available:
-        print_error(port_msg)
+        Console.error(port_msg)
         print("\n  Port 3306 is already in use. Solutions:")
 
         # Platform-specific guidance
@@ -2001,17 +1911,17 @@ def setup_database_compose() -> Tuple[bool, str]:
         # Generate .env file (only if customizations needed)
         # For now, use all defaults - no .env file needed
         # Future: could prompt for port/password customization
-        generate_env_file_inline()
+        DockerManager.generate_env_file()
 
         # Validate .env if it exists
-        if not validate_env_file_inline():
+        if not DockerManager.validate_env_file():
             return False, "env_file_invalid"
 
         # Get compose command
-        compose_cmd = get_compose_command_inline()
+        compose_cmd = DockerManager.get_compose_command()
 
         # Pull images first (better UX - shows progress)
-        show_progress_message("Pulling Docker images", 2)
+        Console.progress("Pulling Docker images", 2)
         result = subprocess.run(
             compose_cmd + ["pull"],
             capture_output=True,
@@ -2021,7 +1931,7 @@ def setup_database_compose() -> Tuple[bool, str]:
         if result.returncode != 0:
             error_output = result.stderr.decode()
             error_lower = error_output.lower()
-            print_error(f"Failed to pull Docker images: {error_output}")
+            Console.error(f"Failed to pull Docker images: {error_output}")
 
             # Prioritize causes by likelihood (network issues most common)
             if "no space" in error_lower or "disk" in error_lower:
@@ -2042,7 +1952,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             return False, "pull_failed"
 
         # Start services
-        print_step("Starting services...")
+        Console.step("Starting services...")
         result = subprocess.run(
             compose_cmd + ["up", "-d"],
             capture_output=True,
@@ -2051,14 +1961,14 @@ def setup_database_compose() -> Tuple[bool, str]:
         )
         if result.returncode != 0:
             error_msg = result.stderr.decode()
-            print_error(f"Failed to start services: {error_msg}")
+            Console.error(f"Failed to start services: {error_msg}")
             cleanup_failed_compose_setup_inline()
             return False, "start_failed"
 
-        print_success("Services started")
+        Console.success("Services started")
 
         # Wait for MySQL readiness using health check
-        print_step("Waiting for MySQL to be ready...")
+        Console.step("Waiting for MySQL to be ready...")
         print("  Checking connection", end="", flush=True)
 
         for attempt in range(30):  # 60 seconds max
@@ -2094,7 +2004,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                             "Health", ""
                         ):
                             print()  # New line after dots
-                            print_success("MySQL is ready")
+                            Console.success("MySQL is ready")
                             break
                     except json.JSONDecodeError:
                         pass
@@ -2108,7 +2018,7 @@ def setup_database_compose() -> Tuple[bool, str]:
         else:
             # Timeout - provide debug info
             print()
-            print_error("MySQL did not become ready within 60 seconds")
+            Console.error("MySQL did not become ready within 60 seconds")
             print("\n  Check logs:")
             print("    docker compose logs mysql")
             cleanup_failed_compose_setup_inline()
@@ -2143,7 +2053,7 @@ def setup_database_compose() -> Tuple[bool, str]:
 
         # Warn if .env exists with custom values
         if env_path.exists():
-            print_warning(
+            Console.warning(
                 "Using custom settings from .env file. "
                 "DataJoint config updated to match."
             )
@@ -2151,19 +2061,19 @@ def setup_database_compose() -> Tuple[bool, str]:
         return True, "success"
 
     except subprocess.CalledProcessError as e:
-        print_error(f"Docker Compose command failed: {e}")
+        Console.error(f"Docker Compose command failed: {e}")
         cleanup_failed_compose_setup_inline()
         return False, str(e)
     except subprocess.TimeoutExpired:
-        print_error("Docker Compose command timed out")
+        Console.error("Docker Compose command timed out")
         cleanup_failed_compose_setup_inline()
         return False, "timeout"
     except (OSError, IOError) as e:
-        print_error(f"File system error during Docker setup: {e}")
+        Console.error(f"File system error during Docker setup: {e}")
         cleanup_failed_compose_setup_inline()
         return False, str(e)
     except json.JSONDecodeError as e:
-        print_error(f"Failed to parse Docker Compose output: {e}")
+        Console.error(f"Failed to parse Docker Compose output: {e}")
         cleanup_failed_compose_setup_inline()
         return False, "json_parse_error"
 
@@ -2207,7 +2117,7 @@ def test_database_connection(
     try:
         import pymysql
 
-        print_step("Testing database connection...")
+        Console.step("Testing database connection...")
 
         connection = pymysql.connect(
             host=host,
@@ -2225,19 +2135,19 @@ def test_database_connection(
             print(f"  MySQL version: {version[0]}")
 
         connection.close()
-        print_success("Database connection successful!")
+        Console.success("Database connection successful!")
         return True, None
 
     except ImportError:
         # pymysql not available yet (before pip install)
-        print_warning("Cannot test connection (pymysql not available)")
+        Console.warning("Cannot test connection (pymysql not available)")
         print("  Connection will be tested during validation")
         return True, None  # Allow to proceed
 
     except OSError as e:
         # Network/socket errors
         error_msg = f"Network error: {e}"
-        print_error(f"Database connection failed: {error_msg}")
+        Console.error(f"Database connection failed: {error_msg}")
         return False, error_msg
 
 
@@ -2264,7 +2174,7 @@ def handle_database_setup_interactive(env_name: str) -> None:
             if success:
                 break
             else:
-                print_error("Docker setup failed")
+                Console.error("Docker setup failed")
                 if reason == "compose_unavailable":
                     print("\nDocker is not available.")
                     print("  Option 1: Install Docker Desktop and restart")
@@ -2273,10 +2183,10 @@ def handle_database_setup_interactive(env_name: str) -> None:
                 else:
                     print(f"  Error: {reason}")
 
-                if not prompt_yes_no(
+                if not Console.prompt_yes_no(
                     "\nTry different option?", default_yes=True
                 ):
-                    print_warning("Skipping database setup")
+                    Console.warning("Skipping database setup")
                     print("  Configure later: docker compose up -d")
                     print("  Or manually: see docs/DATABASE.md")
                     break
@@ -2289,7 +2199,7 @@ def handle_database_setup_interactive(env_name: str) -> None:
             # If remote setup returns False (cancelled), loop to menu
 
         else:  # skip
-            print_warning("Skipping database setup")
+            Console.warning("Skipping database setup")
             print("  Configure later: docker compose up -d")
             print("  Or manually: see docs/DATABASE.md")
             break
@@ -2331,12 +2241,12 @@ def handle_database_setup_cli(
     if db_type == "compose":
         success, reason = setup_database_compose()
         if not success:
-            print_error("Docker setup failed")
+            Console.error("Docker setup failed")
             if reason == "compose_unavailable":
-                print_warning("Docker not available")
+                Console.warning("Docker not available")
                 print("  Install from: https://docs.docker.com/get-docker/")
             else:
-                print_error(f"Error: {reason}")
+                Console.error(f"Error: {reason}")
             print("  You can configure manually later")
     elif db_type == "remote":
         success = setup_database_remote(
@@ -2347,7 +2257,7 @@ def handle_database_setup_cli(
             password=db_password,
         )
         if not success:
-            print_warning("Remote database setup cancelled")
+            Console.warning("Remote database setup cancelled")
             print("  You can configure manually later")
 
 
@@ -2400,8 +2310,8 @@ def change_database_password(
     print("you should change your password now for security.")
     print()
 
-    if not prompt_yes_no("Change password?", default_yes=True):
-        print_warning("Keeping current password")
+    if not Console.prompt_yes_no("Change password?", default_yes=True):
+        Console.warning("Keeping current password")
         return None
 
     # Prompt for new password with confirmation
@@ -2409,20 +2319,20 @@ def change_database_password(
         print()
         new_password = getpass.getpass("  New password: ")
         if not new_password:
-            print_error("Password cannot be empty")
+            Console.error("Password cannot be empty")
             continue
 
         confirm_password = getpass.getpass("  Confirm password: ")
         if new_password != confirm_password:
-            print_error("Passwords do not match")
-            if not prompt_yes_no("  Try again?", default_yes=True):
+            Console.error("Passwords do not match")
+            if not Console.prompt_yes_no("  Try again?", default_yes=True):
                 return None
             continue
 
         break
 
     # Change password using DataJoint in conda environment
-    print_step("Changing password on database server...")
+    Console.step("Changing password on database server...")
 
     # Build Python code to run inside conda environment
     # Uses dj.set_password() directly - new password passed via env var for security
@@ -2451,16 +2361,20 @@ print("SUCCESS")
         )
 
         if result.returncode == 0 and "SUCCESS" in result.stdout:
-            print_success("Password changed successfully!")
+            Console.success("Password changed successfully!")
             return new_password
         else:
-            print_error(f"Failed to change password: {result.stderr}")
-            print_manual_password_instructions(env_name)
+            Console.error(f"Failed to change password: {result.stderr}")
+            Console.manual_password_instructions(env_name)
             return None
 
-    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as e:
-        print_error(f"Password change failed: {e}")
-        print_manual_password_instructions(env_name)
+    except (
+        subprocess.TimeoutExpired,
+        subprocess.CalledProcessError,
+        OSError,
+    ) as e:
+        Console.error(f"Password change failed: {e}")
+        Console.manual_password_instructions(env_name)
         return None
 
 
@@ -2502,7 +2416,7 @@ def setup_database_remote(
     >>> if setup_database_remote(host="db.example.com", user="myuser"):
     ...     print("Non-interactive setup succeeded")
     """
-    print_step("Setting up remote database connection...")
+    Console.step("Setting up remote database connection...")
 
     # If any parameters are missing, prompt interactively
     if host is None or user is None or password is None:
@@ -2517,7 +2431,7 @@ def setup_database_remote(
         if password is None:
             password = os.environ.get("SPYGLASS_DB_PASSWORD")
             if password is None:
-                print_error(
+                Console.error(
                     "Password required: use --db-password or SPYGLASS_DB_PASSWORD env var"
                 )
                 return False
@@ -2529,7 +2443,7 @@ def setup_database_remote(
         # Validate all database configuration parameters
         valid, errors = validate_database_config(host, port, user, password)
         if not valid:
-            print_error("Invalid database configuration:")
+            Console.error("Invalid database configuration:")
             for err in errors:
                 print(f"  - {err}")
             return False
@@ -2539,7 +2453,7 @@ def setup_database_remote(
             print(f"  Testing connection to {host}:{port}...")
             port_reachable, port_msg = is_port_available(host, port)
             if not port_reachable:
-                print_warning(port_msg)
+                Console.warning(port_msg)
                 print("  Port may be blocked by firewall or wrong port number")
                 print("  Continuing anyway (connection test will verify)...")
             else:
@@ -2564,7 +2478,7 @@ def setup_database_remote(
     success, _error = test_database_connection(**config)
 
     if not success:
-        print_error(f"Cannot connect to database: {_error}")
+        Console.error(f"Cannot connect to database: {_error}")
         print()
         print("Most common causes (in order):")
         print("  1. Wrong password - Double check credentials")
@@ -2581,9 +2495,11 @@ def setup_database_remote(
         )
         print()
 
-        if prompt_yes_no("Retry with different settings?", default_yes=False):
+        if Console.prompt_yes_no(
+            "Retry with different settings?", default_yes=False
+        ):
             return setup_database_remote(env_name)  # Recursive retry
-        print_warning("Database setup cancelled")
+        Console.warning("Database setup cancelled")
         return False
 
     # Offer password change for new lab members (only for non-localhost)
@@ -2625,7 +2541,7 @@ def validate_installation(env_name: str) -> bool:
     -----
     Prints warnings if validation fails but does not raise exceptions.
     """
-    print_step("Validating installation...")
+    Console.step("Validating installation...")
 
     validate_script = Path(__file__).parent / "validate.py"
 
@@ -2634,10 +2550,10 @@ def validate_installation(env_name: str) -> bool:
             ["conda", "run", "-n", env_name, "python", str(validate_script)],
             check=True,
         )
-        print_success("Validation passed")
+        Console.success("Validation passed")
         return True
     except subprocess.CalledProcessError:
-        print_warning("Some optional validation checks did not pass")
+        Console.warning("Some optional validation checks did not pass")
         print(
             "\n  Core installation succeeded, but some features may need attention."
         )
@@ -2702,8 +2618,9 @@ def setup_environment(
         Parsed command-line arguments
     """
     check_prerequisites(install_type, base_dir)
-    create_conda_environment(env_file, args.env_name, force=args.force)
-    install_spyglass_package(args.env_name)
+    conda = CondaManager(args.env_name)
+    conda.create(env_file, force=args.force)
+    conda.install_package()
 
 
 def setup_database(args: argparse.Namespace) -> None:
@@ -2919,11 +2836,11 @@ def run_config_only(args: argparse.Namespace) -> None:
     valid, errors = validate_database_config(host, port, user, password)
     if not valid:
         for error in errors:
-            print_error(error)
+            Console.error(error)
         raise ValueError("Invalid database configuration")
 
     # Create the configuration
-    print_step(f"Creating configuration for {host}:{port}")
+    Console.step(f"Creating configuration for {host}:{port}")
     create_database_config(
         host=host,
         port=port,
@@ -2935,7 +2852,7 @@ def run_config_only(args: argparse.Namespace) -> None:
     config_file = Path.home() / ".datajoint_config.json"
     print()
     print("=" * 60)
-    print_success(f"Configuration created: {config_file}")
+    Console.success(f"Configuration created: {config_file}")
     print("=" * 60)
     print()
     print("Configuration summary:")
@@ -3090,21 +3007,21 @@ Environment Variables:
         sys.exit(1)
     except RuntimeError as e:
         # Expected errors from our code (prerequisites, validation, etc.)
-        print_error(f"Installation failed: {e}")
+        Console.error(f"Installation failed: {e}")
         sys.exit(1)
     except subprocess.CalledProcessError as e:
         # Process execution failures
-        print_error(f"Command failed: {e}")
+        Console.error(f"Command failed: {e}")
         print("  Check the output above for details")
         sys.exit(1)
     except (OSError, IOError) as e:
         # File system errors
-        print_error(f"File system error: {e}")
+        Console.error(f"File system error: {e}")
         print("  Check disk space and permissions")
         sys.exit(1)
     except ValueError as e:
         # Configuration/validation errors
-        print_error(f"Invalid configuration: {e}")
+        Console.error(f"Invalid configuration: {e}")
         sys.exit(1)
 
 

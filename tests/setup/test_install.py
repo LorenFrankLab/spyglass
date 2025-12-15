@@ -32,18 +32,15 @@ from install import (
     build_directory_structure,
     check_disk_space,
     check_prerequisites,
+    CondaManager,
     create_database_config,
     determine_tls,
-    generate_env_file_inline,
+    DockerManager,
     get_base_directory,
-    get_conda_command,
     get_required_python_version,
-    is_docker_available_inline,
-    is_docker_compose_available_inline,
     is_port_available,
     load_directory_schema,
     validate_database_config,
-    validate_env_file_inline,
     validate_hostname,
     validate_port,
     validate_schema,
@@ -86,26 +83,26 @@ class TestGetRequiredPythonVersion:
 # =============================================================================
 
 
-class TestGetCondaCommand:
-    """Tests for get_conda_command()."""
+class TestCondaManagerGetCommand:
+    """Tests for CondaManager.get_command()."""
 
     def test_prefers_mamba(self):
         """Prefers mamba over conda when both available."""
         with patch("shutil.which") as mock_which:
             mock_which.side_effect = lambda cmd: cmd == "mamba"
-            assert get_conda_command() == "mamba"
+            assert CondaManager.get_command() == "mamba"
 
     def test_falls_back_to_conda(self):
         """Falls back to conda when mamba unavailable."""
         with patch("shutil.which") as mock_which:
             mock_which.side_effect = lambda cmd: cmd == "conda"
-            assert get_conda_command() == "conda"
+            assert CondaManager.get_command() == "conda"
 
     def test_raises_when_neither_available(self):
         """Raises RuntimeError when neither conda nor mamba available."""
         with patch("shutil.which", return_value=None):
             with pytest.raises(RuntimeError, match="conda or mamba not found"):
-                get_conda_command()
+                CondaManager.get_command()
 
 
 # =============================================================================
@@ -163,13 +160,13 @@ class TestGetBaseDirectory:
 # =============================================================================
 
 
-class TestIsDockerAvailableInline:
-    """Tests for is_docker_available_inline()."""
+class TestDockerManagerIsAvailable:
+    """Tests for DockerManager.is_available()."""
 
     def test_returns_false_when_docker_not_in_path(self):
         """Returns False when docker not in PATH."""
         with patch("shutil.which", return_value=None):
-            assert is_docker_available_inline() is False
+            assert DockerManager.is_available() is False
 
     def test_returns_false_when_daemon_not_running(self):
         """Returns False when docker daemon not running."""
@@ -178,36 +175,36 @@ class TestIsDockerAvailableInline:
                 mock_run.side_effect = subprocess.CalledProcessError(
                     1, "docker"
                 )
-                assert is_docker_available_inline() is False
+                assert DockerManager.is_available() is False
 
     def test_returns_true_when_docker_available(self):
         """Returns True when docker is available and running."""
         with patch("shutil.which", return_value="/usr/bin/docker"):
             with patch("subprocess.run") as mock_run:
                 mock_run.return_value = Mock(returncode=0)
-                assert is_docker_available_inline() is True
+                assert DockerManager.is_available() is True
 
 
-class TestIsDockerComposeAvailableInline:
-    """Tests for is_docker_compose_available_inline()."""
+class TestDockerManagerIsComposeAvailable:
+    """Tests for DockerManager.is_compose_available()."""
 
     def test_returns_false_when_docker_compose_fails(self):
         """Returns False when docker compose command fails."""
         with patch("install.subprocess.run") as mock_run:
             mock_run.side_effect = FileNotFoundError()
-            assert is_docker_compose_available_inline() is False
+            assert DockerManager.is_compose_available() is False
 
     def test_returns_false_on_nonzero_exit(self):
         """Returns False when docker compose returns non-zero exit code."""
         with patch("install.subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=1)
-            assert is_docker_compose_available_inline() is False
+            assert DockerManager.is_compose_available() is False
 
     def test_returns_true_when_compose_available(self):
         """Returns True when docker compose is available."""
         with patch("install.subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0)
-            assert is_docker_compose_available_inline() is True
+            assert DockerManager.is_compose_available() is True
 
 
 # =============================================================================
@@ -639,13 +636,13 @@ class TestDetermineTls:
 # =============================================================================
 
 
-class TestGenerateEnvFileInline:
-    """Tests for generate_env_file_inline()."""
+class TestDockerManagerGenerateEnvFile:
+    """Tests for DockerManager.generate_env_file()."""
 
     def test_creates_no_file_with_defaults(self, tmp_path):
         """Creates no file when all values are defaults."""
         env_path = tmp_path / ".env"
-        generate_env_file_inline(
+        DockerManager.generate_env_file(
             mysql_port=3306,
             mysql_password="tutorial",
             mysql_image="datajoint/mysql:8.0",
@@ -657,7 +654,7 @@ class TestGenerateEnvFileInline:
     def test_creates_file_with_custom_password(self, tmp_path):
         """Creates file when password differs from default."""
         env_path = tmp_path / ".env"
-        generate_env_file_inline(
+        DockerManager.generate_env_file(
             mysql_port=3306,
             mysql_password="custom_password",
             mysql_image="datajoint/mysql:8.0",
@@ -670,7 +667,7 @@ class TestGenerateEnvFileInline:
     def test_creates_file_with_custom_port(self, tmp_path):
         """Creates file when port differs from default."""
         env_path = tmp_path / ".env"
-        generate_env_file_inline(
+        DockerManager.generate_env_file(
             mysql_port=3307,
             mysql_password="tutorial",
             mysql_image="datajoint/mysql:8.0",
@@ -683,7 +680,7 @@ class TestGenerateEnvFileInline:
     def test_creates_file_with_custom_image(self, tmp_path):
         """Creates file when image differs from default."""
         env_path = tmp_path / ".env"
-        generate_env_file_inline(
+        DockerManager.generate_env_file(
             mysql_port=3306,
             mysql_password="tutorial",
             mysql_image="mysql:8.0",
@@ -694,20 +691,20 @@ class TestGenerateEnvFileInline:
         assert "MYSQL_IMAGE=mysql:8.0" in content
 
 
-class TestValidateEnvFileInline:
-    """Tests for validate_env_file_inline()."""
+class TestDockerManagerValidateEnvFile:
+    """Tests for DockerManager.validate_env_file()."""
 
     def test_returns_true_for_missing_file(self, tmp_path):
         """Returns True when .env file doesn't exist (uses defaults)."""
         env_path = tmp_path / ".env"
         assert not env_path.exists()
-        assert validate_env_file_inline(str(env_path)) is True
+        assert DockerManager.validate_env_file(str(env_path)) is True
 
     def test_returns_true_for_readable_file(self, tmp_path):
         """Returns True when .env file exists and is readable."""
         env_path = tmp_path / ".env"
         env_path.write_text("MYSQL_PORT=3306\n")
-        assert validate_env_file_inline(str(env_path)) is True
+        assert DockerManager.validate_env_file(str(env_path)) is True
 
 
 # =============================================================================
