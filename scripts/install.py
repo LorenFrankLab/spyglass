@@ -55,6 +55,9 @@ BYTES_PER_GB = 1024**3
 LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
 CURRENT_SCHEMA_VERSION = "1.0.0"  # Config schema version compatibility
 
+# Repository root - works regardless of where script is run from
+REPO_ROOT = Path(__file__).parent.parent
+
 # Disk space requirements (GB) - includes packages + working space buffer
 # Minimal: ~8 GB packages + ~2 GB working space = 10 GB total
 # Full: ~18 GB packages + ~7 GB working space = 25 GB total
@@ -688,10 +691,13 @@ def create_conda_environment(
     conda_cmd = get_conda_command()
     print("  Installing packages... (this will take several minutes)")
 
+    # Resolve env_file relative to REPO_ROOT (works from any directory)
+    env_file_path = REPO_ROOT / env_file
+
     try:
         # Use Popen to show real-time progress
         process = subprocess.Popen(
-            [conda_cmd, "env", "create", "-f", env_file, "-n", env_name],
+            [conda_cmd, "env", "create", "-f", str(env_file_path), "-n", env_name],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -736,7 +742,7 @@ def install_spyglass_package(env_name: str) -> None:
 
     try:
         subprocess.run(
-            ["conda", "run", "-n", env_name, "pip", "install", "-e", "."],
+            ["conda", "run", "-n", env_name, "pip", "install", "-e", str(REPO_ROOT)],
             check=True,
             capture_output=True,
             text=True,
@@ -853,7 +859,6 @@ def generate_env_file_inline(
     mysql_port: int = 3306,
     mysql_password: str = "tutorial",
     mysql_image: str = "datajoint/mysql:8.0",
-    env_path: str = ".env",
 ) -> None:
     """Generate .env file for Docker Compose (inline, no imports).
 
@@ -865,8 +870,6 @@ def generate_env_file_inline(
         MySQL root password (default: 'tutorial')
     mysql_image : str, optional
         Docker image to use (default: 'datajoint/mysql:8.0')
-    env_path : str, optional
-        Path to write .env file (default: '.env')
 
     Returns
     -------
@@ -881,6 +884,7 @@ def generate_env_file_inline(
     -----
     This is self-contained because spyglass isn't installed yet.
     Only writes non-default values to keep .env file minimal.
+    File is written to REPO_ROOT/.env (where docker-compose.yml lives).
     """
     env_lines = ["# Spyglass Docker Compose Configuration", ""]
 
@@ -896,18 +900,13 @@ def generate_env_file_inline(
     if len(env_lines) == 2:  # Only header lines
         return
 
-    env_path_obj = Path(env_path)
-    with env_path_obj.open("w") as f:
+    env_path = REPO_ROOT / ".env"
+    with env_path.open("w") as f:
         f.write("\n".join(env_lines) + "\n")
 
 
-def validate_env_file_inline(env_path: str = ".env") -> bool:
+def validate_env_file_inline() -> bool:
     """Validate .env file exists and is readable (inline, no imports).
-
-    Parameters
-    ----------
-    env_path : str, optional
-        Path to .env file (default: '.env')
 
     Returns
     -------
@@ -919,17 +918,17 @@ def validate_env_file_inline(env_path: str = ".env") -> bool:
     -----
     This is self-contained because spyglass isn't installed yet.
     Missing .env file is NOT an error (defaults will be used).
+    Checks REPO_ROOT/.env (where docker-compose.yml lives).
     """
-    import os
+    env_path = REPO_ROOT / ".env"
 
     # Missing .env is fine - compose uses defaults
-    if not os.path.exists(env_path):
+    if not env_path.exists():
         return True
 
     # If it exists, make sure it's readable
     try:
-        env_path_obj = Path(env_path)
-        with env_path_obj.open("r") as f:
+        with env_path.open("r") as f:
             f.read()
         return True
     except (OSError, PermissionError):
@@ -1910,6 +1909,7 @@ def cleanup_failed_compose_setup_inline() -> None:
             compose_cmd + ["down", "-v"],
             capture_output=True,
             timeout=30,
+            cwd=REPO_ROOT,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass  # Best-effort cleanup
@@ -2016,6 +2016,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             compose_cmd + ["pull"],
             capture_output=True,
             timeout=300,  # 5 minutes for image pull
+            cwd=REPO_ROOT,
         )
         if result.returncode != 0:
             error_output = result.stderr.decode()
@@ -2046,6 +2047,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             compose_cmd + ["up", "-d"],
             capture_output=True,
             timeout=60,
+            cwd=REPO_ROOT,
         )
         if result.returncode != 0:
             error_msg = result.stderr.decode()
@@ -2066,6 +2068,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                     compose_cmd + ["ps", "--format", "json"],
                     capture_output=True,
                     timeout=5,
+                    cwd=REPO_ROOT,
                 )
 
                 if result.returncode == 0:
@@ -2112,12 +2115,10 @@ def setup_database_compose() -> Tuple[bool, str]:
             return False, "timeout"
 
         # Read actual port/password from .env if it exists
-        import os
-
         actual_port = port
         actual_password = "tutorial"
 
-        env_path = Path(".env")
+        env_path = REPO_ROOT / ".env"
         if env_path.exists():
             # Parse .env file to check for custom values
             try:
@@ -2141,7 +2142,7 @@ def setup_database_compose() -> Tuple[bool, str]:
         )
 
         # Warn if .env exists with custom values
-        if os.path.exists(".env"):
+        if env_path.exists():
             print_warning(
                 "Using custom settings from .env file. "
                 "DataJoint config updated to match."
@@ -2386,8 +2387,9 @@ def change_database_password(
 
     Notes
     -----
-    Prompts user for new password, then uses DataJoint (running in conda env)
-    to change password on MySQL server.
+    Prompts user for new password, then uses dj.set_password() (running in
+    conda env) to change password on MySQL server. The new password is passed
+    via environment variable for security (not visible in process listings).
     """
     import getpass
 
@@ -2423,47 +2425,20 @@ def change_database_password(
     print_step("Changing password on database server...")
 
     # Build Python code to run inside conda environment
-    # New password is passed via environment variable for security
-    python_code = f"""
-import sys
-import os
-import datajoint as dj
-
-# Configure connection
-dj.config['database.host'] = {repr(host)}
-dj.config['database.port'] = {port}
-dj.config['database.user'] = {repr(user)}
-dj.config['database.password'] = {repr(old_password)}
-{'dj.config["database.use_tls"] = True' if use_tls else ''}
-
-# Get new password from environment variable (passed securely)
-new_password = os.environ.get('SPYGLASS_NEW_PASSWORD')
-if not new_password:
-    print("ERROR: SPYGLASS_NEW_PASSWORD not provided", file=sys.stderr)
-    sys.exit(1)
-
-try:
-    # Connect to database
-    dj.conn()
-
-    # Change password using ALTER USER with proper parameterization
-    # Note: '%%' allows user from any host - doubled to escape Python string formatting
-    conn = dj.conn()
-    with conn.cursor() as cursor:
-        cursor.execute("ALTER USER %s@'%%' IDENTIFIED BY %s",
-                      (dj.config['database.user'], new_password))
-    conn.commit()
-
-    print("SUCCESS")
-except Exception as e:
-    print(f"ERROR: {{e}}", file=sys.stderr)
-    sys.exit(1)
+    # Uses dj.set_password() directly - new password passed via env var for security
+    tls_config = 'dj.config["database.use_tls"] = True\n' if use_tls else ""
+    python_code = f"""\
+import os, sys, datajoint as dj
+dj.config["database.host"] = {repr(host)}
+dj.config["database.port"] = {port}
+dj.config["database.user"] = {repr(user)}
+dj.config["database.password"] = {repr(old_password)}
+{tls_config}dj.conn()
+dj.set_password(new_password=os.environ["SPYGLASS_NEW_PASSWORD"], update_config=True)
+print("SUCCESS")
 """
 
     try:
-        # Pass new password via environment variable for security
-        import os
-
         env = os.environ.copy()
         env["SPYGLASS_NEW_PASSWORD"] = new_password
 
@@ -2483,18 +2458,8 @@ except Exception as e:
             print_manual_password_instructions(env_name)
             return None
 
-    except subprocess.TimeoutExpired:
-        print_error("Password change timed out")
-        print_manual_password_instructions(env_name)
-        return None
-
-    except subprocess.CalledProcessError as e:
-        print_error(f"Password change command failed: {e}")
-        print_manual_password_instructions(env_name)
-        return None
-
-    except OSError as e:
-        print_error(f"Failed to run password change: {e}")
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError, OSError) as e:
+        print_error(f"Password change failed: {e}")
         print_manual_password_instructions(env_name)
         return None
 
