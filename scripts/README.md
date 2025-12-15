@@ -209,11 +209,11 @@ This creates a container named `spyglass-db` with:
 
 ```bash
 # Create .env file to customize settings
-cp .env.example .env
+cp example.env .env
 nano .env  # Edit MYSQL_PORT, MYSQL_ROOT_PASSWORD, etc.
 ```
 
-See `docker-compose.yml` and `.env.example` in the repository root.
+See `docker-compose.yml` and `example.env` in the repository root.
 
 ### Option 2: Remote Database
 

@@ -80,7 +80,7 @@ Create a `.env` file to customize settings:
 
 ```bash
 # Copy example
-cp .env.example .env
+cp example.env .env
 
 # Edit settings
 nano .env

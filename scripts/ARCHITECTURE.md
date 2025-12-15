@@ -378,6 +378,6 @@ python scripts/validate.py
 | `environment.yml` | Full dependencies |
 | `environment_min.yml` | Minimal dependencies |
 | `docker-compose.yml` | Database infrastructure |
-| `.env.example` | Docker configuration template |
+| `example.env` | Docker configuration template |
 | `src/spyglass/settings.py` | Runtime config (loads schema) |
 | `src/spyglass/utils/docker.py` | Post-install Docker utilities |

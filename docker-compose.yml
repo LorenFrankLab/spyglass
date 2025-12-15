@@ -16,8 +16,8 @@
 #   Remove:   docker compose down -v  # WARNING: Deletes all data!
 #
 # Customization (optional):
-#   Create .env file from .env.example to customize settings
-#   See .env.example for available configuration options
+#   Create .env file from example.env to customize settings
+#   See example.env for available configuration options
 #
 # Troubleshooting:
 #   Port 3306 in use: Create .env file and change MYSQL_PORT
