@@ -212,7 +212,8 @@ def check_spyglass_config() -> None:
         print("✓ SpyglassConfig loaded")
         print(f"  Base directory: {config.base_dir}")
 
-        if not config.base_dir.exists():
+        base_dir_path = Path(config.base_dir)
+        if not base_dir_path.exists():
             print("  Status: Will be created on first use")
         else:
             print("  Status: Ready")
