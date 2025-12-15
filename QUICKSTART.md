@@ -83,7 +83,7 @@ jupyter notebook 01_Concepts.ipynb
 ```
 
 ### Configure for your data
-- Place NWB files in `~/spyglass_data/raw/`
+- Place NWB files in your configured `raw` directory (default: `$SPYGLASS_BASE_DIR/raw/`)
 - See [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/) for details
 
 ### Join community
