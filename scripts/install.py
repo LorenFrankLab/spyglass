@@ -112,27 +112,55 @@ class Console:
 
     Provides consistent colored output, progress messages, and user prompts.
     All methods are static since no instance state is needed.
+
+    The step/done/fail pattern provides tighter output:
+        Console.step("Checking prerequisites")
+        # ... do work ...
+        Console.done()  # prints: "Checking prerequisites... ✓"
+
+    For standalone status messages, use success/warning/error directly.
     """
 
     @staticmethod
     def step(msg: str) -> None:
-        """Print installation step message."""
-        print(f"{COLORS['blue']}{SYMBOLS['step']}{COLORS['reset']} {msg}")
+        """Print step message without newline, waiting for done/fail."""
+        print(f"{msg}... ", end="", flush=True)
 
     @staticmethod
-    def success(msg: str) -> None:
-        """Print success message."""
-        print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}")
+    def done(msg: str = "") -> None:
+        """Complete a step with success checkmark."""
+        suffix = f" {msg}" if msg else ""
+        print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']}{suffix}")
 
     @staticmethod
-    def warning(msg: str) -> None:
+    def fail(msg: str = "") -> None:
+        """Complete a step with failure mark."""
+        suffix = f" {msg}" if msg else ""
+        print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']}{suffix}")
+
+    @staticmethod
+    def success(msg: str, indent: bool = False) -> None:
+        """Print standalone success message (with newline)."""
+        prefix = "  " if indent else ""
+        print(
+            f"{prefix}{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}"
+        )
+
+    @staticmethod
+    def warning(msg: str, indent: bool = False) -> None:
         """Print warning message."""
-        print(f"{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}")
+        prefix = "  " if indent else ""
+        print(
+            f"{prefix}{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}"
+        )
 
     @staticmethod
-    def error(msg: str) -> None:
+    def error(msg: str, indent: bool = False) -> None:
         """Print error message."""
-        print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}")
+        prefix = "  " if indent else ""
+        print(
+            f"{prefix}{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}"
+        )
 
     @staticmethod
     def manual_password_instructions(env_name: str) -> None:
@@ -165,8 +193,11 @@ class Console:
 
     @staticmethod
     def progress(operation: str, estimated_minutes: int) -> None:
-        """Show progress message for long-running operation."""
-        Console.step(operation)
+        """Show progress message for long-running operation.
+
+        Unlike step(), this prints on its own line with details below.
+        """
+        print(f"{operation}...")
         print(f"  Estimated time: ~{estimated_minutes} minute(s)")
         print("  This may take a while - please be patient...")
         if estimated_minutes > 10:
@@ -284,7 +315,7 @@ def check_prerequisites(
     --------
     >>> check_prerequisites("minimal", Path("/tmp/spyglass_data"))
     """
-    Console.step("Checking prerequisites...")
+    print("Checking prerequisites...")
 
     # Get Python version requirement from pyproject.toml
     min_version = get_required_python_version()
@@ -295,17 +326,21 @@ def check_prerequisites(
             f"Python {min_version[0]}.{min_version[1]}+ required, "
             f"found {sys.version_info.major}.{sys.version_info.minor}"
         )
-    Console.success(f"Python {sys.version_info.major}.{sys.version_info.minor}")
+    Console.success(
+        f"Python {sys.version_info.major}.{sys.version_info.minor}", indent=True
+    )
 
     # Conda/Mamba
     conda_cmd = CondaManager.get_command()
-    Console.success(f"Package manager: {conda_cmd}")
+    Console.success(f"Package manager: {conda_cmd}", indent=True)
 
     # Git (optional but recommended)
     if not shutil.which("git"):
-        Console.warning("Git not found (recommended for development)")
+        Console.warning(
+            "Git not found (recommended for development)", indent=True
+        )
     else:
-        Console.success("Git available")
+        Console.success("Git available", indent=True)
 
     # Disk space check (if base_dir provided)
     if base_dir:
@@ -321,28 +356,32 @@ def check_prerequisites(
 
         if sufficient:
             Console.success(
-                f"Disk space: {available_gb} GB available (need {required_gb} GB)"
+                f"Disk space: {available_gb} GB available (need {required_gb} GB)",
+                indent=True,
             )
         else:
             needed_to_free = required_gb - available_gb
             Console.error(
-                "Insufficient disk space - installation cannot continue"
+                "Insufficient disk space - installation cannot continue",
+                indent=True,
             )
-            print(f"  Checking: {base_dir}")
-            print(f"  Available: {available_gb} GB")
+            print(f"    Checking: {base_dir}")
+            print(f"    Available: {available_gb} GB")
             print(
-                f"  Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
+                f"    Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
             )
-            print(f"  Need to free: {needed_to_free} GB")
+            print(f"    Need to free: {needed_to_free} GB")
             print()
-            print("  To fix:")
-            print(f"    1. Free at least {needed_to_free} GB in this location")
+            print("    To fix:")
             print(
-                "    2. Choose different directory: python scripts/install.py --base-dir /other/path"
+                f"      1. Free at least {needed_to_free} GB in this location"
+            )
+            print(
+                "      2. Choose different directory: python scripts/install.py --base-dir /other/path"
             )
             min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
             print(
-                f"    3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
+                f"      3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
             )
             raise RuntimeError("Insufficient disk space")
 
@@ -386,10 +425,11 @@ class CondaManager:
 
     def remove(self) -> None:
         """Remove the conda environment."""
-        Console.step(f"Removing existing environment '{self.env_name}'...")
+        Console.step(f"Removing existing environment '{self.env_name}'")
         subprocess.run(
             ["conda", "env", "remove", "-n", self.env_name, "-y"], check=True
         )
+        Console.done()
 
     def create(self, env_file: str, force: bool = False) -> None:
         """Create conda environment from file.
@@ -1148,7 +1188,6 @@ def create_database_config(
         use_tls = determine_tls(host, schema=full_schema)
 
     # Build directory structure from JSON schema
-    Console.step("Setting up Spyglass directories...")
     dirs = build_directory_structure(
         base_dir, schema=dir_schema, create=True, verbose=True
     )
@@ -1854,11 +1893,11 @@ def setup_database_compose() -> Tuple[bool, str]:
     """
     import time
 
-    Console.step("Setting up database with Docker Compose...")
-
-    # Check Docker Compose availability
+    Console.step("Checking Docker Compose")
     if not DockerManager.is_compose_available():
+        Console.fail()
         return False, "compose_unavailable"
+    Console.done()
 
     # Check if port 3306 is available
     port = 3306  # Default port (could be customized via .env)
@@ -1952,7 +1991,7 @@ def setup_database_compose() -> Tuple[bool, str]:
             return False, "pull_failed"
 
         # Start services
-        Console.step("Starting services...")
+        Console.step("Starting services")
         result = subprocess.run(
             compose_cmd + ["up", "-d"],
             capture_output=True,
@@ -1960,16 +1999,15 @@ def setup_database_compose() -> Tuple[bool, str]:
             cwd=REPO_ROOT,
         )
         if result.returncode != 0:
+            Console.fail()
             error_msg = result.stderr.decode()
             Console.error(f"Failed to start services: {error_msg}")
             cleanup_failed_compose_setup_inline()
             return False, "start_failed"
-
-        Console.success("Services started")
+        Console.done()
 
         # Wait for MySQL readiness using health check
-        Console.step("Waiting for MySQL to be ready...")
-        print("  Checking connection", end="", flush=True)
+        Console.step("Waiting for MySQL to be ready")
 
         for attempt in range(30):  # 60 seconds max
             try:
@@ -2003,8 +2041,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                         if mysql_service and "healthy" in mysql_service.get(
                             "Health", ""
                         ):
-                            print()  # New line after dots
-                            Console.success("MySQL is ready")
+                            Console.done()
                             break
                     except json.JSONDecodeError:
                         pass
@@ -2017,7 +2054,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                 time.sleep(2)
         else:
             # Timeout - provide debug info
-            print()
+            Console.fail()
             Console.error("MySQL did not become ready within 60 seconds")
             print("\n  Check logs:")
             print("    docker compose logs mysql")
@@ -2117,7 +2154,7 @@ def test_database_connection(
     try:
         import pymysql
 
-        Console.step("Testing database connection...")
+        Console.step("Testing database connection")
 
         connection = pymysql.connect(
             host=host,
@@ -2132,20 +2169,21 @@ def test_database_connection(
         with connection.cursor() as cursor:
             cursor.execute("SELECT VERSION()")
             version = cursor.fetchone()
-            print(f"  MySQL version: {version[0]}")
 
         connection.close()
-        Console.success("Database connection successful!")
+        Console.done(f"MySQL {version[0]}")
         return True, None
 
     except ImportError:
         # pymysql not available yet (before pip install)
+        print()  # newline after step message
         Console.warning("Cannot test connection (pymysql not available)")
         print("  Connection will be tested during validation")
         return True, None  # Allow to proceed
 
     except OSError as e:
         # Network/socket errors
+        Console.fail()
         error_msg = f"Network error: {e}"
         Console.error(f"Database connection failed: {error_msg}")
         return False, error_msg
@@ -2332,7 +2370,7 @@ def change_database_password(
         break
 
     # Change password using DataJoint in conda environment
-    Console.step("Changing password on database server...")
+    Console.step("Changing password on database server")
 
     # Build Python code to run inside conda environment
     # Uses dj.set_password() directly - new password passed via env var for security
@@ -2361,9 +2399,10 @@ print("SUCCESS")
         )
 
         if result.returncode == 0 and "SUCCESS" in result.stdout:
-            Console.success("Password changed successfully!")
+            Console.done()
             return new_password
         else:
+            Console.fail()
             Console.error(f"Failed to change password: {result.stderr}")
             Console.manual_password_instructions(env_name)
             return None
@@ -2373,6 +2412,7 @@ print("SUCCESS")
         subprocess.CalledProcessError,
         OSError,
     ) as e:
+        Console.fail()
         Console.error(f"Password change failed: {e}")
         Console.manual_password_instructions(env_name)
         return None
@@ -2416,7 +2456,7 @@ def setup_database_remote(
     >>> if setup_database_remote(host="db.example.com", user="myuser"):
     ...     print("Non-interactive setup succeeded")
     """
-    Console.step("Setting up remote database connection...")
+    print("Setting up remote database connection...")
 
     # If any parameters are missing, prompt interactively
     if host is None or user is None or password is None:
@@ -2541,7 +2581,7 @@ def validate_installation(env_name: str) -> bool:
     -----
     Prints warnings if validation fails but does not raise exceptions.
     """
-    Console.step("Validating installation...")
+    Console.step("Validating installation")
 
     validate_script = Path(__file__).parent / "validate.py"
 
@@ -2550,9 +2590,10 @@ def validate_installation(env_name: str) -> bool:
             ["conda", "run", "-n", env_name, "python", str(validate_script)],
             check=True,
         )
-        Console.success("Validation passed")
+        Console.done()
         return True
     except subprocess.CalledProcessError:
+        Console.fail()
         Console.warning("Some optional validation checks did not pass")
         print(
             "\n  Core installation succeeded, but some features may need attention."
@@ -2848,6 +2889,7 @@ def run_config_only(args: argparse.Namespace) -> None:
         password=password,
         base_dir=base_dir,
     )
+    Console.done()
 
     config_file = Path.home() / ".datajoint_config.json"
     print()
