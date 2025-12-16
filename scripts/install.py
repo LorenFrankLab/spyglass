@@ -910,7 +910,7 @@ class DockerManager:
 # ============================================================================
 # JSON Schema Loading Functions (DRY Architecture)
 # ============================================================================
-# These functions read from config_schema.json at repository root to ensure
+# These functions read from directory_schema.json at repository root to ensure
 # the installer and settings.py use the same directory structure (single
 # source of truth). This avoids code duplication and ensures consistency.
 
@@ -980,13 +980,13 @@ def load_full_schema() -> Dict[str, Any]:
     Raises
     ------
     FileNotFoundError
-        If config_schema.json not found
+        If directory_schema.json not found
     ValueError
         If schema is invalid
     """
     import json
 
-    schema_path = Path(__file__).parent.parent / "config_schema.json"
+    schema_path = Path(__file__).parent.parent / "directory_schema.json"
 
     if not schema_path.exists():
         raise FileNotFoundError(
@@ -1030,7 +1030,7 @@ def load_directory_schema() -> Dict[str, Dict[str, str]]:
     Raises
     ------
     FileNotFoundError
-        If config_schema.json not found at repository root
+        If directory_schema.json not found at repository root
     ValueError
         If schema is invalid or missing required keys
     """
@@ -1069,7 +1069,7 @@ def build_directory_structure(
     if not schema:
         raise ValueError(
             "Directory schema could not be loaded. "
-            "Check config_schema.json exists at repository root."
+            "Check directory_schema.json exists at repository root."
         )
 
     directories = {}
@@ -1174,7 +1174,7 @@ def create_database_config(
     Notes
     -----
     Uses JSON for safety (no code injection vulnerability).
-    Reads directory structure from config_schema.json (DRY principle).
+    Reads directory structure from directory_schema.json (DRY principle).
     """
     # Get base directory if not provided
     if base_dir is None:

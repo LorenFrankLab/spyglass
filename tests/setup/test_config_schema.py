@@ -32,14 +32,14 @@ from install import (
 
 
 class TestConfigSchema:
-    """Tests for config_schema.json file."""
+    """Tests for directory_schema.json file."""
 
     def test_json_schema_is_valid(self):
-        """Test that config_schema.json is valid JSON and has required structure."""
-        schema_path = Path(__file__).parent.parent.parent / "config_schema.json"
+        """Test that directory_schema.json is valid JSON and has required structure."""
+        schema_path = Path(__file__).parent.parent.parent / "directory_schema.json"
         assert (
             schema_path.exists()
-        ), "config_schema.json not found at repository root"
+        ), "directory_schema.json not found at repository root"
 
         with open(schema_path) as f:
             schema = json.load(f)

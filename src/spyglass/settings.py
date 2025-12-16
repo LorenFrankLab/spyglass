@@ -33,16 +33,16 @@ class SpyglassConfig:
         Raises
         ------
         FileNotFoundError
-            If config_schema.json is not found at repository root
+            If directory_schema.json is not found at repository root
         ValueError
             If schema is invalid or missing required keys
 
         Notes
         -----
-        This method reads from config_schema.json at the repository root,
+        This method reads from directory_schema.json at the repository root,
         which is the single source of truth for Spyglass directory structure.
         """
-        schema_path = Path(__file__).parent.parent.parent / "config_schema.json"
+        schema_path = Path(__file__).parent.parent.parent / "directory_schema.json"
 
         if not schema_path.exists():
             raise FileNotFoundError(
@@ -111,7 +111,7 @@ class SpyglassConfig:
 
         # Load directory schema from JSON file (single source of truth)
         # {PREFIX}_{KEY}_DIR, default dir relative to base_dir
-        # NOTE: Adding new dir requires edit to HHMI hub AND config_schema.json
+        # NOTE: Adding new dir requires edit to HHMI hub AND directory_schema.json
         self.relative_dirs = self._load_directory_schema()
         self.dj_defaults = {
             "database.host": kwargs.get("database_host", "lmf-db.cin.ucsf.edu"),
