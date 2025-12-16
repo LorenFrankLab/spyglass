@@ -721,19 +721,3 @@ class TestIntegration:
         if "time" in result_df.columns:
             assert result_df["time"].tolist() == [1.0, 2.0, 3.0, 4.0, 5.0]
         assert result_df["value"].tolist() == [0.1, 0.2, 0.3, 0.4, 0.5]
-
-        if teardown:
-            TestDataTable().delete_quick()
-            analysis_table.delete_quick()
-
-            file_path = Path(analysis_table.get_abs_path(analysis_file_name))
-            if file_path.exists():
-                file_path.unlink()
-
-        # Always cleanup registry
-        from spyglass.common.common_nwbfile import AnalysisRegistry
-
-        (
-            AnalysisRegistry
-            & {"full_table_name": analysis_table.full_table_name}
-        ).delete_quick()
