@@ -81,10 +81,13 @@ class DLCProject(SpyglassMixin, dj.Manual):
         # Paths of training files (e.g., labeled pngs, CSV or video)
         -> DLCProject
         file_name: varchar(200) # Concise name to describe file
-        file_ext : enum("mp4", "csv", "h5") # extension of file
+        file_ext : varchar(8)  # File extension, e.g., 'mp4', 'h5', 'csv'
         ---
         file_path: varchar(255)
         """
+
+        # NOTE: enum causes issues in local tests that try to store a h264 file
+        # Modified file_ext 10/14/25 will only impact tests and new instances
 
     def insert1(self, key, **kwargs):
         """Override insert1 to check types of key values."""

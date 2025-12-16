@@ -315,6 +315,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         1. Exact match (e.g., "1")
         2. Two-digit zero-padded (e.g., "01")
         3. Three-digit zero-padded (e.g., "001")
+        If multiple matches are found, the two-digit only match is prioritized if
+        present. If no unique match is found, a warning is logged.
 
         Parameters
         ----------
@@ -340,6 +342,14 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         """
         if epoch in session_intervals:
             return epoch
+
+        two_digit_matches = [
+            interval
+            for interval in session_intervals
+            if str(epoch).zfill(2) in interval
+        ]
+        if len(set(two_digit_matches)) == 1:
+            return two_digit_matches[0]
 
         # Try multiple formats:
         possible_formats = [
