@@ -168,7 +168,7 @@ temp_nwb/*s
 *.pem
 dj_local_conf*
 !dj_local_conf_example.json
-!/config_schema.json
+!/src/spyglass/directory_schema.json
 
 !/.vscode/extensions.json
 !/.vscode/settings.json

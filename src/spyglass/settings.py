@@ -23,7 +23,7 @@ class SpyglassConfig:
 
     @staticmethod
     def _load_directory_schema():
-        """Load directory schema from JSON file at repository root.
+        """Load directory schema from JSON file in package directory.
 
         Returns
         -------
@@ -33,18 +33,16 @@ class SpyglassConfig:
         Raises
         ------
         FileNotFoundError
-            If directory_schema.json is not found at repository root
+            If directory_schema.json is not found in spyglass package
         ValueError
             If schema is invalid or missing required keys
 
         Notes
         -----
-        This method reads from directory_schema.json at the repository root,
+        This method reads from directory_schema.json in the spyglass package,
         which is the single source of truth for Spyglass directory structure.
         """
-        schema_path = (
-            Path(__file__).parent.parent.parent / "directory_schema.json"
-        )
+        schema_path = Path(__file__).parent / "directory_schema.json"
 
         if not schema_path.exists():
             raise FileNotFoundError(

@@ -910,7 +910,7 @@ class DockerManager:
 # ============================================================================
 # JSON Schema Loading Functions (DRY Architecture)
 # ============================================================================
-# These functions read from directory_schema.json at repository root to ensure
+# These functions read from directory_schema.json in src/spyglass/ to ensure
 # the installer and settings.py use the same directory structure (single
 # source of truth). This avoids code duplication and ensures consistency.
 
@@ -986,12 +986,14 @@ def load_full_schema() -> Dict[str, Any]:
     """
     import json
 
-    schema_path = Path(__file__).parent.parent / "directory_schema.json"
+    schema_path = (
+        Path(__file__).parent.parent / "src/spyglass/directory_schema.json"
+    )
 
     if not schema_path.exists():
         raise FileNotFoundError(
             f"Config schema not found: {schema_path}\n"
-            f"This file should exist at repository root."
+            f"This file should exist in src/spyglass/ directory."
         )
 
     try:
@@ -1030,7 +1032,7 @@ def load_directory_schema() -> Dict[str, Dict[str, str]]:
     Raises
     ------
     FileNotFoundError
-        If directory_schema.json not found at repository root
+        If directory_schema.json not found in src/spyglass/
     ValueError
         If schema is invalid or missing required keys
     """
@@ -1069,7 +1071,7 @@ def build_directory_structure(
     if not schema:
         raise ValueError(
             "Directory schema could not be loaded. "
-            "Check directory_schema.json exists at repository root."
+            "Check directory_schema.json exists in src/spyglass/."
         )
 
     directories = {}
