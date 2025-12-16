@@ -806,8 +806,8 @@ class TestCheckPrerequisites:
         try:
             check_prerequisites()
         except RuntimeError as e:
-            # Only acceptable failure is conda/mamba not found in test env
-            if "conda or mamba not found" not in str(e):
+            # Only acceptable failure is conda not found in test env
+            if "conda not found" not in str(e):
                 raise
 
     def test_accepts_minimal_install_type(self, tmp_path):
@@ -815,7 +815,9 @@ class TestCheckPrerequisites:
         try:
             check_prerequisites(install_type="minimal", base_dir=tmp_path)
         except RuntimeError as e:
-            if "conda or mamba not found" not in str(e):
+            # Accept conda not found or disk space errors (CI has limited space)
+            err_msg = str(e)
+            if "conda not found" not in err_msg and "disk space" not in err_msg:
                 raise
 
     def test_accepts_full_install_type(self, tmp_path):
@@ -823,7 +825,9 @@ class TestCheckPrerequisites:
         try:
             check_prerequisites(install_type="full", base_dir=tmp_path)
         except RuntimeError as e:
-            if "conda or mamba not found" not in str(e):
+            # Accept conda not found or disk space errors (CI has limited space)
+            err_msg = str(e)
+            if "conda not found" not in err_msg and "disk space" not in err_msg:
                 raise
 
 
