@@ -90,9 +90,9 @@ class MyAnalysis(dj.Computed):
 
 ```python
 with AnalysisNwbfile().build("session.nwb") as builder:
-    position_id = builder.add_nwb_object(position_data, "position")
-    velocity_id = builder.add_nwb_object(velocity_data, "velocity")
-    metadata_id = builder.add_nwb_object(metadata, "analysis_params")
+    position_object_id = builder.add_nwb_object(position_data, "position")
+    velocity_object_id = builder.add_nwb_object(velocity_data, "velocity")
+    metadata_object_id = builder.add_nwb_object(metadata, "analysis_params")
 
 # Store these object_ids in your table to retrieve the objects later
 ```
