@@ -42,7 +42,9 @@ class SpyglassConfig:
         This method reads from directory_schema.json at the repository root,
         which is the single source of truth for Spyglass directory structure.
         """
-        schema_path = Path(__file__).parent.parent.parent / "directory_schema.json"
+        schema_path = (
+            Path(__file__).parent.parent.parent / "directory_schema.json"
+        )
 
         if not schema_path.exists():
             raise FileNotFoundError(

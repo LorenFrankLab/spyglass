@@ -36,7 +36,9 @@ class TestConfigSchema:
 
     def test_json_schema_is_valid(self):
         """Test that directory_schema.json is valid JSON and has required structure."""
-        schema_path = Path(__file__).parent.parent.parent / "directory_schema.json"
+        schema_path = (
+            Path(__file__).parent.parent.parent / "directory_schema.json"
+        )
         assert (
             schema_path.exists()
         ), "directory_schema.json not found at repository root"
