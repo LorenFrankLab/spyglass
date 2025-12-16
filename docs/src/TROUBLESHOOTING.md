@@ -247,7 +247,7 @@ The validator will check:
    cat ~/.datajoint_config.json
    ```
 
-2. **Manually create config:**
+2. **Manually create config** (`~/.datajoint_config.json`):
    ```json
    {
      "database.host": "localhost",
