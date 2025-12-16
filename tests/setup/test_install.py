@@ -86,22 +86,16 @@ class TestGetRequiredPythonVersion:
 class TestCondaManagerGetCommand:
     """Tests for CondaManager.get_command()."""
 
-    def test_prefers_mamba(self):
-        """Prefers mamba over conda when both available."""
-        with patch("shutil.which") as mock_which:
-            mock_which.side_effect = lambda cmd: cmd == "mamba"
-            assert CondaManager.get_command() == "mamba"
-
-    def test_falls_back_to_conda(self):
-        """Falls back to conda when mamba unavailable."""
+    def test_returns_conda_when_available(self):
+        """Returns conda when available."""
         with patch("shutil.which") as mock_which:
             mock_which.side_effect = lambda cmd: cmd == "conda"
             assert CondaManager.get_command() == "conda"
 
-    def test_raises_when_neither_available(self):
-        """Raises RuntimeError when neither conda nor mamba available."""
+    def test_raises_when_conda_not_available(self):
+        """Raises RuntimeError when conda not available."""
         with patch("shutil.which", return_value=None):
-            with pytest.raises(RuntimeError, match="conda or mamba not found"):
+            with pytest.raises(RuntimeError, match="conda not found"):
                 CondaManager.get_command()
 
 

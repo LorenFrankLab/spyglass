@@ -406,29 +406,29 @@ class CondaManager:
 
     @staticmethod
     def get_command() -> str:
-        """Get conda or mamba command ('mamba' preferred if available)."""
-        if shutil.which("mamba"):
-            return "mamba"
-        elif shutil.which("conda"):
+        """Get conda command (required for all environment operations)."""
+        if shutil.which("conda"):
             return "conda"
         else:
             raise RuntimeError(
-                "conda or mamba not found. Install from:\n"
+                "conda not found. Install from:\n"
                 "  https://github.com/conda-forge/miniforge"
             )
 
     def exists(self) -> bool:
         """Check if the conda environment already exists."""
+        conda_cmd = self.get_command()
         result = subprocess.run(
-            ["conda", "env", "list"], capture_output=True, text=True
+            [conda_cmd, "env", "list"], capture_output=True, text=True
         )
         return self.env_name in result.stdout
 
     def remove(self) -> None:
         """Remove the conda environment."""
+        conda_cmd = self.get_command()
         Console.step(f"Removing existing environment '{self.env_name}'")
         subprocess.run(
-            ["conda", "env", "remove", "-n", self.env_name, "-y"], check=True
+            [conda_cmd, "env", "remove", "-n", self.env_name, "-y"], check=True
         )
         Console.done()
 
@@ -1686,15 +1686,9 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print("  ✓ Port is reachable")
 
         # Determine TLS based on host (use TLS for non-localhost)
+        # This is automatic - no prompt needed. TLS is required for security
+        # on remote connections.
         use_tls = host not in LOCALHOST_ADDRESSES
-
-        if use_tls:
-            Console.warning(f"TLS will be enabled for remote host '{host}'")
-            if Console.prompt_yes_no("  Disable TLS?", default_yes=False):
-                use_tls = False
-                Console.warning(
-                    "TLS disabled (not recommended for remote connections)"
-                )
 
         return {
             "host": host,
@@ -2335,8 +2329,9 @@ def change_database_password(
     Notes
     -----
     Prompts user for new password, then uses dj.set_password() (running in
-    conda env) to change password on MySQL server. The new password is passed
-    via environment variable for security (not visible in process listings).
+    conda env) to change password on MySQL server. All sensitive data
+    (host, user, passwords) are passed via environment variables for security
+    (not visible in process listings via ps).
     """
     import getpass
 
@@ -2372,25 +2367,34 @@ def change_database_password(
     Console.step("Changing password on database server")
 
     # Build Python code to run inside conda environment
-    # Uses dj.set_password() directly - new password passed via env var for security
-    tls_config = 'dj.config["database.use_tls"] = True\n' if use_tls else ""
-    python_code = f"""\
-import os, sys, datajoint as dj
-dj.config["database.host"] = {repr(host)}
-dj.config["database.port"] = {port}
-dj.config["database.user"] = {repr(user)}
-dj.config["database.password"] = {repr(old_password)}
-{tls_config}dj.conn()
+    # All sensitive data (passwords) passed via environment variables for security
+    # (not visible in process listings via ps)
+    python_code = """\
+import os, datajoint as dj
+dj.config["database.host"] = os.environ["SPYGLASS_DB_HOST"]
+dj.config["database.port"] = int(os.environ["SPYGLASS_DB_PORT"])
+dj.config["database.user"] = os.environ["SPYGLASS_DB_USER"]
+dj.config["database.password"] = os.environ["SPYGLASS_OLD_PASSWORD"]
+if os.environ.get("SPYGLASS_USE_TLS") == "1":
+    dj.config["database.use_tls"] = True
+dj.conn()
 dj.set_password(new_password=os.environ["SPYGLASS_NEW_PASSWORD"], update_config=True)
 print("SUCCESS")
 """
+    conda_cmd = CondaManager.get_command()
 
     try:
         env = os.environ.copy()
+        env["SPYGLASS_DB_HOST"] = host
+        env["SPYGLASS_DB_PORT"] = str(port)
+        env["SPYGLASS_DB_USER"] = user
+        env["SPYGLASS_OLD_PASSWORD"] = old_password
         env["SPYGLASS_NEW_PASSWORD"] = new_password
+        if use_tls:
+            env["SPYGLASS_USE_TLS"] = "1"
 
         result = subprocess.run(
-            ["conda", "run", "-n", env_name, "python", "-c", python_code],
+            [conda_cmd, "run", "-n", env_name, "python", "-c", python_code],
             env=env,
             capture_output=True,
             text=True,
@@ -2583,10 +2587,11 @@ def validate_installation(env_name: str) -> bool:
     Console.step("Validating installation")
 
     validate_script = Path(__file__).parent / "validate.py"
+    conda_cmd = CondaManager.get_command()
 
     try:
         subprocess.run(
-            ["conda", "run", "-n", env_name, "python", str(validate_script)],
+            [conda_cmd, "run", "-n", env_name, "python", str(validate_script)],
             check=True,
         )
         Console.done()
