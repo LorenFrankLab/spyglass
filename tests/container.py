@@ -52,6 +52,7 @@ class DockerMySQLManager:
         self.password = "tutorial"
         self.user = "root"
         self.host = "localhost"
+        self.branch_name = None
         self._ran_container = None
         self.logger = logger
         self.logger.setLevel("INFO" if verbose else "ERROR")
@@ -68,6 +69,38 @@ class DockerMySQLManager:
             if restart:
                 self.stop()  # stop container if it exists
             self.start()
+
+    def _get_existing_container_port(self, container_name: str) -> int:
+        """Get port of existing container with given name, if it exists.
+
+        Parameters
+        ----------
+        container_name : str
+            Name of container to check
+
+        Returns
+        -------
+        int or None
+            Port number if container exists, None otherwise
+        """
+        try:
+            container = self.client.containers.get(container_name)
+            # Container exists, get its port mapping
+            # Format: {'3306/tcp': [{'HostIp': '0.0.0.0', 'HostPort': '47811'}]}
+            port_bindings = container.attrs["NetworkSettings"]["Ports"]
+            if "3306/tcp" in port_bindings and port_bindings["3306/tcp"]:
+                host_port = port_bindings["3306/tcp"][0]["HostPort"]
+                self.logger.info(
+                    f"Found container {container_name} on port {host_port}"
+                )
+                return int(host_port)
+        except docker.errors.NotFound:  # Container doesn't exist, that's fine
+            pass
+        except Exception as e:
+            self.logger.warning(
+                f"Error checking existing container {container_name}: {e}"
+            )
+        return None
 
     def _container_name_from_branch(self) -> tuple:
         """Generate container name from current git branch."""
@@ -87,9 +120,16 @@ class DockerMySQLManager:
             logger.error(f"Failed to get git branch name: {e}")
             return defaults
 
+        self.branch_name = branch_name
         container_name = f"spyglass-pytest-{branch_name}"
-        port = self.string_to_port(container_name)
 
+        # Check if container with this name already exists and get its port
+        existing_port = self._get_existing_container_port(container_name)
+        if existing_port is not None:
+            return container_name, existing_port
+
+        # Otherwise, find an available port
+        port = self.string_to_port(container_name)
         while self.port_in_use(port):
             port += 1
 
@@ -109,7 +149,7 @@ class DockerMySQLManager:
     def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
         """Check if a port is currently in use on the given host."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((host, port))
                 return False  # port is available

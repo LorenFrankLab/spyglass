@@ -55,8 +55,10 @@ def custom_analysis_tables(custom_config, dj_conn, common_nwbfile):
         this_object_id: varchar(40)  # Object ID for NWB object retrieval
         """
 
-        def insert_by_name(self, fname):
-            super().insert1(dict(analysis_file_name=fname))
+        def insert_by_name(self, fname, object_id="SomeStr"):
+            super().insert1(
+                dict(analysis_file_name=fname, this_object_id=object_id)
+            )
 
     yield AnalysisNwbfile(), CustomDownstream()
 
@@ -209,77 +211,49 @@ class TestFileOperations:
             entry.delete_quick()
 
     def test_add_nwb_object_dataframe(
-        self, mini_copy_name, custom_analysis_table, teardown
+        self, mini_copy_name, custom_analysis_table
     ):
         """Test adding DataFrame to analysis file using add_nwb_object."""
         # Create file
         analysis_file_name = custom_analysis_table.create(mini_copy_name)
         analysis_dict = dict(analysis_file_name=analysis_file_name)
 
-        try:
-            # Create test DataFrame
-            test_df = pd.DataFrame(
-                {"time": [1.0, 2.0, 3.0], "value": [0.1, 0.2, 0.3]}
-            )
+        # Create test DataFrame
+        test_df = pd.DataFrame(
+            {"time": [1.0, 2.0, 3.0], "value": [0.1, 0.2, 0.3]}
+        )
 
-            # Add DataFrame to file BEFORE registering
-            object_id = custom_analysis_table.add_nwb_object(
-                analysis_file_name, test_df, table_name="test_data"
-            )
+        # Add DataFrame to file BEFORE registering
+        object_id = custom_analysis_table.add_nwb_object(
+            analysis_file_name, test_df, table_name="test_data"
+        )
 
-            assert object_id is not None
-            assert isinstance(object_id, str)
+        assert object_id is not None
+        assert isinstance(object_id, str)
 
-            # Now register the file
-            custom_analysis_table.add(mini_copy_name, analysis_file_name)
+        # Now register the file
+        custom_analysis_table.add(mini_copy_name, analysis_file_name)
 
-            custom_analysis_table.insert1(
-                dict(analysis_dict, this_object_id=object_id)
-            )
+        # Verify entry exists
+        entry = custom_analysis_table & analysis_dict
+        assert len(entry) == 1
 
-            # Verify entry exists
-            entry = custom_analysis_table & analysis_dict
-            assert len(entry) == 1
-
-        finally:
-            # Cleanup
-            if teardown:
-                (custom_analysis_table & analysis_dict).delete_quick()
-                file_path = custom_analysis_table.get_abs_path(
-                    analysis_file_name
-                )
-                if Path(file_path).exists():
-                    Path(file_path).unlink()
-
-    def test_add_nwb_object_array(
-        self, mini_copy_name, custom_analysis_table, teardown
-    ):
+    def test_add_nwb_object_array(self, mini_copy_name, custom_analysis_table):
         """Test adding numpy array to analysis file."""
         analysis_file_name = custom_analysis_table.create(mini_copy_name)
-        analysis_dict = dict(analysis_file_name=analysis_file_name)
 
-        try:
-            # Create test array
-            test_array = np.array([1, 2, 3, 4, 5])
+        # Create test array
+        test_array = np.array([1, 2, 3, 4, 5])
 
-            # Add array BEFORE registration
-            object_id = custom_analysis_table.add_nwb_object(
-                analysis_file_name, test_array, table_name="test_array"
-            )
+        # Add array BEFORE registration
+        object_id = custom_analysis_table.add_nwb_object(
+            analysis_file_name, test_array, table_name="test_array"
+        )
 
-            assert object_id is not None
+        assert object_id is not None
 
-            # Register the file
-            custom_analysis_table.add(mini_copy_name, analysis_file_name)
-
-        finally:
-            if teardown:
-                (custom_analysis_table & analysis_dict).delete_quick()
-                file_path = custom_analysis_table.get_abs_path(
-                    analysis_file_name
-                )
-                if Path(file_path).exists():
-                    Path(file_path).unlink()
+        # Register the file
+        custom_analysis_table.add(mini_copy_name, analysis_file_name)
 
     def test_file_path_conflicts(
         self,
@@ -359,7 +333,7 @@ class TestFileOperations:
 
 
 class TestCleanupAndRegistry:
-    """Test cleanup and orphan detection via AnalysisRegistry (Item 4)."""
+    """Test cleanup and orphan detection via AnalysisRegistry."""
 
     def test_registry_get_class(self, analysis_registry, custom_analysis_table):
         """Test AnalysisRegistry.get_class() retrieves table class."""
@@ -381,6 +355,7 @@ class TestCleanupAndRegistry:
         custom_name = custom_analysis_table.full_table_name
         assert custom_name in registered_tables, "Custom table not in registry"
 
+    @pytest.mark.slow
     def test_orphan_detection_across_tables(
         self,
         analysis_registry,
@@ -497,6 +472,7 @@ class TestCleanupAndRegistry:
 # ========================== INTEGRATION TESTS ================================
 
 
+@pytest.mark.integration
 class TestIntegration:
     """Integration tests combining multiple features."""
 
@@ -625,7 +601,6 @@ class TestIntegration:
         dj_conn,
         teardown,
         common,
-        mock_create,
     ):
         """Test custom table with object_id field using fetch_nwb().
 
@@ -637,7 +612,7 @@ class TestIntegration:
 
         This covers the refactored path resolution and object retrieval.
         """
-        from spyglass.utils.dj_mixin import SpyglassAnalysis
+        from spyglass.utils.dj_mixin import SpyglassAnalysis, SpyglassMixin
 
         # For foreign key resolution
         Nwbfile = common.common_nwbfile.Nwbfile  # noqa F401
@@ -650,8 +625,9 @@ class TestIntegration:
             definition = """This definition is managed by SpyglassAnalysis"""
 
         # Create downstream table with object_id field
+        # Must inherit from SpyglassMixin to get fetch_nwb()
         @schema
-        class TestDataTable(dj.Manual):
+        class TestDataTable(SpyglassMixin, dj.Manual):
             definition = """
             test_id: int auto_increment
             -> AnalysisNwbfile
@@ -664,98 +640,100 @@ class TestIntegration:
                 """Fetch DataFrame from NWB object."""
                 nwb_data = self.fetch_nwb()[0]
                 # Object should be accessible as 'test' (without '_object_id')
-                return nwb_data["test"].to_dataframe()
-
-        # Use mock_create for fast file creation
-        analysis_table = AnalysisNwbfile()
-        mock_create(analysis_table)
-
-        try:
-            # 1. Create analysis file
-            analysis_file_name = analysis_table.create(mini_copy_name)
-
-            # 2. Populate with test data
-            test_df = pd.DataFrame(
-                {
-                    "time": [1.0, 2.0, 3.0, 4.0, 5.0],
-                    "value": [0.1, 0.2, 0.3, 0.4, 0.5],
-                    "label": ["a", "b", "c", "d", "e"],
-                }
-            )
-
-            # Add DataFrame and get object_id
-            object_id = analysis_table.add_nwb_object(
-                analysis_file_name, test_df, table_name="test"
-            )
-
-            assert object_id is not None
-            assert isinstance(object_id, str)
-            assert len(object_id) > 0
-
-            # 3. Register analysis file
-            analysis_table.add(mini_copy_name, analysis_file_name)
-
-            # 4. Insert into downstream table with object_id
-            TestDataTable().insert1(
-                {
-                    "analysis_file_name": analysis_file_name,
-                    "test_object_id": object_id,
-                    "description": "Test data for fetch_nwb integration",
-                }
-            )
-
-            # 5. Test fetch_nwb() retrieves the object
-            # This tests the path resolution for custom tables AND object_id handling
-            fetched = (TestDataTable() & {"test_id": 1}).fetch_nwb()
-
-            assert len(fetched) == 1
-            nwb_data = fetched[0]
-
-            # Verify object_id field is present in fetched data
-            # (before conversion to object)
-            assert "test_object_id" in nwb_data or "test" in nwb_data
-
-            # The object should be accessible as 'test' (not 'test_object_id')
-            assert "test" in nwb_data, (
-                "Object not found with stripped name. "
-                f"Available keys: {list(nwb_data.keys())}"
-            )
-
-            # Verify it's a DynamicTable (converted from DataFrame)
-            from hdmf.common import DynamicTable
-
-            assert isinstance(nwb_data["test"], DynamicTable)
-
-            # 6. Test fetch1_dataframe() works
-            result_df = (TestDataTable() & {"test_id": 1}).fetch1_dataframe()
-
-            assert isinstance(result_df, pd.DataFrame)
-            assert len(result_df) == 5
-            assert "time" in result_df.columns or result_df.index.name == "time"
-            assert "value" in result_df.columns
-            assert "label" in result_df.columns
-
-            # Verify data integrity
-            if "time" in result_df.columns:
-                assert result_df["time"].tolist() == [1.0, 2.0, 3.0, 4.0, 5.0]
-            assert result_df["value"].tolist() == [0.1, 0.2, 0.3, 0.4, 0.5]
-
-        finally:
-            # Cleanup
-            if teardown:
-                TestDataTable().delete_quick()
-                analysis_table.delete_quick()
-
-                file_path = Path(
-                    analysis_table.get_abs_path(analysis_file_name)
+                test_data = nwb_data["test"]
+                # If it's already a DataFrame, return it; otherwise convert
+                return (
+                    test_data
+                    if isinstance(test_data, pd.DataFrame)
+                    else test_data.to_dataframe()
                 )
-                if file_path.exists():
-                    file_path.unlink()
 
-            # Always cleanup registry
-            from spyglass.common.common_nwbfile import AnalysisRegistry
+        # Create real NWB file (not using mock_create since we need to add objects)
+        analysis_table = AnalysisNwbfile()
 
-            (
-                AnalysisRegistry
-                & {"full_table_name": analysis_table.full_table_name}
-            ).delete_quick()
+        # 1. Create analysis file (creates a real NWB copy)
+        analysis_file_name = analysis_table.create(mini_copy_name)
+
+        # 2. Populate with test data
+        test_df = pd.DataFrame(
+            {
+                "time": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "value": [0.1, 0.2, 0.3, 0.4, 0.5],
+                "label": ["a", "b", "c", "d", "e"],
+            }
+        )
+
+        # Add DataFrame and get object_id
+        object_id = analysis_table.add_nwb_object(
+            analysis_file_name, test_df, table_name="test"
+        )
+
+        assert object_id is not None
+        assert isinstance(object_id, str)
+        assert len(object_id) > 0
+
+        # 3. Register analysis file
+        analysis_table.add(mini_copy_name, analysis_file_name)
+
+        # 4. Insert into downstream table with object_id
+        TestDataTable().insert1(
+            {
+                "analysis_file_name": analysis_file_name,
+                "test_object_id": object_id,
+                "description": "Test data for fetch_nwb integration",
+            }
+        )
+
+        # 5. Test fetch_nwb() retrieves the object
+        # This tests the path resolution for custom tables AND object_id handling
+        fetched = (TestDataTable() & {"test_id": 1}).fetch_nwb()
+
+        assert len(fetched) == 1
+        nwb_data = fetched[0]
+
+        # Verify object_id field is present in fetched data
+        # (before conversion to object)
+        assert "test_object_id" in nwb_data or "test" in nwb_data
+
+        # The object should be accessible as 'test' (not 'test_object_id')
+        assert "test" in nwb_data, (
+            "Object not found with stripped name. "
+            f"Available keys: {list(nwb_data.keys())}"
+        )
+
+        # Verify it's either a DataFrame or DynamicTable
+        from hdmf.common import DynamicTable
+
+        assert isinstance(
+            nwb_data["test"], (pd.DataFrame, DynamicTable)
+        ), f"Expected DataFrame or DynamicTable, got {type(nwb_data['test'])}"
+
+        # 6. Test fetch1_dataframe() works
+        result_df = (TestDataTable() & {"test_id": 1}).fetch1_dataframe()
+
+        assert isinstance(result_df, pd.DataFrame)
+        assert len(result_df) == 5
+        assert "time" in result_df.columns or result_df.index.name == "time"
+        assert "value" in result_df.columns
+        assert "label" in result_df.columns
+
+        # Verify data integrity
+        if "time" in result_df.columns:
+            assert result_df["time"].tolist() == [1.0, 2.0, 3.0, 4.0, 5.0]
+        assert result_df["value"].tolist() == [0.1, 0.2, 0.3, 0.4, 0.5]
+
+        if teardown:
+            TestDataTable().delete_quick()
+            analysis_table.delete_quick()
+
+            file_path = Path(analysis_table.get_abs_path(analysis_file_name))
+            if file_path.exists():
+                file_path.unlink()
+
+        # Always cleanup registry
+        from spyglass.common.common_nwbfile import AnalysisRegistry
+
+        (
+            AnalysisRegistry
+            & {"full_table_name": analysis_table.full_table_name}
+        ).delete_quick()

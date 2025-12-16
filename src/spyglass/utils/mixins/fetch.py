@@ -70,13 +70,10 @@ class FetchMixin(BaseMixin):
         resolved = getattr(self, "_nwb_table", None)
 
         # Fallback: Check definition for Nwbfile foreign key
-        if not resolved:
-            if "-> Nwbfile" in self.definition:
-                resolved = Nwbfile
-            else:
-                # Default to AnalysisNwbfile if no clear indication
-                resolved = AnalysisNwbfile
+        if not resolved and "-> Nwbfile" in self.definition:
+            resolved = Nwbfile
 
+        # If still not resolved, raise error
         if not resolved:
             raise NotImplementedError(
                 f"{self.__class__.__name__} does not have a "

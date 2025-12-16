@@ -380,7 +380,9 @@ class IngestionMixin(BaseMixin):
         # FreeTable instances captured with `parts(as_objects=True)`
 
         # If novel entry, nothing to validate
-        if not (query := tbl & new_key):
+        # Must use pk only to avoid restricting by blobs
+        new_pk = {k: v for k, v in new_key.items() if k in tbl.primary_key}
+        if not (query := tbl & new_pk):
             return
 
         existing = query.fetch1()
