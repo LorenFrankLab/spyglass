@@ -1,9 +1,13 @@
 """Mixin class for fetching NWB files and pynapple objects."""
 
+import os
 from functools import cached_property
 
-from spyglass.utils.dj_helper_fn import fetch_nwb, get_nwb_table
+import numpy as np
+
+from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
+from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
 try:
     import pynapple  # noqa F401
@@ -90,6 +94,206 @@ class FetchMixin(BaseMixin):
 
         return (resolved, attr_name)
 
+    def _get_nwb_files_and_path_fn(self, tbl, attr_name, *attrs, **kwargs):
+        """Get NWB file names and path resolution function.
+
+        Parameters
+        ----------
+        tbl : table or class
+            DataJoint table/class to fetch from. Can be a table class that
+            was already resolved by _nwb_table_tuple.
+        attr_name : str
+            Attribute name to fetch from the table.
+        *attrs : list
+            Attributes from normal DataJoint fetch call.
+        **kwargs : dict
+            Keyword arguments from normal DataJoint fetch call.
+
+        Returns
+        -------
+        nwb_files : list
+            List of NWB file names.
+        file_path_fn : function
+            Function to get the absolute path to the NWB file.
+        """
+        from spyglass.common.common_nwbfile import (
+            AnalysisNwbfile,
+            Nwbfile,
+        )
+        from spyglass.utils.dj_mixin import SpyglassMixin
+
+        kwargs["as_dict"] = True  # force return as dictionary
+        attrs = attrs or self.heading.names  # if none, all
+
+        which = "analysis" if "analysis" in attr_name else "nwb"
+
+        file_name_str = (
+            "analysis_file_name" if which == "analysis" else "nwb_file_name"
+        )
+
+        # tbl is already the resolved class from _nwb_table_tuple
+        # Get the get_abs_path method from it directly
+        file_path_fn = getattr(tbl, "get_abs_path", None)
+
+        if file_path_fn is None:  # use prev approach as fallback
+            file_path_fn = (
+                AnalysisNwbfile.get_abs_path
+                if which == "analysis"
+                else Nwbfile.get_abs_path
+            )
+        if not callable(file_path_fn):
+            raise ValueError(
+                f"Table {tbl.__name__} does not have a valid "
+                + "get_abs_path method."
+            )
+
+        # Instance the table for the join query
+        tbl_inst = instance_table(tbl)
+
+        # logging arg only if instanced table inherits Mixin
+        inst = instance_table(self)
+        arg = (
+            dict(log_export=False)
+            if isinstance(inst, SpyglassMixin)
+            else dict()
+        )
+
+        nwb_files = (
+            self.join(tbl_inst.proj(nwb2load_filepath=attr_name), **arg)
+        ).fetch(file_name_str)
+
+        return nwb_files, file_path_fn
+
+    def _download_missing_files(self, nwb_files, file_path_fn):
+        """Download missing NWB files from kachery/dandi or recompute.
+
+        Parameters
+        ----------
+        nwb_files : list
+            List of NWB file names.
+        file_path_fn : function
+            Function to get the absolute path to the NWB file.
+        """
+        for file_name in nwb_files:
+            file_path = file_path_fn(file_name, from_schema=True)
+            if not os.path.exists(file_path):
+                # get from kachery/dandi or recompute, store in cache
+                get_nwb_file(file_path, self)
+
+    def _execute_nwb_query(self, tbl, attr_name, *attrs, **kwargs):
+        """Execute join query and fetch records with NWB filepaths.
+
+        Parameters
+        ----------
+        tbl : table
+            DataJoint table to fetch from.
+        attr_name : str
+            Attribute name to fetch from the table.
+        *attrs : list
+            Attributes from normal DataJoint fetch call.
+        **kwargs : dict
+            Keyword arguments from normal DataJoint fetch call.
+
+        Returns
+        -------
+        rec_dicts : list
+            List of dictionaries with fetch results and nwb2load_filepath.
+        """
+        from spyglass.utils.dj_mixin import SpyglassMixin
+
+        kwargs["as_dict"] = True  # force return as dictionary
+
+        file_name_attr = (
+            "analysis_file_name" if "analysis" in attr_name else "nwb_file_name"
+        )
+
+        if not attrs:
+            attrs = self.heading.names
+
+        # Get file names and path function
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+            tbl, attr_name, *attrs, **kwargs
+        )
+
+        # logging arg only if instanced table inherits Mixin
+        inst = instance_table(self)
+        arg = (
+            dict(log_export=False)
+            if isinstance(inst, SpyglassMixin)
+            else dict()
+        )
+        tbl_inst = instance_table(tbl)
+        query_table = self.join(
+            tbl_inst.proj(nwb2load_filepath=attr_name), **arg
+        )
+
+        rec_dicts = query_table.fetch(*attrs, **kwargs)
+
+        # get filepath for each. Use datajoint for checksum if local
+        for rec_dict in rec_dicts:
+            file_path = file_path_fn(rec_dict[file_name_attr])
+            if file_from_dandi(file_path):
+                # skip the filepath checksum if streamed from Dandi
+                rec_dict["nwb2load_filepath"] = file_path
+                continue
+
+            # Full dict caused issues with dlc tables using dicts in secondary keys
+            rec_only_pk = {
+                k: v
+                for k, v in rec_dict.items()
+                if k in query_table.heading.primary_key
+            }
+            rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
+                "nwb2load_filepath"
+            )
+
+        return rec_dicts
+
+    def _process_object_ids(self, rec_dicts, *attrs):
+        """Process object_id fields and convert to NWB objects.
+
+        Parameters
+        ----------
+        rec_dicts : list
+            List of dictionaries with fetch results.
+        *attrs : list
+            Attributes from fetch call.
+
+        Returns
+        -------
+        list
+            List of dicts with object_id fields converted to NWB objects.
+        """
+        if not rec_dicts or not np.any(
+            ["object_id" in key for key in rec_dicts[0]]
+        ):
+            return rec_dicts
+
+        ret = []
+        for rec_dict in rec_dicts:
+            nwbf = get_nwb_file(rec_dict.pop("nwb2load_filepath"))
+            # for each attr that contains substring 'object_id', store key-value:
+            # attr name to NWB object
+            # remove '_object_id' from attr name
+            nwb_objs = {
+                id_attr.replace("_object_id", ""): self._get_nwb_object(
+                    nwbf.objects, rec_dict[id_attr]
+                )
+                for id_attr in attrs
+                if "object_id" in id_attr and rec_dict[id_attr] != ""
+            }
+            ret.append({**rec_dict, **nwb_objs})
+
+        return ret
+
+    @staticmethod
+    def _get_nwb_object(objects, object_id):
+        """Retrieve NWB object and try to convert to dataframe if possible."""
+        try:
+            return objects[object_id].to_dataframe()
+        except AttributeError:
+            return objects[object_id]
+
     def fetch_nwb(self, *attrs, **kwargs):
         """Fetch NWBFile object from relevant table.
 
@@ -98,10 +302,21 @@ class FetchMixin(BaseMixin):
         or a _nwb_table attribute. If both are present, the attribute takes
         precedence.
 
-        Additional logic support Export table logging.
+        Parameters
+        ----------
+        *attrs : list
+            Attributes from normal DataJoint fetch call.
+        **kwargs : dict
+            Keyword arguments from normal DataJoint fetch call.
+
+        Returns
+        -------
+        nwb_objects : list
+            List of dicts containing fetch results and NWB objects.
         """
         table, tbl_attr = self._nwb_table_tuple
 
+        # Handle export logging
         log_export = kwargs.pop("log_export", True)
         is_export = log_export and self.export_id
 
@@ -114,7 +329,24 @@ class FetchMixin(BaseMixin):
         if is_export and is_analysis_table:
             self._copy_to_common()
 
-        return fetch_nwb(self, self._nwb_table_tuple, *attrs, **kwargs)
+        # Set defaults for fetch
+        kwargs["as_dict"] = True  # force return as dictionary
+        if not attrs:
+            attrs = self.heading.names
+
+        # Get file names and path resolution function
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
+            table, tbl_attr, *attrs, **kwargs
+        )
+
+        # Download any missing files
+        self._download_missing_files(nwb_files, file_path_fn)
+
+        # Execute query and get records
+        rec_dicts = self._execute_nwb_query(table, tbl_attr, *attrs, **kwargs)
+
+        # Process object_id fields if present
+        return self._process_object_ids(rec_dicts, *attrs)
 
     def fetch_pynapple(self, *attrs, **kwargs):
         """Get a pynapple object from the given DataJoint query.
@@ -140,8 +372,7 @@ class FetchMixin(BaseMixin):
         if pynapple is None:
             raise ImportError("Pynapple is not installed.")
 
-        nwb_files, file_path_fn = get_nwb_table(
-            self,
+        nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
             self._nwb_table_tuple[0],
             self._nwb_table_tuple[1],
             *attrs,

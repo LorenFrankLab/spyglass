@@ -248,6 +248,10 @@ def get_fetching_table_from_stack(stack):
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
+
     Parameters
     ----------
     query_expression : query
@@ -273,7 +277,13 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
         AnalysisRegistry,
         Nwbfile,
     )
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="get_nwb_table",
+        alt="FetchMixin.fetch_nwb() (logic integrated into mixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
@@ -329,6 +339,10 @@ def instance_table(table: Union[str, Type[dj.Table]]) -> dj.Table:
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
 
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
+
     Parameters
     ----------
     query_expression : query
@@ -348,7 +362,13 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="fetch_nwb (helper function)",
+        alt="table.fetch_nwb() method (logic integrated into FetchMixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
 
