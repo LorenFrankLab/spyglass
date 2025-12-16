@@ -64,14 +64,13 @@ class PopulateMixin(BaseMixin):
         use_transact = kwargs.pop("use_transaction", None)
         if use_transact is None:  # if user does not specify, use class default
             use_transact = self._use_transaction
-            if self._use_transaction is False:  # If class default is off, warn
-                self._logger.warning(
-                    "Turning off transaction protection this table by default. "
-                    + "Use use_transation=True to re-enable.\n"
-                    + "Read more about transactions:\n"
-                    + "https://docs.datajoint.io/python/definition/05-Transactions.html\n"
-                    + "https://github.com/LorenFrankLab/spyglass/issues/1030"
+            if self._use_transaction is False:  # To be deprecated #1422
+                from spyglass.common.common_usage import ActivityLog
+
+                ActivityLog().deprecate_log(
+                    "no_transaction_make", alt="tri-part make"
                 )
+
         if use_transact is False and processes > 1:
             raise RuntimeError(
                 "Must use transaction protection with parallel processing.\n"

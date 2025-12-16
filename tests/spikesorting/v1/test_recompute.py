@@ -7,7 +7,7 @@ from tests.conftest import VERBOSE
 
 
 @pytest.mark.slow
-def test_recompute(spike_v1, pop_rec, common):
+def test_recompute(spike_v1, pop_rec, common, utils):
     key = spike_v1.SpikeSortingRecording().fetch(
         "analysis_file_name", as_dict=True
     )[0]
@@ -16,6 +16,7 @@ def test_recompute(spike_v1, pop_rec, common):
 
     file_path = common.AnalysisNwbfile.get_abs_path(key["analysis_file_name"])
     Path(file_path).unlink()  # delete the file to force recompute
+    utils.nwb_helper_fn.close_nwb_files()  # clear the io cache to trigger re-compute
 
     post = restr_tbl.fetch_nwb()[0]["object_id"]  # trigger recompute
 

@@ -9,7 +9,6 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
-import copy
 import uuid
 from pathlib import Path
 
@@ -96,34 +95,24 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
     classifier_path: filepath@analysis # path to the classifier file
     """
 
-    def make(self, key):
-        """Populate the ClusterlessDecoding table.
-
+    def make_fetch(self, key):
+        """
         1. Fetches...
             position data from PositionGroup table
             waveform features and spike times from UnitWaveformFeatures table
             decoding parameters from DecodingParameters table
             encoding/decoding intervals from IntervalList table
-        2. Decodes via ClusterlessDetector from non_local_detector package
-        3. Optionally estimates decoding parameters
-        4. Saves the decoding results (initial conditions, discrete state
-            transitions) and classifier to disk. May include discrete transition
-            coefficients if available.
-        5. Inserts into ClusterlessDecodingV1 table and DecodingOutput merge
-            table.
         """
-        orig_key = copy.deepcopy(key)
+        nwb_dict = {"nwb_file_name": key["nwb_file_name"]}
 
         # Get model parameters
         model_params = (
             DecodingParameters
             & {"decoding_param_name": key["decoding_param_name"]}
         ).fetch1()
-        decoding_params, decoding_kwargs = (
-            model_params["decoding_params"],
-            model_params["decoding_kwargs"],
-        )
-        decoding_kwargs = decoding_kwargs or {}
+
+        decoding_params = model_params.get("decoding_params") or dict()
+        decoding_kwargs = model_params.get("decoding_kwargs") or dict()
 
         # Get position data
         (
@@ -142,11 +131,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         # Get the encoding and decoding intervals
         encoding_interval = (
             IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["encoding_interval"],
-            }
+            & dict(nwb_dict, interval_list_name=key["encoding_interval"])
         ).fetch1("valid_times")
+
         is_training = np.zeros(len(position_info), dtype=bool)
         for interval_start, interval_end in encoding_interval:
             is_training[
@@ -158,16 +145,40 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         is_training[
             position_info[position_variable_names].isna().values.max(axis=1)
         ] = False
+
         if "is_training" not in decoding_kwargs:
             decoding_kwargs["is_training"] = is_training
 
         decoding_interval = (
             IntervalList
-            & {
-                "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": key["decoding_interval"],
-            }
+            & dict(nwb_dict, interval_list_name=key["decoding_interval"])
         ).fetch1("valid_times")
+
+        return [
+            decoding_params,
+            decoding_kwargs,
+            position_info,
+            position_variable_names,
+            spike_times,
+            spike_waveform_features,
+            encoding_interval,
+            is_training,
+            decoding_interval,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        decoding_params,
+        decoding_kwargs,
+        position_info,
+        position_variable_names,
+        spike_times,
+        spike_waveform_features,
+        encoding_interval,
+        is_training,
+        decoding_interval,
+    ):
 
         # Run decoder (external dependency - can be mocked in tests)
         classifier, results = self._run_decoder(
@@ -181,21 +192,23 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             decoding_interval=decoding_interval,
         )
 
-        # Save results to disk (external I/O - can be mocked in tests)
         results_path, classifier_path = self._save_decoder_results(
-            classifier=classifier,
-            results=results,
-            key=key,
+            classifier=classifier, results=results, key=key
         )
 
-        key["results_path"] = results_path
-        key["classifier_path"] = classifier_path
+        self_insert = dict(
+            key, results_path=results_path, classifier_path=classifier_path
+        )
 
-        self.insert1(key)
+        return [self_insert]
+
+    def make_insert(self, key: dict, self_insert: dict):
+
+        self.insert1(self_insert)
 
         from spyglass.decoding.decoding_merge import DecodingOutput
 
-        DecodingOutput.insert1(orig_key, skip_duplicates=True)
+        DecodingOutput.insert1(key, skip_duplicates=True)
 
     def _run_decoder(
         self,
@@ -522,10 +535,16 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
 
         min_time, max_time = _get_interval_range(key)
 
-        return pd.concat(
-            [linear_position_df.set_index(position_df.index), position_df],
-            axis=1,
-        ).loc[min_time:max_time]
+        # sort_index() for defensive programming - ensures chronological order
+        # before .loc[] slice. See: github.com/LorenFrankLab/spyglass/issues/1471
+        return (
+            pd.concat(
+                [linear_position_df.set_index(position_df.index), position_df],
+                axis=1,
+            )
+            .sort_index()
+            .loc[min_time:max_time]
+        )
 
     @classmethod
     def fetch_spike_data(cls, key, filter_by_interval=True):
