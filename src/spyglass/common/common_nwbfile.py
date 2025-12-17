@@ -251,7 +251,7 @@ class AnalysisRegistry(dj.Manual):
     def _is_valid_entry(
         self, full_table_name: str, raise_err: bool = True
     ) -> bool:
-        """Check if the given table name corresponds to a valid SpyglassAnalysis
+        """Check if the given table name corresponds to a valid SpyglassAnalysis.
 
         Parameters
         ----------

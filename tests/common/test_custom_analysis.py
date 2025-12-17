@@ -615,7 +615,6 @@ class TestIntegration:
         from spyglass.utils.dj_mixin import SpyglassAnalysis, SpyglassMixin
 
         # For foreign key resolution
-        Nwbfile = common.common_nwbfile.Nwbfile  # noqa F401
 
         # Create custom AnalysisNwbfile schema
         schema = dj.schema(f"{custom_config}_nwbfile")

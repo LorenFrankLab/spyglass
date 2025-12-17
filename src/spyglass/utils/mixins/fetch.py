@@ -42,8 +42,6 @@ class FetchMixin(BaseMixin):
         )
 
         # Helper function to extract prefix from parent name
-        def get_prefix(name: str) -> str:
-            return name.split("_")[0].strip("`")
 
         # Check for custom AnalysisNwbfile parent
         analysis_parents = [
