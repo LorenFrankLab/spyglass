@@ -350,13 +350,14 @@ def mini_insert(
     if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
 
-    insert_sessions(mini_path.name, raise_err=True)
-
-    # else:
-    #     try:
-    #         insert_sessions(mini_path.name, raise_err=True)
-    #     except Exception as e:  # If can't insert session, exit all tests
-    #         pytest.exit(f"Failed to insert sessions: {e}")
+    else:
+        # Useful try/except for avoiding a full run on insert failure
+        # Should be commented out in favor of vanilla insert for debugging
+        # the insert_sessions function itself.
+        try:
+            insert_sessions(mini_path.name, raise_err=True)
+        except Exception as e:  # If can't insert session, exit all tests
+            pytest.exit(f"Failed to insert sessions: {e}")
 
     if len(Session()) == 0:
         raise ValueError("No sessions inserted.")

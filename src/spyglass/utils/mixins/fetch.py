@@ -42,7 +42,6 @@ class FetchMixin(BaseMixin):
         )
 
         # Helper function to extract prefix from parent name
-
         # Check for custom AnalysisNwbfile parent
         analysis_parents = [
             p for p in self.parents() if p.endswith(".`analysis_nwbfile`")
@@ -102,10 +101,6 @@ class FetchMixin(BaseMixin):
             was already resolved by _nwb_table_tuple.
         attr_name : str
             Attribute name to fetch from the table.
-        *attrs : list
-            Attributes from normal DataJoint fetch call.
-        **kwargs : dict
-            Keyword arguments from normal DataJoint fetch call.
 
         Returns
         -------
@@ -114,17 +109,10 @@ class FetchMixin(BaseMixin):
         file_path_fn : function
             Function to get the absolute path to the NWB file.
         """
-        from spyglass.common.common_nwbfile import (
-            AnalysisNwbfile,
-            Nwbfile,
-        )
+        from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
         from spyglass.utils.dj_mixin import SpyglassMixin
 
-        kwargs["as_dict"] = True  # force return as dictionary
-        attrs = attrs or self.heading.names  # if none, all
-
         which = "analysis" if "analysis" in attr_name else "nwb"
-
         file_name_str = (
             "analysis_file_name" if which == "analysis" else "nwb_file_name"
         )
@@ -150,14 +138,14 @@ class FetchMixin(BaseMixin):
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)
-        arg = (
+        log_exp = (
             dict(log_export=False)
             if isinstance(inst, SpyglassMixin)
             else dict()
         )
 
         nwb_files = (
-            self.join(tbl_inst.proj(nwb2load_filepath=attr_name), **arg)
+            self.join(tbl_inst.proj(nwb2load_filepath=attr_name), **log_exp)
         ).fetch(file_name_str)
 
         return nwb_files, file_path_fn
@@ -199,14 +187,9 @@ class FetchMixin(BaseMixin):
         """
         from spyglass.utils.dj_mixin import SpyglassMixin
 
-        kwargs["as_dict"] = True  # force return as dictionary
-
         file_name_attr = (
             "analysis_file_name" if "analysis" in attr_name else "nwb_file_name"
         )
-
-        if not attrs:
-            attrs = self.heading.names
 
         # Get file names and path function
         nwb_files, file_path_fn = self._get_nwb_files_and_path_fn(
@@ -215,16 +198,18 @@ class FetchMixin(BaseMixin):
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)
-        arg = (
+        log_exp = (
             dict(log_export=False)
             if isinstance(inst, SpyglassMixin)
             else dict()
         )
         tbl_inst = instance_table(tbl)
         query_table = self.join(
-            tbl_inst.proj(nwb2load_filepath=attr_name), **arg
+            tbl_inst.proj(nwb2load_filepath=attr_name), **log_exp
         )
 
+        kwargs["as_dict"] = True  # force return as dictionary
+        attrs = attrs or self.heading.names  # if not specified, fetch all
         rec_dicts = query_table.fetch(*attrs, **kwargs)
 
         # get filepath for each. Use datajoint for checksum if local
@@ -235,7 +220,7 @@ class FetchMixin(BaseMixin):
                 rec_dict["nwb2load_filepath"] = file_path
                 continue
 
-            # Full dict caused issues with dlc tables using dicts in secondary keys
+            # Drop secondary blob attrs that can't be part of restrictions
             rec_only_pk = {
                 k: v
                 for k, v in rec_dict.items()
