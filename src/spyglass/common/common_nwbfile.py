@@ -63,8 +63,8 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         """
 
         definition = """
-        -> master
         access_id: int auto_increment
+        -> master
         ---
         dj_user: varchar(64)  # DataJoint user who accessed the file
         access_time=CURRENT_TIMESTAMP: timestamp
