@@ -981,7 +981,7 @@ class RestrGraph(AbstractGraph):
                     cascade=True,
                 )
                 cascaded_leaves.append(leaf_graph)
-            print("adding cascaded leaves")
+            logger.info("adding cascaded leaves")
             self = self + cascaded_leaves
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
