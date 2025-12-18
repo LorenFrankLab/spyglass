@@ -31,6 +31,7 @@ class IntervalList(SpyglassIngestion, dj.Manual):
     """
 
     # See #630, #664. Excessive key length.
+    _source_nwb_object_name = "epochs"
 
     @property
     def _source_nwb_object_type(self):
@@ -156,6 +157,8 @@ class IntervalList(SpyglassIngestion, dj.Manual):
         for i, (intervals, color) in enumerate(
             zip(all_intervals, custom_palette)
         ):
+            if getattr(intervals, "shape", None) == (2,):
+                intervals = [intervals]
             int_range = convert_intervals_to_range(intervals, start_time)
             ax.broken_barh(
                 int_range, (10 * (i + 1), 6), facecolors=color, alpha=0.7
