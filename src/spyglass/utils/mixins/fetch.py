@@ -2,8 +2,10 @@
 
 import os
 from functools import cached_property
+from typing import Tuple
 
 import numpy as np
+from datajoint import Table
 
 from spyglass.utils.dj_helper_fn import instance_table
 from spyglass.utils.mixins.base import BaseMixin
@@ -91,7 +93,9 @@ class FetchMixin(BaseMixin):
 
         return (resolved, attr_name)
 
-    def _get_nwb_files_and_path_fn(self, tbl, attr_name, *attrs, **kwargs):
+    def _get_nwb_files_and_path_fn(
+        self, tbl: Table, attr_name: str, *attrs, **kwargs
+    ) -> Tuple[list, callable]:
         """Get NWB file names and path resolution function.
 
         Parameters
@@ -121,6 +125,10 @@ class FetchMixin(BaseMixin):
         # Get the get_abs_path method from it directly
         file_path_fn = getattr(tbl, "get_abs_path", None)
 
+        # Instance the table for the join query
+        tbl_inst = instance_table(tbl)
+        tbl_name = getattr(tbl_inst, "camel_name", tbl_inst.table_name)
+
         if file_path_fn is None:  # use prev approach as fallback
             file_path_fn = (
                 AnalysisNwbfile.get_abs_path
@@ -129,12 +137,8 @@ class FetchMixin(BaseMixin):
             )
         if not callable(file_path_fn):
             raise ValueError(
-                f"Table {tbl.__name__} does not have a valid "
-                + "get_abs_path method."
+                f"Table {tbl_name} does not have a valid get_abs_path method."
             )
-
-        # Instance the table for the join query
-        tbl_inst = instance_table(tbl)
 
         # logging arg only if instanced table inherits Mixin
         inst = instance_table(self)

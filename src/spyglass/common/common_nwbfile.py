@@ -308,10 +308,32 @@ class AnalysisRegistry(dj.Manual):
         type
             Enhanced table class with helper methods
         """
-        camel_name = dj.utils.to_camel_case(full_name.split(".")[-1])
-        prefix = full_name.split("_")[0].strip("`")
+        database, table_name, prefix, _ = cls._parse_table_name(full_name)
+        camel_name = dj.utils.to_camel_case(table_name)
 
-        class EnhancedAnalysisNwbfile(SpyglassAnalysis, dj.FreeTable):
+        if (
+            database not in dj.list_schemas()
+            or table_name not in dj.Schema(database).list_tables()
+        ):
+            raise dj.errors.MissingTableError(
+                f"Cannot create class for missing table: {full_name}. "
+                "Ensure the schema is created and you have permissions to it."
+                f"with dj.list_schemas(); dj.Schema({database}).list_tables()"
+            )
+
+        class AnalysisMeta(type):
+            """Metaclass for custom AnalysisNwbfile classes."""
+
+            def __repr__(cls):
+                """Enhanced class repr showing prefix."""
+                return (
+                    f"<class '{cls.__name__}'"
+                    + f"prefix='{cls._analysis_prefix}'>"
+                )
+
+        class EnhancedAnalysisNwbfile(
+            SpyglassAnalysis, dj.FreeTable, metaclass=AnalysisMeta
+        ):
             f"""Custom AnalysisNwbfile table for {prefix}.
 
             Automatically created by AnalysisRegistry for schema {full_name}.
@@ -333,6 +355,9 @@ class AnalysisRegistry(dj.Manual):
         # Set the class name dynamically
         EnhancedAnalysisNwbfile.__name__ = camel_name
         EnhancedAnalysisNwbfile.__qualname__ = camel_name
+        EnhancedAnalysisNwbfile.__module__ = (
+            f"spyglass.common.common_nwbfile[{prefix}]"
+        )
 
         return EnhancedAnalysisNwbfile
 
@@ -658,6 +683,72 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return to_delete, tracked
 
+    def _cleanup_custom_table(
+        self, analysis_tbl, table_num: int, total_tables: int
+    ) -> None:
+        """Clean up a single custom AnalysisNwbfile table.
+
+        Parameters
+        ----------
+        analysis_tbl : AnalysisNwbfile class
+            The custom analysis table to clean up.
+        table_num : int
+            Current table number (for logging).
+        total_tables : int
+            Total number of tables being processed (for logging).
+
+        Returns
+        -------
+        None
+            Modifies the table in place by deleting orphans and cleaning external.
+        """
+        tbl_name = analysis_tbl.full_table_name
+        logger.info(f"  [{table_num}/{total_tables}] Processing {tbl_name}")
+
+        # Delete orphaned entries (no downstream references)
+        analysis_tbl.delete_orphans(dry_run=False, safemode=False)
+
+        # Clean up unused external file entries
+        analysis_tbl.cleanup_external()
+
+    def _cleanup_custom_tables(self, custom_tables: list) -> set:
+        """Process all custom AnalysisNwbfile tables.
+
+        Parameters
+        ----------
+        custom_tables : list
+            List of custom AnalysisNwbfile table classes.
+
+        Returns
+        -------
+        common_orphans : set
+            Set of common orphans after removing valid custom table entries.
+        """
+        num_tables = len(custom_tables)
+        common_orphans = self.get_orphans().proj()
+
+        for i, analysis_tbl in enumerate(custom_tables, start=1):
+            self._cleanup_custom_table(analysis_tbl, i, num_tables)
+
+            # Remove valid entries from common orphans
+            if bool(analysis_tbl):
+                common_orphans -= analysis_tbl.proj()
+
+        return common_orphans
+
+    def _cleanup_common_orphans(self, common_orphans) -> None:
+        """Delete remaining common orphans and clean external entries.
+
+        Parameters
+        ----------
+        common_orphans : DataJoint query
+            Query of orphaned common analysis files.
+        """
+        if bool(common_orphans):
+            common_orphans.delete_quick()
+
+        self.cleanup_external()
+
     def cleanup(self) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
@@ -693,35 +784,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         registry = AnalysisRegistry()
         registry.block_new_inserts()
 
-        # Get all custom tables first so we can check their tracked files
-        custom_tables = list(registry.all_classes)
-        num_tables = len(custom_tables)
-        common_orphans = self.get_orphans().proj()
+        try:
+            # Step 1: Process all custom tables and track common orphans
+            custom_tables = list(registry.all_classes)
+            common_orphans = self._cleanup_custom_tables(custom_tables)
 
-        try:  # Long try block ensures that we always unblock inserts after
-            for i, analysis_tbl in enumerate(custom_tables, start=1):
-                tbl_name = analysis_tbl.full_table_name
-                logger.info(f"  [{i}/{num_tables}] Processing {tbl_name}")
+            # Step 2: Clean up remaining common orphans
+            self._cleanup_common_orphans(common_orphans)
 
-                # Step 1a: Get orphans from this analysis table
-                _ = analysis_tbl.delete_orphans(dry_run=False, safemode=False)
-
-                # Step 1b: Clean up this table's external entries
-                _ = analysis_tbl.cleanup_external()
-
-                # Step 1c: Remove valid entries from common orphans.
-                if bool(analysis_tbl):
-                    common_orphans -= analysis_tbl.proj()
-
-            # Step 3: Delete remaining common orphans.
-            if bool(common_orphans):
-                common_orphans.delete_quick()
-
-            # Step 4: Clean up common external table entries
-            _ = self.cleanup_external()
-
-            # Remove untracked files, checking both common and custom tables
-            _ = self._remove_untracked_files(custom_tables, dry_run=False)
+            # Step 3: Remove untracked files across all tables
+            self._remove_untracked_files(custom_tables, dry_run=False)
 
         finally:
             registry.unblock_new_inserts()
