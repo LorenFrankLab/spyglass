@@ -4,6 +4,7 @@ from os import system as os_system
 from pathlib import Path
 from typing import List
 
+import datajoint as dj
 import yaml
 from datajoint import FreeTable
 from datajoint import config as dj_config
@@ -135,9 +136,6 @@ class SQLDumpHelper:
 
             prev_db = None
             for table in tables_by_db:
-                if not (where := table.where_clause()):
-                    continue
-                where = bash_escape_sql(where)
                 database, table_name = (
                     table.full_table_name.replace("`", "")
                     .replace("#", "\\#")
@@ -146,11 +144,7 @@ class SQLDumpHelper:
                 if database != prev_db:
                     file.write(create_cmd.format(database=database))
                     prev_db = database
-                file.write(
-                    dump_cmd.format(
-                        database=database, table=table_name, where=where
-                    )
-                )
+                self._write_table_dumps(file, table, dump_cmd)
 
         self._remove_encoding(dump_script)
         self._write_version_file()
@@ -194,6 +188,43 @@ class SQLDumpHelper:
             yaml.dump(yml, file)
 
         self._logger.info(f"Conda environment exported to {yml_path}")
+
+    def _write_table_dumps(
+        self, file, table: FreeTable, dump_cmd: str, key_list=None
+    ):
+        MAX_WHERE_LENGTH = 100000
+
+        database, table_name = (
+            table.full_table_name.replace("`", "")
+            .replace("#", "\\#")
+            .split(".")
+        )
+
+        where = table.where_clause()
+        if not where:
+            return
+        where = bash_escape_sql(where)
+        if len(where) <= MAX_WHERE_LENGTH:
+            file.write(
+                dump_cmd.format(
+                    database=database, table=table_name, where=where
+                )
+            )
+            return
+        # Split where clause into smaller chunks
+        clean_table = dj.FreeTable(dj.conn(), table.full_table_name)
+        key_list = key_list or table.fetch("KEY")
+        estimate_len_per_key = len(where) // len(key_list)
+        n_keys_per_chunk = max(1, MAX_WHERE_LENGTH // estimate_len_per_key - 1)
+        n_keys_per_chunk = min(n_keys_per_chunk, len(key_list) // 2 + 1)
+        i = 0
+        while i < len(key_list):
+            chunk_keys = key_list[i : i + n_keys_per_chunk]
+            self._write_table_dumps(
+                file, clean_table & chunk_keys, dump_cmd, chunk_keys
+            )
+            i += n_keys_per_chunk
+        return
 
 
 def remove_redundant(s):
