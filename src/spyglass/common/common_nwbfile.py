@@ -1,11 +1,7 @@
 import os
-import random
 import re
-import string
-import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
-from uuid import uuid4
 
 import datajoint as dj
 import h5py
@@ -179,6 +175,8 @@ class AnalysisRegistry(dj.Manual):
     created_at = CURRENT_TIMESTAMP: timestamp  # when registered
     created_by : varchar(32)                   # who registered
     """
+
+    _blocked_tables: Set[str] = set()
 
     def insert1(self, key: Union[str, dict], **kwargs) -> None:
         """Auto-add created_by if not provided.
@@ -425,19 +423,27 @@ class AnalysisRegistry(dj.Manual):
         result = dj.conn().query(SQL_TRIGGER_QUERY.format(**kwargs))
         return result.fetchone()[0] > 0
 
-    def _block_single_table(self, table: str) -> Optional[str]:
+    def _block_single_table(
+        self, table: str, dry_run: bool = False
+    ) -> Optional[str]:
         """Block new inserts into a single analysis table.
 
         Parameters
         ----------
         table : str
             The full table name of the analysis table to block.
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Returns
         -------
         error_msg : str or None
             An error message if blocking fails, otherwise None.
         """
+        if dry_run:
+            logger.info(f"Dry run: would block inserts into {table}")
+            return None
+
         try:
             database, trigger = self._get_block_info(table)
             kwargs = dict(database=database, trigger=trigger, table=table)
@@ -453,11 +459,16 @@ class AnalysisRegistry(dj.Manual):
 
         return None
 
-    def block_new_inserts(self) -> None:
+    def block_new_inserts(self, dry_run: bool = False) -> None:
         """Block new inserts into all registered analysis tables.
 
         Creates BEFORE INSERT triggers on all registered custom analysis tables
         to prevent data modifications during maintenance operations.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Raises
         ------
@@ -466,9 +477,11 @@ class AnalysisRegistry(dj.Manual):
         """
         errors = []
         for table in self.fetch("full_table_name"):
-            error = self._block_single_table(table)
+            error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
                 errors.append(error)
+            else:
+                self._blocked_tables.add(table)
 
         if errors:
             raise RuntimeError(
@@ -488,7 +501,7 @@ class AnalysisRegistry(dj.Manual):
         """
         errors = []
 
-        for table in self.fetch("full_table_name"):
+        for table in self._blocked_tables:
             try:
                 database, trigger = self._get_block_info(table)
                 if not self._block_exists(table):
@@ -559,7 +572,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         to_delete = set()
         for path in tqdm(
             Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files",
+            desc="Scanning analysis files  ",
         ):
             is_empty_file = path.is_file() and path.stat().st_size == 0
             is_empty_dir = path.is_dir() and not any(path.iterdir())
@@ -569,6 +582,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 to_delete.add(path)
 
         if dry_run:
+            logger.info(f"  {len(to_delete)} untracked or empty analysis files")
             return to_delete, tracked
 
         for path in to_delete:
@@ -579,7 +593,52 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return to_delete, tracked
 
-    def cleanup(self) -> None:
+    def _cleanup_custom_table(
+        self,
+        analysis_tbl: SpyglassAnalysis,
+        common_orphans: dj.expression.QueryExpression,
+        dry_run: bool,
+        table_num: int,
+        num_tables: int,
+    ) -> dj.expression.QueryExpression:
+        """Clean up a single custom analysis table.
+
+        Parameters
+        ----------
+        analysis_tbl : SpyglassAnalysis
+            The custom analysis table to clean up.
+        common_orphans : dj.expression.QueryExpression
+            The common orphans to update with valid entries.
+        dry_run : bool
+            If True, only report what would be deleted.
+        table_num : int
+            Current table number for logging.
+        num_tables : int
+            Total number of tables for logging.
+
+        Returns
+        -------
+        dj.expression.QueryExpression
+            Updated common orphans with valid entries removed.
+        """
+        prefix = analysis_tbl.database.split("_")[0]
+
+        # Delete orphans from this analysis table
+        orphans = analysis_tbl.delete_orphans(dry_run=dry_run, safemode=False)
+        logger.info(
+            f"  [{table_num}/{num_tables}] {len(orphans)} orphans in {prefix}"
+        )
+
+        # Clean up this table's external entries
+        _ = analysis_tbl.cleanup_external()
+
+        # Remove valid entries from common orphans
+        if bool(analysis_tbl):
+            common_orphans -= analysis_tbl.proj()
+
+        return common_orphans
+
+    def cleanup(self, dry_run: bool) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -610,39 +669,40 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         See Also:
             docs/src/ForDevelopers/Management.md for detailed cleanup guide.
         """
-        logger.info("Analysis cleanup")
+        heading = "============== Analysis Cleanup "
+        suffix = "(Dry Run) ==============" if dry_run else "=============="
+        logger.info(heading + suffix)
+
         registry = AnalysisRegistry()
-        registry.block_new_inserts()
+
+        registry.block_new_inserts(dry_run=dry_run)
 
         # Get all custom tables first so we can check their tracked files
         custom_tables = list(registry.all_classes)
-        num_tables = len(custom_tables)
+        num_tables = len(custom_tables) + 1  # +1 for common table
         common_orphans = self.get_orphans().proj()
 
-        try:  # Long try block ensures that we always unblock inserts after
+        try:
+            # Process each custom analysis table.
+            # Subtract valid entries from common_orphans
             for i, analysis_tbl in enumerate(custom_tables, start=1):
-                tbl_name = analysis_tbl.full_table_name
-                logger.info(f"  [{i}/{num_tables}] Processing {tbl_name}")
+                common_orphans = self._cleanup_custom_table(
+                    analysis_tbl, common_orphans, dry_run, i, num_tables
+                )
 
-                # Step 1a: Get orphans from this analysis table
-                _ = analysis_tbl.delete_orphans(dry_run=False, safemode=False)
-
-                # Step 1b: Clean up this table's external entries
-                _ = analysis_tbl.cleanup_external()
-
-                # Step 1c: Remove valid entries from common orphans.
-                if bool(analysis_tbl):
-                    common_orphans -= analysis_tbl.proj()
-
-            # Step 3: Delete remaining common orphans.
-            if bool(common_orphans):
+            # Delete remaining common orphans
+            logger.info(
+                f"  [{num_tables}/{num_tables}] "
+                f"{len(common_orphans)} orphans in analysis common"
+            )
+            if bool(common_orphans) and not dry_run:
                 common_orphans.delete_quick()
 
-            # Step 4: Clean up common external table entries
+            # Clean up common external table entries
             _ = self.cleanup_external()
 
-            # Remove untracked files, checking both common and custom tables
-            _ = self._remove_untracked_files(custom_tables, dry_run=False)
+            # Remove untracked files
+            _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
 
-        finally:
-            registry.unblock_new_inserts()
+        finally:  # always unblock inserts
+            registry.unblock_new_inserts()  # if none, does nothing
