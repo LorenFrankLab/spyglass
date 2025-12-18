@@ -48,7 +48,7 @@ DecodingParameters().alter()
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
 - Improve export process for speed and generalization #1387
-- Addional methods for updating files for DANDI standards #1387
+- Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
 
 ### Pipelines
