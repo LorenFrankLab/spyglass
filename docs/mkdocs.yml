@@ -42,6 +42,9 @@ theme:
 
 nav:
   - Home: index.md
+  - Getting Started:
+      - Database Setup: DATABASE.md
+      - Troubleshooting: TROUBLESHOOTING.md
   - Tutorials:
       - Overview: notebooks/index.md
       - Intro:
