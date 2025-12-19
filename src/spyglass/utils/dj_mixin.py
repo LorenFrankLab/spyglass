@@ -53,6 +53,8 @@ class SpyglassMixin(
         Checks that schema prefix is in SHARED_MODULES.
         Validates that table doesn't have multiple AnalysisNwbfile foreign keys.
         """
+        super().__init__(*args, **kwargs)
+
         # Uncomment to force Spyglass version check. See #439
         # _ = self._has_updated_sg_version
 
@@ -189,6 +191,8 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         - Not a part table (part tables cannot be AnalysisNwbfile)
         - Inserts into AnalysisRegistry on declaration
         """
+
+        super().__init__(*args, **kwargs)
 
         if self.is_declared:
             return

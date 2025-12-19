@@ -287,16 +287,13 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_credentials(server):
-    yield server.credentials
-
-
-@pytest.fixture(scope="session")
 def worker_id(request):
     """Get unique worker ID for pytest-xdist parallelization.
 
     Returns 'master' for serial execution, or 'gwN' for parallel workers.
     This enables worker-specific database schema isolation.
+
+    NOTE: Not currently in use, but set up for future parallel test runs.
     """
     if hasattr(request.config, "workerinput"):
         return request.config.workerinput["workerid"]
@@ -304,40 +301,33 @@ def worker_id(request):
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_credentials, worker_id, verbose, teardown):
+def dj_conn(request, server, worker_id, verbose, teardown):
     """Fixture for datajoint connection with pytest-xdist support.
 
     For parallel execution, each worker gets its own database schema prefix
     to avoid race conditions and ensure test isolation.
     """
     # Worker-specific config file to avoid conflicts
-    config_file = f"dj_local_conf.json_test_{worker_id}"
+    config_file = "dj_local_conf.json"
+    if branch_name := server.branch_name:
+        config_file = f"dj_local_conf_{branch_name}.json"
+
     if Path(config_file).exists():
         os.remove(config_file)
 
     # Set worker-specific schema prefix for database isolation
-    schema_prefix = f"test_spyglass_{worker_id}_"
-
-    dj.config.update(server_credentials)
+    dj.config.update(server.credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
-    dj.config["database.prefix"] = schema_prefix
+    dj.config["database.prefix"] = "pytests"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
-    dj.conn()
+
+    try:
+        dj.conn().ping()
+    except Exception as e:  # If can't connect, exit all tests
+        pytest.exit(f"Failed to connect to database: {e}")
 
     yield dj.conn()
-
-    # Cleanup: drop worker-specific schemas if tearing down
-    if teardown:
-        conn = dj.conn()
-        cursor = conn.query(f"SHOW DATABASES LIKE '{schema_prefix}%%'")
-        schemas = cursor.fetchall()
-        for schema in schemas:
-            dj_logger.info(f"Dropping worker schema: {schema[0]}")
-            conn.query(f"DROP DATABASE IF EXISTS `{schema[0]}`")
-
-        if Path(config_file).exists():
-            os.remove(config_file)
 
 
 @pytest.fixture(scope="session")
@@ -441,7 +431,11 @@ def mini_insert(
 
     if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
+
     else:
+        # Useful try/except for avoiding a full run on insert failure
+        # Should be commented out in favor of vanilla insert for debugging
+        # the insert_sessions function itself.
         try:
             insert_sessions(mini_path.name, raise_err=True)
         except Exception as e:  # If can't insert session, exit all tests
