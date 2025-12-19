@@ -176,8 +176,6 @@ class AnalysisRegistry(dj.Manual):
     created_by : varchar(32)                   # who registered
     """
 
-    _blocked_tables: Set[str] = set()
-
     def insert1(self, key: Union[str, dict], **kwargs) -> None:
         """Auto-add created_by if not provided.
 
@@ -480,8 +478,6 @@ class AnalysisRegistry(dj.Manual):
             error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
                 errors.append(error)
-            else:
-                self._blocked_tables.add(table)
 
         if errors:
             raise RuntimeError(
@@ -501,7 +497,7 @@ class AnalysisRegistry(dj.Manual):
         """
         errors = []
 
-        for table in self._blocked_tables:
+        for table in self.fetch("full_table_name"):
             try:
                 database, trigger = self._get_block_info(table)
                 if not self._block_exists(table):
@@ -572,7 +568,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         to_delete = set()
         for path in tqdm(
             Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files  ",
+            desc="Scanning analysis files  ",  # Note extra spaces for alignment
         ):
             is_empty_file = path.is_file() and path.stat().st_size == 0
             is_empty_dir = path.is_dir() and not any(path.iterdir())
@@ -630,7 +626,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         )
 
         # Clean up this table's external entries
-        _ = analysis_tbl.cleanup_external()
+        unused = analysis_tbl.cleanup_external(
+            dry_run=dry_run, delete_external_files=True
+        )
+        logger.info(
+            f"  [{table_num}/{num_tables}] {prefix}: {len(orphans)} orphans, "
+            + f"{len(unused)} unused externals"
+        )
 
         # Remove valid entries from common orphans
         if bool(analysis_tbl):
@@ -638,7 +640,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return common_orphans
 
-    def cleanup(self, dry_run: bool) -> None:
+    def cleanup(self, dry_run: bool = False) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -659,7 +661,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             from spyglass.common import AnalysisNwbfile
 
             # Run cleanup across all tables
-            AnalysisNwbfile().cleanup()
+            AnalysisNwbfile().cleanup(dry_run=False)
 
         Note:
             This is a destructive operation. Ensure you have backups before
@@ -668,6 +670,14 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         See Also:
             docs/src/ForDevelopers/Management.md for detailed cleanup guide.
+
+        Parameters
+        ----------
+        dry_run : bool
+            If True, perform a non-destructive dry run: log and report all
+            cleanup actions without deleting database entries or files.
+            If False, apply the cleanup changes, including deleting orphaned
+            entries and associated files.
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
@@ -691,18 +701,24 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 )
 
             # Delete remaining common orphans
-            logger.info(
-                f"  [{num_tables}/{num_tables}] "
-                f"{len(common_orphans)} orphans in analysis common"
-            )
+            n_orphans = len(common_orphans)
+
             if bool(common_orphans) and not dry_run:
                 common_orphans.delete_quick()
 
             # Clean up common external table entries
-            _ = self.cleanup_external()
+            unused = self.cleanup_external(
+                dry_run=dry_run, delete_external_files=False
+            )
+
+            logger.info(
+                f"  [{num_tables}/{num_tables}] common: {n_orphans} "
+                f"orphans, {len(unused)} unused externals"
+            )
 
             # Remove untracked files
             _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
 
         finally:  # always unblock inserts
-            registry.unblock_new_inserts()  # if none, does nothing
+            if not dry_run:
+                registry.unblock_new_inserts()
