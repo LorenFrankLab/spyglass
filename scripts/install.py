@@ -2009,8 +2009,6 @@ def setup_database_compose() -> Tuple[bool, str]:
 
                 if result.returncode == 0:
                     # Parse JSON output to check health
-                    import json
-
                     try:
                         services = json.loads(result.stdout.decode())
                         # Handle both single dict and list of dicts
@@ -2032,9 +2030,11 @@ def setup_database_compose() -> Tuple[bool, str]:
                             Console.done()
                             break
                     except json.JSONDecodeError:
+                        # JSON parse failed, retry on next attempt
                         pass
 
             except subprocess.TimeoutExpired:
+                # Command timed out, retry on next attempt
                 pass
 
             if attempt < 29:
