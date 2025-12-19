@@ -52,6 +52,7 @@ class _TestDatabaseManager:
         # Use 3308 as default (GitHub Actions service container port)
         self.port = port if port is not None else 3308
         self.null_server = null_server
+        self.branch_name = None  # No branch-specific naming for service containers
 
     def wait(self, timeout=120, wait_interval=3):
         """Wait for database to be ready.
