@@ -410,12 +410,17 @@ class CondaManager:
 
     @staticmethod
     def get_command() -> str:
-        """Get conda command (required for all environment operations)."""
-        if shutil.which("conda"):
+        """Get conda/mamba command (required for all environment operations).
+
+        Prefers mamba over conda for faster package resolution.
+        """
+        if shutil.which("mamba"):
+            return "mamba"
+        elif shutil.which("conda"):
             return "conda"
         else:
             raise RuntimeError(
-                "conda not found. Install from:\n"
+                "Neither mamba nor conda found. Install from:\n"
                 "  https://github.com/conda-forge/miniforge"
             )
 
