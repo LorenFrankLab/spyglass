@@ -1216,8 +1216,8 @@ def create_database_config(
         },
         # Spyglass custom configuration
         "custom": {
-            "debug_mode": False,
-            "test_mode": False,
+            "debug_mode": "false",
+            "test_mode": "false",
             "kachery_zone": "franklab.default",
             "spyglass_dirs": {
                 "base": str(base_dir),
