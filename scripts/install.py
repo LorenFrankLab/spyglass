@@ -427,10 +427,40 @@ class CondaManager:
     def exists(self) -> bool:
         """Check if the conda environment already exists."""
         conda_cmd = self.get_command()
-        result = subprocess.run(
-            [conda_cmd, "env", "list"], capture_output=True, text=True
-        )
-        return self.env_name in result.stdout
+        try:
+            result = subprocess.run(
+                [conda_cmd, "env", "list", "--json"],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            data = json.loads(result.stdout)
+            envs = data.get("envs", [])
+            names = {Path(env).name for env in envs if env}
+            return self.env_name in names
+        except (
+            subprocess.CalledProcessError,
+            json.JSONDecodeError,
+            OSError,
+        ):
+            result = subprocess.run(
+                [conda_cmd, "env", "list"], capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                return False
+            names = set()
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split()
+                if not parts:
+                    continue
+                if parts[0] == "*" and len(parts) > 1:
+                    names.add(parts[1])
+                    continue
+                names.add(parts[0])
+            return self.env_name in names
 
     def remove(self) -> None:
         """Remove the conda environment."""
@@ -929,11 +959,19 @@ class DockerManager:
                     key, _, value = line.partition("=")
                     value = value.strip()
                     if key == "MYSQL_PORT":
+                        if not value:
+                            raise ValueError("MYSQL_PORT is empty")
                         port = int(value)
+                        if port < 1 or port > 65535:
+                            raise ValueError(
+                                f"MYSQL_PORT {port} is out of range"
+                            )
                     elif key == "MYSQL_ROOT_PASSWORD":
+                        if not value:
+                            raise ValueError("MYSQL_ROOT_PASSWORD is empty")
                         password = value
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as e:
+            raise ValueError(f"Invalid .env file: {e}") from e
         return port, password
 
     @staticmethod
@@ -1930,9 +1968,13 @@ def setup_database_compose() -> Tuple[bool, str]:
             return False, "env_file_invalid"
 
         env_path = REPO_ROOT / ".env"
-        actual_port, actual_password = DockerManager.read_env_file(
-            str(env_path)
-        )
+        try:
+            actual_port, actual_password = DockerManager.read_env_file(
+                str(env_path)
+            )
+        except ValueError as e:
+            Console.error(str(e))
+            return False, "env_file_invalid"
 
         # Check if port is available
         port_available, port_msg = is_port_available(
@@ -2170,7 +2212,13 @@ def test_database_connection(
     """
     try:
         import pymysql
+    except ImportError:
+        # pymysql not available yet (before pip install)
+        Console.warning("Cannot test connection (pymysql not available)")
+        print("  Connection will be tested during validation")
+        return True, None  # Allow to proceed
 
+    try:
         Console.step("Testing database connection")
 
         connection = pymysql.connect(
@@ -2191,17 +2239,22 @@ def test_database_connection(
         Console.done(f"MySQL {version[0]}")
         return True, None
 
-    except ImportError:
-        # pymysql not available yet (before pip install)
-        print()  # newline after step message
-        Console.warning("Cannot test connection (pymysql not available)")
-        print("  Connection will be tested during validation")
-        return True, None  # Allow to proceed
+    except pymysql.MySQLError as e:
+        Console.fail()
+        error_msg = f"MySQL error: {e}"
+        Console.error(f"Database connection failed: {error_msg}")
+        return False, error_msg
 
     except OSError as e:
         # Network/socket errors
         Console.fail()
         error_msg = f"Network error: {e}"
+        Console.error(f"Database connection failed: {error_msg}")
+        return False, error_msg
+
+    except Exception as e:
+        Console.fail()
+        error_msg = f"Unexpected error: {e}"
         Console.error(f"Database connection failed: {error_msg}")
         return False, error_msg
 

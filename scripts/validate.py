@@ -12,6 +12,7 @@ Exit codes:
     1 - One or more checks failed
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -155,6 +156,10 @@ def check_conda() -> None:
     elif shutil.which("conda"):
         conda_cmd = "conda"
     else:
+        conda_exe = os.environ.get("CONDA_EXE")
+        if conda_exe:
+            print("✓ Package manager: conda (from CONDA_EXE)")
+            return
         raise RuntimeError(
             "conda or mamba not found\n"
             "Install from: https://github.com/conda-forge/miniforge"
