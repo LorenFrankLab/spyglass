@@ -79,6 +79,10 @@ DOCKER_STARTUP_TIMEOUT = 60  # 1 minute
 DEFAULT_MYSQL_PORT = 3306
 DEFAULT_MYSQL_PASSWORD = "tutorial"
 
+# Environment creation time estimates (minutes)
+ENV_CREATION_TIME_MINIMAL = 5
+ENV_CREATION_TIME_FULL = 15
+
 
 # Named tuple for database menu options
 class DatabaseOption(NamedTuple):
@@ -442,7 +446,11 @@ class CondaManager:
         force : bool
             If True, overwrite existing environment without prompting
         """
-        estimated_time = 5 if "min" in env_file else 15
+        estimated_time = (
+            ENV_CREATION_TIME_MINIMAL
+            if "min" in env_file
+            else ENV_CREATION_TIME_FULL
+        )
         Console.progress(
             f"Creating environment '{self.env_name}' from {env_file}",
             estimated_time,
@@ -507,9 +515,9 @@ class CondaManager:
 
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                f"Failed to create environment. Try:\n"
-                f"  1. Update conda: conda update conda\n"
-                f"  2. Clear cache: conda clean --all\n"
+                "Failed to create environment. Try:\n"
+                "  1. Update conda: conda update conda\n"
+                "  2. Clear cache: conda clean --all\n"
                 f"  3. Check {env_file} for conflicts"
             ) from e
 
@@ -538,10 +546,13 @@ class CondaManager:
             error_output = e.stderr if e.stderr else str(e)
             error_lower = error_output.lower()
 
+            # Platform-specific disk space command
+            disk_space_cmd = "dir" if sys.platform == "win32" else "df -h"
+
             if "no space left" in error_lower or "disk" in error_lower:
                 primary_cause = "Disk space is full"
                 primary_fix = (
-                    "Free up disk space: df -h shows usage by filesystem"
+                    f"Free up disk space: {disk_space_cmd} shows usage"
                 )
             elif "connection" in error_lower or "timeout" in error_lower:
                 primary_cause = "Network connection issue"
@@ -559,7 +570,7 @@ class CondaManager:
                 f"Recommended fix: {primary_fix}\n\n"
                 f"If that doesn't help, try these steps:\n"
                 f"  1. Update pip: conda run -n {self.env_name} pip install --upgrade pip\n"
-                f"  2. Check disk space: df -h\n"
+                f"  2. Check disk space: {disk_space_cmd}\n"
                 f"  3. Check network connection\n"
                 f"  4. Retry the installation\n\n"
                 f"Error details: {error_output[:500]}"
@@ -747,7 +758,7 @@ def prompt_install_type() -> Tuple[str, str]:
     full_total = DISK_SPACE_REQUIREMENTS["full"]["total"]
 
     print("\n1. Minimal (Recommended for getting started)")
-    print("   ├─ Install time: ~5 minutes")
+    print(f"   ├─ Install time: ~{ENV_CREATION_TIME_MINIMAL} minutes")
     print(
         f"   ├─ Disk space: ~{min_pkg} GB packages ({min_total} GB total with buffer)"
     )
@@ -760,7 +771,7 @@ def prompt_install_type() -> Tuple[str, str]:
     print("   └─ Good for: Learning, basic workflows")
 
     print("\n2. Full (For advanced analysis)")
-    print("   ├─ Install time: ~15 minutes")
+    print(f"   ├─ Install time: ~{ENV_CREATION_TIME_FULL} minutes")
     print(
         f"   ├─ Disk space: ~{full_pkg} GB packages ({full_total} GB total with buffer)"
     )
