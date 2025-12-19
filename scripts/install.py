@@ -2463,16 +2463,7 @@ def setup_database_remote(
             return False
     else:
         # Non-interactive mode - use provided parameters
-        import os
-
-        # Check environment variable for password if not provided
-        if password is None:
-            password = os.environ.get("SPYGLASS_DB_PASSWORD")
-            if password is None:
-                Console.error(
-                    "Password required: use --db-password or SPYGLASS_DB_PASSWORD env var"
-                )
-                return False
+        # (host, user, and password are all not None at this point)
 
         # Use defaults for optional parameters
         if port is None:
