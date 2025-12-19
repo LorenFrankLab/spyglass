@@ -1630,9 +1630,7 @@ def is_port_available(host: str, port: int) -> Tuple[bool, str]:
     import socket
 
     try:
-        addrinfos = socket.getaddrinfo(
-            host, port, type=socket.SOCK_STREAM
-        )
+        addrinfos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror:
         return False, f"Cannot resolve hostname: {host}"
 
@@ -1977,14 +1975,10 @@ def setup_database_compose() -> Tuple[bool, str]:
             return False, "env_file_invalid"
 
         # Check if port is available
-        port_available, port_msg = is_port_available(
-            "localhost", actual_port
-        )
+        port_available, port_msg = is_port_available("localhost", actual_port)
         if not port_available:
             Console.error(port_msg)
-            print(
-                f"\n  Port {actual_port} is already in use. Solutions:"
-            )
+            print(f"\n  Port {actual_port} is already in use. Solutions:")
 
             # Platform-specific guidance
             if sys.platform == "darwin":  # macOS
@@ -2001,9 +1995,7 @@ def setup_database_compose() -> Tuple[bool, str]:
                 print("       # or: sudo service mysql stop")
                 print("    2. Find what's using the port:")
                 print(f"       sudo lsof -i :{actual_port}")
-                print(
-                    f"       # or: sudo netstat -tulpn | grep {actual_port}"
-                )
+                print(f"       # or: sudo netstat -tulpn | grep {actual_port}")
             elif sys.platform == "win32":  # Windows
                 print("    1. Stop existing MySQL service:")
                 print("       net stop MySQL")
@@ -2603,9 +2595,7 @@ def setup_database_remote(
         print()
         print("Diagnostic steps:")
         print(f"  Test port:  nc -zv {host} {port}")
-        print(
-            f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p"
-        )
+        print(f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p")
         print()
         print(
             "Need help? See: docs/TROUBLESHOOTING.md#database-connection-fails"
