@@ -1887,12 +1887,25 @@ def setup_database_compose() -> Tuple[bool, str]:
         return False, "compose_unavailable"
     Console.done()
 
-    # Check if port 3306 is available
-    port = 3306  # Default port (could be customized via .env)
+    # Read port from .env if it exists (before checking availability)
+    port = 3306  # Default port
+    env_path = REPO_ROOT / ".env"
+    if env_path.exists():
+        try:
+            with env_path.open("r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("MYSQL_PORT="):
+                        port = int(line.split("=", 1)[1])
+                        break
+        except (OSError, ValueError):
+            pass  # Use default if .env parsing fails
+
+    # Check if port is available
     port_available, port_msg = is_port_available("localhost", port)
     if not port_available:
         Console.error(port_msg)
-        print("\n  Port 3306 is already in use. Solutions:")
+        print(f"\n  Port {port} is already in use. Solutions:")
 
         # Platform-specific guidance
         if sys.platform == "darwin":  # macOS
@@ -1902,20 +1915,20 @@ def setup_database_compose() -> Tuple[bool, str]:
                 "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist"
             )
             print("    2. Find what's using the port:")
-            print("       lsof -i :3306")
+            print(f"       lsof -i :{port}")
         elif sys.platform.startswith("linux"):  # Linux
             print("    1. Stop existing MySQL service:")
             print("       sudo systemctl stop mysql")
             print("       # or: sudo service mysql stop")
             print("    2. Find what's using the port:")
-            print("       sudo lsof -i :3306")
-            print("       # or: sudo netstat -tulpn | grep 3306")
+            print(f"       sudo lsof -i :{port}")
+            print(f"       # or: sudo netstat -tulpn | grep {port}")
         elif sys.platform == "win32":  # Windows
             print("    1. Stop existing MySQL service:")
             print("       net stop MySQL")
             print("       # or use Services app (services.msc)")
             print("    2. Find what's using the port:")
-            print("       netstat -ano | findstr :3306")
+            print(f"       netstat -ano | findstr :{port}")
 
         print("    Alternative: Use a different port:")
         print("       Create .env file with: MYSQL_PORT=3307")
