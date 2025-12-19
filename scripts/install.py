@@ -521,8 +521,8 @@ class CondaManager:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
                 "Failed to create environment. Try:\n"
-                "  1. Update conda: conda update conda\n"
-                "  2. Clear cache: conda clean --all\n"
+                f"  1. Update {conda_cmd}: {conda_cmd} update {conda_cmd}\n"
+                f"  2. Clear cache: {conda_cmd} clean --all\n"
                 f"  3. Check {env_file} for conflicts"
             ) from e
 
@@ -530,10 +530,11 @@ class CondaManager:
         """Install spyglass package in development mode."""
         Console.progress("Installing spyglass package", 1)
 
+        conda_cmd = self.get_command()
         try:
             subprocess.run(
                 [
-                    "conda",
+                    conda_cmd,
                     "run",
                     "-n",
                     self.env_name,
@@ -567,14 +568,17 @@ class CondaManager:
                 primary_fix = "Check write permissions in the install directory"
             else:
                 primary_cause = "Package installation failed"
-                primary_fix = f"Update pip: conda run -n {self.env_name} pip install --upgrade pip"
+                primary_fix = (
+                    f"Update pip: {conda_cmd} run -n {self.env_name} "
+                    "pip install --upgrade pip"
+                )
 
             raise RuntimeError(
                 f"Failed to install spyglass package.\n\n"
                 f"Most likely cause: {primary_cause}\n"
                 f"Recommended fix: {primary_fix}\n\n"
                 f"If that doesn't help, try these steps:\n"
-                f"  1. Update pip: conda run -n {self.env_name} pip install --upgrade pip\n"
+                f"  1. Update pip: {conda_cmd} run -n {self.env_name} pip install --upgrade pip\n"
                 f"  2. Check disk space: {disk_space_cmd}\n"
                 f"  3. Check network connection\n"
                 f"  4. Retry the installation\n\n"
@@ -907,6 +911,30 @@ class DockerManager:
             return True
         except (OSError, PermissionError):
             return False
+
+    @staticmethod
+    def read_env_file(env_path: Optional[str] = None) -> Tuple[int, str]:
+        """Read MySQL settings from .env file (missing uses defaults)."""
+        target_path = Path(env_path) if env_path else REPO_ROOT / ".env"
+        port = DEFAULT_MYSQL_PORT
+        password = DEFAULT_MYSQL_PASSWORD
+        if not target_path.exists():
+            return port, password
+        try:
+            with target_path.open("r") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    key, _, value = line.partition("=")
+                    value = value.strip()
+                    if key == "MYSQL_PORT":
+                        port = int(value)
+                    elif key == "MYSQL_ROOT_PASSWORD":
+                        password = value
+        except (OSError, ValueError):
+            pass
+        return port, password
 
     @staticmethod
     def cleanup() -> None:
@@ -1564,39 +1592,38 @@ def is_port_available(host: str, port: int) -> Tuple[bool, str]:
     import socket
 
     try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.settimeout(1)  # 1 second timeout
-            result = sock.connect_ex((host, port))
-
-            # For localhost, we want the port to be FREE (not in use)
-            # For remote, we want the port to be IN USE (something listening)
-
-            if host in LOCALHOST_ADDRESSES:
-                # Checking if local port is free for Docker/services
-                if result == 0:
-                    # Port is in use
-                    return False, f"Port {port} is already in use on {host}"
-                else:
-                    # Port is free
-                    return True, f"Port {port} is available on {host}"
-            else:
-                # Checking if remote port is reachable
-                if result == 0:
-                    # Port is reachable (good!)
-                    return True, f"Port {port} is reachable on {host}"
-                else:
-                    # Port is not reachable
-                    return (
-                        False,
-                        f"Cannot reach {host}:{port} (firewall/wrong port?)",
-                    )
-
+        addrinfos = socket.getaddrinfo(
+            host, port, type=socket.SOCK_STREAM
+        )
     except socket.gaierror:
-        # DNS resolution failed
         return False, f"Cannot resolve hostname: {host}"
-    except socket.error as e:
-        # Other socket errors
-        return False, f"Socket error: {e}"
+
+    is_local = host in LOCALHOST_ADDRESSES
+    any_success = False
+    last_error: Optional[Exception] = None
+
+    for family, socktype, proto, _canonname, sockaddr in addrinfos:
+        try:
+            with socket.socket(family, socktype, proto) as sock:
+                sock.settimeout(1)  # 1 second timeout
+                if sock.connect_ex(sockaddr) == 0:
+                    any_success = True
+                    break
+        except socket.error as e:
+            last_error = e
+
+    # For localhost, we want the port to be FREE (not in use)
+    # For remote, we want the port to be IN USE (something listening)
+    if is_local:
+        if any_success:
+            return False, f"Port {port} is already in use on {host}"
+        return True, f"Port {port} is available on {host}"
+
+    if any_success:
+        return True, f"Port {port} is reachable on {host}"
+    if last_error:
+        return False, f"Cannot reach {host}:{port} ({last_error})"
+    return False, f"Cannot reach {host}:{port} (firewall/wrong port?)"
 
 
 def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
@@ -1892,66 +1919,6 @@ def setup_database_compose() -> Tuple[bool, str]:
         return False, "compose_unavailable"
     Console.done()
 
-    # Read port from .env if it exists (before checking availability)
-    port = 3306  # Default port
-    env_path = REPO_ROOT / ".env"
-    if env_path.exists():
-        try:
-            with env_path.open("r") as f:
-                for line in f:
-                    line = line.strip()
-                    if line.startswith("MYSQL_PORT="):
-                        port = int(line.split("=", 1)[1])
-                        break
-        except (OSError, ValueError):
-            pass  # Use default if .env parsing fails
-
-    # Check if port is available
-    port_available, port_msg = is_port_available("localhost", port)
-    if not port_available:
-        Console.error(port_msg)
-        print(f"\n  Port {port} is already in use. Solutions:")
-
-        # Platform-specific guidance
-        if sys.platform == "darwin":  # macOS
-            print("    1. Stop existing MySQL (if installed):")
-            print("       brew services stop mysql")
-            print(
-                "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist"
-            )
-            print("    2. Find what's using the port:")
-            print(f"       lsof -i :{port}")
-        elif sys.platform.startswith("linux"):  # Linux
-            print("    1. Stop existing MySQL service:")
-            print("       sudo systemctl stop mysql")
-            print("       # or: sudo service mysql stop")
-            print("    2. Find what's using the port:")
-            print(f"       sudo lsof -i :{port}")
-            print(f"       # or: sudo netstat -tulpn | grep {port}")
-        elif sys.platform == "win32":  # Windows
-            print("    1. Stop existing MySQL service:")
-            print("       net stop MySQL")
-            print("       # or use Services app (services.msc)")
-            print("    2. Find what's using the port:")
-            print(f"       netstat -ano | findstr :{port}")
-
-        print("    Alternative: Use a different port:")
-        print("       Create .env file with: MYSQL_PORT=3307")
-        print("       (and update DataJoint config to match)")
-        return False, "port_in_use"
-
-    # Show what will happen
-    print("\n" + "=" * 60)
-    print("Docker Database Setup")
-    print("=" * 60)
-    print("\nThis will:")
-    print("  • Download MySQL 8.0 Docker image (~500 MB)")
-    print("  • Create a container named 'spyglass-db'")
-    print("  • Start MySQL on localhost:3306")
-    print("  • Save credentials to ~/.datajoint_config.json")
-    print("\nEstimated time: 2-3 minutes")
-    print("=" * 60)
-
     try:
         # Generate .env file (only if customizations needed)
         # For now, use all defaults - no .env file needed
@@ -1961,6 +1928,66 @@ def setup_database_compose() -> Tuple[bool, str]:
         # Validate .env if it exists
         if not DockerManager.validate_env_file():
             return False, "env_file_invalid"
+
+        env_path = REPO_ROOT / ".env"
+        actual_port, actual_password = DockerManager.read_env_file(
+            str(env_path)
+        )
+
+        # Check if port is available
+        port_available, port_msg = is_port_available(
+            "localhost", actual_port
+        )
+        if not port_available:
+            Console.error(port_msg)
+            print(
+                f"\n  Port {actual_port} is already in use. Solutions:"
+            )
+
+            # Platform-specific guidance
+            if sys.platform == "darwin":  # macOS
+                print("    1. Stop existing MySQL (if installed):")
+                print("       brew services stop mysql")
+                print(
+                    "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist"
+                )
+                print("    2. Find what's using the port:")
+                print(f"       lsof -i :{actual_port}")
+            elif sys.platform.startswith("linux"):  # Linux
+                print("    1. Stop existing MySQL service:")
+                print("       sudo systemctl stop mysql")
+                print("       # or: sudo service mysql stop")
+                print("    2. Find what's using the port:")
+                print(f"       sudo lsof -i :{actual_port}")
+                print(
+                    f"       # or: sudo netstat -tulpn | grep {actual_port}"
+                )
+            elif sys.platform == "win32":  # Windows
+                print("    1. Stop existing MySQL service:")
+                print("       net stop MySQL")
+                print("       # or use Services app (services.msc)")
+                print("    2. Find what's using the port:")
+                print(f"       netstat -ano | findstr :{actual_port}")
+
+            print("    Alternative: Use a different port:")
+            if env_path.exists():
+                print(f"       Edit {env_path} and set MYSQL_PORT=3307")
+            else:
+                print("       Create .env file with: MYSQL_PORT=3307")
+            print("       (and update DataJoint config to match)")
+            return False, "port_in_use"
+
+        # Show what will happen
+        print("\n" + "=" * 60)
+        print("Docker Database Setup")
+        print("=" * 60)
+        print("\nThis will:")
+        print("  • Download MySQL 8.0 Docker image (~500 MB)")
+        print("  • Create a container named 'spyglass-db'")
+        print(f"  • Start MySQL on localhost:{actual_port}")
+        print("  • Save credentials to ~/.datajoint_config.json")
+        print("\nEstimated time: 2-3 minutes")
+        print("=" * 60)
 
         # Get compose command
         compose_cmd = DockerManager.get_compose_command()
@@ -2068,24 +2095,6 @@ def setup_database_compose() -> Tuple[bool, str]:
             print("    docker compose logs mysql")
             DockerManager.cleanup()
             return False, "timeout"
-
-        # Read actual port/password from .env if it exists
-        actual_port = port
-        actual_password = "tutorial"
-
-        env_path = REPO_ROOT / ".env"
-        if env_path.exists():
-            # Parse .env file to check for custom values
-            try:
-                with env_path.open("r") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line.startswith("MYSQL_PORT="):
-                            actual_port = int(line.split("=", 1)[1])
-                        elif line.startswith("MYSQL_ROOT_PASSWORD="):
-                            actual_password = line.split("=", 1)[1]
-            except (OSError, ValueError):
-                pass  # Use defaults if .env parsing fails
 
         # Create configuration file matching .env values
         create_database_config(
@@ -2523,6 +2532,10 @@ def setup_database_remote(
         if use_tls:
             print("  TLS: enabled")
 
+    host = config["host"]
+    port = config["port"]
+    user = config["user"]
+
     # Test connection before saving
     success, _error = test_database_connection(**config)
 
@@ -2536,9 +2549,9 @@ def setup_database_remote(
         print("  4. TLS mismatch")
         print()
         print("Diagnostic steps:")
-        print(f"  Test port:  nc -zv {config['host']} {config['port']}")
+        print(f"  Test port:  nc -zv {host} {port}")
         print(
-            f"  Test MySQL: mysql -h {config['host']} -P {config['port']} -u {config['user']} -p"
+            f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p"
         )
         print()
         print(
