@@ -1188,6 +1188,8 @@ def create_database_config(
         "database.password": password,
         "database.use_tls": use_tls,
         "database.reconnect": True,
+        "connection.init_function": None,
+        "connection.charset": "",
         # DataJoint general settings
         "loglevel": "INFO",
         "safemode": True,
@@ -1195,6 +1197,7 @@ def create_database_config(
         "display.limit": 12,
         "display.width": 14,
         "display.show_tuple_count": True,
+        "add_hidden_timestamp": False,
         # DataJoint performance settings
         "filepath_checksum_size_limit": 1 * 1024**3,  # 1 GB
         "enable_python_native_blobs": True,
