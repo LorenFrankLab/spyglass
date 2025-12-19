@@ -2537,7 +2537,9 @@ def setup_database_remote(
         print()
         print("Diagnostic steps:")
         print(f"  Test port:  nc -zv {config['host']} {config['port']}")
-        print(f"  Test MySQL: mysql -h {config['host']} -P {config['port']} -u {config['user']} -p")
+        print(
+            f"  Test MySQL: mysql -h {config['host']} -P {config['port']} -u {config['user']} -p"
+        )
         print()
         print(
             "Need help? See: docs/TROUBLESHOOTING.md#database-connection-fails"

@@ -221,6 +221,8 @@ echo ""
 
 # Export lab-wide settings as environment variables
 export SPYGLASS_BASE_DIR="$BASE_DIR"
+# Pass password via environment variable to avoid exposure in process listings
+export SPYGLASS_DB_PASSWORD="$DB_PASSWORD"
 
 # Run the installer with Frank Lab settings
 cd "$REPO_DIR"
@@ -230,7 +232,6 @@ python scripts/install.py \
     --db-host "$FRANKLAB_DB_HOST" \
     --db-port "$FRANKLAB_DB_PORT" \
     --db-user "$DB_USER" \
-    --db-password "$DB_PASSWORD" \
     --base-dir "$BASE_DIR"
 
 # ============================================================================
