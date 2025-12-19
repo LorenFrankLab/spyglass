@@ -908,7 +908,7 @@ class DockerManager:
 
 
 # ============================================================================
-# JSON Schema Loading Functions (DRY Architecture)
+# JSON Schema Loading Functions
 # ============================================================================
 # These functions read from directory_schema.json in src/spyglass/ to ensure
 # the installer and settings.py use the same directory structure (single
@@ -916,57 +916,30 @@ class DockerManager:
 
 
 def validate_schema(schema: Dict[str, Any]) -> None:
-    """Validate config schema structure.
+    """Validate config schema has required structure.
+
+    Validates that the schema has a directory_schema key with at least one
+    prefix, and each prefix has at least one subdirectory. The JSON file
+    is the single source of truth for directory structure.
 
     Raises
     ------
     ValueError
-        If schema is invalid or missing required keys
+        If schema is missing directory_schema or has empty prefixes
     """
     if "directory_schema" not in schema:
         raise ValueError("Schema missing 'directory_schema' key")
 
-    required_prefixes = {"spyglass", "kachery", "dlc", "moseq"}
-    actual_prefixes = set(schema["directory_schema"].keys())
+    dir_schema = schema["directory_schema"]
+    if not dir_schema:
+        raise ValueError("Schema 'directory_schema' is empty")
 
-    if required_prefixes != actual_prefixes:
-        missing = required_prefixes - actual_prefixes
-        extra = actual_prefixes - required_prefixes
-        msg = []
-        if missing:
-            msg.append(f"Missing prefixes: {missing}")
-        if extra:
-            msg.append(f"Extra prefixes: {extra}")
-        raise ValueError("; ".join(msg))
-
-    # Validate each prefix has expected keys (matches settings.py exactly)
-    required_keys = {
-        "spyglass": {
-            "raw",
-            "analysis",
-            "recording",
-            "sorting",
-            "waveforms",
-            "temp",
-            "video",
-            "export",
-        },
-        "kachery": {"cloud", "storage", "temp"},
-        "dlc": {"project", "video", "output"},
-        "moseq": {"project", "video"},
-    }
-
-    for prefix, expected_keys in required_keys.items():
-        actual_keys = set(schema["directory_schema"][prefix].keys())
-        if expected_keys != actual_keys:
-            missing = expected_keys - actual_keys
-            extra = actual_keys - expected_keys
-            msg = [f"Invalid keys for '{prefix}':"]
-            if missing:
-                msg.append(f"missing {missing}")
-            if extra:
-                msg.append(f"extra {extra}")
-            raise ValueError(" ".join(msg))
+    # Validate each prefix has at least one subdirectory defined
+    for prefix, subdirs in dir_schema.items():
+        if not isinstance(subdirs, dict) or not subdirs:
+            raise ValueError(
+                f"Schema prefix '{prefix}' must have at least one subdirectory"
+            )
 
 
 def load_full_schema() -> Dict[str, Any]:
