@@ -1140,7 +1140,7 @@ def create_database_config(
     This creates a complete DataJoint + Spyglass configuration including:
     - Database connection settings
     - DataJoint external stores
-    - Spyglass directory structure (all 16 directories)
+    - Spyglass directory structure (from directory_schema.json)
 
     Parameters
     ----------
@@ -1927,7 +1927,7 @@ def setup_database_compose() -> Tuple[bool, str]:
     print("Docker Database Setup")
     print("=" * 60)
     print("\nThis will:")
-    print("  • Download MySQL 8.0 Docker image (~200 MB)")
+    print("  • Download MySQL 8.0 Docker image (~500 MB)")
     print("  • Create a container named 'spyglass-db'")
     print("  • Start MySQL on localhost:3306")
     print("  • Save credentials to ~/.datajoint_config.json")
@@ -1997,7 +1997,7 @@ def setup_database_compose() -> Tuple[bool, str]:
         # Wait for MySQL readiness using health check
         Console.step("Waiting for MySQL to be ready")
 
-        for attempt in range(30):  # 60 seconds max
+        for attempt in range(MYSQL_HEALTH_CHECK_ATTEMPTS):
             try:
                 # Check if service is healthy
                 result = subprocess.run(
@@ -2037,13 +2037,15 @@ def setup_database_compose() -> Tuple[bool, str]:
                 # Command timed out, retry on next attempt
                 pass
 
-            if attempt < 29:
+            if attempt < MYSQL_HEALTH_CHECK_ATTEMPTS - 1:
                 print(".", end="", flush=True)
-                time.sleep(2)
+                time.sleep(MYSQL_HEALTH_CHECK_INTERVAL)
         else:
             # Timeout - provide debug info
             Console.fail()
-            Console.error("MySQL did not become ready within 60 seconds")
+            Console.error(
+                f"MySQL did not become ready within {MYSQL_HEALTH_CHECK_TIMEOUT} seconds"
+            )
             print("\n  Check logs:")
             print("    docker compose logs mysql")
             DockerManager.cleanup()
