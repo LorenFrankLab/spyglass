@@ -82,12 +82,14 @@ conda activate spyglass
 ```
 
 The installer will:
+
 - ✅ Create conda environment with all dependencies
 - ✅ Set up local MySQL database (Docker) or connect to remote
 - ✅ Validate installation
 - ✅ Provide clear next steps
 
 **Installation Options:**
+
 ```bash
 # Minimal installation (recommended for new users)
 python scripts/install.py --minimal
@@ -106,24 +108,20 @@ export SPYGLASS_BASE_DIR=/path/to/data
 python scripts/install.py --minimal --docker
 
 # Non-interactive remote database setup
-python scripts/install.py --remote \
-  --db-host db.lab.edu \
-  --db-user myuser \
-  --db-password mysecret
-
-# Or use environment variable for password
 export SPYGLASS_DB_PASSWORD=mysecret
 python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 ```
 
 **Troubleshooting:**
-- See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues
+
+- See [docs/src/TROUBLESHOOsrc/TING.md](docs/src/TROUBLESHOOsrc/TING.md) for common issues
 - Run `python scripts/validate.py` to check your installation
 - For database help, see [docs/DATABASE.md](docs/DATABASE.md)
 
 ### Manual Installation
 
 For manual installation and advanced configuration:
+
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
 - [Database Setup Guide](docs/DATABASE.md)
 

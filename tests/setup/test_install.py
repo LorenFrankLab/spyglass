@@ -29,13 +29,13 @@ scripts_dir = Path(__file__).parent.parent.parent / "scripts"
 sys.path.insert(0, str(scripts_dir))
 
 from install import (
+    CondaManager,
+    DockerManager,
     build_directory_structure,
     check_disk_space,
     check_prerequisites,
-    CondaManager,
     create_database_config,
     determine_tls,
-    DockerManager,
     get_base_directory,
     get_required_python_version,
     is_port_available,

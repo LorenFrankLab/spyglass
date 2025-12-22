@@ -77,12 +77,14 @@ python scripts/validate.py
 ## Next Steps
 
 ### Run first tutorial
+
 ```bash
 cd notebooks
 jupyter notebook 01_Concepts.ipynb
 ```
 
 ### Configure for your data
+
 - Place NWB files in your configured `raw` directory (default: `$SPYGLASS_BASE_DIR/raw/`)
 - See [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/) for details
 
@@ -103,7 +105,7 @@ python scripts/install.py --minimal        # Core dependencies only (~5 min)
 python scripts/install.py --full           # All optional dependencies (~15 min)
 python scripts/install.py --docker         # Set up local Docker database
 python scripts/install.py --remote         # Connect to existing database
-python scripts/install.py --env-name myenv # Custom environment name
+python scripts/install.py --env-name myenv # Custom conda environment name
 python scripts/install.py --help           # See all options
 ```
 
@@ -119,6 +121,7 @@ The installer creates:
 ## Troubleshooting
 
 ### Installation fails?
+
 ```bash
 # Remove environment and retry
 conda env remove -n spyglass
@@ -195,3 +198,4 @@ example that pre-configures Frank Lab settings.
 
 **Next tutorial**: [01_Concepts.ipynb](notebooks/01_Concepts.ipynb)
 **Full documentation**: [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
+
