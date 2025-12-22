@@ -87,13 +87,84 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         if linked_ids is not None:
             self.insert_linked_ids(group_key, linked_ids)
 
+    def fetch_data(self, key: dict = dict()):
+        """Fetch spike times and waveform features for the group, concatenating
+        any linked sorts as specified in the LinkedSorts table.
+
+        Args:
+            key (dict, optional): Restriction on the group table. Defaults to dict().
+
+        Raises:
+            ValueError: Error if a linked SpikeSortingMerge ID is not found in the
+                UnitFeatures table.
+
+        Returns:
+            tuple: (spike_times, spike_waveform_features) where each is a list of
+                np.ndarrays for each unit in the group.
+        """
+
+        # fetch spike times and waveform features for the group
+        group_key = (self & key).fetch1("KEY")
+        waveform_keys = (self.UnitFeatures & group_key).fetch("KEY")
+        spike_times, spike_waveform_features = (
+            UnitWaveformFeatures & waveform_keys
+        ).fetch_data()
+
+        # return if no features keys need to be linked
+        if not (link_query := (self.LinkedSorts & group_key)):
+            return spike_times, spike_waveform_features
+
+        # concatenate linked sorts
+        linked_id_list = link_query.fetch("linked_merge_ids")
+        merge_ids = [k["spikesorting_merge_id"] for k in waveform_keys]
+        df = pd.DataFrame(
+            {
+                "merge_id": merge_ids,
+                "spike_times": spike_times,
+                "waveform_features": spike_waveform_features,
+            }
+        )
+        df.set_index("merge_id", inplace=True)
+        merged_spike_times = []
+        merged_waveform_features = []
+        managed_ids = set()
+        for linked_ids in linked_id_list:
+            times_list = []
+            features_list = []
+            for merge_id in linked_ids:
+                if merge_id in df.index:
+                    times_list.append(df.at[merge_id, "spike_times"])
+                    features_list.append(df.at[merge_id, "waveform_features"])
+                    managed_ids.add(merge_id)
+                else:
+                    raise ValueError(
+                        f"Linked SpikeSortingMerge ID {merge_id} not found in "
+                        + "UnitFeatures table"
+                        + f" for group {key['waveform_features_group_name']}"
+                    )
+            if times_list:
+                merged_times_i = np.concatenate(times_list)
+                merged_features_i = np.concatenate(features_list)
+                ind_sort = np.argsort(merged_times_i)
+                merged_spike_times.append(merged_times_i[ind_sort])
+                merged_waveform_features.append(merged_features_i[ind_sort])
+
+        # add any remaining unlinked units
+        for merge_id in df.index:
+            if merge_id not in managed_ids:
+                merged_spike_times.append(df.at[merge_id, "spike_times"])
+                merged_waveform_features.append(
+                    df.at[merge_id, "waveform_features"]
+                )
+        return merged_spike_times, merged_waveform_features
+
     def insert1_linked_ids(self, key, linked_merge_ids: list[str]):
         """Insert linked SpikeSortingMerge IDs for this waveform features group"""
-        link_query = (self.LinkedSorts & key).fetch("link_id")
-        if link_query:
-            link_id = np.max(link_query) + 1
-        else:
+
+        if not (link_query := (self.LinkedSorts & key)):
             link_id = 0
+        else:
+            link_id = np.max(link_query.fetch("link_id")) + 1
 
         # verify that all merge ids are in the UnitFeatures table
         for merge_id in linked_merge_ids:
@@ -621,20 +692,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
             ],
         )
 
-        waveform_keys = (
-            (
-                UnitWaveformFeaturesGroup.UnitFeatures
-                & {
-                    "nwb_file_name": key["nwb_file_name"],
-                    "waveform_features_group_name": key[
-                        "waveform_features_group_name"
-                    ],
-                }
-            )
-        ).fetch("KEY")
         spike_times, spike_waveform_features = (
-            UnitWaveformFeatures & waveform_keys
-        ).fetch_data()
+            UnitWaveformFeaturesGroup.fetch_data(key)
+        )
 
         if not filter_by_interval:
             return spike_times, spike_waveform_features
