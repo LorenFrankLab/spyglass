@@ -49,8 +49,20 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         -> UnitWaveformFeatures
         """
 
+    class LinkedSorts(SpyglassMixinPart):
+        definition = """
+        -> UnitWaveformFeaturesGroup
+        link_id: int
+        ---
+        linked_merge_ids: longblob # list of SpikeSortingMerge IDs to concatenate
+        """
+
     def create_group(
-        self, nwb_file_name: str, group_name: str, keys: list[dict]
+        self,
+        nwb_file_name: str,
+        group_name: str,
+        keys: list[dict],
+        linked_ids: list[list[str]] = None,
     ):
         """Create a group of waveform features for a given session"""
         group_key = {
@@ -59,7 +71,7 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
         }
         if self & group_key:
             logger.error(  # No error on duplicate helps with pytests
-                f"Group {nwb_file_name}: {group_name} already exists"
+                f"Group {nwb_file_name}: {group_name} already exists, "
                 + "please delete the group before creating a new one",
             )
             return
@@ -72,6 +84,44 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
                 {**key, **group_key},
                 skip_duplicates=True,
             )
+        if linked_ids is not None:
+            self.insert_linked_ids(group_key, linked_ids)
+
+    def insert1_linked_ids(self, key, linked_merge_ids: list[str]):
+        """Insert linked SpikeSortingMerge IDs for this waveform features group"""
+        link_query = (self.LinkedSorts & key).fetch("link_id")
+        if link_query:
+            link_id = np.max(link_query) + 1
+        else:
+            link_id = 0
+
+        # verify that all merge ids are in the UnitFeatures table
+        for merge_id in linked_merge_ids:
+            if not (
+                UnitWaveformFeaturesGroup.UnitFeatures
+                & {**key, "spikesorting_merge_id": merge_id}
+            ):
+                raise ValueError(
+                    f"SpikeSortingMerge ID {merge_id} not found in "
+                    + "UnitWaveformFeaturesGroup.UnitFeatures table"
+                    + f" for group {key['waveform_features_group_name']}"
+                )
+        self.LinkedSorts.insert1(
+            {
+                **key,
+                "link_id": link_id,
+                "linked_merge_ids": np.array(linked_merge_ids, dtype=object),
+            },
+            skip_duplicates=True,
+        )
+
+    def insert_linked_ids(
+        self, key: dict, linked_merge_ids_list: list[list[str]]
+    ):
+        """Insert linked SpikeSortingMerge IDs for multiple waveform features groups"""
+        with self.LinkedSorts.connection.transaction:
+            for linked_merge_ids in linked_merge_ids_list:
+                self.insert1_linked_ids(key, linked_merge_ids)
 
 
 @schema
