@@ -114,7 +114,8 @@ python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 
 **Troubleshooting:**
 
-- See [docs/src/TROUBLESHOOsrc/TING.md](docs/src/TROUBLESHOOsrc/TING.md) for common issues
+- See [docs/src/TROUBLESHOOsrc/TING.md](docs/src/TROUBLESHOOsrc/TING.md) for
+    common issues
 - Run `python scripts/validate.py` to check your installation
 - For database help, see [docs/DATABASE.md](docs/DATABASE.md)
 

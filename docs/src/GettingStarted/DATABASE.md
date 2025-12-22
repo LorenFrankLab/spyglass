@@ -1,6 +1,8 @@
 # Spyglass Database Setup Guide
 
-Spyglass requires a MySQL database backend for storing experimental data and analysis results. This guide covers all setup options from quick local development to production deployments.
+Spyglass requires a MySQL database backend for storing experimental data and
+analysis results. This guide covers all setup options from quick local
+development to production deployments.
 
 ## Quick Start (Recommended)
 
@@ -47,18 +49,18 @@ docker compose up -d
 #### Prerequisites
 
 1. **Install Docker Desktop:**
-  ([macOS](https://docs.docker.com/desktop/install/mac-install/),
-  [Windows](https://docs.docker.com/desktop/install/windows-install/),
-  or [Linux](https://docs.docker.com/desktop/install/linux-install/))
+    ([macOS](https://docs.docker.com/desktop/install/mac-install/),
+    [Windows](https://docs.docker.com/desktop/install/windows-install/), or
+    [Linux](https://docs.docker.com/desktop/install/linux-install/))
 
 2. **Start Docker Desktop** and ensure it's running
 
 3. **Verify Compose is available:**
 
-   ```bash
-   docker compose --version
-   # Should show: Docker Compose version ##.##.##
-   ```
+    ```bash
+    docker compose --version
+    # Should show: Docker Compose version ##.##.##
+    ```
 
 #### Setup
 
@@ -105,7 +107,8 @@ MYSQL_ROOT_PASSWORD=your-secure-password
 MYSQL_IMAGE=datajoint/mysql:8.4
 ```
 
-**Important:** If you change port or password, update your DataJoint config accordingly.
+**Important:** If you change port or password, update your DataJoint config
+accordingly.
 
 #### Management
 
@@ -185,15 +188,15 @@ python scripts/install.py --remote
 ```bash
 # Using CLI arguments
 python scripts/install.py --remote \
-  --db-host db.mylab.edu \
-  --db-user myusername \
-  --db-password mypassword
+    --db-host db.mylab.edu \
+    --db-user myusername \
+    --db-password mypassword
 
 # Using environment variables (recommended for CI/CD)
 export SPYGLASS_DB_PASSWORD=mypassword
 python scripts/install.py --remote \
-  --db-host db.mylab.edu \
-  --db-user myusername
+    --db-host db.mylab.edu \
+    --db-user myusername
 ```
 
 **Manual configuration:**
@@ -214,6 +217,7 @@ Create `~/.datajoint_config.json`:
 
 ```python
 import datajoint as dj
+
 dj.conn().ping()  # Should succeed
 ```
 
@@ -407,37 +411,39 @@ For shared/production databases:
 
 1. **Strong passwords:**
 
-   ```bash
-   # Generate secure password
-   openssl rand -base64 32
-   ```
+    ```bash
+    # Generate secure password
+    openssl rand -base64 32
+    ```
 
 2. **User permissions:**
 
-   ```sql
-   -- Create user with specific database access
-   CREATE USER 'spyglass'@'%' IDENTIFIED BY 'strong_password';
-   GRANT ALL PRIVILEGES ON spyglass_*.* TO 'spyglass'@'%';
-   FLUSH PRIVILEGES;
-   ```
+    ```sql
+    -- Create user with specific database access
+    CREATE USER 'spyglass'@'%' IDENTIFIED BY 'strong_password';
+    GRANT ALL PRIVILEGES ON spyglass_*.* TO 'spyglass'@'%';
+    FLUSH PRIVILEGES;
+    ```
 
 3. **Enable TLS:**
 
-   ```json
-   {
-     "database.use_tls": true
-   }
-   ```
+    ```json
+    {
+      "database.use_tls": true
+    }
+    ```
 
 4. **Network security:**
-   - Use firewall rules
-   - Consider VPN for remote access
-   - Use SSH tunnels when appropriate
+
+    - Use firewall rules
+    - Consider VPN for remote access
+    - Use SSH tunnels when appropriate
 
 5. **Credential management:**
-   - Never commit config files to git
-   - Use environment variables for CI/CD
-   - Consider secrets management tools
+
+    - Never commit config files to git
+    - Use environment variables for CI/CD
+    - Consider secrets management tools
 
 ### File Permissions
 
@@ -544,10 +550,7 @@ docker run -p 3307:3306 ...
 
 ```python
 # Disable TLS for localhost
-config = {
-    "database.host": "localhost",
-    "database.use_tls": False
-}
+config = {"database.host": "localhost", "database.use_tls": False}
 ```
 
 For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
@@ -582,11 +585,11 @@ mysql -u USER -p < backup.sql
 
 ```bash
 docker run -d \
-  --name spyglass-db \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=tutorial \
-  datajoint/mysql:8.0 \
-  --innodb-buffer-pool-size=2G
+    --name spyglass-db \
+    -p 3306:3306 \
+    -e MYSQL_ROOT_PASSWORD=tutorial \
+    datajoint/mysql:8.0 \
+    --innodb-buffer-pool-size=2G
 ```
 
 **Optimize tables:**
