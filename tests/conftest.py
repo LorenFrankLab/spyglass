@@ -56,6 +56,8 @@ def pytest_addoption(parser):
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
+    --container-name (str): Default 'spyglass-pytest'. Docker container name.
+    --container-port (str): Default None (uses 330[mysql_version]). Port mapping.
     """
     parser.addoption(
         "--quiet-spy",
@@ -92,6 +94,20 @@ def pytest_addoption(parser):
         default=False,
         help="Skip downloads for and tests of DLC-dependent features.",
     )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-name",
+        action="store",
+        default="spyglass-pytest",
+        dest="container_name",
+        help="Docker container name for MySQL server.",
+    )
+    parser.addoption(  # Allows for concurrency with other pytest runs
+        "--container-port",
+        action="store",
+        default=None,
+        dest="container_port",
+        help="Port to map to MySQL's default 3306. Defaults to 330[mysql_version].",
+    )
 
 
 def pytest_configure(config):
@@ -108,8 +124,11 @@ def pytest_configure(config):
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
+    os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
     SERVER = DockerMySQLManager(
+        container_name=config.option.container_name,
+        port=config.option.container_port,
         restart=TEARDOWN,
         shutdown=TEARDOWN,
         null_server=config.option.no_docker,
@@ -186,26 +205,47 @@ def server(request, teardown):
 
 
 @pytest.fixture(scope="session")
-def server_credentials(server):
-    yield server.credentials
+def worker_id(request):
+    """Get unique worker ID for pytest-xdist parallelization.
+
+    Returns 'master' for serial execution, or 'gwN' for parallel workers.
+    This enables worker-specific database schema isolation.
+
+    NOTE: Not currently in use, but set up for future parallel test runs.
+    """
+    if hasattr(request.config, "workerinput"):
+        return request.config.workerinput["workerid"]
+    return "master"
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server_credentials, verbose, teardown):
-    """Fixture for datajoint connection."""
-    config_file = "dj_local_conf.json_test"
+def dj_conn(request, server, worker_id, verbose, teardown):
+    """Fixture for datajoint connection with pytest-xdist support.
+
+    For parallel execution, each worker gets its own database schema prefix
+    to avoid race conditions and ensure test isolation.
+    """
+    # Worker-specific config file to avoid conflicts
+    config_file = "dj_local_conf.json"
+    if branch_name := server.branch_name:
+        config_file = f"dj_local_conf_{branch_name}.json"
+
     if Path(config_file).exists():
         os.remove(config_file)
 
-    dj.config.update(server_credentials)
+    # Set worker-specific schema prefix for database isolation
+    dj.config.update(server.credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
+    dj.config["database.prefix"] = "pytests"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
-    dj.conn()
+
+    try:
+        dj.conn().ping()
+    except Exception as e:  # If can't connect, exit all tests
+        pytest.exit(f"Failed to connect to database: {e}")
+
     yield dj.conn()
-    if teardown:
-        if Path(config_file).exists():
-            os.remove(config_file)
 
 
 @pytest.fixture(scope="session")
@@ -286,13 +326,13 @@ def load_config(dj_conn, base_dir):
 
 @pytest.fixture(autouse=True, scope="session")
 def mini_insert(
-    dj_conn, mini_path, mini_content, teardown, server, load_config
+    dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: E402
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
@@ -307,9 +347,13 @@ def mini_insert(
     if not server.connected:
         raise ConnectionError("No server connection.")
 
-    if len(Nwbfile()) != 0:
+    if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
+
     else:
+        # Useful try/except for avoiding a full run on insert failure
+        # Should be commented out in favor of vanilla insert for debugging
+        # the insert_sessions function itself.
         try:
             insert_sessions(mini_path.name, raise_err=True)
         except Exception as e:  # If can't insert session, exit all tests
@@ -1356,6 +1400,13 @@ def spike_v1(common):
     from spyglass.spikesorting import v1
 
     yield v1
+
+
+@pytest.fixture(scope="session")
+def imported_spike(common):
+    from spyglass.spikesorting import imported
+
+    yield imported
 
 
 @pytest.fixture(scope="session")

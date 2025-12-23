@@ -6,7 +6,7 @@ import multiprocessing.pool
 import os
 import re
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Type, Union
+from typing import Any, Iterable, List, Optional, Tuple, Type, Union
 from uuid import uuid4
 
 import datajoint as dj
@@ -97,8 +97,9 @@ def ensure_names(
     return getattr(table, "full_table_name", None)
 
 
-def declare_all_merge_tables():
+def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     """Ensures all merge tables in the spyglass core package are declared.
+
     - Prevents circular imports
     - Prevents errors from table declaration within a transaction
     - Run during nwb insertion
@@ -109,6 +110,8 @@ def declare_all_merge_tables():
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
     )  # noqa: F401
+
+    return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
 
 def fuzzy_get(index: Union[int, str], names: List[str], sources: List[str]):
@@ -245,6 +248,10 @@ def get_fetching_table_from_stack(stack):
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
+
     Parameters
     ----------
     query_expression : query
@@ -265,30 +272,50 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     file_path_fn : function
         Function to get the absolute path to the NWB file.
     """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.common.common_nwbfile import (
+        AnalysisNwbfile,
+        AnalysisRegistry,
+        Nwbfile,
+    )
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="get_nwb_table",
+        alt="FetchMixin.fetch_nwb() (logic integrated into mixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
 
     which = "analysis" if "analysis" in attr_name else "nwb"
-    tbl_map = {  # map to file_name_str and file_path_fn
-        "analysis": ["analysis_file_name", AnalysisNwbfile.get_abs_path],
-        "nwb": ["nwb_file_name", Nwbfile.get_abs_path],
-    }
-    file_name_str, file_path_fn = tbl_map[which]
+
+    file_name_str = (
+        "analysis_file_name" if which == "analysis" else "nwb_file_name"
+    )
+
+    tbl_inst = instance_table(tbl)
+    tbl_class = AnalysisRegistry().get_class(tbl_inst.full_table_name)
+    file_path_fn = getattr(tbl_class, "get_abs_path", None)  # for custom tables
+
+    if file_path_fn is None:  # use prev approach as fallback
+        file_path_fn = (
+            AnalysisNwbfile.get_abs_path
+            if which == "analysis"
+            else Nwbfile.get_abs_path
+        )
+    if not callable(file_path_fn):
+        raise ValueError(
+            f"Table {tbl_inst.__class__.__name__} does not have a valid "
+            + "get_abs_path method."
+        )
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
     nwb_files = (
-        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
+        query_expression.join(tbl_inst.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -300,8 +327,21 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     return nwb_files, file_path_fn
 
 
+def instance_table(table: Union[str, Type[dj.Table]]) -> dj.Table:
+    """Instantiate a DataJoint table from its class, if uninstantiated."""
+    if isinstance(table, str):
+        return dj.FreeTable(dj.conn(), table)
+    if isinstance(table, type) and issubclass(table, dj.Table):
+        return table()
+    return table
+
+
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
+
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
 
     Parameters
     ----------
@@ -322,7 +362,13 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="fetch_nwb (helper function)",
+        alt="table.fetch_nwb() method (logic integrated into FetchMixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
 
@@ -346,16 +392,13 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             get_nwb_file(file_path, query_expression)
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+    tbl_inst = instance_table(tbl)
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), **arg
+        tbl_inst.proj(nwb2load_filepath=attr_name), **arg
     )
+
     rec_dicts = query_table.fetch(*attrs, **kwargs)
     # get filepath for each. Use datajoint for checksum if local
     for rec_dict in rec_dicts:
@@ -366,7 +409,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             continue
 
         # Full dict caused issues with dlc tables using dicts in secondary keys
-        rec_only_pk = {k: rec_dict[k] for k in query_table.heading.primary_key}
+        rec_only_pk = {
+            k: v
+            for k, v in rec_dict.items()
+            if k in query_table.heading.primary_key
+        }
         rec_dict["nwb2load_filepath"] = (query_table & rec_only_pk).fetch1(
             "nwb2load_filepath"
         )
@@ -390,6 +437,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             if "object_id" in id_attr and rec_dict[id_attr] != ""
         }
         ret.append({**rec_dict, **nwb_objs})
+
     return ret
 
 
@@ -543,20 +591,46 @@ def _resolve_external_table(
         ["analysis", "raw], by default "analysis"
     """
     from spyglass.common import LabMember
+    from spyglass.common.common_nwbfile import AnalysisRegistry
     from spyglass.common.common_nwbfile import schema as common_schema
 
     LabMember().check_admin_privilege(
         error_message="Please contact database admin to edit database checksums"
     )
-    external_table = common_schema.external[location]
-    external_key = (external_table & f"filepath LIKE '%{file_name}'").fetch1()
-    external_key.update(
-        {
-            "size": Path(filepath).stat().st_size,
-            "contents_hash": dj.hash.uuid_from_file(filepath),
-        }
+
+    file_restr = f"filepath LIKE '%{file_name}'"
+
+    to_updates = []
+    if location == "analysis":  # Update for each custom Analysis external
+        for external in AnalysisRegistry().get_externals():
+            restr_external = external & file_restr
+            if not bool(restr_external):
+                continue
+            if len(restr_external) > 1:
+                raise ValueError(
+                    "Multiple entries found in external table for file: "
+                    + f"{file_name}, cannot resolve."
+                )
+            to_updates.append(restr_external)
+
+    elif location == "raw":
+        restr_external = common_schema.external["raw"] & file_restr
+        to_updates.append(restr_external)
+
+    if not to_updates:
+        logger.warning(
+            f"No entries found in external tables for file: {file_name}"
+        )
+        return
+
+    update_vals = dict(
+        size=Path(filepath).stat().st_size,
+        contents_hash=dj.hash.uuid_from_file(filepath),
     )
-    external_table.update1(external_key)
+    for to_update in to_updates:
+        key = to_update.fetch1()
+        key.update(update_vals)
+        to_update.update1(key)
 
 
 def make_file_obj_id_unique(nwb_path: str):

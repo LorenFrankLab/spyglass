@@ -6,13 +6,13 @@ import pynwb
 
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_imported")
 
 
 @schema
-class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
+class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     definition = """
     -> Session
     ---
@@ -20,6 +20,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _single_entry_per_table = True
 
     class Annotations(SpyglassMixin, dj.Part):
         definition = """
@@ -30,35 +31,68 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         annotations: longblob # dict of other annotations (e.g. metrics)
         """
 
-    def make(self, key):
-        """Make without transaction
+    # SpyglassIngestion properties
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "object_id": "object_id",
+            }
+        }
 
-        Allows populate_all_common to work within a single transaction."""
-        orig_key = copy.deepcopy(key)
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.misc.Units
 
-        nwb_file_abs_path = Nwbfile.get_abs_path(key["nwb_file_name"])
+    def get_nwb_objects(self, nwb_file, nwb_file_name=None):
+        """Override to get units from nwb_file.units."""
+        if not getattr(nwb_file, "units", None):
+            logger.warn("No units found in NWB file")
+            return []
+        return [nwb_file.units]
 
-        with pynwb.NWBHDF5IO(
-            nwb_file_abs_path, "r", load_namespaces=True
-        ) as io:
-            nwbfile = io.read()
-            if not nwbfile.units:
-                logger.warn("No units found in NWB file")
-                return
+    def insert_from_nwbfile(
+        self,
+        nwb_file_name: str,
+        config: dict = None,
+        dry_run: bool = False,
+    ):
+        """Override base method to add merge table integration."""
+        # Call the base implementation first
+        result = super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
-        from spyglass.spikesorting.spikesorting_merge import (
+        if dry_run or not result or self not in result:
+            return result
+
+        # Add merge table integration
+        orig_key = {"nwb_file_name": nwb_file_name}
+
+        from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
             SpikeSortingOutput,
-        )  # noqa: F401
-
-        key["object_id"] = nwbfile.units.object_id
-
-        self.insert1(key, skip_duplicates=True, allow_direct_insert=True)
+        )
 
         part_name = SpikeSortingOutput._part_name(self.table_name)
         SpikeSortingOutput._merge_insert(
             [orig_key], part_name=part_name, skip_duplicates=True
         )
 
+        return result
+
+    def make(self, key):
+        """Legacy make method - replaced by insert_from_nwbfile.
+
+        Kept for backward compatibility during migration.
+        """
+        # Call the new SpyglassIngestion method
+        from spyglass.common.common_usage import ActivityLog
+
+        ActivityLog().deprecate_log(
+            self, "ImportedSpikesorting.make", alt="insert_from_nwbfile"
+        )
+
+        return self.insert_from_nwbfile(key["nwb_file_name"])
+
+    # ------------ Placeholder methods for merge table integration ------------
     @classmethod
     def get_recording(cls, key):
         """Placeholder for merge table to call on all sources."""
@@ -73,6 +107,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
             "Imported spike sorting does not have a `get_sorting` method"
         )
 
+    # --------------------------- Annotation methods ---------------------------
     def add_annotation(
         self, key, id, label=[], annotations={}, merge_annotations=False
     ):
@@ -134,7 +169,7 @@ class ImportedSpikeSorting(SpyglassMixin, dj.Imported):
         return df
 
     def fetch_nwb(self, *attrs, **kwargs):
-        """class method to fetch the nwb and add annotations to the spike dfs returned"""
+        """Fetch the nwb and add annotations to the spike dfs returned"""
         # get the original nwbs
         nwbs = super().fetch_nwb(*attrs, **kwargs)
         # for each nwb, get the annotations and add them to the spikes dataframe

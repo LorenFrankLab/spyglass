@@ -148,6 +148,8 @@ downstream analysis is selective to an analysis result, you might add a `result`
 field to the analysis table, and store various results associated with that
 analysis in a part table.
 
+#### Table Example
+
 Example analysis table:
 
 ```python
@@ -192,6 +194,8 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         self.MyAnalysisPart.insert1({**key, "result": 1})
 ```
 
+### Make Method
+
 In general, `make` methods have three steps:
 
 1. Collect inputs: fetch the relevant parameters and data.
@@ -199,8 +203,41 @@ In general, `make` methods have three steps:
 3. Insert results: insert the results into the relevant tables.
 
 DataJoint has protections in place to ensure that `populate` calls are treated
-as a single transaction, but separating these steps supports debugging and
-testing.
+as a single transaction, but transaction times can slow down table interactions
+for collaborators. Instead, consider an explicit separation with a
+[generator approach](https://github.com/datajoint/datajoint-python/blob/63ebc380ecdd1ba1b0cff02f9927fe2666a59e24/datajoint/autopopulate.py#L108-L112).
+
+```python
+@schema
+class MyAnalysis(SpyglassMixin, dj.Computed):
+    ...
+
+    def make_fetch(self, key):
+        one = SomeUpstreamTable.fetch1(...) # (1)
+        two = AnotherUpstreamTable.fetch1(...) # (2)
+
+        return [one, two]
+
+    def make_compute(self, key, one, two):
+        result = some_analysis_function(one, two)  # (3)
+        self_insert = {'result_field': result}  # (4)
+
+        return self_insert
+
+    def make_insert(self, key, self_insert):
+        self.insert1(dict(key, **self_insert))  # (5)
+```
+
+1. `make_fetch` may not modify the key or the database, and only fetches data.
+2. `make_fetch` must be deterministic and idempotent.
+    - Deterministic: given the same key, it always returns the same data.
+    - Idempotent: calling it multiple times has the same effect as calling it
+      once.
+3. `make_compute` runs time-consuming computations.
+4. `make_compute` should not modify the key or the database.
+5. `make_insert` modifies the database.
+
+### Time Intervals
 
 To facilitate operations on the time intervals, the `IntervalList` table has a
 `fetch_interval` method that returns the relevant `valid_times` as an `Interval`
