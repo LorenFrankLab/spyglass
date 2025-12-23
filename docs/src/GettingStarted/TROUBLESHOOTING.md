@@ -48,7 +48,7 @@ The validator will check:
 
     ```bash
     conda install mamba -c conda-forge
-    mamba env create -f environment.yml
+    mamba env create -f environments/environment.yml
     ```
 
 4. **Use minimal installation first:**
@@ -333,7 +333,7 @@ The validator will check:
 
     ```bash
     conda install mamba -c conda-forge
-    mamba env create -f environment.yml
+    mamba env create -f environments/environment.yml
     ```
 
 ### Insufficient Disk Space

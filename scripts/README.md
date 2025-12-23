@@ -330,7 +330,7 @@ conda update conda
 conda clean --all
 
 # Try with mamba (faster)
-mamba env create -f environment.yml
+mamba env create -f environments/environment.yml
 ```
 
 ### Docker Issues
@@ -443,8 +443,8 @@ The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
 
 ## Related Files
 
-- `environment_min.yml` - Minimal dependencies
-- `environment.yml` - Full dependencies
+- `environments/environment_min.yml` - Minimal dependencies
+- `environments/environment.yml` - Full dependencies
 - `src/spyglass/utils/docker.py` - Reusable Docker utilities
 - `tests/setup/test_install.py` - Unit tests
 - `pyproject.toml` - Python version requirements (single source of truth)

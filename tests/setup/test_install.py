@@ -95,7 +95,9 @@ class TestCondaManagerGetCommand:
     def test_raises_when_conda_not_available(self):
         """Raises RuntimeError when conda not available."""
         with patch("shutil.which", return_value=None):
-            with pytest.raises(RuntimeError, match="conda not found"):
+            with pytest.raises(
+                RuntimeError, match="Neither mamba nor conda found"
+            ):
                 CondaManager.get_command()
 
 
@@ -499,7 +501,23 @@ class TestIsPortAvailable:
 
     def test_remote_port_reachable(self):
         """Returns True when remote port is reachable."""
-        with patch("socket.socket") as mock_socket:
+        import socket
+
+        with (
+            patch("socket.getaddrinfo") as mock_getaddrinfo,
+            patch("socket.socket") as mock_socket,
+        ):
+            # Mock getaddrinfo to return address info
+            mock_getaddrinfo.return_value = [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("192.168.1.1", 3306),
+                )
+            ]
+
             mock_instance = Mock()
             mock_socket.return_value.__enter__ = Mock(
                 return_value=mock_instance
@@ -514,7 +532,23 @@ class TestIsPortAvailable:
 
     def test_remote_port_unreachable(self):
         """Returns False when remote port is unreachable."""
-        with patch("socket.socket") as mock_socket:
+        import socket
+
+        with (
+            patch("socket.getaddrinfo") as mock_getaddrinfo,
+            patch("socket.socket") as mock_socket,
+        ):
+            # Mock getaddrinfo to return address info
+            mock_getaddrinfo.return_value = [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("192.168.1.1", 3306),
+                )
+            ]
+
             mock_instance = Mock()
             mock_socket.return_value.__enter__ = Mock(
                 return_value=mock_instance
@@ -549,7 +583,21 @@ class TestIsPortAvailable:
         """Returns False on general socket errors."""
         import socket
 
-        with patch("socket.socket") as mock_socket:
+        with (
+            patch("socket.getaddrinfo") as mock_getaddrinfo,
+            patch("socket.socket") as mock_socket,
+        ):
+            # Mock getaddrinfo to return address info
+            mock_getaddrinfo.return_value = [
+                (
+                    socket.AF_INET,
+                    socket.SOCK_STREAM,
+                    0,
+                    "",
+                    ("10.0.0.1", 3306),
+                )
+            ]
+
             mock_instance = Mock()
             mock_socket.return_value.__enter__ = Mock(
                 return_value=mock_instance
@@ -561,7 +609,8 @@ class TestIsPortAvailable:
 
             available, msg = is_port_available("10.0.0.1", 3306)
             assert available is False
-            assert "Socket error" in msg
+            assert "Cannot reach" in msg
+            assert "Network unreachable" in msg
 
     def test_ipv4_localhost_treated_as_local(self):
         """127.0.0.1 is treated as localhost (port free = available)."""
@@ -1037,7 +1086,7 @@ class TestInvalidCLIArguments:
         )
         # Script uses if/elif, so --minimal wins
         assert result.returncode == 0
-        assert "environment_min.yml" in result.stdout
+        assert "environments/environment_min.yml" in result.stdout
 
     def test_docker_takes_precedence_over_remote(self, tmp_path):
         """When both --docker and --remote specified, --docker takes precedence."""

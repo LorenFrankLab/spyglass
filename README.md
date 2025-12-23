@@ -155,8 +155,10 @@ amount of data that can be stored and analyzed is limited by the available disk
 space and memory. GPUs are required for some of the analysis tools, such as
 DeepLabCut.
 
-See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or
-[environment_dlc.yml](environment_dlc.yml) for software dependencies.
+See [pyproject.toml](pyproject.toml),
+[environment.yml](environments/environment.yml), or
+[environment_dlc.yml](environments/environment_dlc.yml) for software
+dependencies.
 
 See
 [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)
