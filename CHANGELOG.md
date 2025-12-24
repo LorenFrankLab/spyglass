@@ -56,12 +56,16 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     #1490
 - Update fixes for accessing files from DANDI #1477
 - Deprecate `populate` transaction workaround with tripart `make` calls #1422
+- Add file issue checks to AnalysisNwbfile cleanup steps #1431
 
 ### Pipelines
 
 - Behavior
+
     - Add methods for calling moseq visualization functions #1374
+
 - Common
+
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
     - Change `IntervalList.insert` to `cautious_insert` #1423
@@ -80,21 +84,28 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+
 - Decoding
+
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
     - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
         merge IDs are fetched in non-chronological order #1471
     - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
+
 - LFP
+
     - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
 
 - Position
+
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+
 - Spikesorting
+
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
