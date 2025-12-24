@@ -350,7 +350,11 @@ class AnalysisRegistry(dj.Manual):
 
             def __repr__(self) -> str:
                 """Enhanced repr showing custom table info."""
-                return f"<{camel_name} (custom '{prefix}' analysis table)>"
+
+                return (
+                    f"<{camel_name} (custom '{prefix}' analysis table)>\n"
+                    + super().__repr__()
+                )
 
         # Set the class name dynamically
         EnhancedAnalysisNwbfile.__name__ = camel_name
@@ -797,3 +801,53 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         finally:
             registry.unblock_new_inserts()
+
+    def check_all_files(self) -> dict:
+        """Check files across all analysis tables for issues.
+
+        Iterates through common and all custom AnalysisNwbfile tables,
+        checking file existence and readability. Populates AnalysisFileIssues
+        table with any problems found. This is a read-only monitoring operation
+        that can be run independently of cleanup at different frequencies.
+
+        Returns
+        -------
+        results : dict
+            Dictionary mapping table names to issue counts
+
+        Example
+        -------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> results = AnalysisNwbfile().check_all_files()
+        >>> print(f"Total issues: {sum(results.values())}")
+
+        See Also
+        --------
+        AnalysisFileIssues : Table that stores detected issues
+        """
+        from spyglass.common.common_file_tracking import AnalysisFileIssues
+
+        logger.info("Checking analysis files across all tables")
+        registry = AnalysisRegistry()
+
+        # Include common table + all custom tables
+        analysis_tables = [self.__class__] + list(registry.all_classes)
+        num_tables = len(analysis_tables)
+
+        results = {}
+        file_checker = AnalysisFileIssues()
+
+        for i, analysis_cls in enumerate(analysis_tables, start=1):
+            tbl_name = analysis_cls.full_table_name
+            logger.info(f"  [{i}/{num_tables}] Checking {tbl_name} files")
+
+            issue_count = file_checker.check_files(analysis_cls)
+            results[tbl_name] = issue_count
+
+            if issue_count > 0:
+                logger.warning(f"    Found {issue_count} file issues")
+
+        total_issues = sum(results.values())
+        logger.info(f"File check complete: {total_issues} issues found")
+
+        return results

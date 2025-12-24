@@ -11,11 +11,7 @@ import warnings
 from pathlib import Path
 
 from spyglass.common import AnalysisNwbfile, Nwbfile
-from spyglass.common.common_file_tracking import (
-    AnalysisFileIssues,
-    FileMatch,
-    TrackedFile,
-)
+from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_version import SpyglassVersions
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema
@@ -77,16 +73,6 @@ def cleanup_temp_dir(days_old: int = 7, dry_run: bool = True):
         print(f"Error cleaning temp_dir: {e}")
 
 
-def trask_files_on_disk():
-    pop_kwargs = dict(
-        order="random", display_progress=True, reserve_jobs=True, processes=15
-    )
-
-    TrackedFile().run()
-    FileMatch().populate(**pop_kwargs)
-    AnalysisFileIssues().populate(**pop_kwargs)
-
-
 def main():
     print("Updating Spyglass versions table...")
     SpyglassVersions().fetch_from_pypi()
@@ -96,8 +82,11 @@ def main():
     cleanup_external_files()
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
-    print("Tracking files on disk...")
-    trask_files_on_disk()
+    print("Checking for AnalysisFile Issues...")
+    pop_kwargs = dict(
+        order="random", display_progress=True, reserve_jobs=True, processes=15
+    )
+    AnalysisFileIssues().populate(**pop_kwargs)
 
 
 if __name__ == "__main__":
