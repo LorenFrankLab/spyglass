@@ -82,12 +82,14 @@ conda activate spyglass
 ```
 
 The installer will:
+
 - ✅ Create conda environment with all dependencies
 - ✅ Set up local MySQL database (Docker) or connect to remote
 - ✅ Validate installation
 - ✅ Provide clear next steps
 
 **Installation Options:**
+
 ```bash
 # Minimal installation (recommended for new users)
 python scripts/install.py --minimal
@@ -106,26 +108,23 @@ export SPYGLASS_BASE_DIR=/path/to/data
 python scripts/install.py --minimal --docker
 
 # Non-interactive remote database setup
-python scripts/install.py --remote \
-  --db-host db.lab.edu \
-  --db-user myuser \
-  --db-password mysecret
-
-# Or use environment variable for password
 export SPYGLASS_DB_PASSWORD=mysecret
 python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 ```
 
 **Troubleshooting:**
-- See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for common issues
+
+- See [TROUBLESHOOTING.md](docs/src/GettingStarted/TROUBLESHOOTING.md) for
+    common issues
 - Run `python scripts/validate.py` to check your installation
-- For database help, see [docs/DATABASE.md](docs/DATABASE.md)
+- For database help, see [DATABASE.md](docs/src/GettingStarted/DATABASE.md)
 
 ### Manual Installation
 
 For manual installation and advanced configuration:
+
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
-- [Database Setup Guide](docs/DATABASE.md)
+- [Database Setup Guide](docs/src/GettingStarted/DATABASE.md)
 
 ## Tutorials
 
@@ -156,8 +155,10 @@ amount of data that can be stored and analyzed is limited by the available disk
 space and memory. GPUs are required for some of the analysis tools, such as
 DeepLabCut.
 
-See [pyproject.toml](pyproject.toml), [environment.yml](environment.yml), or
-[environment_dlc.yml](environment_dlc.yml) for software dependencies.
+See [pyproject.toml](pyproject.toml),
+[environment.yml](environments/environment.yml), or
+[environment_dlc.yml](environments/environment_dlc.yml) for software
+dependencies.
 
 See
 [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)

@@ -32,6 +32,8 @@ repos:
         args: ["--fix=lf"]
         description: Forces to replace line ending by the UNIX 'lf' character.
       - id: trailing-whitespace
+        args: ["--markdown-linebreak-ext=md"]
+        exclude: \.md$
       - id: debug-statements
       - id: check-added-large-files # prevent giant files from being committed
       # - id: check-builtin-literals

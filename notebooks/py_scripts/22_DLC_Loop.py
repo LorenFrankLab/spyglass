@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -38,7 +38,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environment_dlc.yml)**
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environments/environment_dlc.yml)**
 
 # Here is a schematic showing the tables used in this pipeline.
 #

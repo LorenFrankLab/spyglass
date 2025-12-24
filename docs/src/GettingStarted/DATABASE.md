@@ -1,6 +1,8 @@
 # Spyglass Database Setup Guide
 
-Spyglass requires a MySQL database backend for storing experimental data and analysis results. This guide covers all setup options from quick local development to production deployments.
+Spyglass requires a MySQL database backend for storing experimental data and
+analysis results. This guide covers all setup options from quick local
+development to production deployments.
 
 ## Quick Start (Recommended)
 
@@ -13,12 +15,14 @@ python scripts/install.py
 ```
 
 This automatically:
-- Pulls the MySQL 8.0 Docker image
+
+- Pulls the DataJoint MySQL 8.0 Docker image
 - Creates and starts a container named `spyglass-db`
 - Waits for MySQL to be ready
 - Creates configuration file with credentials
 
 **Or use Docker Compose directly:**
+
 ```bash
 cd spyglass
 docker compose up -d
@@ -29,46 +33,52 @@ docker compose up -d
 ### Option 1: Docker Compose (Recommended for Local Development)
 
 **Pros:**
+
 - One-command setup (~2 minutes)
-- Infrastructure as code (version controlled)
+- Version controlled
 - Easy to customize via .env file
 - Industry-standard tool
 - Persistent data storage
 - Health checks built-in
 
 **Cons:**
+
 - Requires Docker Desktop with Compose plugin
 - Uses system resources when running
 
 #### Prerequisites
 
 1. **Install Docker Desktop:**
-   - macOS: https://docs.docker.com/desktop/install/mac-install/
-   - Windows: https://docs.docker.com/desktop/install/windows-install/
-   - Linux: https://docs.docker.com/desktop/install/linux-install/
+    ([macOS](https://docs.docker.com/desktop/install/mac-install/),
+    [Windows](https://docs.docker.com/desktop/install/windows-install/), or
+    [Linux](https://docs.docker.com/desktop/install/linux-install/))
 
 2. **Start Docker Desktop** and ensure it's running
 
 3. **Verify Compose is available:**
-   ```bash
-   docker compose version
-   # Should show: Docker Compose version v2.x.x
-   ```
+
+    ```bash
+    docker compose --version
+    # Should show: Docker Compose version ##.##.##
+    ```
 
 #### Setup
 
 **Using installer (recommended):**
+
 ```bash
-python scripts/install.py --docker  # Will auto-detect and use Compose
+python scripts/install.py --docker  # Will auto-detect and use compose command
 ```
 
 **Using Docker Compose directly:**
+
 ```bash
 # From spyglass repository root
 docker compose up -d
 ```
 
 The default configuration uses:
+
 - Port: 3306
 - Password: tutorial
 - Container name: spyglass-db
@@ -79,14 +89,13 @@ The default configuration uses:
 Create a `.env` file to customize settings:
 
 ```bash
-# Copy example
+# Copy and edit example
 cp example.env .env
-
-# Edit settings
-nano .env
+nano .env # or use your favorite editor
 ```
 
 Available options:
+
 ```bash
 # Change port if 3306 is in use
 MYSQL_PORT=3307
@@ -98,11 +107,13 @@ MYSQL_ROOT_PASSWORD=your-secure-password
 MYSQL_IMAGE=datajoint/mysql:8.4
 ```
 
-**Important:** If you change port or password, update your DataJoint config accordingly.
+**Important:** If you change port or password, update your DataJoint config
+accordingly.
 
 #### Management
 
 **Start/stop services:**
+
 ```bash
 # Start
 docker compose up -d
@@ -118,22 +129,26 @@ docker compose down -v  # WARNING: Deletes all data!
 ```
 
 **View logs:**
+
 ```bash
 docker compose logs mysql
 docker compose logs -f mysql  # Follow mode
 ```
 
 **Check status:**
+
 ```bash
 docker compose ps
 ```
 
 **Access MySQL shell:**
+
 ```bash
 docker compose exec mysql mysql -uroot -ptutorial
 ```
 
 **Restart services:**
+
 ```bash
 docker compose restart
 ```
@@ -141,12 +156,14 @@ docker compose restart
 ### Option 2: Remote Database (Lab/Cloud Setup)
 
 **Pros:**
+
 - Shared across team members
 - Production-ready
 - Professional backup/monitoring
 - Persistent storage
 
 **Cons:**
+
 - Requires existing MySQL server
 - Network configuration needed
 - May need VPN/SSH tunnel
@@ -160,29 +177,32 @@ docker compose restart
 #### Setup
 
 **Using installer (interactive):**
+
 ```bash
 python scripts/install.py --remote
 # Enter connection details when prompted
 ```
 
 **Using installer (non-interactive for automation):**
+
 ```bash
 # Using CLI arguments
 python scripts/install.py --remote \
-  --db-host db.mylab.edu \
-  --db-user myusername \
-  --db-password mypassword
+    --db-host db.mylab.edu \
+    --db-user myusername \
+    --db-password mypassword
 
 # Using environment variables (recommended for CI/CD)
 export SPYGLASS_DB_PASSWORD=mypassword
 python scripts/install.py --remote \
-  --db-host db.mylab.edu \
-  --db-user myusername
+    --db-host db.mylab.edu \
+    --db-user myusername
 ```
 
 **Manual configuration:**
 
 Create `~/.datajoint_config.json`:
+
 ```json
 {
   "database.host": "db.mylab.edu",
@@ -194,8 +214,10 @@ Create `~/.datajoint_config.json`:
 ```
 
 **Test connection:**
+
 ```python
 import datajoint as dj
+
 dj.conn().ping()  # Should succeed
 ```
 
@@ -220,6 +242,7 @@ EOF
 ```
 
 Or use autossh for persistent tunnel:
+
 ```bash
 autossh -M 0 -L 3306:localhost:3306 user@remote-server
 ```
@@ -227,11 +250,13 @@ autossh -M 0 -L 3306:localhost:3306 user@remote-server
 ### Option 3: Local MySQL Installation
 
 **Pros:**
+
 - No Docker required
 - Direct system integration
 - Full control over configuration
 
 **Cons:**
+
 - More complex setup
 - Platform-specific installation
 - Harder to reset/clean
@@ -253,6 +278,7 @@ mysql -uroot -p
 ```
 
 In MySQL shell:
+
 ```sql
 CREATE USER 'spyglass'@'localhost' IDENTIFIED BY 'spyglass_password';
 GRANT ALL PRIVILEGES ON *.* TO 'spyglass'@'localhost';
@@ -261,6 +287,7 @@ EXIT;
 ```
 
 Configure DataJoint:
+
 ```json
 {
   "database.host": "localhost",
@@ -290,6 +317,7 @@ sudo mysql
 ```
 
 In MySQL shell:
+
 ```sql
 CREATE USER 'spyglass'@'localhost' IDENTIFIED BY 'spyglass_password';
 GRANT ALL PRIVILEGES ON *.* TO 'spyglass'@'localhost';
@@ -311,6 +339,7 @@ EXIT;
 Location: `~/.datajoint_config.json`
 
 **Full configuration example:**
+
 ```json
 {
   "database.host": "localhost",
@@ -337,6 +366,7 @@ Location: `~/.datajoint_config.json`
 ### TLS/SSL Configuration
 
 **When to use TLS:**
+
 - ✅ Remote database connections
 - ✅ Production environments
 - ✅ When connecting over untrusted networks
@@ -344,6 +374,7 @@ Location: `~/.datajoint_config.json`
 - ❌ Docker containers on same machine
 
 **Enable TLS:**
+
 ```json
 {
   "database.use_tls": true
@@ -351,6 +382,7 @@ Location: `~/.datajoint_config.json`
 ```
 
 **Custom certificate:**
+
 ```json
 {
   "database.use_tls": {
@@ -368,6 +400,7 @@ Location: `~/.datajoint_config.json`
 ### Development
 
 For local development, simple credentials are acceptable:
+
 - User: `root` or dedicated user
 - Password: Simple but unique
 - TLS: Disabled for localhost
@@ -377,39 +410,45 @@ For local development, simple credentials are acceptable:
 For shared/production databases:
 
 1. **Strong passwords:**
-   ```bash
-   # Generate secure password
-   openssl rand -base64 32
-   ```
+
+    ```bash
+    # Generate secure password
+    openssl rand -base64 32
+    ```
 
 2. **User permissions:**
-   ```sql
-   -- Create user with specific database access
-   CREATE USER 'spyglass'@'%' IDENTIFIED BY 'strong_password';
-   GRANT ALL PRIVILEGES ON spyglass_*.* TO 'spyglass'@'%';
-   FLUSH PRIVILEGES;
-   ```
+
+    ```sql
+    -- Create user with specific database access
+    CREATE USER 'spyglass'@'%' IDENTIFIED BY 'strong_password';
+    GRANT ALL PRIVILEGES ON spyglass_*.* TO 'spyglass'@'%';
+    FLUSH PRIVILEGES;
+    ```
 
 3. **Enable TLS:**
-   ```json
-   {
-     "database.use_tls": true
-   }
-   ```
+
+    ```json
+    {
+      "database.use_tls": true
+    }
+    ```
 
 4. **Network security:**
-   - Use firewall rules
-   - Consider VPN for remote access
-   - Use SSH tunnels when appropriate
+
+    - Use firewall rules
+    - Consider VPN for remote access
+    - Use SSH tunnels when appropriate
 
 5. **Credential management:**
-   - Never commit config files to git
-   - Use environment variables for CI/CD
-   - Consider secrets management tools
+
+    - Never commit config files to git
+    - Use environment variables for CI/CD
+    - Consider secrets management tools
 
 ### File Permissions
 
 Protect configuration file:
+
 ```bash
 chmod 600 ~/.datajoint_config.json
 ```
@@ -439,6 +478,7 @@ FLUSH PRIVILEGES;
 Each user creates their own config:
 
 **Alice's config:**
+
 ```json
 {
   "database.host": "lab-db.university.edu",
@@ -449,6 +489,7 @@ Each user creates their own config:
 ```
 
 **Bob's config:**
+
 ```json
 {
   "database.host": "lab-db.university.edu",
@@ -463,6 +504,7 @@ Each user creates their own config:
 ### Cannot Connect
 
 **Check MySQL is running:**
+
 ```bash
 # Docker
 docker ps | grep spyglass-db
@@ -475,6 +517,7 @@ brew services list | grep mysql
 ```
 
 **Test connection:**
+
 ```bash
 # With mysql client
 mysql -h HOST -P PORT -u USER -p
@@ -507,10 +550,7 @@ docker run -p 3307:3306 ...
 
 ```python
 # Disable TLS for localhost
-config = {
-    "database.host": "localhost",
-    "database.use_tls": False
-}
+config = {"database.host": "localhost", "database.use_tls": False}
 ```
 
 For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
@@ -520,6 +560,7 @@ For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 ### Database Backup
 
 **Docker database:**
+
 ```bash
 # Backup
 docker exec spyglass-db mysqldump -uroot -ptutorial --all-databases > backup.sql
@@ -529,6 +570,7 @@ docker exec -i spyglass-db mysql -uroot -ptutorial < backup.sql
 ```
 
 **System MySQL:**
+
 ```bash
 # Backup
 mysqldump -u USER -p --all-databases > backup.sql
@@ -540,16 +582,18 @@ mysql -u USER -p < backup.sql
 ### Performance Tuning
 
 **Increase buffer pool (Docker):**
+
 ```bash
 docker run -d \
-  --name spyglass-db \
-  -p 3306:3306 \
-  -e MYSQL_ROOT_PASSWORD=tutorial \
-  datajoint/mysql:8.0 \
-  --innodb-buffer-pool-size=2G
+    --name spyglass-db \
+    -p 3306:3306 \
+    -e MYSQL_ROOT_PASSWORD=tutorial \
+    datajoint/mysql:8.0 \
+    --innodb-buffer-pool-size=2G
 ```
 
 **Optimize tables:**
+
 ```sql
 OPTIMIZE TABLE tablename;
 ```
@@ -557,12 +601,14 @@ OPTIMIZE TABLE tablename;
 ### Migration
 
 **Moving from Docker to Remote:**
+
 1. Backup Docker database
 2. Restore to remote server
 3. Update config to point to remote
 4. Test connection
 
 **Example:**
+
 ```bash
 # Backup from Docker
 docker exec spyglass-db mysqldump -uroot -ptutorial --all-databases > backup.sql

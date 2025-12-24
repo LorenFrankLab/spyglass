@@ -65,7 +65,7 @@ jobs:
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass
-        environment-file: environment.yml
+        environment-file: environments/environment.yml
         miniforge-version: latest
         use-mamba: true
     - name: Install apt dependencies

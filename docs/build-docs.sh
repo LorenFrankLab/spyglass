@@ -4,8 +4,10 @@
 # For auto-reload during dev, use `mkdocs serve -f ./docs/mkdocs.yaml`
 
 # Copy top-level repo files for docs display
-cp ./CHANGELOG.md ./docs/src/
+cp ./CHANGELOG.md ./docs/src/CHANGELOG.md
 cp ./LICENSE ./docs/src/LICENSE.md
+mkdir -p ./docs/src/GettingStarted
+cp ./QUICKSTART.md ./docs/src/GettingStarted/QUICKSTART.md
 mkdir -p ./docs/src/notebooks
 rm -fr ./docs/src/notebooks/*
 cp ./notebooks/*ipynb ./docs/src/notebooks/

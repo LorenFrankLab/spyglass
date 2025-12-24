@@ -27,4 +27,4 @@ dependencies:
 
   # Essential spyglass dependencies (installed via pip for development mode)
   - pip:
-      - .
+      - ..

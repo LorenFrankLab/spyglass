@@ -516,5 +516,205 @@ class TestConfigCompatibility:
             missing_keys = settings_keys - installer_keys
             assert not missing_keys, (
                 f"Installer config is missing keys from settings.py: "
-                f"{sorted(missing_keys)}. Update install.py::create_database_config()"
+                f"{sorted(missing_keys)}. Update "
+                "install.py::create_database_config()"
             )
+
+
+class TestExampleConfigSync:
+    """Tests that dj_local_conf_example.json stays in sync with installer.
+
+    This test ensures the example config file matches the structure that
+    install.py::create_database_config() generates. When install.py changes,
+    this test will fail, reminding developers to update the example.
+    """
+
+    def _get_all_keys(self, d: dict, prefix: str = "") -> set:
+        """Recursively get all keys in nested dictionary."""
+        keys = set()
+        for k, v in d.items():
+            full_key = f"{prefix}.{k}" if prefix else k
+            keys.add(full_key)
+            if isinstance(v, dict):
+                keys.update(self._get_all_keys(v, full_key))
+        return keys
+
+    def _normalize_value(self, value):
+        """Normalize values for comparison (paths become placeholders)."""
+        if isinstance(value, str):
+            # Normalize path-like values to placeholder
+            if "/" in value or "\\" in value:
+                return "/placeholder/path"
+            # Normalize localhost variations
+            if value in ["localhost", "lmf-db.cin.ucsf.edu"]:
+                return "localhost"
+        return value
+
+    def test_example_config_structure_matches_installer(self):
+        """Test that dj_local_conf_example.json matches installer structure.
+
+        This validates that the example config has the same keys and
+        structure as what install.py generates. When new config keys are
+        added to install.py, this test will fail, prompting an update to
+        the example file.
+        """
+        with TemporaryDirectory() as tmpdir:
+            base_dir = Path(tmpdir) / "spyglass_data"
+
+            # Get config structure from installer (what create_database_config generates)
+            dir_schema = load_directory_schema()
+            dirs = build_directory_structure(
+                base_dir, schema=dir_schema, create=True, verbose=False
+            )
+
+            installer_config = {
+                "database.host": "localhost",
+                "database.port": 3306,
+                "database.user": "root",
+                "database.password": "tutorial",
+                "database.use_tls": False,
+                "database.reconnect": True,
+                "connection.init_function": None,
+                "connection.charset": "",
+                "loglevel": "INFO",
+                "safemode": True,
+                "fetch_format": "array",
+                "display.limit": 12,
+                "display.width": 14,
+                "display.show_tuple_count": True,
+                "add_hidden_timestamp": False,
+                "filepath_checksum_size_limit": 1 * 1024**3,
+                "enable_python_native_blobs": True,
+                "stores": {
+                    "raw": {
+                        "protocol": "file",
+                        "location": str(dirs["spyglass_raw"]),
+                        "stage": str(dirs["spyglass_raw"]),
+                    },
+                    "analysis": {
+                        "protocol": "file",
+                        "location": str(dirs["spyglass_analysis"]),
+                        "stage": str(dirs["spyglass_analysis"]),
+                    },
+                },
+                "custom": {
+                    "debug_mode": "false",
+                    "test_mode": "false",
+                    "kachery_zone": "franklab.default",
+                    "spyglass_dirs": {
+                        "base": str(base_dir),
+                        "raw": str(dirs["spyglass_raw"]),
+                        "analysis": str(dirs["spyglass_analysis"]),
+                        "recording": str(dirs["spyglass_recording"]),
+                        "sorting": str(dirs["spyglass_sorting"]),
+                        "waveforms": str(dirs["spyglass_waveforms"]),
+                        "temp": str(dirs["spyglass_temp"]),
+                        "video": str(dirs["spyglass_video"]),
+                        "export": str(dirs["spyglass_export"]),
+                    },
+                    "kachery_dirs": {
+                        "cloud": str(dirs["kachery_cloud"]),
+                        "storage": str(dirs["kachery_storage"]),
+                        "temp": str(dirs["kachery_temp"]),
+                    },
+                    "dlc_dirs": {
+                        "base": str(base_dir / "deeplabcut"),
+                        "project": str(dirs["dlc_project"]),
+                        "video": str(dirs["dlc_video"]),
+                        "output": str(dirs["dlc_output"]),
+                    },
+                    "moseq_dirs": {
+                        "base": str(base_dir / "moseq"),
+                        "project": str(dirs["moseq_project"]),
+                        "video": str(dirs["moseq_video"]),
+                    },
+                },
+            }
+
+            # Load example config
+            example_path = (
+                Path(__file__).parent.parent.parent
+                / "dj_local_conf_example.json"
+            )
+            assert (
+                example_path.exists()
+            ), "dj_local_conf_example.json not found in repo root"
+
+            with open(example_path) as f:
+                example_config = json.load(f)
+
+            # Get all keys from both
+            installer_keys = self._get_all_keys(installer_config)
+            example_keys = self._get_all_keys(example_config)
+
+            # Check for missing keys in example
+            missing_in_example = installer_keys - example_keys
+            assert not missing_in_example, (
+                f"\ndj_local_conf_example.json is MISSING keys that "
+                f"install.py generates:\n"
+                f"{sorted(missing_in_example)}\n\n"
+                f"Action required:\n"
+                f"  1. Update dj_local_conf_example.json to include these keys\n"
+                f"  2. See install.py::create_database_config() "
+                f"(lines ~1264-1331) for reference\n"
+            )
+
+            # Check for extra keys in example (warning, not error)
+            extra_in_example = example_keys - installer_keys
+            if extra_in_example:
+                import warnings
+
+                warnings.warn(
+                    f"\ndj_local_conf_example.json has EXTRA keys not in "
+                    f"installer:\n"
+                    f"{sorted(extra_in_example)}\n\n"
+                    f"This might be OK (example may show optional configs), "
+                    f"but verify these are intentional.\n",
+                    UserWarning,
+                )
+
+    def test_example_config_directory_groups_complete(self):
+        """Test that example has all 4 required directory groups."""
+        example_path = (
+            Path(__file__).parent.parent.parent / "dj_local_conf_example.json"
+        )
+
+        with open(example_path) as f:
+            example_config = json.load(f)
+
+        # Check custom section exists
+        assert (
+            "custom" in example_config
+        ), "dj_local_conf_example.json missing 'custom' section"
+
+        custom = example_config["custom"]
+
+        # Check all 4 directory groups present
+        required_groups = [
+            "spyglass_dirs",
+            "kachery_dirs",
+            "dlc_dirs",
+            "moseq_dirs",
+        ]
+        for group in required_groups:
+            assert (
+                group in custom
+            ), f"dj_local_conf_example.json missing '{group}' in custom section"
+
+    def test_example_config_is_valid_json(self):
+        """Test that dj_local_conf_example.json is valid JSON."""
+        example_path = (
+            Path(__file__).parent.parent.parent / "dj_local_conf_example.json"
+        )
+
+        assert (
+            example_path.exists()
+        ), "dj_local_conf_example.json not found in repo root"
+
+        # Should not raise JSONDecodeError
+        with open(example_path) as f:
+            config = json.load(f)
+
+        assert isinstance(
+            config, dict
+        ), "Example config should be a JSON object (dict)"

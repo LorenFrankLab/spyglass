@@ -6,8 +6,8 @@ Get from zero to analyzing neural data with Spyglass in just a few commands.
 
 ### Joining an Existing Lab? (Recommended)
 
-If you received database credentials from your lab admin, this is you!
-The installer will:
+If you received database credentials from your lab admin, this is you! The
+installer will:
 
 - Set up your development environment
 - Connect you to your lab's existing database
@@ -18,26 +18,27 @@ The installer will:
 
 ### Trying Spyglass Locally?
 
-Want to explore Spyglass features without joining a lab?
-The installer can:
+Want to explore Spyglass features without joining a lab? The installer can:
 
 - Set up a local trial database using Docker
 - Create an isolated test environment
 - Let you experiment with sample data
 
-**Time**: ~10 minutes | **Database**: Local Docker container
-(requires [Docker Desktop](https://docs.docker.com/get-docker/))
+**Time**: ~10 minutes | **Database**: Local Docker container (requires
+[Docker Desktop](https://docs.docker.com/get-docker/))
 
----
+______________________________________________________________________
 
 ## Prerequisites
 
 - **Python**: Version 3.9 or higher
 - **Disk Space**: ~10GB for installation + data storage
 - **Operating System**: macOS or Linux (Windows experimental)
-- **Package Manager**: [conda](https://docs.conda.io/) (23.10.0+ recommended) or [mamba](https://mamba.readthedocs.io/)
+- **Package Manager**: [conda](https://docs.conda.io/) (23.10.0+ recommended) or
+    [mamba](https://mamba.readthedocs.io/)
 
-If you don't have mamba/conda, install [miniforge](https://github.com/conda-forge/miniforge#install) first.
+If you don't have mamba/conda, install
+[miniforge](https://github.com/conda-forge/miniforge#install) first.
 
 ## Installation (2 steps)
 
@@ -56,11 +57,13 @@ The installer will prompt you to choose:
 
 1. **Installation type**: Minimal (recommended) or Full
 2. **Database setup**:
-   - **Remote** (recommended for lab members) - Connect to lab's existing database
-   - **Docker** - Local trial database for testing
-   - **Skip** - Configure manually later
+    - **Remote** (recommended for lab members) - Connect to lab's existing
+        database
+    - **Docker** - Local trial database for testing
+    - **Skip** - Configure manually later
 
-If joining a lab, you'll be prompted to change your password during installation.
+If joining a lab, you'll be prompted to change your password during
+installation.
 
 ### Step 2: Validate installation
 
@@ -77,22 +80,33 @@ python scripts/validate.py
 ## Next Steps
 
 ### Run first tutorial
+
 ```bash
 cd notebooks
 jupyter notebook 01_Concepts.ipynb
 ```
 
 ### Configure for your data
-- Place NWB files in your configured `raw` directory (default: `$SPYGLASS_BASE_DIR/raw/`)
-- See [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/) for details
+
+- Place NWB files in your configured `raw` directory (default:
+    `$SPYGLASS_BASE_DIR/raw/`)
+- See
+    [Data Import Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/01_Insert_Data/)
+    for details
 
 ### Join community
 
-- **Documentation**: [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
-- **Discussions**: [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
-- **Report Issues**: [GitHub Issues](https://github.com/LorenFrankLab/spyglass/issues)
+- **Documentation**:
+    [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
+    
 
----
+- **Discussions**:
+    [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
+
+- **Report Issues**:
+    [GitHub Issues](https://github.com/LorenFrankLab/spyglass/issues)
+
+______________________________________________________________________
 
 ## Installation Options
 
@@ -103,7 +117,7 @@ python scripts/install.py --minimal        # Core dependencies only (~5 min)
 python scripts/install.py --full           # All optional dependencies (~15 min)
 python scripts/install.py --docker         # Set up local Docker database
 python scripts/install.py --remote         # Connect to existing database
-python scripts/install.py --env-name myenv # Custom environment name
+python scripts/install.py --env-name myenv # Custom conda environment name
 python scripts/install.py --help           # See all options
 ```
 
@@ -119,6 +133,7 @@ The installer creates:
 ## Troubleshooting
 
 ### Installation fails?
+
 ```bash
 # Remove environment and retry
 conda env remove -n spyglass
@@ -134,10 +149,13 @@ python scripts/install.py
 
 ### Need help?
 
-- Check [Advanced Setup Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/) for manual installation
-- Ask questions in [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
+- Check
+    [Advanced Setup Guide](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
+    for manual installation
+- Ask questions in
+    [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
 
----
+______________________________________________________________________
 
 ## For Lab Administrators
 
@@ -146,14 +164,14 @@ settings so new members don't need to enter them manually.
 
 ### Lab-Wide vs User-Specific Settings
 
-| Setting | Lab-Wide | User-Specific |
-|---------|----------|---------------|
-| Database host | ✅ | |
-| Database port | ✅ | |
-| Base data directory | ✅ | |
-| Kachery zone | ✅ | |
-| Database username | | ✅ |
-| Database password | | ✅ |
+| Setting             | Lab-Wide | User-Specific |
+| ------------------- | -------- | ------------- |
+| Database host       | ✅       |               |
+| Database port       | ✅       |               |
+| Base data directory | ✅       |               |
+| Kachery zone        | ✅       |               |
+| Database username   |          | ✅            |
+| Database password   |          | ✅            |
 
 ### Option 1: Environment Variables (Recommended)
 
@@ -168,8 +186,8 @@ New members run the installer and only need to enter their credentials:
 
 ```bash
 python scripts/install.py --remote \
-  --db-host your-db-server.edu \
-  --db-user $USER
+    --db-host your-db-server.edu \
+    --db-user $USER
 # Password prompted securely
 ```
 
@@ -186,12 +204,14 @@ example that pre-configures Frank Lab settings.
 ### What to Tell New Lab Members
 
 1. SSH to your shared server
-2. Clone the repository: `git clone https://github.com/LorenFrankLab/spyglass.git`
+2. Clone the repository:
+    `git clone https://github.com/LorenFrankLab/spyglass.git`
 3. Run the installer (or your lab's setup script)
 4. Enter their database username and temporary password
 5. Change their password when prompted
 
----
+______________________________________________________________________
 
-**Next tutorial**: [01_Concepts.ipynb](notebooks/01_Concepts.ipynb)
-**Full documentation**: [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
+**Next tutorial**: [01_Concepts.ipynb](notebooks/01_Concepts.ipynb) **Full
+documentation**:
+[lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
