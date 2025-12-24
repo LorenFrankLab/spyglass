@@ -11,6 +11,7 @@ import warnings
 from pathlib import Path
 
 from spyglass.common import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_version import SpyglassVersions
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema
@@ -81,6 +82,11 @@ def main():
     cleanup_external_files()
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
+    print("Checking for AnalysisFile Issues...")
+    pop_kwargs = dict(
+        order="random", display_progress=True, reserve_jobs=True, processes=15
+    )
+    AnalysisFileIssues().populate(**pop_kwargs)
 
 
 if __name__ == "__main__":
