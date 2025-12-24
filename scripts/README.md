@@ -279,7 +279,7 @@ Skip database setup during installation and configure manually later:
 
 ```bash
 python scripts/install.py --skip-validation
-# Then configure manually: see docs/DATABASE.md
+# Then configure manually: see spyglass/docs/src/GettingStarted/DATABASE.md
 ```
 
 ## Configuration
@@ -343,8 +343,9 @@ docker info
 
 If Docker is not available:
 
-- Install from https://docs.docker.com/get-docker/
-- Or configure database manually (see docs/DATABASE.md)
+- Install from [Docker](https://docs.docker.com/get-docker/)
+- Or configure database manually (see
+    [DATABASE.md](../docs/src/GettingStarted/DATABASE.md))
 
 ### Database Connection Fails
 
@@ -454,7 +455,7 @@ The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
 For issues:
 
 1. Check validation output: `python scripts/validate.py`
-2. See [docs/TROUBLESHOOTING.md](../docs/TROUBLESHOOTING.md)
+2. See [TROUBLESHOOTING.md](../docs/src/GettingStarted/TROUBLESHOOTING.md)
 3. File issue at https://github.com/LorenFrankLab/spyglass/issues
 
 ## License

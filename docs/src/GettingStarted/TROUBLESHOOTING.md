@@ -493,8 +493,8 @@ The validator will check:
     - Include relevant error messages
     - Mention your OS and Python version
 
-3. **Manual Installation:** See `docs/DATABASE.md` and main documentation for
-    manual setup steps
+3. **Manual Installation:** See [`DATABASE.md`](./DATABASE.md) and main
+    documentation for manual setup steps.
 
 ## Reset and Start Fresh
 

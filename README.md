@@ -114,17 +114,17 @@ python scripts/install.py --remote --db-host db.lab.edu --db-user myuser
 
 **Troubleshooting:**
 
-- See [docs/src/TROUBLESHOOsrc/TING.md](docs/src/TROUBLESHOOsrc/TING.md) for
+- See [TROUBLESHOOTING.md](docs/src/GettingStarted/TROUBLESHOOTING.md) for
     common issues
 - Run `python scripts/validate.py` to check your installation
-- For database help, see [docs/DATABASE.md](docs/DATABASE.md)
+- For database help, see [DATABASE.md](docs/src/GettingStarted/DATABASE.md)
 
 ### Manual Installation
 
 For manual installation and advanced configuration:
 
 - [Setup Documentation](https://lorenfranklab.github.io/spyglass/latest/notebooks/00_Setup/)
-- [Database Setup Guide](docs/DATABASE.md)
+- [Database Setup Guide](docs/src/GettingStarted/DATABASE.md)
 
 ## Tutorials
 
