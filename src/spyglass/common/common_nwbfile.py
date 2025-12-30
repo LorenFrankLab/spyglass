@@ -831,17 +831,17 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         registry = AnalysisRegistry()
 
         # Include common table + all custom tables
-        analysis_tables = [self.__class__] + list(registry.all_classes)
+        analysis_tables = [self] + list(registry.all_classes)
         num_tables = len(analysis_tables)
 
         results = {}
         file_checker = AnalysisFileIssues()
 
-        for i, analysis_cls in enumerate(analysis_tables, start=1):
-            tbl_name = analysis_cls.full_table_name
+        for i, analysis_tbl in enumerate(analysis_tables, start=1):
+            tbl_name = analysis_tbl.full_table_name
             logger.info(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
-            issue_count = file_checker.check_files(analysis_cls)
+            issue_count = file_checker.check_files(analysis_tbl)
             results[tbl_name] = issue_count
 
             if issue_count > 0:

@@ -83,10 +83,7 @@ def main():
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
     print("Checking for AnalysisFile Issues...")
-    pop_kwargs = dict(
-        order="random", display_progress=True, reserve_jobs=True, processes=15
-    )
-    AnalysisFileIssues().populate(**pop_kwargs)
+    AnalysisNwbfile().check_all_files()
 
 
 if __name__ == "__main__":
