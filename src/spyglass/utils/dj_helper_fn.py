@@ -246,6 +246,10 @@ def get_fetching_table_from_stack(stack):
 def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     """Get the NWB file name and path from the given DataJoint query.
 
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
+
     Parameters
     ----------
     query_expression : query
@@ -266,30 +270,50 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     file_path_fn : function
         Function to get the absolute path to the NWB file.
     """
-    from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+    from spyglass.common.common_nwbfile import (
+        AnalysisNwbfile,
+        AnalysisRegistry,
+        Nwbfile,
+    )
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="get_nwb_table",
+        alt="FetchMixin.fetch_nwb() (logic integrated into mixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
     attrs = attrs or query_expression.heading.names  # if none, all
 
     which = "analysis" if "analysis" in attr_name else "nwb"
-    tbl_map = {  # map to file_name_str and file_path_fn
-        "analysis": ["analysis_file_name", AnalysisNwbfile.get_abs_path],
-        "nwb": ["nwb_file_name", Nwbfile.get_abs_path],
-    }
-    file_name_str, file_path_fn = tbl_map[which]
+
+    file_name_str = (
+        "analysis_file_name" if which == "analysis" else "nwb_file_name"
+    )
+
+    tbl_inst = instance_table(tbl)
+    tbl_class = AnalysisRegistry().get_class(tbl_inst.full_table_name)
+    file_path_fn = getattr(tbl_class, "get_abs_path", None)  # for custom tables
+
+    if file_path_fn is None:  # use prev approach as fallback
+        file_path_fn = (
+            AnalysisNwbfile.get_abs_path
+            if which == "analysis"
+            else Nwbfile.get_abs_path
+        )
+    if not callable(file_path_fn):
+        raise ValueError(
+            f"Table {tbl_inst.__class__.__name__} does not have a valid "
+            + "get_abs_path method."
+        )
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
 
     nwb_files = (
-        query_expression.join(tbl.proj(nwb2load_filepath=attr_name), **arg)
+        query_expression.join(tbl_inst.proj(nwb2load_filepath=attr_name), **arg)
     ).fetch(file_name_str)
 
     # Disabled #1024
@@ -301,8 +325,21 @@ def get_nwb_table(query_expression, tbl, attr_name, *attrs, **kwargs):
     return nwb_files, file_path_fn
 
 
+def instance_table(table: Union[str, Type[dj.Table]]) -> dj.Table:
+    """Instantiate a DataJoint table from its class, if uninstantiated."""
+    if isinstance(table, str):
+        return dj.FreeTable(dj.conn(), table)
+    if isinstance(table, type) and issubclass(table, dj.Table):
+        return table()
+    return table
+
+
 def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     """Get an NWB object from the given DataJoint query.
+
+    .. deprecated:: 0.6.0
+        This function has been integrated into FetchMixin.
+        Use table.fetch_nwb() instead, which now includes all this logic.
 
     Parameters
     ----------
@@ -323,7 +360,13 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
     nwb_objects : list
         List of dicts containing fetch results and NWB objects.
     """
+    from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin
+
+    ActivityLog().deprecate_log(
+        name="fetch_nwb (helper function)",
+        alt="table.fetch_nwb() method (logic integrated into FetchMixin)",
+    )
 
     kwargs["as_dict"] = True  # force return as dictionary
 
@@ -347,15 +390,11 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             get_nwb_file(file_path, query_expression)
 
     # logging arg only if instanced table inherits Mixin
-    inst = (  # instancing may not be necessary
-        query_expression()
-        if isinstance(query_expression, type)
-        and issubclass(query_expression, dj.Table)
-        else query_expression
-    )
+    inst = instance_table(query_expression)
     arg = dict(log_export=False) if isinstance(inst, SpyglassMixin) else dict()
+    tbl_inst = instance_table(tbl)
     query_table = query_expression.join(
-        tbl.proj(nwb2load_filepath=attr_name), **arg
+        tbl_inst.proj(nwb2load_filepath=attr_name), **arg
     )
 
     rec_dicts = query_table.fetch(*attrs, **kwargs)
@@ -396,6 +435,7 @@ def fetch_nwb(query_expression, nwb_master, *attrs, **kwargs):
             if "object_id" in id_attr and rec_dict[id_attr] != ""
         }
         ret.append({**rec_dict, **nwb_objs})
+
     return ret
 
 

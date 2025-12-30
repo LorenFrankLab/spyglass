@@ -83,9 +83,12 @@ class AnalysisMixin(BaseMixin):
         build() - RECOMMENDED: Create builder for safe file creation (context manager)
         create() - Legacy: Create new analysis file with unique suffix
         add() - Legacy: Register analysis file in table
-        get_file_path() - Get absolute path to analysis file
+        get_abs_path() - Get absolute path for a single analysis file
+        get_abs_paths() - Batch fetch absolute file paths
+        get_prefix() - Get database prefix (e.g., 'myteam')
         cleanup() - Remove orphaned files across all custom tables
         _copy_to_common() - Copy entries to common table during export
+
 
     The build() method returns an AnalysisFileBuilder context manager that
     enforces the CREATE → POPULATE → REGISTER lifecycle, preventing common
@@ -97,6 +100,34 @@ class AnalysisMixin(BaseMixin):
 
     _creation_times = {}
     _cached_analysis_dir = None
+    _analysis_prefix: Optional[str] = None
+
+    def get_prefix(self) -> str:
+        """Get the database prefix for this analysis table.
+
+        Returns the first part of the schema name before the underscore.
+        For example, 'myteam_nwbfile' returns 'myteam'.
+
+        Returns
+        -------
+        str
+            Database prefix (e.g., 'common', 'myteam', username)
+
+        Examples
+        --------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> AnalysisNwbfile().get_prefix()
+        'common'
+
+        >>> from spyglass.common.custom_nwbfile import AnalysisNwbfile
+        >>> AnalysisNwbfile().get_prefix()
+        'yourusername'
+        """
+        if self._analysis_prefix is not None:
+            return self._analysis_prefix
+        if database := getattr(self, "database", None):
+            self._analysis_prefix = database.split("_")[0]
+        return self._analysis_prefix
 
     # ---------------------------- Table management ----------------------------
     @property
@@ -469,6 +500,12 @@ class AnalysisMixin(BaseMixin):
     ) -> str:
         """Return the absolute path for an analysis NWB file given the name.
 
+        This method uses a multi-step fallback strategy to locate files:
+        1. If from_schema=True: Query external table (skips checksum/existence)
+        2. Check database table entry (validates checksum if file exists)
+        3. Check base analysis directory (for legacy flat structure)
+        4. Generate new subdirectory path (modern structure)
+
         The spyglass config from settings.py must be set.
 
         Parameters
@@ -477,48 +514,111 @@ class AnalysisMixin(BaseMixin):
             The name of the NWB file in this table.
         from_schema : bool, optional
             If true, get the file path from the schema externals table, skipping
-            checksum and file existence checks. Defaults to False.
+            checksum and file existence checks. Used internally during fetch
+            operations. Defaults to False.
 
         Returns
         -------
         analysis_nwb_file_abspath : str
             The absolute path for the given file name.
+
+        Raises
+        ------
+        FileNotFoundError
+            Raised by DataJoint when file exists in database but not on disk
+            during checksum validation (caught internally).
+
+        Examples
+        --------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> path = AnalysisNwbfile.get_abs_path("file_ABC123.nwb")
+        >>> # Returns: '/data/analysis/file_ABC/file_ABC123.nwb'
+
+        >>> # Skip checksum for faster lookups (internal use)
+        >>> AnalysisNwbfile.get_abs_path("file_ABC123.nwb", from_schema=True)
         """
-        if from_schema:  # Skips checksum check
+        # FALLBACK 1: Query external table (from_schema=True)
+        # Used during fetch operations to skip checksum validation
+        if from_schema:
             query = (
                 cls()._ext_tbl & f"filepath LIKE '%{analysis_nwb_file_name}'"
             )
-            if len(query) == 1:  # Else try the standard way
+            if len(query) == 1:
                 return str(Path(cls()._analysis_dir) / query.fetch1("filepath"))
-            cls()._logger.warning(
-                f"Found {len(query)} files for: {analysis_nwb_file_name}"
+            # If multiple or no matches, fall through to standard resolution
+            if len(query) != 0:
+                cls()._logger.warning(
+                    f"Found {len(query)} files matching "
+                    f"'{analysis_nwb_file_name}' in external table. "
+                )
+
+        # FALLBACK 2: Check database table entry (with checksum validation)
+        file_key = (
+            dict(analysis_file_name=analysis_nwb_file_name)
+            if isinstance(analysis_nwb_file_name, str)
+            else analysis_nwb_file_name
+        )
+        if not isinstance(file_key, dict):
+            raise ValueError(
+                "analysis_nwb_file_name must be dict or str, got "
+                + f"{type(analysis_nwb_file_name)}"
             )
 
-        # If an entry exists in the database get the stored datajoint filepath
-        file_key = {"analysis_file_name": analysis_nwb_file_name}
         query = cls().restrict(file_key, log_export=False)
         if bool(query):
-            try:  # runs if file exists locally
+            try:
                 return query.fetch1("analysis_file_abs_path", log_export=False)
             except FileNotFoundError as e:
-                # file exists in database but not locally
-                # parse the intended path from the error message
+                # File is registered but not present locally. Parse the intended
+                # path from DataJoint's error message for downstream use (e.g.,
+                # download from remote storage).
                 return str(e).split(": ")[1].replace("'", "")
 
-        # File not in database, define what it should be
-        # see if the file exists and is stored in the base analysis dir
+        # FALLBACK 3: Check flat directory structure
         test_path = f"{cls()._analysis_dir}/{analysis_nwb_file_name}"
-
         if Path(test_path).exists():
+            cls()._logger.debug(
+                f"Found {analysis_nwb_file_name} in flat structure: {test_path}"
+            )
             return test_path
-        else:
-            # use the new path
-            analysis_file_base_path = Path(
-                cls()._analysis_dir
-            ) / cls.__get_analysis_file_dir(analysis_nwb_file_name)
-            if not analysis_file_base_path.exists():
-                os.mkdir(str(analysis_file_base_path))
-            return str(analysis_file_base_path / analysis_nwb_file_name)
+
+        # FALLBACK 4: Generate modern subdirectory path
+        # Example: 'analysis_dir/session_ABC/session_ABC123.nwb'
+        analysis_file_base_path = Path(
+            cls()._analysis_dir
+        ) / cls.__get_analysis_file_dir(analysis_nwb_file_name)
+        if not analysis_file_base_path.exists():
+            cls()._logger.debug(
+                f"Creating analysis subdirectory: {analysis_file_base_path}"
+            )
+            os.mkdir(str(analysis_file_base_path))
+
+        return str(analysis_file_base_path / analysis_nwb_file_name)
+
+    def get_abs_paths(self, **kwargs) -> list:
+        """Fetch absolute paths for all analysis files in this restriction.
+
+        Convenience method for batch path operations. Fetches all file names
+        and resolves them to absolute paths.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional arguments passed to fetch()
+
+        Returns
+        -------
+        list of str
+            Absolute paths to analysis files
+
+        Examples
+        --------
+        >>> from spyglass.common import AnalysisNwbfile
+        >>> paths = (AnalysisNwbfile & restriction).get_abs_paths()
+        >>> # ['/data/analysis/file1.nwb', '/data/analysis/file2.nwb']
+        """
+        file_names = self.fetch("analysis_file_name", **kwargs)
+        return [self.get_abs_path(fn) for fn in file_names]
 
     def add_nwb_object(
         self,
