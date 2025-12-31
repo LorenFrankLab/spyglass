@@ -47,8 +47,6 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
-- Set default codecov threshold for test fail, disable patch check #1370, #1372
-- Simplify PR template #1370
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489
 - Pin `ndx-optogenetics` to 0.2.0 #1458
@@ -78,7 +76,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
