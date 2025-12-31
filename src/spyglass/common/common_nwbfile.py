@@ -730,7 +730,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         # Delete orphans from this analysis table
         orphans = analysis_tbl.delete_orphans(dry_run=dry_run, safemode=False)
-        n_orphans = len(orphans)
+        n_orphans = len(orphans) if orphans is not None else 0
 
         # Clean up this table's external entries
         unused = analysis_tbl.cleanup_external(
