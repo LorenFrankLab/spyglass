@@ -465,10 +465,7 @@ def _safe_compress(input_path, output_path):
     lock_path = Path(str(output_path) + ".lock")
 
     if lock_path.exists():
-        raise RuntimeError(
-            f"Lock file exists: {lock_path}. "
-            "Another compression may be in progress."
-        )
+        raise RuntimeError(f"Another file lock exists: {lock_path}")
 
     lock_path.touch()
     temp_fd, temp_output = tempfile.mkstemp(

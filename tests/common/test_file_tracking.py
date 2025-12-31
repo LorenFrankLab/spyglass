@@ -31,28 +31,28 @@ def sample_file(temp_dir):
 class TestSafeCompress:
     """Tests for _safe_compress context manager."""
 
-    def test_checksum_computation(self, sample_file, temp_dir):
-        """Test that checksums are computed correctly."""
+    def test_temp_file_usage(self, sample_file, temp_dir):
+        """Test that temp file is used for atomic writes."""
         # Import here to avoid module-level schema creation
         from spyglass.common.common_file_tracking import _safe_compress
 
         output_path = temp_dir / "output.gz"
 
-        with _safe_compress(str(sample_file), str(output_path)) as checksums:
-            # Simulate compression
+        with _safe_compress(str(sample_file), str(output_path)) as temp_path:
+            # Compress to temp file (not output_path)
             with open(sample_file, "rb") as f_in:
-                with gzip.open(output_path, "wb") as f_out:
+                with gzip.open(temp_path, "wb") as f_out:
                     f_out.write(f_in.read())
 
-        assert "input" in checksums
-        assert "output" in checksums
-        # UUID string format is 36 chars (includes hyphens)
-        assert len(str(checksums["input"])) == 36  # UUID string length
-        assert len(str(checksums["output"])) == 36
+        # After context, output file should exist (renamed from temp)
+        assert output_path.exists()
 
-        # Verify input checksum matches
-        expected = uuid_from_file(sample_file)
-        assert checksums["input"] == expected
+        # Verify decompression produces correct data
+        with gzip.open(output_path, "rb") as f_in:
+            decompressed_data = f_in.read()
+        with open(sample_file, "rb") as f_in:
+            original_data = f_in.read()
+        assert decompressed_data == original_data
 
     def test_lock_file_creation(self, sample_file, temp_dir):
         """Test that lock file is created and removed."""
@@ -61,12 +61,10 @@ class TestSafeCompress:
         output_path = temp_dir / "output.gz"
         lock_path = Path(str(output_path) + ".lock")
 
-        with _safe_compress(str(sample_file), str(output_path)) as _:
+        with _safe_compress(str(sample_file), str(output_path)) as temp_path:
             # Lock is removed in finally block
-            import gzip
-
             with open(sample_file, "rb") as f_in:
-                with gzip.open(output_path, "wb") as f_out:
+                with gzip.open(temp_path, "wb") as f_out:
                     f_out.write(f_in.read())
 
         # Lock should be removed after
