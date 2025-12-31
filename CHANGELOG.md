@@ -9,8 +9,10 @@ import all foreign key references.
 
 ```python
 # Alter Decoding v1 table
+from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
+FirFilterParameters().alter()
 DecodingParameters().alter()
 
 # Alter v0 recompute table
@@ -34,7 +36,19 @@ from spyglass.spikesorting.v1.recompute import (
 
 RecordingRecomputeSelection().alter()
 RecordingRecompute().alter()
+
+
+# Fix LFPBandV1 issue #1481
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()  # See issue #1481
 ```
+
+### Breaking Changes
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Documentation
 
@@ -42,6 +56,7 @@ RecordingRecompute().alter()
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
+- Add support for bandstop filter type #1464
 
 ### Infrastructure
 
@@ -57,18 +72,26 @@ RecordingRecompute().alter()
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
-- Set default codecov threshold for test fail, disable patch check #1370, #1372
-- Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
+    #1484, #1489
 - Pin `ndx-optogenetics` to 0.2.0 #1458
+- Cleanup bug when fetching raw files from DANDI #1469
+- Refactor pytests for speed, run fast tests on push #1440
+- Allow for permissive name selection when identifying objects in ingestion nwb
+    #1490
+- Update fixes for accessing files from DANDI #1477
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
 
 ### Pipelines
 
 - Behavior
+
     - Add methods for calling moseq visualization functions #1374
+
 - Common
+
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
     - Change `IntervalList.insert` to `cautious_insert` #1423
@@ -79,19 +102,36 @@ RecordingRecompute().alter()
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
-    - Improve error transparency on duplicate `Electrode` ids #1454
+    - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
+    - Handle epoch formats with varying zero-padding #1459, #1492
+    - Reduce lock conflicts between users during ingestion #1483
+    - Add the table `RawCompassDirection` for importing orientation data from NWB
+        files #1466
+
 - Decoding
+
     - Ensure results directory is created if it doesn't exist #1362
     - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+    - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
+        merge IDs are fetched in non-chronological order #1471
+    - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
+
+- LFP
+
+    - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
+
 - Position
+
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+
 - Spikesorting
+
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
 
 ## [0.5.5] (Aug 6, 2025)
