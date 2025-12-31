@@ -15,21 +15,25 @@ DecodingParameters().alter()
 
 # Alter v0 recompute table
 from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
     RecordingRecomputeSelection,
     RecordingRecomputeVersions,  # noqa F401
     UserEnvironment,  # noqa F401
 )
 
 RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
 
 # Alter v1 recompute table
 from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
     RecordingRecomputeSelection,
     RecordingRecomputeVersions,  # noqa F401
     UserEnvironment,  # noqa F401
 )
 
 RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
 ```
 
 ### Documentation
