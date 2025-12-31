@@ -10,6 +10,7 @@ import os
 import shutil
 import tempfile
 import time
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,59 +25,189 @@ from spyglass.utils import logger
 schema = dj.schema("common_file_compression")
 
 
-# Compression algorithm implementations
-def _compress_gzip(input_path, output_path, **kwargs):
-    """Compress file using gzip."""
-    with open(input_path, "rb") as f_in:
-        with gzip.open(output_path, "wb", **kwargs) as f_out:
-            shutil.copyfileobj(f_in, f_out)
+# ============================================================================
+# Compression Algorithm Classes
+# ============================================================================
 
 
-def _compress_lzma(input_path, output_path, **kwargs):
-    """Compress file using lzma."""
-    with open(input_path, "rb") as f_in:
-        with lzma.open(output_path, "wb", **kwargs) as f_out:
-            shutil.copyfileobj(f_in, f_out)
+class CompressionAlgorithm(ABC):
+    """Abstract base class for compression algorithms.
+
+    Subclasses must define:
+    - name: str - Algorithm identifier (e.g., 'gzip', 'lzma')
+    - suffix: str - File extension (e.g., '.gz', '.xz')
+    - compress(input_path, output_path, **kwargs) - Compression implementation
+    - decompress(input_path, output_path) - Decompression implementation
+
+    Algorithms auto-register on class definition via __init_subclass__.
+
+    Examples
+    --------
+    >>> # Get algorithm instance
+    >>> algo = CompressionAlgorithm.get("gzip")
+    >>> algo.compress("input.nwb", "output.gz", compresslevel=6)
+    >>> algo.decompress("output.gz", "restored.nwb")
+    """
+
+    # Class-level registry mapping algorithm name to instance
+    _registry = {}
+
+    # Subclasses must define these
+    name = None
+    suffix = None
+
+    def __init_subclass__(cls, **kwargs):
+        """Auto-register algorithm when subclass is defined."""
+        super().__init_subclass__(**kwargs)
+        if cls.name is not None:
+            CompressionAlgorithm._registry[cls.name] = cls()
+
+    @classmethod
+    def get(cls, algorithm: str):
+        """Get algorithm instance by name.
+
+        Parameters
+        ----------
+        algorithm : str
+            Algorithm name (e.g., 'gzip', 'lzma')
+
+        Returns
+        -------
+        CompressionAlgorithm
+            Algorithm instance
+
+        Raises
+        ------
+        ValueError
+            If algorithm not found in registry
+        """
+        if algorithm not in cls._registry:
+            available = list(cls._registry.keys())
+            raise ValueError(
+                f"Unsupported algorithm: {algorithm}. "
+                f"Available: {available}"
+            )
+        return cls._registry[algorithm]
+
+    @classmethod
+    def get_all(cls):
+        """Get all registered algorithms.
+
+        Returns
+        -------
+        dict
+            Mapping of algorithm name to instance
+        """
+        return cls._registry.copy()
+
+    @abstractmethod
+    def compress(self, input_path, output_path, **kwargs):
+        """Compress a file.
+
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to input file
+        output_path : str or Path
+            Path to output compressed file
+        **kwargs
+            Algorithm-specific parameters
+        """
+
+    @abstractmethod
+    def decompress(self, input_path, output_path):
+        """Decompress a file.
+
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to compressed file
+        output_path : str or Path
+            Path to output decompressed file
+        """
 
 
-def _decompress_gzip(input_path, output_path):
-    """Decompress gzip file."""
-    with gzip.open(input_path, "rb") as f_in:
-        with open(output_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+class GzipAlgorithm(CompressionAlgorithm):
+    """Gzip compression algorithm."""
+
+    name = "gzip"
+    suffix = ".gz"
+
+    def compress(self, input_path, output_path, **kwargs):
+        """Compress file using gzip.
+
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to input file
+        output_path : str or Path
+            Path to output file
+        **kwargs
+            Passed to gzip.open (e.g., compresslevel=6)
+        """
+        with open(input_path, "rb") as f_in:
+            with gzip.open(output_path, "wb", **kwargs) as f_out:
+                shutil.copyfileobj(f_in, f_out)
+
+    def decompress(self, input_path, output_path):
+        """Decompress gzip file.
+
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to compressed file
+        output_path : str or Path
+            Path to output file
+        """
+        with gzip.open(input_path, "rb") as f_in:
+            with open(output_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
 
-def _decompress_lzma(input_path, output_path):
-    """Decompress lzma file."""
-    with lzma.open(input_path, "rb") as f_in:
-        with open(output_path, "wb") as f_out:
-            shutil.copyfileobj(f_in, f_out)
+class LzmaAlgorithm(CompressionAlgorithm):
+    """LZMA/XZ compression algorithm."""
 
+    name = "lzma"
+    suffix = ".xz"
 
-# Mapping of algorithm names to compression/decompression functions
-COMPRESSION_FUNCTIONS = {
-    "gzip": _compress_gzip,
-    "lzma": _compress_lzma,
-}
+    def compress(self, input_path, output_path, **kwargs):
+        """Compress file using lzma.
 
-DECOMPRESSION_FUNCTIONS = {
-    "gzip": _decompress_gzip,
-    "lzma": _decompress_lzma,
-}
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to input file
+        output_path : str or Path
+            Path to output file
+        **kwargs
+            Passed to lzma.open (e.g., preset=6)
+        """
+        with open(input_path, "rb") as f_in:
+            with lzma.open(output_path, "wb", **kwargs) as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
-COMPRESSION_SUFFIXES = {
-    "gzip": ".gz",
-    "lzma": ".xz",
-}
+    def decompress(self, input_path, output_path):
+        """Decompress lzma file.
+
+        Parameters
+        ----------
+        input_path : str or Path
+            Path to compressed file
+        output_path : str or Path
+            Path to output file
+        """
+        with lzma.open(input_path, "rb") as f_in:
+            with open(output_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
 
 
 @schema
 class CompressionParams(dj.Lookup):
     """Supported compression algorithms and parameters.
 
-    Maps algorithm names to compression functions with configurable parameters.
-    Adding new algorithms requires implementing compression/decompression functions
-    and adding entries to COMPRESSION_FUNCTIONS/DECOMPRESSION_FUNCTIONS dicts.
+    Maps algorithm names to CompressionAlgorithm instances with configurable
+    parameters. Adding new algorithms requires defining a new CompressionAlgorithm
+    subclass with compress() and decompress() methods.
     """
 
     definition = """
@@ -192,16 +323,9 @@ class CompressedNwbfile(dj.Manual):
         kwargs = params["kwargs"]
         description = params["description"]
 
-        # Get compression function and file suffix
-        compress_func = COMPRESSION_FUNCTIONS.get(algorithm)
-        if not compress_func:
-            raise ValueError(
-                f"Unsupported algorithm: {algorithm}. "
-                f"Available: {list(COMPRESSION_FUNCTIONS.keys())}"
-            )
-
-        suffix = COMPRESSION_SUFFIXES.get(algorithm, ".compressed")
-        compressed_path = str(original_path) + suffix
+        # Get compression algorithm instance
+        algo = CompressionAlgorithm.get(algorithm)
+        compressed_path = str(original_path) + algo.suffix
 
         logger.info(
             f"Compressing {nwb_file_name} with {description} "
@@ -210,8 +334,8 @@ class CompressedNwbfile(dj.Manual):
 
         # Use _safe_compress to create compressed file atomically
         with _safe_compress(original_path, compressed_path) as temp_path:
-            # Compress using the algorithm-specific function with kwargs
-            compress_func(original_path, temp_path, **kwargs)
+            # Compress using the algorithm's compress method with kwargs
+            algo.compress(original_path, temp_path, **kwargs)
 
         compressed_size = os.path.getsize(compressed_path)
         ratio = original_size / compressed_size if compressed_size > 0 else 0
@@ -271,19 +395,14 @@ class CompressedNwbfile(dj.Manual):
         params = (CompressionParams & {"param_id": param_id}).fetch1()
         algorithm = params["algorithm"]
 
-        # Get decompression function
-        decompress_func = DECOMPRESSION_FUNCTIONS.get(algorithm)
-        if not decompress_func:
-            raise ValueError(
-                f"Unsupported algorithm: {algorithm}. "
-                f"Available: {list(DECOMPRESSION_FUNCTIONS.keys())}"
-            )
+        # Get algorithm instance
+        algo = CompressionAlgorithm.get(algorithm)
 
         logger.info(f"Decompressing {nwb_file_name} ({algorithm})...")
 
         # Decompress and time it
         start_time = time.time()
-        decompress_func(compressed_path, original_path)
+        algo.decompress(compressed_path, original_path)
         decompress_time_ms = int((time.time() - start_time) * 1000)
 
         # Update is_compressed flag

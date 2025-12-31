@@ -80,7 +80,7 @@ class TestSafeCompress:
         # Create lock file
         lock_path.touch()
 
-        with pytest.raises(RuntimeError, match="Lock file exists"):
+        with pytest.raises(RuntimeError, match="file lock exists"):
             with _safe_compress(str(sample_file), str(output_path)):
                 pass
 
