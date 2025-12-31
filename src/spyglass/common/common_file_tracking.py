@@ -17,7 +17,7 @@ from pathlib import Path
 import datajoint as dj
 import pynwb
 
-from spyglass.common import LabMember, Nwbfile
+from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_nwbfile import schema as nwbfile_schema
 from spyglass.utils import logger
 
@@ -101,6 +101,8 @@ class CompressionParams(dj.Lookup):
 
     def insert1(self, *args, **kwargs):
         """Require admin privileges to add compression algorithms."""
+        from spyglass.common import LabMember
+
         LabMember().check_admin_privilege(
             "Admin permissions required to add compression algorithms"
         )
