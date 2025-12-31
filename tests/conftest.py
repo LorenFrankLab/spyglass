@@ -338,7 +338,9 @@ def load_config(dj_conn, base_dir):
 def mini_insert(
     dj_conn, mini_path, mini_content, teardown, server, load_config, mini_dict
 ):
-    from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
+    # CompressedNwbfile schema needs to be declared before insert_sessions
+    from spyglass.common import CompressedNwbfile  # noqa: E402
+    from spyglass.common import LabMember, Nwbfile, Session
     from spyglass.data_import import insert_sessions  # noqa: E402
     from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
@@ -360,6 +362,8 @@ def mini_insert(
     if len(Nwbfile & mini_dict) != 0:
         dj_logger.warning("Skipping insert, use existing data.")
     else:
+        # Uncomment to debug insert_sessions errors
+        # insert_sessions(mini_path.name, raise_err=True)
         try:
             insert_sessions(mini_path.name, raise_err=True)
         except Exception as e:  # If can't insert session, exit all tests

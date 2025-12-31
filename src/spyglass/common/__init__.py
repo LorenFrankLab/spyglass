@@ -29,6 +29,7 @@ from spyglass.common.common_ephys import (
     Raw,
     SampleCount,
 )
+from spyglass.common.common_file_tracking import CompressedNwbfile
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import (
     IntervalList,
