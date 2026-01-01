@@ -137,7 +137,7 @@ class TestCompressionIntegrity:
         lock_path.touch()
 
         # Try second compression
-        with pytest.raises(RuntimeError, match="Lock file exists"):
+        with pytest.raises(RuntimeError, match="file lock exists"):
             with _safe_compress(str(sample_file), str(output_path)):
                 pass
 
