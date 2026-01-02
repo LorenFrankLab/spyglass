@@ -55,6 +55,23 @@ class Nwbfile(SpyglassMixin, dj.Manual):
 
     # NOTE: See #630, #664. Excessive key length.
 
+    class AccessLog(dj.Part):
+        """Track file access for usage analysis and compression decisions.
+
+        Logs all file access events to help identify compression candidates
+        and monitor usage patterns.
+        """
+
+        definition = """
+        access_id: int auto_increment
+        -> master
+        ---
+        dj_user: varchar(64)  # DataJoint user who accessed the file
+        access_time=CURRENT_TIMESTAMP: timestamp
+        access_method: varchar(32)  # Method used (fetch_nwb, direct, etc)
+        decompression_time_ms=null: int unsigned  # Decompression duration
+        """
+
     @classmethod
     def insert_from_relative_file_name(cls, nwb_file_name: str) -> None:
         """Insert a new session from an existing NWB file.
@@ -77,10 +94,61 @@ class Nwbfile(SpyglassMixin, dj.Manual):
         )
 
     def fetch_nwb(self):
-        return [
-            get_nwb_file(self.get_abs_path(file))
-            for file in self.fetch("nwb_file_name")
-        ]
+        """Fetch NWB files, decompressing if needed.
+
+        Checks compression status and automatically decompresses compressed files
+        before opening. Logs all file access events with user tracking for usage
+        analysis and compression decisions.
+
+        Returns
+        -------
+        list
+            List of opened NWB file objects
+        """
+        import time
+
+        from spyglass.common.common_file_tracking import CompressedNwbfile
+
+        # Get current DataJoint user
+        dj_user = dj.config.get("database.user", "unknown")
+
+        file_names = self.fetch("nwb_file_name")
+        nwb_files = []
+
+        for file_name in file_names:
+            decompression_time_ms = None
+
+            # Check if file is compressed and decompress if needed
+            comp_entry = CompressedNwbfile() & {"nwb_file_name": file_name}
+
+            if comp_entry:
+                is_compressed = comp_entry.fetch1("is_compressed")
+
+                if is_compressed:
+                    # Decompress and measure time
+                    logger.info(f"Decompressing {file_name} for access")
+                    start_time = time.time()
+                    CompressedNwbfile().decompress(file_name)
+                    decompression_time_ms = int(
+                        (time.time() - start_time) * 1000
+                    )
+
+            # Log access event for all files
+            Nwbfile.AccessLog.insert1(
+                {
+                    "nwb_file_name": file_name,
+                    "dj_user": dj_user,
+                    "access_method": "fetch_nwb",
+                    "decompression_time_ms": decompression_time_ms,
+                },
+                skip_duplicates=False,  # Allow multiple access logs
+            )
+
+            # Get path and open file
+            file_path = self.get_abs_path(file_name)
+            nwb_files.append(get_nwb_file(file_path))
+
+        return nwb_files
 
     @classmethod
     def get_abs_path(
