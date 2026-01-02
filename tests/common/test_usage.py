@@ -217,7 +217,7 @@ def test_export_populate(populate_export, custom_analysis_file):
     assert len(file) == 5, "Export files not captured correctly"
 
     # 41->42 w/ access log in compression #1478
-    assert len(table) == 41, "Export tables not captured correctly"
+    assert len(table) == 42, "Export tables not captured correctly"
 
 
 def test_invalid_export_id(export_tbls):
