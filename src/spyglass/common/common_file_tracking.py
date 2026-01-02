@@ -7,7 +7,7 @@ from tqdm import tqdm
 from spyglass.common import AnalysisRegistry
 from spyglass.utils import SpyglassAnalysis
 
-schema = dj.Schema("cbroz_common_file_tracking")
+schema = dj.Schema("common_file_tracking")
 
 
 @schema
