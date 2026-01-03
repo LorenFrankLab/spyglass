@@ -12,7 +12,10 @@ import warnings
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import List, Tuple, Union
+from typing import TYPE_CHECKING, List, Tuple, Union
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 import datajoint as dj
 import networkx as nx
@@ -35,8 +38,14 @@ except ImportError:
 try:
     from deeplabcut import create_training_dataset, train_network
     from deeplabcut.core.engine import Engine
+
+    try:
+        from deeplabcut import evaluate_network
+    except ImportError:
+        evaluate_network = None
 except ImportError:
     create_training_dataset, train_network, Engine = [None] * 3
+    evaluate_network = None
 
 # -------------------------------- Module setup --------------------------------
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
@@ -550,13 +559,760 @@ class Model(SpyglassMixin, dj.Computed):
     key_source = ModelSelection  # one entry per selection, ensures unique id
 
     def make(self, key):
-        pass
+        """Train a new model based on ModelSelection entry.
 
-    def train(self, key):
-        raise NotImplementedError("add selection w/key as parent, populate")
+        This method is called automatically by DataJoint's populate() when
+        a new ModelSelection entry is inserted. It performs the following:
+        1. Fetches model parameters and video group information
+        2. Creates training dataset (if needed)
+        3. Trains the model using the specified tool (DLC, SLEAP, etc.)
+        4. Stores model metadata in NWB file
+        5. Inserts entry into Model table
 
-    def evaluate(self):
-        raise NotImplementedError("Evaluate trained model")
+        Parameters
+        ----------
+        key : dict
+            Primary key from ModelSelection table containing:
+            - model_params_id
+            - tool
+            - vid_group_id
+            - parent_id (optional, for continued training)
+
+        Raises
+        ------
+        NotImplementedError
+            If the tool is not supported for training
+        ValueError
+            If required parameters or data are missing
+        """
+        logger.info(f"Training model for selection: {key}")
+
+        # Fetch selection details
+        sel_entry = (ModelSelection() & key).fetch1()
+        params_key = {
+            "model_params_id": sel_entry["model_params_id"],
+            "tool": sel_entry["tool"],
+        }
+        params_entry = (ModelParams() & params_key).fetch1()
+        tool = params_entry["tool"]
+        params = params_entry["params"]
+        skeleton_id = params_entry.get("skeleton_id")
+
+        # Fetch video group
+        vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
+        vid_group = (VidFileGroup() & vid_group_key).fetch1()
+
+        logger.info(f"Training {tool} model with params: {params_key}")
+
+        # Dispatch to tool-specific training method
+        if tool == "DLC":
+            model_result = self._make_dlc_model(
+                key, params, skeleton_id, vid_group, sel_entry
+            )
+        else:
+            raise NotImplementedError(
+                f"Training not implemented for tool: {tool}"
+            )
+
+        # Insert into Model table
+        self.insert1(model_result)
+        logger.info(f"Model training complete: {model_result['model_id']}")
+
+    def _make_dlc_model(
+        self,
+        key: dict,
+        params: dict,
+        skeleton_id: str,
+        vid_group: dict,
+        sel_entry: dict,
+    ) -> dict:
+        """Train a DLC model.
+
+        Parameters
+        ----------
+        key : dict
+            ModelSelection key
+        params : dict
+            Training parameters from ModelParams
+        skeleton_id : str
+            Skeleton ID for this model
+        vid_group : dict
+            VidFileGroup entry
+        sel_entry : dict
+            Full ModelSelection entry
+
+        Returns
+        -------
+        dict
+            Model table entry with model_id, model_path, analysis_file_name
+        """
+        if create_training_dataset is None or train_network is None:
+            raise ImportError(
+                "DeepLabCut is required for training. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        # Get project path from params or raise error
+        if "project_path" not in params:
+            raise ValueError(
+                "DLC training requires 'project_path' in ModelParams. "
+                "Please specify the DLC project directory."
+            )
+
+        project_path = Path(params["project_path"])
+        if not project_path.exists():
+            raise FileNotFoundError(f"DLC project not found: {project_path}")
+
+        config_path = project_path / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"DLC config.yaml not found in: {project_path}"
+            )
+
+        logger.info(f"Using DLC project: {project_path}")
+
+        # Load config to check training dataset
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        # Get training parameters
+        shuffle = params.get("shuffle", 1)
+        trainingsetindex = params.get("trainingsetindex", 0)
+        maxiters = params.get("maxiters", None)  # Use DLC default if None
+        displayiters = params.get("displayiters", None)
+        saveiters = params.get("saveiters", None)
+
+        # Check if this is continued training
+        parent_id = sel_entry.get("parent_id")
+        if parent_id:
+            logger.info(f"Continuing training from parent model: {parent_id}")
+            # For continued training, we assume dataset already exists
+
+        # Step 1: Create training dataset if needed
+        training_dataset_path = (
+            project_path
+            / "training-datasets"
+            / f"iteration-{config.get('iteration', 0)}"
+        )
+
+        if not training_dataset_path.exists():
+            logger.info("Creating training dataset...")
+            try:
+                create_training_dataset(
+                    str(config_path),
+                    num_shuffles=shuffle,
+                    Shuffles=[shuffle],
+                    trainIndices=None,
+                    testIndices=None,
+                    net_type=params.get("net_type"),
+                    augmenter_type=params.get(
+                        "augmenter_type", config.get("default_augmenter")
+                    ),
+                )
+                logger.info("Training dataset created successfully")
+            except Exception as e:
+                logger.warning(
+                    f"Training dataset creation failed or already exists: {e}"
+                )
+                # May already exist, continue
+
+        # Step 2: Train the network
+        logger.info("Starting model training...")
+        train_params = {
+            "config": str(config_path),
+            "shuffle": shuffle,
+            "trainingsetindex": trainingsetindex,
+            "displayiters": displayiters,
+            "saveiters": saveiters,
+            "maxiters": maxiters,
+        }
+
+        # Remove None values
+        train_params = {k: v for k, v in train_params.items() if v is not None}
+
+        logger.info(f"Training parameters: {train_params}")
+
+        try:
+            train_network(**train_params)
+        except Exception as e:
+            logger.error(f"Training failed: {e}")
+            raise
+
+        logger.info("Training completed successfully")
+
+        # Step 3: Find the trained model
+        # Get latest model info
+        latest_model = self._get_latest_dlc_model_info(config)
+        if not latest_model:
+            raise ValueError(
+                "No trained model found after training. Check DLC output."
+            )
+
+        model_path = latest_model["path"]
+        logger.info(f"Trained model path: {model_path}")
+
+        # Step 4: Generate model_id
+        model_id = default_pk_name(
+            f"DLC-{config['Task']}-{config['date']}",
+            dict(
+                tool="DLC",
+                shuffle=shuffle,
+                iteration=latest_model["iteration"],
+                trainFraction=latest_model["trainFraction"],
+            ),
+        )
+
+        # Step 5: Create NWB file with model metadata
+        # For now, we'll create a simple NWB file
+        # In future, this should include training history, loss curves, etc.
+        nwb_file_name = f"{model_id}_model.nwb"
+        nwb_path = project_path / nwb_file_name
+
+        # Create basic NWB file
+        from pynwb import NWBHDF5IO, NWBFile
+
+        nwbfile = NWBFile(
+            session_description=f"DLC model training: {model_id}",
+            identifier=f"model_{datetime.utcnow():%Y%m%d%H%M%S}",
+            session_start_time=datetime.utcnow(),
+        )
+
+        # Store training metadata in scratch space
+        training_metadata = {
+            "model_id": model_id,
+            "tool": "DLC",
+            "project_path": str(project_path),
+            "config_path": str(config_path),
+            "model_path": str(model_path),
+            "shuffle": shuffle,
+            "trainingsetindex": trainingsetindex,
+            "iteration": latest_model["iteration"],
+            "trainFraction": latest_model["trainFraction"],
+            "snapshot": latest_model.get("snapshot"),
+            "trained_date": latest_model["date_trained"].isoformat(),
+            "parent_id": parent_id,
+            "skeleton_id": skeleton_id,
+        }
+
+        nwbfile.add_scratch(training_metadata, name="model_training_metadata")
+
+        # Write NWB file
+        with NWBHDF5IO(str(nwb_path), mode="w") as io:
+            io.write(nwbfile)
+
+        logger.info(f"Model metadata saved to NWB: {nwb_path}")
+
+        # Step 6: Register NWB file in AnalysisNwbfile
+        # Note: This may need to be adjusted based on Spyglass conventions
+        analysis_key = AnalysisNwbfile().create(nwb_file_name)
+        if not analysis_key:
+            # File may already be registered
+            analysis_key = (
+                AnalysisNwbfile() & {"analysis_file_name": nwb_file_name}
+            ).fetch1("KEY")
+
+        # Return Model entry
+        return dict(
+            key,
+            model_id=model_id,
+            analysis_file_name=nwb_file_name,
+            model_path=str(model_path),
+        )
+
+    def train(
+        self,
+        model_key: dict,
+        maxiters: Union[int, None] = None,
+        **kwargs,
+    ) -> dict:
+        """Continue training an existing model or train with new parameters.
+
+        This method creates a new ModelSelection entry with parent_id pointing
+        to the original model, then triggers populate() to train the new model.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for existing Model entry (must include 'model_id')
+        maxiters : Union[int, None], optional
+            Additional training iterations. If None, uses default from params.
+        **kwargs
+            Additional parameters to override in ModelParams. Can include:
+            - shuffle : int, new shuffle index
+            - trainingsetindex : int, new training set fraction
+            - displayiters : int, display frequency
+            - saveiters : int, save frequency
+
+        Returns
+        -------
+        dict
+            Primary key for the new Model entry
+
+        Raises
+        ------
+        ValueError
+            If model_key doesn't exist in Model table
+
+        Examples
+        --------
+        >>> # Continue training with 50k more iterations
+        >>> model_key = {"model_id": "my_dlc_model"}
+        >>> new_model_key = model.train(model_key, maxiters=50000)
+        >>>
+        >>> # Train new shuffle from same model
+        >>> new_model_key = model.train(model_key, shuffle=2)
+        """
+        # Validate model exists
+        if not (self & model_key):
+            raise ValueError(
+                f"Model not found in database: {model_key}. "
+                "Cannot continue training from non-existent model."
+            )
+
+        # Fetch existing model info
+        model_entry = (self & model_key).fetch1()
+        old_sel_key = {
+            "model_params_id": model_entry["model_params_id"],
+            "tool": model_entry["tool"],
+            "vid_group_id": model_entry["vid_group_id"],
+        }
+
+        logger.info(
+            f"Creating new training session from model: {model_key['model_id']}"
+        )
+
+        # Fetch original params
+        params_entry = (ModelParams() & old_sel_key).fetch1()
+        old_params = params_entry["params"].copy()
+
+        # Update params with new values
+        if maxiters is not None:
+            old_params["maxiters"] = maxiters
+
+        for k, v in kwargs.items():
+            if k in ModelParams().get_accepted_params(params_entry["tool"]):
+                old_params[k] = v
+            else:
+                logger.warning(f"Ignoring unknown parameter: {k}")
+
+        # Create new ModelParams entry if params changed
+        if old_params != params_entry["params"]:
+            new_params_key = ModelParams().insert1(
+                dict(
+                    tool=params_entry["tool"],
+                    params=old_params,
+                    skeleton_id=params_entry.get("skeleton_id"),
+                ),
+                skip_duplicates=True,
+            )
+            if not new_params_key:
+                # Params already exist, fetch the key
+                params_hash = dj.hash.key_hash(old_params)
+                new_params_key = (
+                    ModelParams()
+                    & {
+                        "tool": params_entry["tool"],
+                        "params_hash": params_hash,
+                    }
+                ).fetch1("KEY")
+        else:
+            new_params_key = {
+                "model_params_id": params_entry["model_params_id"],
+                "tool": params_entry["tool"],
+            }
+
+        # Create new ModelSelection with parent_id
+        new_sel_key = dict(
+            new_params_key,
+            vid_group_id=old_sel_key["vid_group_id"],
+            parent_id=model_key["model_id"],
+        )
+
+        logger.info(
+            f"Inserting new ModelSelection with parent_id: {model_key['model_id']}"
+        )
+        ModelSelection().insert1(new_sel_key, skip_duplicates=True)
+
+        # Populate to trigger make()
+        logger.info("Triggering model training...")
+        self.populate(new_sel_key)
+
+        # Fetch and return new model key
+        new_model = (self & new_sel_key).fetch1("KEY")
+        logger.info(f"New model trained: {new_model}")
+
+        return new_model
+
+    def evaluate(
+        self,
+        model_key: dict,
+        plotting: bool = False,
+        show_errors: bool = True,
+        **kwargs,
+    ) -> dict:
+        """Evaluate a trained model on test dataset.
+
+        Runs DLC's evaluate_network to compute test/train errors and optionally
+        create labeled images. Results are stored in the evaluation-results
+        directory within the DLC project.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for Model entry (must include 'model_id')
+        plotting : bool, optional
+            Whether to create labeled comparison images, by default False
+        show_errors : bool, optional
+            Whether to display errors in logger, by default True
+        **kwargs
+            Additional parameters for evaluate_network. Can include:
+            - Shuffles : list, which shuffles to evaluate (default: [1])
+            - trainingsetindex : int, training set fraction index
+            - comparisonbodyparts : list, specific bodyparts to evaluate
+
+        Returns
+        -------
+        dict
+            Evaluation results with keys:
+            - train_error : float, mean training error in pixels
+            - test_error : float, mean test error in pixels
+            - train_error_p : float, training error with p-cutoff
+            - test_error_p : float, test error with p-cutoff
+            - p_cutoff : float, p-value cutoff used
+            - results_path : str, path to results CSV file
+
+        Raises
+        ------
+        ValueError
+            If model_key doesn't exist in Model table
+        ImportError
+            If DLC is not installed or evaluate_network not available
+        FileNotFoundError
+            If model or config file not found
+
+        Examples
+        --------
+        >>> # Evaluate model
+        >>> results = model.evaluate({"model_id": "my_dlc_model"})
+        >>> print(f"Test error: {results['test_error']:.2f} px")
+        >>>
+        >>> # Evaluate with labeled images
+        >>> results = model.evaluate(
+        ...     {"model_id": "my_dlc_model"},
+        ...     plotting=True
+        ... )
+        """
+        if evaluate_network is None:
+            raise ImportError(
+                "DeepLabCut evaluate_network is required for evaluation. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        # Validate model exists
+        if not (self & model_key):
+            raise ValueError(
+                f"Model not found in database: {model_key}. "
+                "Cannot evaluate non-existent model."
+            )
+
+        # Fetch model info
+        model_entry = (self & model_key).fetch1()
+        sel_key = {
+            "model_params_id": model_entry["model_params_id"],
+            "tool": model_entry["tool"],
+            "vid_group_id": model_entry["vid_group_id"],
+        }
+
+        params_entry = (ModelParams() & sel_key).fetch1()
+        tool = params_entry["tool"]
+
+        logger.info(f"Evaluating model: {model_key['model_id']}")
+
+        # Dispatch to tool-specific evaluation
+        if tool == "DLC":
+            return self._evaluate_dlc_model(
+                model_entry, params_entry, plotting, show_errors, **kwargs
+            )
+        else:
+            raise NotImplementedError(
+                f"Evaluation not implemented for tool: {tool}"
+            )
+
+    def _evaluate_dlc_model(
+        self,
+        model_entry: dict,
+        params_entry: dict,
+        plotting: bool,
+        show_errors: bool,
+        **kwargs,
+    ) -> dict:
+        """Evaluate a DLC model.
+
+        Parameters
+        ----------
+        model_entry : dict
+            Model table entry
+        params_entry : dict
+            ModelParams entry
+        plotting : bool
+            Create labeled images
+        show_errors : bool
+            Display errors
+        **kwargs
+            Additional DLC evaluation parameters
+
+        Returns
+        -------
+        dict
+            Evaluation results
+        """
+        params = params_entry["params"]
+
+        # Get project path
+        if "project_path" not in params:
+            raise ValueError(
+                "DLC evaluation requires 'project_path' in ModelParams"
+            )
+
+        project_path = Path(params["project_path"])
+        config_path = project_path / "config.yaml"
+
+        if not config_path.exists():
+            raise FileNotFoundError(f"DLC config not found: {config_path}")
+
+        # Get evaluation parameters
+        shuffle = kwargs.get("Shuffles", [params.get("shuffle", 1)])
+        if not isinstance(shuffle, list):
+            shuffle = [shuffle]
+
+        trainingsetindex = kwargs.get(
+            "trainingsetindex", params.get("trainingsetindex", 0)
+        )
+
+        logger.info(f"Running DLC evaluation on shuffles: {shuffle}")
+
+        # Run DLC evaluation
+        try:
+            evaluate_network(
+                str(config_path),
+                Shuffles=shuffle,
+                trainingsetindex=trainingsetindex,
+                plotting=plotting,
+                show_errors=show_errors,
+            )
+        except Exception as e:
+            logger.error(f"DLC evaluation failed: {e}")
+            raise
+
+        logger.info("Evaluation completed successfully")
+
+        # Parse evaluation results
+        results = self._parse_dlc_evaluation_results(
+            project_path, shuffle[0], trainingsetindex
+        )
+
+        if show_errors and results:
+            logger.info(
+                f"Train error: {results['train_error']:.2f} px, "
+                f"Test error: {results['test_error']:.2f} px"
+            )
+
+        return results
+
+    def _parse_dlc_evaluation_results(
+        self, project_path: Path, shuffle: int, trainingsetindex: int
+    ) -> dict:
+        """Parse DLC evaluation results from CSV file.
+
+        Parameters
+        ----------
+        project_path : Path
+            DLC project path
+        shuffle : int
+            Shuffle number
+        trainingsetindex : int
+            Training set index
+
+        Returns
+        -------
+        dict
+            Parsed evaluation results
+        """
+        # Find evaluation results
+        # Pattern: evaluation-results/iteration-X/TASK-trainsetYshuffleZ/*-results.csv
+        eval_dir = project_path / "evaluation-results"
+
+        if not eval_dir.exists():
+            logger.warning(f"No evaluation results found in {eval_dir}")
+            return {}
+
+        # Find most recent iteration
+        iteration_dirs = sorted(eval_dir.glob("iteration-*"))
+        if not iteration_dirs:
+            logger.warning("No iteration directories found")
+            return {}
+
+        latest_iter = iteration_dirs[-1]
+
+        # Find results CSV for this shuffle
+        results_csvs = list(latest_iter.rglob("*-results.csv"))
+        results_csvs = [
+            f
+            for f in results_csvs
+            if f"shuffle{shuffle}" in str(f)
+            and "CombinedEvaluation" not in str(f)
+        ]
+
+        if not results_csvs:
+            logger.warning(f"No results CSV found for shuffle {shuffle}")
+            return {}
+
+        # Use most recent results file
+        results_csv = max(results_csvs, key=lambda p: p.stat().st_mtime)
+        logger.debug(f"Reading evaluation results: {results_csv}")
+
+        # Parse CSV
+        import pandas as pd
+
+        df = pd.read_csv(results_csv)
+
+        # Get last row (latest snapshot)
+        if len(df) == 0:
+            return {}
+
+        last_row = df.iloc[-1]
+
+        return {
+            "train_error": float(last_row["Train error(px)"]),
+            "test_error": float(last_row["Test error(px)"]),
+            "train_error_p": float(last_row["Train error with p-cutoff"]),
+            "test_error_p": float(last_row["Test error with p-cutoff"]),
+            "p_cutoff": float(last_row["p-cutoff used"]),
+            "training_iterations": int(last_row["Training iterations:"]),
+            "shuffle": int(last_row["Shuffle number"]),
+            "train_fraction": int(last_row["%Training dataset"]),
+            "results_path": str(results_csv),
+        }
+
+    def get_training_history(
+        self, model_key: dict
+    ) -> Union["pd.DataFrame", None]:
+        """Extract training history (loss curves) for a model.
+
+        Reads the learning_stats.csv file from DLC training output.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for Model entry
+
+        Returns
+        -------
+        pd.DataFrame or None
+            DataFrame with columns: iteration, loss, learning_rate
+            Returns None if training history not found
+
+        Examples
+        --------
+        >>> history = model.get_training_history({"model_id": "my_dlc_model"})
+        >>> if history is not None:
+        ...     print(f"Final loss: {history['loss'].iloc[-1]:.4f}")
+        """
+        import pandas as pd
+
+        # Validate model exists
+        if not (self & model_key):
+            raise ValueError(f"Model not found: {model_key}")
+
+        # Get model path
+        model_entry = (self & model_key).fetch1()
+        model_path = Path(model_entry["model_path"])
+
+        # Training stats are in model_path/train/learning_stats.csv
+        stats_path = model_path / "train" / "learning_stats.csv"
+
+        if not stats_path.exists():
+            logger.warning(f"Training stats not found: {stats_path}")
+            return None
+
+        # Read CSV (format: iteration, loss, learning_rate)
+        df = pd.read_csv(
+            stats_path,
+            header=None,
+            names=["iteration", "loss", "learning_rate"],
+        )
+
+        logger.debug(f"Loaded {len(df)} training iterations from {stats_path}")
+        return df
+
+    def plot_training_history(
+        self, model_key: dict, save_path: Union[Path, str, None] = None
+    ):
+        """Plot training loss curve for a model.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for Model entry
+        save_path : Union[Path, str, None], optional
+            Path to save plot. If None, displays plot, by default None
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure object
+
+        Examples
+        --------
+        >>> fig = model.plot_training_history({"model_id": "my_dlc_model"})
+        >>> # Or save to file
+        >>> model.plot_training_history(
+        ...     {"model_id": "my_dlc_model"},
+        ...     save_path="training_loss.png"
+        ... )
+        """
+        import matplotlib.pyplot as plt
+
+        history = self.get_training_history(model_key)
+
+        if history is None:
+            raise ValueError("No training history found for this model")
+
+        # Create plot
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        ax.plot(history["iteration"], history["loss"], linewidth=2)
+        ax.set_xlabel("Training Iteration", fontsize=12)
+        ax.set_ylabel("Loss", fontsize=12)
+        ax.set_title(
+            f"Training Loss Curve: {model_key['model_id']}",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.grid(True, alpha=0.3)
+
+        # Add final loss annotation
+        final_loss = history["loss"].iloc[-1]
+        final_iter = history["iteration"].iloc[-1]
+        ax.annotate(
+            f"Final: {final_loss:.4f}",
+            xy=(final_iter, final_loss),
+            xytext=(10, 10),
+            textcoords="offset points",
+            bbox=dict(boxstyle="round,pad=0.5", fc="yellow", alpha=0.7),
+            arrowprops=dict(arrowstyle="->", connectionstyle="arc3,rad=0"),
+        )
+
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches="tight")
+            logger.info(f"Training plot saved to: {save_path}")
+            plt.close(fig)
+        else:
+            plt.show()
+
+        return fig
 
     def import_model(
         self,
@@ -901,6 +1657,239 @@ class Model(SpyglassMixin, dj.Computed):
         logger.info(f"Model imported: {model_id}")
 
         return model_key
+
+    def run_inference(
+        self,
+        model_key: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool = False,
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run pose estimation inference on video(s) using a trained model.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for the Model table entry (must include 'model_id')
+        video_path : Union[Path, str, list]
+            Path to video file(s) for inference. Can be:
+            - Single video path (str or Path)
+            - List of video paths
+            - Directory containing videos (will analyze all videos)
+        save_as_csv : bool, optional
+            Whether to save output as CSV in addition to h5, by default False
+        destfolder : Union[Path, str, None], optional
+            Destination folder for output files. If None, saves in same directory
+            as video, by default None
+        **kwargs
+            Additional parameters passed to the underlying inference function
+            (e.g., DLC's analyze_videos). Common options:
+            - shuffle : int, shuffle index (default: 1)
+            - trainingsetindex : int, training set fraction index (default: 0)
+            - batch_size : int, batch size for inference
+            - device : str, device for inference ('cpu', 'cuda', etc.)
+
+        Returns
+        -------
+        Union[str, list]
+            Path(s) to output file(s). Returns single path if single video input,
+            list of paths if multiple videos.
+
+        Raises
+        ------
+        ValueError
+            If model_key doesn't exist in Model table
+        FileNotFoundError
+            If video_path doesn't exist
+        NotImplementedError
+            If model tool is not supported for inference
+
+        Examples
+        --------
+        >>> # Run inference on single video
+        >>> model_key = {"model_id": "my_dlc_model"}
+        >>> output = model.run_inference(model_key, "/path/to/video.mp4")
+        >>>
+        >>> # Run inference with custom options
+        >>> output = model.run_inference(
+        ...     model_key,
+        ...     "/path/to/video.mp4",
+        ...     save_as_csv=True,
+        ...     batch_size=32,
+        ...     device="cuda",
+        ... )
+        """
+        # Validate model exists
+        if not (self & model_key):
+            raise ValueError(
+                f"Model not found in database: {model_key}. "
+                "Please import model first using Model.import_model()"
+            )
+
+        # Fetch model information
+        model_info = (self & model_key).fetch1()
+        model_params_key = {
+            "model_params_id": model_info["model_params_id"],
+            "tool": model_info["tool"],
+        }
+        params_info = (ModelParams() & model_params_key).fetch1()
+        tool = params_info["tool"]
+
+        logger.info(f"Running inference with {tool} model: {model_key}")
+
+        # Dispatch to tool-specific inference method
+        if tool == "DLC":
+            return self._run_dlc_inference(
+                model_info, video_path, save_as_csv, destfolder, **kwargs
+            )
+        elif tool == "ndx-pose":
+            raise NotImplementedError(
+                "Inference from ndx-pose NWB files not yet supported. "
+                "Please use the original DLC project for inference."
+            )
+        else:
+            raise NotImplementedError(
+                f"Inference not supported for tool: {tool}"
+            )
+
+    def _run_dlc_inference(
+        self,
+        model_info: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool,
+        destfolder: Union[Path, str, None],
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run DLC inference on video(s).
+
+        Parameters
+        ----------
+        model_info : dict
+            Model table entry with model_path and other metadata
+        video_path : Union[Path, str, list]
+            Video path(s) for inference
+        save_as_csv : bool
+            Save output as CSV
+        destfolder : Union[Path, str, None]
+            Destination folder for outputs
+        **kwargs
+            Additional DLC analyze_videos parameters
+
+        Returns
+        -------
+        Union[str, list]
+            Output file path(s)
+        """
+        if create_training_dataset is None or train_network is None:
+            raise ImportError(
+                "DeepLabCut is required for inference. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        # Get DLC config path from model
+        model_path = Path(model_info["model_path"])
+
+        # For DLC models, model_path should point to config.yaml
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model config not found: {model_path}")
+
+        if model_path.suffix not in [".yaml", ".yml"]:
+            raise ValueError(
+                f"DLC model path must be a config.yaml file, got: {model_path}"
+            )
+
+        # Validate video path(s)
+        if isinstance(video_path, (list, tuple)):
+            for vp in video_path:
+                if not Path(vp).exists():
+                    raise FileNotFoundError(f"Video not found: {vp}")
+            videos = [str(vp) for vp in video_path]
+        else:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                raise FileNotFoundError(f"Video not found: {video_path}")
+            videos = str(video_path)
+
+        # Set up DLC analyze_videos parameters
+        analyze_params = {
+            "config": str(model_path),
+            "videos": videos,
+            "save_as_csv": save_as_csv,
+            "destfolder": str(destfolder) if destfolder else None,
+        }
+
+        # Add any additional parameters from kwargs
+        # Only include DLC-accepted parameters
+        dlc_params = [
+            "shuffle",
+            "trainingsetindex",
+            "videotype",
+            "in_random_order",
+            "snapshot_index",
+            "device",
+            "batch_size",
+            "dynamic",
+            "modelprefix",
+            "robust_nframes",
+            "cropping",
+        ]
+        for param in dlc_params:
+            if param in kwargs:
+                analyze_params[param] = kwargs[param]
+
+        logger.info(f"Running DLC inference on {videos}")
+        logger.debug(f"DLC parameters: {analyze_params}")
+
+        # Import analyze_videos dynamically to avoid import errors
+        try:
+            from deeplabcut import analyze_videos
+        except ImportError:
+            raise ImportError(
+                "Failed to import DeepLabCut analyze_videos. "
+                "Please ensure DeepLabCut>=3.0 is installed."
+            )
+
+        # Run DLC inference
+        try:
+            analyze_videos(**analyze_params)
+        except Exception as e:
+            logger.error(f"DLC inference failed: {e}")
+            raise
+
+        # Determine output file path(s)
+        # DLC saves outputs in the same directory as videos (or destfolder)
+        output_folder = Path(destfolder) if destfolder else None
+
+        if isinstance(videos, list):
+            output_paths = []
+            for vid_path in videos:
+                vid_path = Path(vid_path)
+                output_dir = output_folder if output_folder else vid_path.parent
+                # DLC output naming: {video_stem}DLC_{scorer}.h5
+                output_pattern = f"{vid_path.stem}DLC_*.h5"
+                output_files = list(output_dir.glob(output_pattern))
+                if output_files:
+                    # Get most recent if multiple
+                    output_paths.append(
+                        str(max(output_files, key=lambda p: p.stat().st_mtime))
+                    )
+            logger.info(f"Inference complete. Output files: {output_paths}")
+            return output_paths
+        else:
+            vid_path = Path(videos)
+            output_dir = output_folder if output_folder else vid_path.parent
+            output_pattern = f"{vid_path.stem}DLC_*.h5"
+            output_files = list(output_dir.glob(output_pattern))
+            if not output_files:
+                raise FileNotFoundError(
+                    f"DLC output file not found: {output_dir}/{output_pattern}"
+                )
+            output_path = str(
+                max(output_files, key=lambda p: p.stat().st_mtime)
+            )
+            logger.info(f"Inference complete. Output: {output_path}")
+            return output_path
 
     def _get_latest_dlc_model_info(self, config: dict) -> dict:
         """Given a DLC project path, return available model info

@@ -252,3 +252,105 @@ def mock_nwb_file_for_parent(tmp_path):
         io.write(nwbfile)
 
     return nwb_path
+
+
+# ----------------------------- Inference Fixtures -----------------------------
+
+
+@pytest.fixture
+def mock_video_file(tmp_path):
+    """Create a mock video file for testing inference.
+
+    Creates a simple test video using OpenCV if available,
+    otherwise creates a placeholder file.
+
+    Returns
+    -------
+    Path
+        Path to the created video file
+    """
+    video_path = tmp_path / "test_video.avi"
+
+    try:
+        import cv2
+
+        # Create a simple 10-frame video (640x480, 30fps)
+        fourcc = cv2.VideoWriter_fourcc(*"XVID")
+        out = cv2.VideoWriter(str(video_path), fourcc, 30.0, (640, 480))
+
+        for i in range(10):
+            # Create a blank frame with frame number
+            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            cv2.putText(
+                frame,
+                f"Frame {i}",
+                (250, 240),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2,
+            )
+            out.write(frame)
+
+        out.release()
+    except ImportError:
+        # If cv2 not available, create a placeholder file
+        video_path.write_text("MOCK_VIDEO_FILE")
+
+    return video_path
+
+
+@pytest.fixture
+def mock_dlc_inference_output(tmp_path):
+    """Create mock DLC inference output files (h5 and csv).
+
+    Returns
+    -------
+    dict
+        Dictionary with keys 'h5' and 'csv' pointing to the output files
+    """
+    import pandas as pd
+
+    # Create mock DLC output structure
+    # DLC outputs have multi-level columns: [scorer, bodypart, coords]
+    scorer = "DLC_resnet50_TESTSep8shuffle1_6"
+    bodyparts = ["bodypart1", "bodypart2", "bodypart3", "objectA"]
+    coords = ["x", "y", "likelihood"]
+
+    # Create MultiIndex columns
+    columns = pd.MultiIndex.from_product(
+        [[scorer], bodyparts, coords], names=["scorer", "bodyparts", "coords"]
+    )
+
+    # Create mock data (10 frames)
+    n_frames = 10
+    data = np.random.rand(n_frames, len(bodyparts) * len(coords)) * 100
+
+    # Set likelihood column to reasonable values (0.7-1.0)
+    for i, bp in enumerate(bodyparts):
+        likelihood_col = (scorer, bp, "likelihood")
+        col_idx = columns.get_loc(likelihood_col)
+        data[:, col_idx] = np.random.rand(n_frames) * 0.3 + 0.7
+
+    df = pd.DataFrame(data, columns=columns)
+
+    # Save as h5 and csv
+    h5_path = tmp_path / "test_video_dlc_output.h5"
+    csv_path = tmp_path / "test_video_dlc_output.csv"
+
+    df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+    df.to_csv(str(csv_path))
+
+    return {"h5": h5_path, "csv": csv_path, "dataframe": df}
+
+
+@pytest.fixture
+def skip_if_no_dlc():
+    """Skip test if DeepLabCut is not available."""
+    try:
+        import deeplabcut  # noqa: F401
+
+        return False
+    except ImportError:
+        pytest.skip("DeepLabCut not available")
+        return True
