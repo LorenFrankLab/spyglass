@@ -30,8 +30,16 @@ def _open_nwb_file(nwb_file_path, source="local"):
     elif source == "dandi":
         from ..common.common_dandi import DandiPath
 
+        if DandiPath().has_file_path(nwb_file_path):
+            path_to_load = nwb_file_path
+        elif DandiPath().has_raw_path(nwb_file_path):
+            path_to_load = DandiPath().raw_from_path(nwb_file_path)["filename"]
+        else:
+            raise ValueError(
+                f"File not found in Dandi: {Path(nwb_file_path).name}"
+            )
         io, nwbfile = DandiPath().fetch_file_from_dandi(
-            nwb_file_path=nwb_file_path
+            nwb_file_path=path_to_load
         )
     else:
         raise ValueError(f"Invalid open_nwb source: {source}")
@@ -99,12 +107,10 @@ def get_nwb_file(nwb_file_path, query_expression=None):
     # Dandi fallback SB 2024-04-03
     from ..common.common_dandi import DandiPath
 
-    if DandiPath().has_file_path(file_path=nwb_file_path):
+    if DandiPath().has_file_path(
+        file_path=nwb_file_path
+    ) or DandiPath().has_raw_path(file_path=nwb_file_path):
         return _open_nwb_file(nwb_file_path, source="dandi")
-
-    if DandiPath().has_raw_path(file_path=nwb_file_path):
-        raw = DandiPath().get_raw_path(file_path=nwb_file_path)["filename"]
-        return _open_nwb_file(raw, source="dandi")
 
     if hasattr(query_expression, "_make_file"):
         # if the query_expression has a _make_file method, call it to
