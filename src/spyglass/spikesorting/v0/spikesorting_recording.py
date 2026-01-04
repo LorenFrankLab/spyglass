@@ -563,12 +563,39 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             self._make_file(key)
 
         if rec_path in self._data_cache:
-            return self._data_cache[rec_path].get("num_samples")
+            num_samples = self._data_cache[rec_path].get("num_samples")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                num_samples = data.get("num_samples", None)
+        else:
+            num_samples = None
 
-        with open(rec_path / "si_folder.json") as f:
-            data = json.load(f)
-            self._data_cache[rec_path] = data
-            num_samples = data.get("num_samples", None)
+        # Fallback: if num_samples is None, read from source NWB
+        if num_samples is None and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                # Get the recording for the specific interval
+                valid_sort_times = self._get_sort_interval_valid_times(
+                    key
+                ).times
+                valid_sort_times_indices = np.array(
+                    [
+                        np.searchsorted(recording.get_times(), interval)
+                        for interval in valid_sort_times
+                    ]
+                )
+                # Calculate total samples across all intervals
+                num_samples = sum(
+                    end - start for start, end in valid_sort_times_indices
+                )
+            except Exception as e:
+                logger.warning(f"Could not read num_samples from NWB: {e}")
+                return None
 
         return num_samples
 
@@ -597,14 +624,98 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             self._make_file(key)
 
         if rec_path in self._data_cache:
-            return self._data_cache[rec_path].get("sampling_rate")
+            samp_rate = self._data_cache[rec_path].get("sampling_rate")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                samp_rate = data.get("sampling_rate", None)
+        else:
+            samp_rate = None
 
-        with open(rec_path / "si_folder.json") as f:
-            data = json.load(f)
-            self._data_cache[rec_path] = data
-            sampling_rate = data.get("sampling_rate", None)
+        def is_invalid(x):  # checks for None, nan, or <= 0
+            return x is None or (isinstance(x, float) and x != x) or x <= 0
 
-        return sampling_rate
+        # Fallback: if sampling_rate is None or invalid, read from source NWB
+        if is_invalid(samp_rate) and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                samp_rate = recording.get_sampling_frequency()
+            except Exception as e:
+                logger.warning(f"Could not read sampling rate from NWB: {e}")
+
+        if is_invalid(samp_rate):
+            logger.warning(f"Invalid sampling rate from NWBns: {samp_rate}")
+            samp_rate = None
+
+        return samp_rate
+
+    def _get_min_segment_length(
+        self, key: dict, min_threshold: Optional[int] = None
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """Get minimum segment length in samples.
+
+        Examines all segments in the recording and returns the minimum length.
+        If min_threshold is provided, returns early when a segment below the
+        threshold is found (for efficiency).
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with nwb_file_name, sort_interval_name, etc.
+        min_threshold : int, optional
+            If provided, return early when a segment below this threshold
+            is found. Default None (check all segments).
+
+        Returns
+        -------
+        min_length : int or None
+            Minimum segment length in samples, or None if cannot determine
+        segment_index : int or None
+            Index of the minimum segment, or None if cannot determine
+        """
+        try:
+            # Get the valid sort times (segment boundaries)
+            valid_sort_times = self._get_sort_interval_valid_times(key).times
+            if len(valid_sort_times) == 0:
+                return None, None
+
+            # Get sampling rate to convert time to samples
+            samp_rate = self._get_sampling_rate(key=key)
+            if not samp_rate or samp_rate <= 0:
+                return None, None
+
+            # Check each segment length
+            min_length = float("inf")
+            min_index = None
+
+            for i, (start, end) in enumerate(valid_sort_times):
+                segment_duration = end - start  # in seconds
+                segment_samples = int(segment_duration * samp_rate)
+
+                # Early exit if below threshold
+                if (
+                    min_threshold is not None
+                    and segment_samples < min_threshold
+                ):
+                    return segment_samples, i
+
+                # Track minimum
+                if segment_samples < min_length:
+                    min_length = segment_samples
+                    min_index = i
+
+            return (
+                int(min_length) if min_length != float("inf") else None,
+                min_index,
+            )
+
+        except Exception as e:
+            logger.warning(f"Could not determine min segment length: {e}")
+            return None, None
 
     @staticmethod
     def _get_recording_timestamps(recording):

@@ -101,7 +101,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             have = sort_dict(  # pragma: no cover
                 dict(spikeinterface=si_version, probeinterface=pi_version)
             )
-            logger.error(f"Versions mismatch: {need} != {have}")
+            logger.error(f"Versions mismatch:\n\tNeed: {need}\n\tHave: {have}")
 
         return ret
 
@@ -243,7 +243,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         skip_si094 : bool, optional
             Check for SI 0.94.x incompatibility. Default True.
         skip_low_sr : bool, optional
-            Check for low sampling rate causing Wn[0] < Wn[1] errors. Default True.
+            Check for low sampling rate causing Wn[0] < Wn[1] errors. Default
+            True.
 
         Returns
         -------
@@ -259,12 +260,35 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             rec_path = Path(recording_dir) / rec_name
 
         if not rec_path.exists():
-            return False, None
+            return True, "Recording path does not exist"
 
-        # Pattern 1: Padlen error (short recordings)
+        required_files = [
+            "si_folder.json",
+            "binary.json",
+            "provenance.json",
+            "probe.json",
+        ]
+        for req_file in required_files:
+            if not (rec_path / req_file).exists():
+                err_msg = f"missing_required_file ({req_file})"
+                return True, err_msg
+
+        # Pattern 1: Padlen error (short recordings or short segments)
         if skip_padlen:
-            n_samples = rec_tbl._get_n_samples(rec_path=rec_path) or 36
-            if n_samples < 35:
+            # Check for short segments (early exit on first segment < 35)
+            min_samples, seg_index = rec_tbl._get_min_segment_length(
+                key, min_threshold=35
+            )
+            if min_samples is not None and min_samples < 35:
+                err_msg = (
+                    f"padlen_short_segment (segment {seg_index}: "
+                    f"{min_samples} samples < 35)"
+                )
+                return True, err_msg
+
+            # Fallback: also check total n_samples from si_folder.json
+            n_samples = rec_tbl._get_n_samples(key=key, rec_path=rec_path)
+            if n_samples is not None and n_samples < 35:
                 err_msg = f"padlen_short_recording ({n_samples} samples)"
                 return True, err_msg
 
@@ -277,12 +301,20 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         # Pattern 3: Low sampling rate (Wn[0] < Wn[1] error)
         if skip_low_sr:
-            samp_rate = rec_tbl._get_sampling_rate(rec_path=rec_path) or 0
+            # Pass key to enable NWB fallback if si_folder.json unavailable
+            samp_rate = rec_tbl._get_sampling_rate(key=key, rec_path=rec_path)
+
+            # If sampling rate is None/invalid even after NWB fallback, mark xfail
+            if samp_rate is None:
+                err_msg = "invalid_sampling_rate (None or NaN from source)"
+                return True, err_msg
+
             nyquist = samp_rate / 2
             freq_max = (
                 SpikeSortingPreprocessingParameters().fetch_params(key)
             ).get("frequency_max", 0)
-            if samp_rate > 0 and freq_max > 0 and freq_max >= nyquist:
+
+            if freq_max > 0 and freq_max >= nyquist:
                 err_msg = (
                     f"low_sampling_rate (freq_max={freq_max} Hz >= "
                     f"Nyquist={nyquist:.1f} Hz)"
@@ -350,18 +382,24 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             skip_si094=skip_si094,
             skip_low_sr=skip_low_sr,
         )
-        for row in rows:
+        for row in tqdm(rows, desc="Preparing inserts"):
+            no_env = {k: v for k, v in row.items() if k != "env_id"}
+            if bool(RecordingRecompute & no_env & "matched=1"):
+                logger.info(
+                    f"Skipping already matched: {row.get('nwb_file_name', row)}"
+                )
+                continue
+
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
                 continue
 
             # Check xfail patterns if enabled
-            if not force_attempt and skip_xfail:
-                is_xfail, reason = check_xfail(key_pk, **xfail_kwargs)
-                if is_xfail:
-                    key_pk["xfail_reason"] = reason
+            xfail_reason = None
+            if skip_xfail:
+                _, xfail_reason = check_xfail(key_pk, **xfail_kwargs)
 
-            key_pk.update(self.env_dict)
+            key_pk.update(dict(self.env_dict, xfail_reason=xfail_reason))
             key_pk.setdefault("logged_at_creation", at_creation)
             inserts.append(key_pk)
 
@@ -440,7 +478,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         >>> # Remove all redundant selection entries
         >>> RecordingRecomputeSelection().remove_matched(dry_run=False)
         """
-        # Get all successfully matched entries (excluding env_id)
+        # Get all successfully matched entries
         matched_entries = RecordingRecompute & "matched=1"
 
         # Get primary keys excluding env_id
@@ -453,13 +491,13 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             "KEY", as_dict=True
         )
 
-        if not matched_keys:
-            logger.info("No matched entries found in RecordingRecompute")
-            return 0
-
         # Find selection entries that match these files
-        redundant = self & restriction & matched_keys
+        redundant = (self & restriction & matched_keys) - matched_entries.proj()
         count = len(redundant)
+
+        if count == 0:
+            logger.debug("No redundant matched entries")
+            return 0
 
         prefix = "DRY RUN: " if dry_run else ""
         logger.info(
@@ -476,10 +514,11 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 logger.info(f"  {i}. {nwb_file} (env: {env_id})")
             if count > 10:
                 logger.info(f"  ... and {count - 10} more")
-            return count
+            return redundant
 
         # Actually delete the redundant entries
-        redundant.delete()
+        redundant.delete_quick()
+        logger.info(f"Deleted {count} redundant entries")
 
         return count
 
@@ -656,16 +695,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         logger.error(f"V0 Recheck mismat: {new_path}")
         return False
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, force_check=False) -> None:
         rec_key = {k: v for k, v in key.items() if k != "env_id"}
-        if self & rec_key & "matched=1":
+        if not force_check and (self & rec_key & "matched=1"):
             logger.info(f"Already matched {rec_key['nwb_file_name']}")
-            try:
-                (RecordingRecomputeSelection & key).super_delete(
-                    warn=False, safemode=False
-                )
-            except Exception:
-                logger.warning("Failed to delete recompute selection entry.")
+            RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
             return  # pragma: no cover
 
         # Skip recompute for files logged at creation
@@ -693,17 +727,19 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         old_hasher, new_hasher = self._hash_both(key, strict=True)
 
         if isinstance(new_hasher, str):  # pragma: no cover
-            self.insert1(
+            logger.error(f"Recompute error for {log_key}: {new_hasher}")
+            self.insert1(  # if `_hash_both` returned an error message
                 {**key, "matched": False, "err_msg": new_hasher, **created_key}
             )
             return  # pragma: no cover
 
         if old_hasher.hash == new_hasher.hash:
+            logger.info(f"V0 Matched {log_key}")
             self.insert1({**key, "matched": True, **created_key})
             return
 
         # only show file name if available
-        logger.info(f"Failed to match {log_key}")
+        logger.info(f"V0: Failed to match {log_key}")
 
         names, hashes = [], []
         for file in set(new_hasher.cache) | set(old_hasher.cache):
@@ -808,10 +844,11 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             _, new = self._get_paths(key)
             attempt_dirs.append(new)
 
-        msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_dirs)
-        if dj.utils.user_choice(msg).lower() in ["yes", "y"]:
-            for dir in attempt_dirs:
-                shutil_rmtree(dir, ignore_errors=True)
+        if attempt_dirs:
+            msg = "Delete attempt files?\n\t" + "\n\t".join(attempt_dirs)
+            if dj.utils.user_choice(msg).lower() in ["yes", "y"]:
+                for dir in attempt_dirs:
+                    shutil_rmtree(dir, ignore_errors=True)
 
         super().delete(*args, **kwargs)
 

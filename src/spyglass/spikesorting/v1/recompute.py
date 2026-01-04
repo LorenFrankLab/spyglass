@@ -23,15 +23,21 @@ from typing import Optional, Tuple, Union
 
 import datajoint as dj
 import pynwb
+import spikeinterface.extractors as se
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
 from hdmf.build import TypeMap
 from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
+from spyglass.common.common_device import Probe
+from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
@@ -210,6 +216,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         skip_xfail: bool = True,
         skip_probe: bool = True,
         skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
         **kwargs,
     ) -> None:
         """Custom insert to ensure dependencies are added to each row.
@@ -231,6 +238,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             Skip entries with missing probe metadata. Default True.
         skip_pynwb_api : bool, optional
             Skip entries with PyNWB API incompatibilities. Default True.
+        skip_nwb_spec : bool, optional
+            Skip entries with NWB schema/spec incompatibilities. Default True.
         """
 
         if not self.env_dict.get("env_id"):  # likely not using conda
@@ -251,17 +260,22 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         inserts = []
         for row in rows:
+            no_env = {k: v for k, v in row.items() if k != "env_id"}
+            if bool((RecordingRecompute & "matched = 1") & no_env):
+                continue  # skip already matched
+
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
-                continue
+                continue  # skip env mismatch
 
             # Check xfail patterns if enabled
             xfail_reason = None
-            if not force_attempt and skip_xfail:
+            if skip_xfail:
                 is_xfail, reason = self._check_xfail(
                     key_pk,
                     skip_probe=skip_probe,
                     skip_pynwb_api=skip_pynwb_api,
+                    skip_nwb_spec=skip_nwb_spec,
                 )
                 if is_xfail:
                     xfail_reason = reason
@@ -328,7 +342,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             logger.info(f"No rows to insert from:\n\t{source}")
             return
 
-        logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
+        logger.info(f"Inserting ocompute attempts for {len(inserts)} files.")
 
         self.insert(inserts, at_creation=False, **kwargs)
 
@@ -339,6 +353,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         key: dict,
         skip_probe: bool = True,
         skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
     ) -> Tuple[bool, Optional[str]]:
         """Check if entry matches known xfail (expected failure) patterns.
 
@@ -350,6 +365,8 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             Check for missing probe metadata. Default True.
         skip_pynwb_api : bool, optional
             Check for PyNWB API incompatibilities. Default True.
+        skip_nwb_spec : bool, optional
+            Check for NWB schema/spec incompatibilities. Default True.
 
         Returns
         -------
@@ -363,16 +380,57 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         # Pattern 1: Missing probe information
         if skip_probe:
-            # Check if this NWB file is known to have missing probe info
-            # based on previous recompute failures
+            # First check previous runs (fast check)
             if bool(prev_runs & 'err_msg LIKE "%probe info%"'):
                 return True, "missing_probe_info"
 
-        # Pattern 2: PyNWB API incompatibility (dtype keyword)
-        if skip_pynwb_api:
-            # Check if there are existing failures with dtype errors
+            # Proactive check: query database for probe metadata
+            try:
+                parent = SpikeSortingRecordingSelection & key
+                if parent:
+                    nwb_file_name = parent.fetch1("nwb_file_name")
+                    probe_query = Electrode * Probe & {
+                        "nwb_file_name": nwb_file_name
+                    }
+                    if len(probe_query) == 0:
+                        return True, "missing_probe_info"
+            except Exception:
+                # If unable to check, don't mark as xfail
+                pass
+
+        if skip_pynwb_api or skip_nwb_spec:
+            # First check previous runs (fast check)
             if bool(prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'):
                 return (True, "pynwb_api_incompatible")
+
+            if bool(prev_runs & 'err_msg LIKE "%No spec%namespace%"'):
+                return True, "nwb_spec_incompatible"
+
+            # Proactive check: try reading NWB with SpikeInterface
+            try:
+                parent = SpikeSortingRecording & key
+                if not parent:
+                    return False, None
+                analysis_file_name = parent.fetch1("analysis_file_name")
+                nwb_path = AnalysisNwbfile().get_abs_path(analysis_file_name)
+
+                # Attempt to read the NWB file with SpikeInterface
+                # This will raise TypeError if dtype API incompatibility
+                _ = se.read_nwb_recording(nwb_path, load_time_vector=False)
+
+            # Pattern 2: PyNWB API incompatibility (dtype keyword)
+            except TypeError as e:
+                is_api_err = "unexpected" in str(e) and "dtype" in str(e)
+                # Check if it's a dtype keyword incompatibility error
+                if skip_pynwb_api and is_api_err:
+                    return True, "pynwb_api_incompatible"
+
+            # Pattern 3: NWB schema/specification incompatibility
+            except ValueError as e:
+                is_spec_err = "No spec" in str(e) and "namespace" in str(e)
+                # Check if it's a spec incompatibility error
+                if skip_nwb_spec and is_spec_err:
+                    return True, "nwb_spec_incompatible"
 
         return False, None
 
@@ -418,7 +476,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """
         from tqdm import tqdm
 
-        # Get all successfully matched entries (excluding env_id)
+        # Get all successfully matched entries
         matched_entries = RecordingRecompute & "matched=1"
 
         # Get primary keys excluding env_id
@@ -431,13 +489,13 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             "KEY", as_dict=True
         )
 
-        if not matched_keys:
-            logger.info("No matched entries found in RecordingRecompute")
-            return 0
-
         # Find selection entries that match these files
-        redundant = self & restriction & matched_keys
+        redundant = (self & restriction & matched_keys) - matched_entries.proj()
         count = len(redundant)
+
+        if count == 0:
+            logger.debug("No redundant matched entries")
+            return 0
 
         prefix = "DRY RUN: " if dry_run else ""
         logger.info(
@@ -454,11 +512,10 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 logger.info(f"  {i}. {analysis_file} (env: {env_id})")
             if count > 10:
                 logger.info(f"  ... and {count - 10} more")
-            return count
+            return redundant
 
         # Actually delete the redundant entries
-        logger.info(f"Deleting {count} redundant selection entries...")
-        redundant.delete(safemode=False)
+        redundant.delete_quick()
         logger.info(f"Deleted {count} redundant entries")
 
         return count
@@ -734,8 +791,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
-        rec_dict = dict(recording_id=key["recording_id"])
-        if self & rec_dict & "matched=1":
+        rec_key = dict(recording_id=key["recording_id"])
+        if not force_check and (self & rec_key & "matched=1"):
+            RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
             logger.info("Previous match found. Skipping recompute.")
             return
 
