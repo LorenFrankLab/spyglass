@@ -342,7 +342,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             logger.info(f"No rows to insert from:\n\t{source}")
             return
 
-        logger.info(f"Inserting ocompute attempts for {len(inserts)} files.")
+        logger.info(f"Inserting compute attempts for {len(inserts)} files.")
 
         self.insert(inserts, at_creation=False, **kwargs)
 
