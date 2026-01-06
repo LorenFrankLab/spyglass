@@ -39,7 +39,6 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
-- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
 - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
@@ -76,7 +75,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
     - Remove pre-existing `Units` from created analysis nwb files #1453
     - Allow multiple VideoFile entries during ingestion #1462
@@ -107,6 +106,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Spikesorting
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+    - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
 
 ## [0.5.5] (Aug 6, 2025)
 

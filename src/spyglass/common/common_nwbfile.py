@@ -156,6 +156,7 @@ class AnalysisRegistry(dj.Manual):
 
     Key Methods:
         get_class(prefix) - Get AnalysisNwbfile class for a specific team prefix
+        get_all_classes() - Get all registered AnalysisNwbfile class objects
         get_tracked_files() - Get all files tracked across all custom tables
         clear_cache() - Clear the class cache (useful for testing)
 
@@ -533,19 +534,27 @@ class AnalysisRegistry(dj.Manual):
         result = dj.conn().query(SQL_TRIGGER_QUERY.format(**kwargs))
         return result.fetchone()[0] > 0
 
-    def _block_single_table(self, table: str) -> Optional[str]:
+    def _block_single_table(
+        self, table: str, dry_run: bool = False
+    ) -> Optional[str]:
         """Block new inserts into a single analysis table.
 
         Parameters
         ----------
         table : str
             The full table name of the analysis table to block.
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Returns
         -------
         error_msg : str or None
             An error message if blocking fails, otherwise None.
         """
+        if dry_run:
+            logger.info(f"Dry run: would block inserts into {table}")
+            return None
+
         try:
             database, trigger = self._get_block_info(table)
             kwargs = dict(database=database, trigger=trigger, table=table)
@@ -561,11 +570,16 @@ class AnalysisRegistry(dj.Manual):
 
         return None
 
-    def block_new_inserts(self) -> None:
+    def block_new_inserts(self, dry_run: bool = False) -> None:
         """Block new inserts into all registered analysis tables.
 
         Creates BEFORE INSERT triggers on all registered custom analysis tables
         to prevent data modifications during maintenance operations.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Raises
         ------
@@ -574,7 +588,7 @@ class AnalysisRegistry(dj.Manual):
         """
         errors = []
         for table in self.fetch("full_table_name"):
-            error = self._block_single_table(table)
+            error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
                 errors.append(error)
 
@@ -667,7 +681,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         to_delete = set()
         for path in tqdm(
             Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files",
+            desc="Scanning analysis files  ",  # Note extra spaces for alignment
         ):
             is_empty_file = path.is_file() and path.stat().st_size == 0
             is_empty_dir = path.is_dir() and not any(path.iterdir())
@@ -677,6 +691,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 to_delete.add(path)
 
         if dry_run:
+            logger.info(f"  {len(to_delete)} untracked or empty analysis files")
             return to_delete, tracked
 
         for path in to_delete:
@@ -688,72 +703,55 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         return to_delete, tracked
 
     def _cleanup_custom_table(
-        self, analysis_tbl, table_num: int, total_tables: int
-    ) -> None:
-        """Clean up a single custom AnalysisNwbfile table.
+        self,
+        analysis_tbl: SpyglassAnalysis,
+        common_orphans: dj.expression.QueryExpression,
+        dry_run: bool,
+        table_num: int,
+        num_tables: int,
+    ) -> dj.expression.QueryExpression:
+        """Clean up a single custom analysis table.
 
         Parameters
         ----------
-        analysis_tbl : AnalysisNwbfile class
+        analysis_tbl : SpyglassAnalysis
             The custom analysis table to clean up.
+        common_orphans : dj.expression.QueryExpression
+            The common orphans to update with valid entries.
+        dry_run : bool
+            If True, only report what would be deleted.
         table_num : int
-            Current table number (for logging).
-        total_tables : int
-            Total number of tables being processed (for logging).
+            Current table number for logging.
+        num_tables : int
+            Total number of tables for logging.
 
         Returns
         -------
-        None
-            Modifies the table in place by deleting orphans and cleaning external.
+        dj.expression.QueryExpression
+            Updated common orphans with valid entries removed.
         """
-        tbl_name = analysis_tbl.full_table_name
-        logger.info(f"  [{table_num}/{total_tables}] Processing {tbl_name}")
+        prefix = analysis_tbl.database.split("_")[0]
 
-        # Delete orphaned entries (no downstream references)
-        analysis_tbl.delete_orphans(dry_run=False, safemode=False)
+        # Delete orphans from this analysis table
+        orphans = analysis_tbl.delete_orphans(dry_run=dry_run, safemode=False)
+        n_orphans = len(orphans) if orphans is not None else 0
 
-        # Clean up unused external file entries
-        analysis_tbl.cleanup_external()
+        # Clean up this table's external entries
+        unused = analysis_tbl.cleanup_external(
+            dry_run=dry_run, delete_external_files=True
+        )
+        logger.info(
+            f"  [{table_num}/{num_tables}] {prefix}: {n_orphans} orphans, "
+            + f"{len(unused)} unused externals"
+        )
 
-    def _cleanup_custom_tables(self, custom_tables: list) -> set:
-        """Process all custom AnalysisNwbfile tables.
-
-        Parameters
-        ----------
-        custom_tables : list
-            List of custom AnalysisNwbfile table classes.
-
-        Returns
-        -------
-        common_orphans : set
-            Set of common orphans after removing valid custom table entries.
-        """
-        num_tables = len(custom_tables)
-        common_orphans = self.get_orphans().proj()
-
-        for i, analysis_tbl in enumerate(custom_tables, start=1):
-            self._cleanup_custom_table(analysis_tbl, i, num_tables)
-
-            # Remove valid entries from common orphans
-            if bool(analysis_tbl):
-                common_orphans -= analysis_tbl.proj()
+        # Remove valid entries from common orphans
+        if bool(analysis_tbl):
+            common_orphans -= analysis_tbl.proj()
 
         return common_orphans
 
-    def _cleanup_common_orphans(self, common_orphans) -> None:
-        """Delete remaining common orphans and clean external entries.
-
-        Parameters
-        ----------
-        common_orphans : DataJoint query
-            Query of orphaned common analysis files.
-        """
-        if bool(common_orphans):
-            common_orphans.delete_quick()
-
-        self.cleanup_external()
-
-    def cleanup(self) -> None:
+    def cleanup(self, dry_run: bool = False) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -774,7 +772,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             from spyglass.common import AnalysisNwbfile
 
             # Run cleanup across all tables
-            AnalysisNwbfile().cleanup()
+            AnalysisNwbfile().cleanup(dry_run=False)
 
         Note:
             This is a destructive operation. Ensure you have backups before
@@ -783,24 +781,58 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         See Also:
             docs/src/ForDevelopers/Management.md for detailed cleanup guide.
+
+        Parameters
+        ----------
+        dry_run : bool
+            If True, perform a non-destructive dry run: log and report all
+            cleanup actions without deleting database entries or files.
+            If False, apply the cleanup changes, including deleting orphaned
+            entries and associated files.
         """
-        logger.info("Analysis cleanup")
+        heading = "============== Analysis Cleanup "
+        suffix = "(Dry Run) ==============" if dry_run else "=============="
+        logger.info(heading + suffix)
+
         registry = AnalysisRegistry()
-        registry.block_new_inserts()
+
+        registry.block_new_inserts(dry_run=dry_run)
+
+        # Get all custom tables first so we can check their tracked files
+        custom_tables = list(registry.all_classes)
+        num_tables = len(custom_tables) + 1  # +1 for common table
+        common_orphans = self.get_orphans().proj()
 
         try:
-            # Step 1: Process all custom tables and track common orphans
-            custom_tables = list(registry.all_classes)
-            common_orphans = self._cleanup_custom_tables(custom_tables)
+            # Process each custom analysis table.
+            # Subtract valid entries from common_orphans
+            for i, analysis_tbl in enumerate(custom_tables, start=1):
+                common_orphans = self._cleanup_custom_table(
+                    analysis_tbl, common_orphans, dry_run, i, num_tables
+                )
 
-            # Step 2: Clean up remaining common orphans
-            self._cleanup_common_orphans(common_orphans)
+            # Delete remaining common orphans
+            n_orphans = len(common_orphans)
 
-            # Step 3: Remove untracked files across all tables
-            self._remove_untracked_files(custom_tables, dry_run=False)
+            if bool(common_orphans) and not dry_run:
+                common_orphans.delete_quick()
+
+            # Clean up common external table entries
+            unused = self.cleanup_external(
+                dry_run=dry_run, delete_external_files=False
+            )
+
+            logger.info(
+                f"  [{num_tables}/{num_tables}] common: {n_orphans} "
+                f"orphans, {len(unused)} unused externals"
+            )
+
+            # Remove untracked files
+            _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
 
         finally:
-            registry.unblock_new_inserts()
+            if not dry_run:
+                registry.unblock_new_inserts()
 
     def check_all_files(self) -> dict:
         """Check files across all analysis tables for issues.
