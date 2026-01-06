@@ -777,7 +777,7 @@ def prompt_install_type() -> Tuple[str, str]:
     Returns
     -------
     env_file : str
-        Path to environment YAML file ("environment_min.yml" or "environment.yml")
+        Path to environment YAML file ("environments/environment_min.yml" or "environments/environment.yml")
     install_type : str
         Installation type identifier ("minimal" or "full")
 
@@ -825,8 +825,8 @@ def prompt_install_type() -> Tuple[str, str]:
 
     # Map choices to (env_file, install_type)
     choice_map = {
-        "1": ("environment_min.yml", "minimal"),
-        "2": ("environment.yml", "full"),
+        "1": ("environments/environment_min.yml", "minimal"),
+        "2": ("environments/environment.yml", "full"),
     }
 
     while True:
@@ -1015,6 +1015,16 @@ def validate_schema(schema: Dict[str, Any]) -> None:
     dir_schema = schema["directory_schema"]
     if not dir_schema:
         raise ValueError("Schema 'directory_schema' is empty")
+
+    # Check for required prefixes
+    required_prefixes = {"spyglass", "kachery", "dlc", "moseq"}
+    actual_prefixes = set(dir_schema.keys())
+    missing_prefixes = required_prefixes - actual_prefixes
+    if missing_prefixes:
+        raise ValueError(
+            f"Missing prefixes: {sorted(missing_prefixes)}. "
+            f"Required: {sorted(required_prefixes)}"
+        )
 
     # Validate each prefix has at least one subdirectory defined
     for prefix, subdirs in dir_schema.items():
@@ -2700,9 +2710,9 @@ def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
         Installation type identifier ("minimal" or "full")
     """
     if args.minimal:
-        return "environment_min.yml", "minimal"
+        return "environments/environment_min.yml", "minimal"
     if args.full:
-        return "environment.yml", "full"
+        return "environments/environment.yml", "full"
     return prompt_install_type()
 
 
@@ -2802,11 +2812,14 @@ def run_dry_run(args: argparse.Namespace) -> None:
 
     # Determine installation type
     if args.minimal:
-        env_file, install_type = "environment_min.yml", "minimal"
+        env_file, install_type = "environments/environment_min.yml", "minimal"
     elif args.full:
-        env_file, install_type = "environment.yml", "full"
+        env_file, install_type = "environments/environment.yml", "full"
     else:
-        env_file, install_type = "environment_min.yml", "minimal (default)"
+        env_file, install_type = (
+            "environments/environment_min.yml",
+            "minimal (default)",
+        )
 
     # Determine base directory
     base_dir = (

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.14.7
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -226,8 +226,8 @@
 # 1. Navigate to your project directory.
 # 2. Use `git` to download the Spyglass repository.
 # 3. Navigate to the newly downloaded directory.
-# 4. Create a `mamba` environment with either `environment.yml` (full) or
-#    `environment_min.yml` (minimal, faster install).
+# 4. Create a `mamba` environment with either `environments/environment.yml` (full) or
+#    `environments/environment_min.yml` (minimal, faster install).
 # 5. Open this notebook with VSCode
 #
 # Commands for the steps above:
@@ -236,7 +236,7 @@
 # cd /your/project/directory/             # 1
 # git clone https://github.com/LorenFrankLab/spyglass/  # 2
 # cd spyglass                             # 3
-# mamba env create -f environment_min.yml # 4 (or environment.yml for full)
+# mamba env create -f environments/environment_min.yml # 4 (or environments/environment.yml for full)
 # code notebooks/00_Setup.ipynb           # 5
 # ```
 #
@@ -315,7 +315,7 @@
 #
 # ```bash
 # # cd /path/to/spyglass # 1
-# mamba env create -f environment_dlc.yml # 2
+# mamba env create -f environments/environment_dlc.yml # 2
 # mamba activate spyglass-dlc # 3
 # ```
 #
@@ -334,7 +334,7 @@
 #
 # ```bash
 # # cd /path/to/spyglass # 1
-# mamba env create -f environment_moseq_cpu.yml # 2
+# mamba env create -f environments/environment_moseq_cpu.yml # 2
 # mamba activate spyglass-moseq-cpu # 3
 # ```
 #

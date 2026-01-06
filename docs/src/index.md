@@ -59,17 +59,21 @@ python scripts/install.py
 ```
 
 The automated installer handles environment creation, database setup, and
-configuration. See [QUICKSTART.md](https://github.com/LorenFrankLab/spyglass/blob/master/QUICKSTART.md)
+configuration. See
+[QUICKSTART.md](https://github.com/LorenFrankLab/spyglass/blob/master/QUICKSTART.md)
 for details.
 
 **Need help?**
 
-- [Database Setup Guide](./DATABASE.md) - Detailed database configuration options
-- [Troubleshooting](./TROUBLESHOOTING.md) - Common installation issues and solutions
+- [Database Setup Guide](./GettingStarted/DATABASE.md) - Detailed database
+    configuration options
+- [Troubleshooting](./GettingStarted/TROUBLESHOOTING.md) - Common installation
+    issues and solutions
 
 This site hosts [tutorials](./notebooks/index.md) to help you get started with
 Spyglass. We recommend running the notebooks yourself. They can be downloaded
-from the [Spyglass GitHub repository](https://github.com/LorenFrankLab/spyglass).
+from the
+[Spyglass GitHub repository](https://github.com/LorenFrankLab/spyglass).
 
 ## Diving Deeper
 

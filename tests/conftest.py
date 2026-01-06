@@ -74,14 +74,12 @@ class _TestDatabaseManager:
 
         # Service container should be ready if health check passed
         # Let test fixtures handle actual connection verification
-        pass
 
     def stop(self):
         """Stop database. No-op as service container is managed by GitHub Actions."""
         if self.null_server:
             return
         # Service container cleanup is handled by GitHub Actions
-        pass
 
     @property
     def credentials(self):
