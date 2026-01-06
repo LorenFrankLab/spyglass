@@ -11,7 +11,6 @@ import warnings
 from pathlib import Path
 
 from spyglass.common import AnalysisNwbfile, Nwbfile
-from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_version import SpyglassVersions
 from spyglass.decoding.decoding_merge import DecodingOutput
 from spyglass.decoding.v1.clusterless import schema as clusterless_schema

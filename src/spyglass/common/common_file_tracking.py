@@ -4,8 +4,8 @@ import datajoint as dj
 from datajoint.logging import logger as dj_logger
 from tqdm import tqdm
 
-from spyglass.common import AnalysisRegistry
-from spyglass.utils import SpyglassAnalysis
+from spyglass.common.common_nwbfile import AnalysisRegistry
+from spyglass.utils import SpyglassAnalysis, logger
 
 schema = dj.Schema("common_file_tracking")
 
@@ -184,8 +184,8 @@ class AnalysisFileIssues(dj.Manual):
         """
         entries = (self & "can_read=0" & restriction).fetch("KEY", as_dict=True)
         if not entries:
-            print("No issues found.")
-            return
+            logger.info("No issues found.")
+            return []
 
         # Get unique analysis tables from entries
         analysis_tables_names = set(e["full_table_name"] for e in entries)
@@ -206,6 +206,6 @@ class AnalysisFileIssues(dj.Manual):
                     ret.append(child & entries)
 
         if not ret:
-            print("No issues found.")
-            return
-        return ret if len(ret) > 1 else ret[0]
+            logger.info("No issues found.")
+
+        return ret or []

@@ -47,6 +47,7 @@ from spyglass.common.common_nwbfile import (
     Nwbfile,
     AnalysisRegistry,
 )
+from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_optogenetics import (
     OpticalFiberDevice,
     OpticalFiberImplant,
@@ -84,6 +85,8 @@ from spyglass.utils.nwb_helper_fn import (
 )
 
 __all__ = [
+    "AnalysisFileIssues",
+    "AnalysisRegistry",
     "LabTeam",
     "LinearizationParameters",
     "Nwbfile",

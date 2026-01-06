@@ -9,6 +9,7 @@ Tests custom analysis table support for file tracking, including:
 """
 
 from pathlib import Path
+from unittest.mock import patch
 
 import datajoint as dj
 import pytest
@@ -48,7 +49,6 @@ def custom_analysis_with_files(custom_config, dj_conn, common_nwbfile):
     prefix = custom_config
     schema = dj.schema(f"{prefix}_nwbfile")
 
-    Nwbfile = common_nwbfile.Nwbfile  # noqa F401
     _ = common_nwbfile.AnalysisRegistry().unblock_new_inserts()
 
     @schema
@@ -183,3 +183,141 @@ def test_integration_check_all_files_returns_dict(common_nwbfile):
 
     # Should have at least the common table
     assert len(results) > 0
+
+
+# ======================= NEGATIVE TEST CASES ==========================
+
+
+def test_check1_file_missing_from_disk(
+    analysis_file_issues, test_analysis_file, teardown
+):
+    """Test check1_file() when file doesn't exist on disk (line 123-127)."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    # Get the path of the test file and delete it temporarily
+    test_file_path = Path(analysis_tbl.get_abs_path(analysis_file_name))
+
+    # Rename the file temporarily to simulate it being missing
+    temp_path = test_file_path.with_suffix(".nwb.tmp")
+    test_file_path.rename(temp_path)
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+
+    # Clear any previous entries for this file
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+    try:
+        # Check the file - should detect it's missing
+        issue_found = analysis_file_issues.check1_file(
+            analysis_tbl, analysis_file_name
+        )
+
+        # Should find an issue
+        assert issue_found is True
+
+        # Should insert an entry with on_disk=False, can_read=False
+        issue_entry = (analysis_file_issues & key).fetch1()
+        assert not issue_entry["on_disk"]
+        assert not issue_entry["can_read"]
+        assert "path not found" in issue_entry["issue"]
+
+    finally:
+        # Restore the file
+        temp_path.rename(test_file_path)
+
+        # Cleanup issue entry
+        if teardown:
+            (analysis_file_issues & key).delete_quick()
+
+
+def test_check1_file_filenotfound_error(
+    analysis_file_issues, test_analysis_file, teardown
+):
+    """Test check1_file() when get_abs_path raises FileNotFoundError (line 128-130)."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+
+    # Clear any previous entries for this file
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+    # Mock get_abs_path to raise FileNotFoundError
+    error_msg = "File path could not be constructed"
+    with patch.object(
+        analysis_tbl, "get_abs_path", side_effect=FileNotFoundError(error_msg)
+    ):
+        # Check the file - should catch FileNotFoundError
+        issue_found = analysis_file_issues.check1_file(
+            analysis_tbl, analysis_file_name
+        )
+
+    # Should find an issue
+    assert issue_found is True
+
+    # Should insert an entry with on_disk=False, can_read=False
+    issue_entry = (analysis_file_issues & key).fetch1()
+    assert not issue_entry["on_disk"]
+    assert not issue_entry["can_read"]
+    assert error_msg in issue_entry["issue"]
+
+    # Cleanup
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+
+def test_check1_file_checksum_error(
+    analysis_file_issues, test_analysis_file, teardown
+):
+    """Test check1_file() when DataJointError is raised for checksum mismatch (line 131-138)."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+
+    # Clear any previous entries for this file
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+    # Mock get_abs_path to raise DataJointError (simulating checksum mismatch)
+    error_msg = "Checksum mismatch for file"
+
+    # Also mock get_tbl to return a dummy table name
+    with (
+        patch.object(
+            analysis_tbl,
+            "get_abs_path",
+            side_effect=dj.DataJointError(error_msg),
+        ),
+        patch.object(
+            analysis_file_issues, "get_tbl", return_value="dummy_child_table"
+        ),
+    ):
+        # Check the file - should catch DataJointError
+        issue_found = analysis_file_issues.check1_file(
+            analysis_tbl, analysis_file_name
+        )
+
+    # Should find an issue
+    assert issue_found is True
+
+    # Should insert an entry with on_disk=True, can_read=False (checksum error)
+    issue_entry = (analysis_file_issues & key).fetch1()
+    assert issue_entry["on_disk"]  # Should be truthy (1 in MySQL)
+    assert not issue_entry["can_read"]  # Should be falsy (0 in MySQL)
+    assert error_msg in issue_entry["issue"]
+    # Should also capture the downstream table name
+    assert issue_entry["table"] == "dummy_child_table"
+
+    # Cleanup
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
