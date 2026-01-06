@@ -236,7 +236,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         ----------
         key : dict
             Recording key with nwb_file_name, sort_group_id, etc.
-        recording_path : Path, optional
+        rec_path : Path, optional
             Path to recording directory. If None, computed from key.
         skip_padlen : bool, optional
             Check for padlen errors (recordings <35 samples). Default True.
@@ -831,7 +831,12 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
             return
 
-        for key in tqdm(query.proj(), total=len(query), desc="Deleting files"):
+        for key in tqdm(query, total=len(query), desc="Deleting files"):
+            try:
+                self.update1(dict(key, deleted=1))
+            except Exception as err:
+                logger.error(f"Failed to update deleted flag: {err}")
+                continue  # don't delete files if db update fails
             old, new = self._get_paths(key)
             logger.info(f"Deleting old: {old}, new: {new}")
             shutil_rmtree(old, ignore_errors=True)

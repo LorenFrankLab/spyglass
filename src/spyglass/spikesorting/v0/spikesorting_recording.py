@@ -593,7 +593,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 num_samples = sum(
                     end - start for start, end in valid_sort_times_indices
                 )
-            except Exception as e:
+            except (FileNotFoundError, KeyError, OSError, ValueError) as e:
                 logger.warning(f"Could not read num_samples from NWB: {e}")
                 return None
 
@@ -634,7 +634,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             samp_rate = None
 
         def is_invalid(x):  # checks for None, nan, or <= 0
-            return x is None or (isinstance(x, float) and x != x) or x <= 0
+            return (
+                x is None
+                or (isinstance(x, (float, np.floating)) and np.isnan(x))
+                or x <= 0
+            )
 
         # Fallback: if sampling_rate is None or invalid, read from source NWB
         if is_invalid(samp_rate) and key is not None:
@@ -644,11 +648,11 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                     nwb_file_abs_path, load_time_vector=True
                 )
                 samp_rate = recording.get_sampling_frequency()
-            except Exception as e:
+            except (FileNotFoundError, OSError, KeyError, ValueError) as e:
                 logger.warning(f"Could not read sampling rate from NWB: {e}")
 
         if is_invalid(samp_rate):
-            logger.warning(f"Invalid sampling rate from NWBns: {samp_rate}")
+            logger.warning(f"Invalid sampling rate from NWB: {samp_rate}")
             samp_rate = None
 
         return samp_rate
@@ -677,45 +681,37 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         segment_index : int or None
             Index of the minimum segment, or None if cannot determine
         """
-        try:
-            # Get the valid sort times (segment boundaries)
-            valid_sort_times = self._get_sort_interval_valid_times(key).times
-            if len(valid_sort_times) == 0:
-                return None, None
-
-            # Get sampling rate to convert time to samples
-            samp_rate = self._get_sampling_rate(key=key)
-            if not samp_rate or samp_rate <= 0:
-                return None, None
-
-            # Check each segment length
-            min_length = float("inf")
-            min_index = None
-
-            for i, (start, end) in enumerate(valid_sort_times):
-                segment_duration = end - start  # in seconds
-                segment_samples = int(segment_duration * samp_rate)
-
-                # Early exit if below threshold
-                if (
-                    min_threshold is not None
-                    and segment_samples < min_threshold
-                ):
-                    return segment_samples, i
-
-                # Track minimum
-                if segment_samples < min_length:
-                    min_length = segment_samples
-                    min_index = i
-
-            return (
-                int(min_length) if min_length != float("inf") else None,
-                min_index,
-            )
-
-        except Exception as e:
-            logger.warning(f"Could not determine min segment length: {e}")
+        # Get the valid sort times (segment boundaries)
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
+        if len(valid_sort_times) == 0:
             return None, None
+
+        # Get sampling rate to convert time to samples
+        samp_rate = self._get_sampling_rate(key=key)
+        if not samp_rate or samp_rate <= 0:
+            return None, None
+
+        # Check each segment length
+        min_length = float("inf")
+        min_index = None
+
+        for i, (start, end) in enumerate(valid_sort_times):
+            segment_duration = end - start  # in seconds
+            segment_samples = int(segment_duration * samp_rate)
+
+            # Early exit if below threshold
+            if min_threshold is not None and segment_samples < min_threshold:
+                return segment_samples, i
+
+            # Track minimum
+            if segment_samples < min_length:
+                min_length = segment_samples
+                min_index = i
+
+        return (
+            int(min_length) if min_length != float("inf") else None,
+            min_index,
+        )
 
     @staticmethod
     def _get_recording_timestamps(recording):

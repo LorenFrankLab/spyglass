@@ -342,7 +342,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             logger.info(f"No rows to insert from:\n\t{source}")
             return
 
-        logger.info(f"Inserting compute attempts for {len(inserts)} files.")
+        logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
 
         self.insert(inserts, at_creation=False, **kwargs)
 
@@ -396,7 +396,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                         return True, "missing_probe_info"
             except Exception:
                 # If unable to check, don't mark as xfail
-                pass
+                logger.warning(f"Unable to check probe info for {key}")
 
         if skip_pynwb_api or skip_nwb_spec:
             # First check previous runs (fast check)
@@ -825,12 +825,13 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 f"Match at higher precision. Assuming match for {key}\n\t"
                 + "Run with force_check=True to recompute."
             )
+            RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
             return
 
         old_hasher, new_hasher = self._hash_both(key)
 
         if new_hasher is None:  # Error occurred during recompute
-            logger.error(f"V1 Recompute failed: {new_hasher.path.name}")
+            logger.error("V1 Recompute failed")
             return
 
         if new_hasher.hash == old_hasher.hash:
@@ -917,10 +918,14 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         for key in query:
+            try:
+                self.update1(dict(key, deleted=1))
+            except Exception as e:
+                logger.error(f"Failed to update deleted flag: {e}")
+                continue  # skip deleting files if db update fails
             old, new = self._get_paths(key)
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
-            self.update1(dict(key, deleted=1))
 
     def delete(self, *args, **kwargs) -> None:
         """Delete recompute attempts when deleting rows."""
