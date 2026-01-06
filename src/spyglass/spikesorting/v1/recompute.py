@@ -904,8 +904,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
-            file_names
+            file_names[:10]
         )
+        if len(file_names) > 10:
+            msg += f"\n\t... and {len(file_names) - 10} more"
 
         if dry_run:
             restr = query.fetch("KEY", as_dict=True)
