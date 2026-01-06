@@ -166,7 +166,7 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         sorting = CurationV1.get_sorting(sel_key)
 
         # Some versions of sortingview expect `_file_path` attribute
-        # not present in all recording objects
+        # which may not be present in all recording objects
         if not hasattr(recording, "_file_path") and hasattr(
             recording, "file_path"
         ):

@@ -107,6 +107,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Spikesorting
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+    - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
 
 ## [0.5.5] (Aug 6, 2025)
 
