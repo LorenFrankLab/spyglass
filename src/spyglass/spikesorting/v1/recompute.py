@@ -916,7 +916,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
             return
 
-        for key in query.proj():
+        for key in query:
             old, new = self._get_paths(key)
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
