@@ -47,6 +47,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Auto-load within-Spyglass tables for graph operations #1368
 - Add explicit `kachery-cloud` dependency #1430
 - Default to globally saved config #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489
