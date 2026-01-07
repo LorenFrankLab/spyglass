@@ -1049,8 +1049,6 @@ def load_full_schema() -> Dict[str, Any]:
     ValueError
         If schema is invalid
     """
-    import json
-
     schema_path = (
         Path(__file__).parent.parent / "src/spyglass/directory_schema.json"
     )
