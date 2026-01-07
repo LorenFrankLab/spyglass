@@ -161,7 +161,7 @@ if [[ -z "$DB_USER" ]]; then
     print_step "Enter your Frank Lab database username"
     echo "  (This was provided by your lab admin)"
     echo ""
-    read -p "Username: " DB_USER
+    read -r -p "Username: " DB_USER
 
     if [[ -z "$DB_USER" ]]; then
         print_error "Username cannot be empty"
@@ -178,7 +178,7 @@ echo ""
 print_step "Enter your database password"
 echo "  (You'll be prompted to change this after connecting)"
 echo ""
-read -s -p "Password: " DB_PASSWORD
+read -r -s -p "Password: " DB_PASSWORD
 echo ""  # New line after hidden input
 
 if [[ -z "$DB_PASSWORD" ]]; then
@@ -204,7 +204,7 @@ else
 fi
 echo ""
 
-read -p "Continue with installation? [Y/n]: " CONFIRM
+read -r -p "Continue with installation? [Y/n]: " CONFIRM
 CONFIRM=${CONFIRM:-y}
 
 if [[ ! "$CONFIRM" =~ ^[Yy] ]]; then
