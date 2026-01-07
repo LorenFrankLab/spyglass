@@ -227,7 +227,7 @@ export SPYGLASS_DB_PASSWORD="$DB_PASSWORD"
 # Run the installer with Frank Lab settings
 cd "$REPO_DIR"
 python scripts/install.py \
-    $INSTALL_TYPE \
+    "$INSTALL_TYPE" \
     --remote \
     --db-host "$FRANKLAB_DB_HOST" \
     --db-port "$FRANKLAB_DB_PORT" \
