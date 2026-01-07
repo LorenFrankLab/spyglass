@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from spyglass.utils.logging import logger
+
 
 @dataclass
 class DockerConfig:
@@ -163,7 +165,7 @@ def wait_for_mysql(
                 return  # Success!
 
         except subprocess.TimeoutExpired:
-            pass
+            logger.warning("MySQL ping command timed out")
 
         if attempt < (timeout // 2) - 1:
             time.sleep(2)
