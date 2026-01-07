@@ -18,6 +18,7 @@ Exit codes:
     0 - Installation successful
     1 - Installation failed
 """
+from __future__ import annotations
 
 import argparse
 import json
