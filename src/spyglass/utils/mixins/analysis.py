@@ -564,7 +564,7 @@ class AnalysisMixin(BaseMixin):
                 + f"{type(analysis_nwb_file_name)}"
             )
 
-        query = cls() & file_key
+        query = cls().restrict(file_key, log_export=False)
         if bool(query):
             try:
                 return query.fetch1("analysis_file_abs_path", log_export=False)
@@ -997,14 +997,27 @@ class AnalysisMixin(BaseMixin):
 
     # ------------------------------ Maintenance ------------------------------
 
-    def cleanup_external(self):
+    def cleanup_external(
+        self, dry_run: bool = False, delete_external_files: bool = False
+    ):
         """Remove the filepath entries for NWB files that are not in use.
 
         Because an unused file in the common may be in use in a custom table,
         we never want to delete external files. Instead, the common handles
         orphan detection and deletion.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If true, only return the unused files without deleting them.
+            Defaults to False.
+        delete_external_files : bool, optional
+            If true, delete the external files from disk. Defaults to False.
         """
-        self._ext_tbl.delete(delete_external_files=False)
+        unused = self._ext_tbl.unused()
+        if not dry_run and "common" not in self.full_table_name:
+            self._ext_tbl.delete(delete_external_files=delete_external_files)
+        return unused
 
     def get_orphans(self):
         """Clean up orphaned entries and external files."""
