@@ -127,7 +127,7 @@ def get_required_python_version() -> tuple[int, int]:
         if match:
             return (int(match.group(1)), int(match.group(2)))
     except Exception:
-        pass
+        print("Warning: Failed to parse pyproject.toml for Python version")
 
     return (3, 9)  # Safe fallback
 
