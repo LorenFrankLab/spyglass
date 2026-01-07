@@ -2221,13 +2221,21 @@ def test_database_connection(
     try:
         Console.step("Testing database connection")
 
+        # Configure SSL context for TLS connections
+        # Uses system CA certificates for verification
+        ssl_context = None
+        if use_tls:
+            import ssl
+
+            ssl_context = ssl.create_default_context()
+
         connection = pymysql.connect(
             host=host,
             port=port,
             user=user,
             password=password,
             connect_timeout=timeout,
-            ssl={"ssl": True} if use_tls else None,
+            ssl=ssl_context,
         )
 
         # Test basic operation
