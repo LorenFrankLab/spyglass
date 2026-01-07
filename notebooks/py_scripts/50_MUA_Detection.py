@@ -149,5 +149,3 @@ for id, mua_time in mua_times.loc[
 (MuaEventsV1 & mua_key).create_figurl(
     zscore_mua=True,
 )
-
-

@@ -23,8 +23,8 @@
 #
 # - To set up your Spyglass environment and database, see
 #   [the Setup notebook](./00_Setup.ipynb)
-# - This tutorial assumes you've already 
-#   [extracted waveforms](./41_Extracting_Clusterless_Waveform_Features.ipynb), as well as loaded 
+# - This tutorial assumes you've already
+#   [extracted waveforms](./41_Extracting_Clusterless_Waveform_Features.ipynb), as well as loaded
 #   [position data](./20_Position_Trodes.ipynb). If 1D decoding, this data should also be
 #   [linearized](./24_Linearization.ipynb).
 #
@@ -37,7 +37,7 @@
 #
 # ## Grouping Data
 # An important concept will be groups. Groups are tables that allow use to specify collections of data. We will use groups in two situations here:
-# 1. Because we want to decode from more than one tetrode (or probe), so we will create a group that contains all of the tetrodes that we want to decode from. 
+# 1. Because we want to decode from more than one tetrode (or probe), so we will create a group that contains all of the tetrodes that we want to decode from.
 # 2. Similarly, we will create a group for the position data that we want to decode, so that we can decode from position data from multiple sessions.
 #
 # ### Grouping Waveform Features
@@ -206,7 +206,7 @@ from non_local_detector.models import ContFragClusterlessClassifier
 ContFragClusterlessClassifier()
 # -
 
-# You can change these parameters like so: 
+# You can change these parameters like so:
 
 # +
 from non_local_detector.models import ContFragClusterlessClassifier
@@ -272,7 +272,7 @@ from non_local_detector.environment import Environment
 # - `estimate_decoding_params`: whether or not we want to estimate the decoding parameters
 #
 #
-# The first three parameters should be familiar to you. 
+# The first three parameters should be familiar to you.
 #
 #
 # ### Decoding and Encoding Intervals
@@ -428,7 +428,7 @@ jax.devices()
 # ### Monitoring GPU Usage
 #
 # You can see which GPUs are occupied (if you have multiple GPUs) by running the command `nvidia-smi` in
-# a terminal (or `!nvidia-smi` in a notebook). Pick a GPU with low memory usage. 
+# a terminal (or `!nvidia-smi` in a notebook). Pick a GPU with low memory usage.
 #
 # We can monitor GPU use with the terminal command `watch -n 0.1 nvidia-smi`, will
 # update `nvidia-smi` every 100 ms. This won't work in a notebook, as it won't
@@ -436,7 +436,7 @@ jax.devices()
 #
 # Other ways to monitor GPU usage are:
 #
-# - A 
+# - A
 #   [jupyter widget by nvidia](https://github.com/rapidsai/jupyterlab-nvdashboard)
 #   to monitor GPU usage in the notebook
 # - A [terminal program](https://github.com/peci1/nvidia-htop) like nvidia-smi

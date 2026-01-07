@@ -29,7 +29,7 @@
 
 # ## SortedSpikesGroup
 #
-# `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple 
+# `SortedSpikesGroup` is a child table of `SpikeSortingOutput` in the spikesorting pipeline. It allows us to group the spikesorting results from multiple
 # sources (e.g. multiple tetrode groups or intervals) into a single entry. Here we will group together the spiking of multiple tetrode groups to use for decoding.
 #
 #
@@ -171,5 +171,3 @@ DecodingOutput.SortedSpikesDecodingV1 & selection_key
 
 results = (SortedSpikesDecodingV1 & selection_key).fetch_results()
 results
-
-

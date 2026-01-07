@@ -54,7 +54,7 @@
 # ```
 #
 # If you have successfully connected to the database before but your config appears empty,
-# You may not have saved it in a globally-accessible location. To fix, return to the 
+# You may not have saved it in a globally-accessible location. To fix, return to the
 # functioning notebook and run:
 # ```python
 # dj.config.save_global()
