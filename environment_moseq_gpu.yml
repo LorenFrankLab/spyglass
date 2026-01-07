@@ -39,5 +39,4 @@ dependencies:
   - pip:
       - ghostipy # for common_filter
       - mountainsort4
-      - kachery-cloud
       - .[moseq-gpu]
