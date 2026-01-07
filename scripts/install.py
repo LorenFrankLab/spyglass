@@ -986,7 +986,7 @@ class DockerManager:
                 cwd=REPO_ROOT,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+            print("Failed to clean up Docker Compose setup")
 
 
 # ============================================================================
