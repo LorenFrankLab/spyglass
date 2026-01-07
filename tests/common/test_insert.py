@@ -12,6 +12,9 @@ def test_insert_session(mini_insert, mini_content, mini_restr, common):
         session_data["subject_id"] == subj_raw.subject_id
     ), "Subject ID not match"
 
+    subject_data = (common.Subject & (common.Session & mini_restr)).fetch1()
+    assert subject_data["sex"] == "M", "Subject sex not standardized correctly"
+
     attrs = [
         ("institution_name", "institution"),
         ("lab_name", "lab"),

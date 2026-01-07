@@ -7,6 +7,7 @@ from datajoint.utils import to_camel_case
 
 from spyglass.common.common_behav import (
     PositionSource,
+    RawCompassDirection,
     RawPosition,
     StateScriptFile,
     VideoFile,
@@ -150,8 +151,6 @@ def single_transaction_make(
                     log_insert_error(
                         table=table, err=err, error_constants=error_constants
                     )
-            # if table_name in ["TaskEpoch"]:
-            #     __import__("pdb").set_trace()
 
 
 def populate_all_common(
@@ -221,6 +220,7 @@ def populate_all_common(
         [  # Tables that depend on above transaction
             Electrode,  # Depends on ElectrodeGroup
             PositionSource,  # Depends on Session
+            RawCompassDirection,  # Depends on Session
             VideoFile,  # Depends on TaskEpoch
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
