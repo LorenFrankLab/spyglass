@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -26,15 +26,6 @@
 # This time, instead of extracting waveform features, we can proceed directly from the SpikeSortingOutput table to specify which units we want to decode. The rest of the decoding process is the same as before.
 #
 #
-
-# +
-from pathlib import Path
-import datajoint as dj
-
-dj.config.load(
-    Path("../dj_local_conf.json").absolute()
-)  # load config for database connection info
-# -
 
 # ## SortedSpikesGroup
 #

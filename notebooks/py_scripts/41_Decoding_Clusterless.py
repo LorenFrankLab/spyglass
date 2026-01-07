@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -43,14 +43,6 @@
 # ### Grouping Waveform Features
 # Let's start with grouping the Waveform Features. We will first inspect the waveform features that we have extracted to figure out the primary keys of the data that we want to decode from. We need to use the tables `SpikeSortingSelection` and `SpikeSortingOutput` to figure out the `merge_id` associated with `nwb_file_name` to get the waveform features associated with the NWB file of interest.
 #
-
-# +
-from pathlib import Path
-import datajoint as dj
-
-dj.config.load(
-    Path("../dj_local_conf.json").absolute()
-)  # load config for database connection info
 
 # +
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
