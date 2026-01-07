@@ -126,8 +126,9 @@ def get_required_python_version() -> tuple[int, int]:
         match = re.search(r">=(\d+)\.(\d+)", requires_python)
         if match:
             return (int(match.group(1)), int(match.group(2)))
-    except Exception:
-        print("Warning: Failed to parse pyproject.toml for Python version")
+    except (FileNotFoundError, KeyError, AttributeError, ValueError):
+        # Expected errors during parsing - use safe fallback
+        pass
 
     return (3, 9)  # Safe fallback
 
