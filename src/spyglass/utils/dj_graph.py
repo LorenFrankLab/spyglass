@@ -13,8 +13,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
 import datajoint as dj
-import pandas as pd
-import pymysql
 from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
@@ -259,6 +257,7 @@ class AbstractGraph(ABC):
 
         If r is a QueryExpression, project to primary key to keep relational. This saves
         on database requests while propagating restrictions. Otherwise, returns a
+        valid restriction string or condition.
 
         Parameters
         ----------
@@ -284,7 +283,24 @@ class AbstractGraph(ABC):
     def _set_restr(
         self, table, restriction, replace=False
     ) -> str | QueryExpression:
-        """Add restriction to graph node. If one exists, merge with new."""
+        """
+        Add restriction to graph node. If one exists, merge with new.
+
+        Parameters
+        ----------
+        table : str
+            Table name
+        restriction : str | QueryExpression
+            Restriction to log to node
+        replace : bool, optional
+            Whether to replace existing restriction. Default False will combine
+            with OR logic.
+
+        Returns
+        -------
+        str | QueryExpression
+            The resulting restriction after addition/merging.
+        """
         ft = self._get_ft(table)
         restriction = self._coerce_to_condition(ft, restriction)
         existing = self._get_restr(table)
@@ -303,6 +319,11 @@ class AbstractGraph(ABC):
 
     @lru_cache(maxsize=128)
     def _get_ft_with_restr(self, table, restr):
+        """Get FreeTable from graph node with restriction applied.
+
+        This helper method is cached to avoid redundant FreeTable creation while
+        ensuring that any updated restrictions are applied correctly.
+        """
         if not (ft := self._get_node(table).get("ft")):
             ft = FreeTable(self.connection, table)
             self._set_node(table, "ft", ft)
@@ -1063,8 +1084,24 @@ class RestrGraph(AbstractGraph):
         return self._graph_intersect(other)
 
     def whitelist(self, other: "RestrGraph") -> "RestrGraph":
-        self = self & other
-        return self
+        """
+        Return a new RestrGraph restricted to the intersect of both graphs.
+
+        This is a convenience alias for the bitwise AND operator
+        (``self & other``) and has identical semantics and return value.
+
+        Parameters
+        ----------
+        other : RestrGraph
+            Another RestrGraph whose restrictions will be intersected with
+            this one.
+        Returns
+        -------
+        RestrGraph
+            A new RestrGraph representing the intersection of ``self`` and
+            ``other``.
+        """
+        return self & other
 
     # ----------------------------- Graph Addition -----------------------------
 
@@ -1075,7 +1112,6 @@ class RestrGraph(AbstractGraph):
 
         for dict in other_dicts:
             table = dict["table_name"]
-            node = self.graph.nodes.get(table, {})
             new_restr_list = self._get_restr_list(
                 table
             ) + other._get_restr_list(table)

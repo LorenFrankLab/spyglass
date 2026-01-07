@@ -3,6 +3,12 @@ from typing import List
 import h5py
 
 from spyglass.utils.dj_helper_fn import ExportErrorLog, _resolve_external_table
+from spyglass.utils.h5py_helper_fn import (
+    add_id_column_to_table,
+    convert_dataset_type,
+    find_dynamic_tables_missing_id,
+    find_float16_datasets,
+)
 from spyglass.utils.logging import logger
 
 STR_DTYPE = h5py.special_dtype(vlen=str)
@@ -231,17 +237,14 @@ def convert_float16_to_float32(file: h5py.File):
 
 def add_id_column_to_dynamic_tables(
     file: h5py.File,
-    table_path: str,
 ):
     """
-    Add an 'id' column to a dynamic table if missing.
+    Add an 'id' column to all dynamic tables in a nwb file missing this column.
 
     Parameters
     ----------
     file : h5py.File
         An open HDF5 file object.
-    table_path : str
-        The HDF5 path to the dynamic table.
     """
     tables_missing_id = find_dynamic_tables_missing_id(file)
     if not tables_missing_id:

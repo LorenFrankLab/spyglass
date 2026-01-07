@@ -140,6 +140,18 @@ class ExportMixin(FetchMixin):
         return False
 
     def undo_projection(self, table_to_undo=None):
+        """Undo name projection on table
+
+        Parameters
+        ----------
+        table_to_undo : Table, optional
+            Table to undo projection on, by default None (uses self)
+
+        Returns
+        -------
+        Table
+            Table reverted to original column names
+        """
         if table_to_undo is None:
             table_to_undo = self
         assert set(
@@ -333,7 +345,6 @@ class ExportMixin(FetchMixin):
             if not chunk_entries:
                 break
             self._insert_log(chunk_entries)
-        return
 
     def _insert_log(self, restr_str):
         """Executes insert log entry for export table and restriction."""

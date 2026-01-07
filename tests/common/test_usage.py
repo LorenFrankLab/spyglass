@@ -312,9 +312,7 @@ def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
     assert len(file) == 5, "Export files not captured correctly"
-    assert (
-        len(table) == 39
-    ), "Export tables not captured correctly"  # Note for PR: Update because not using common.IntervalPositionInfoSelection (and param table)
+    assert len(table) == 39, "Export tables not captured correctly"
 
 
 def test_intersect_export_populate(populate_intersect_export, common):

@@ -192,6 +192,23 @@ class SQLDumpHelper:
     def _write_table_dumps(
         self, file, table: FreeTable, dump_cmd: str, key_list=None
     ):
+        """Write dump commands for a table, splitting large WHERE clauses.
+        Parameters
+        ----------
+        file :
+            Writable file-like object to which the dump commands are written.
+        table : FreeTable
+            DataJoint table whose contents will be exported.
+        dump_cmd : str
+            Template for the dump command, expected to contain ``{database}``,
+            ``{table}``, and ``{where}`` placeholders.
+        key_list : optional
+            Optional list of primary-key dictionaries (or similar key
+            specifications) used to chunk the export when the generated
+            WHERE clause would exceed the maximum allowed length. If not
+            provided, the keys are obtained via ``table.fetch("KEY")``.
+        """
+
         MAX_WHERE_LENGTH = 100000
 
         database, table_name = (
@@ -224,7 +241,6 @@ class SQLDumpHelper:
                 file, clean_table & chunk_keys, dump_cmd, chunk_keys
             )
             i += n_keys_per_chunk
-        return
 
 
 def remove_redundant(s):
