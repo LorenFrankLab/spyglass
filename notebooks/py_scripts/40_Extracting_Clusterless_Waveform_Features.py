@@ -33,9 +33,6 @@
 # While clusterless decoding avoids actual spike sorting, we need to pass through these tables to maintain (relative) pipeline simplicity. Pass-through tables keep spike sorting and clusterless waveform extraction as similar as possible, by using shared steps. Here, "spike sorting" involves simple thresholding (sorter: clusterless_thresholder).
 #
 
-from pathlib import Path
-import datajoint as dj
-
 # First, if you haven't inserted the the `mediumnwb20230802.wnb` file into the database, you should do so now. This is the file that we will use for the decoding tutorials.
 #
 # It is a truncated version of the full NWB file, so it will run faster, but bigger than the minirec file we used in the previous tutorials so that decoding makes sense.
@@ -340,3 +337,5 @@ plt.scatter(
     s=1,
 )
 # -
+
+

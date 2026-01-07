@@ -36,8 +36,6 @@
 
 # # Imports
 
-import datajoint as dj
-from pathlib import Path
 from spyglass.mua.v1.mua import MuaEventsV1, MuaEventsParameters
 
 # ## Select Position Data
@@ -151,3 +149,5 @@ for id, mua_time in mua_times.loc[
 (MuaEventsV1 & mua_key).create_figurl(
     zscore_mua=True,
 )
+
+
