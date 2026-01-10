@@ -568,24 +568,25 @@ For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 ### Database Backup
 
-**Docker database:**
+=== Docer database
 
-```bash
-# Backup
-docker exec spyglass-db mysqldump -uroot -ptutorial --all-databases > backup.sql
+    ```bash
+    # Backup
+    docker exec spyglass-db mysqldump -uroot -ptutorial --all-databases > backup.sql
+    
+    # Restore
+    docker exec -i spyglass-db mysql -uroot -ptutorial < backup.sql
+    ```
 
-# Restore
-docker exec -i spyglass-db mysql -uroot -ptutorial < backup.sql
-```
+=== System MySQL
 
-**System MySQL:**
-
-```bash
-# Backup
-mysqldump -u USER -p --all-databases > backup.sql
-
-# Restore
-mysql -u USER -p < backup.sql
+    ```bash
+    # Backup
+    mysqldump -u USER -p --all-databases > backup.sql
+    
+    # Restore
+    mysql -u USER -p < backup.sql
+    ```
 ```
 
 ### Performance Tuning
