@@ -450,7 +450,8 @@ For shared/production databases:
 5. **Credential management:**
 
     - Never commit config files to git
-    - Use environment variables for CI/CD
+    - Use environment variables for CI/CD (e.g., 
+    [GitHub Actions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets))
     - Consider secrets management tools
 
 ### File Permissions
