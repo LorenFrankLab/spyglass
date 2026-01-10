@@ -149,8 +149,11 @@ docker compose ps
 **Access MySQL shell:**
 
 ```bash
-docker compose exec mysql mysql -uroot -ptutorial
+docker compose exec mysql mysql -uroot -p
 ```
+
+This will securely prompt you for a password. For test cases, you can directly append the 
+password (e.g., `-ptutorial`).
 
 **Restart services:**
 
