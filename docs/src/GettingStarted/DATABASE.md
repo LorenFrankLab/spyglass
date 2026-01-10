@@ -470,15 +470,15 @@ For lab environments with shared database:
 
 ```sql
 -- Create database prefix for lab
-CREATE DATABASE spyglass_common;
+CREATE DATABASE yourlab_common;
 
 -- Create users
 CREATE USER 'alice'@'%' IDENTIFIED BY 'alice_password';
 CREATE USER 'bob'@'%' IDENTIFIED BY 'bob_password';
 
 -- Grant permissions
-GRANT ALL PRIVILEGES ON spyglass_*.* TO 'alice'@'%';
-GRANT ALL PRIVILEGES ON spyglass_*.* TO 'bob'@'%';
+GRANT ALL PRIVILEGES ON yourlab_*.* TO 'alice'@'%';
+GRANT ALL PRIVILEGES ON yourlab_*.* TO 'bob'@'%';
 FLUSH PRIVILEGES;
 ```
 
