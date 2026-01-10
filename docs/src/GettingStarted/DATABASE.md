@@ -108,7 +108,12 @@ MYSQL_IMAGE=datajoint/mysql:8.0.18
 ```
 
 **Important:** If you change port or password, update your DataJoint config
-accordingly.
+accordingly. You can either edit this file directly, or run the following in your python environment.
+
+```python
+dj.config.save_global()
+```
+
 
 #### Management
 
