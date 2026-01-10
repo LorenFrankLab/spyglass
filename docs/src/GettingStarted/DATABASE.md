@@ -231,7 +231,7 @@ dj.conn().ping()  # Should succeed
 
 #### SSH Tunnel (For Remote Access)
 
-If database is behind firewall, use SSH tunnel:
+If the database is behind firewall, use SSH tunnel:
 
 ```bash
 # Create tunnel (keep running in terminal)
