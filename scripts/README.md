@@ -457,7 +457,3 @@ For issues:
 1. Check validation output: `python scripts/validate.py`
 2. See [TROUBLESHOOTING.md](../docs/src/GettingStarted/TROUBLESHOOTING.md)
 3. File issue at https://github.com/LorenFrankLab/spyglass/issues
-
-## License
-
-Same as Spyglass main package.
