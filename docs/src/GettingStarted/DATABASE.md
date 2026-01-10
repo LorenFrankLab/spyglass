@@ -424,7 +424,7 @@ For shared/production databases:
     openssl rand -base64 32
     ```
 
-2. **User permissions:**
+2. **User permissions:** Manage by database prefix
 
     ```sql
     -- Create user with specific database access
