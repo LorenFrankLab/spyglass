@@ -104,7 +104,7 @@ MYSQL_PORT=3307
 MYSQL_ROOT_PASSWORD=your-secure-password
 
 # Use different MySQL version
-MYSQL_IMAGE=datajoint/mysql:8.4
+MYSQL_IMAGE=datajoint/mysql:8.0.18
 ```
 
 **Important:** If you change port or password, update your DataJoint config
