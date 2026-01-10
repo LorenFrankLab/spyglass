@@ -429,7 +429,7 @@ For shared/production databases:
     ```sql
     -- Create user with specific database access
     CREATE USER 'spyglass'@'%' IDENTIFIED BY 'strong_password';
-    GRANT ALL PRIVILEGES ON spyglass_*.* TO 'spyglass'@'%';
+    GRANT ALL PRIVILEGES ON someprefix_*.* TO 'spyglass'@'%';
     FLUSH PRIVILEGES;
     ```
 
