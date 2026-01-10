@@ -539,7 +539,6 @@ python -c "import datajoint as dj; dj.conn().ping()"
 Grant additional privileges to a given user in mysql: 
 
 ```sql
--- Grant missing privileges
 GRANT ALL PRIVILEGES ON *.* TO 'user'@'host';
 FLUSH PRIVILEGES;
 ```
