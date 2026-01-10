@@ -778,7 +778,8 @@ def prompt_install_type() -> Tuple[str, str]:
     Returns
     -------
     env_file : str
-        Path to environment YAML file ("environments/environment_min.yml" or "environments/environment.yml")
+        Path to environment YAML file ("environments/environment_min.yml" or 
+        "environments/environment.yml")
     install_type : str
         Installation type identifier ("minimal" or "full")
 
