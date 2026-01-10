@@ -285,7 +285,7 @@ def check_disk_space(required_gb: int, path: Path) -> Tuple[bool, int]:
     ...     print(f"OK: {available} GB available")
     """
     # Find existing path to check
-    check_path = path
+    check_path = path # original input preserved for debugging
     while not check_path.exists() and check_path != check_path.parent:
         check_path = check_path.parent
 
