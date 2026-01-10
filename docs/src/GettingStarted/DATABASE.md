@@ -536,6 +536,7 @@ python -c "import datajoint as dj; dj.conn().ping()"
 ```
 
 ### Permission Denied
+Grant additional privileges to a given user in mysql: 
 
 ```sql
 -- Grant missing privileges
