@@ -436,11 +436,7 @@ The installer uses inline Docker operations instead of importing from
 - Cannot create circular dependency (installer → spyglass → installer)
 - Must be self-contained with stdlib only
 
-The reusable Docker utilities are in `src/spyglass/utils/docker.py` for:
-
-- Testing infrastructure (`tests/container.py`)
-- Post-installation database management
-- Other spyglass code
+The reusable Docker utilities are in `src/spyglass/utils/docker.py`.
 
 ## Related Files
 
