@@ -456,7 +456,7 @@ For shared/production databases:
 
 ### File Permissions
 
-Protect configuration file:
+Protect configuration file by only allowing read/write access by you:
 
 ```bash
 chmod 600 ~/.datajoint_config.json
