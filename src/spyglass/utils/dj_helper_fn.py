@@ -18,8 +18,6 @@ from datajoint.user_tables import TableMeta, UserTable
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
-STR_DTYPE = h5py.special_dtype(vlen=str)
-
 # Tables that should be excluded from the undirected graph when finding paths
 # for TableChain objects and searching for an upstream key.
 PERIPHERAL_TABLES = [
@@ -107,9 +105,9 @@ def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
         SpikeSortingOutput,
-    )  # noqa: F401
+    )
 
     return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
@@ -465,113 +463,6 @@ def get_child_tables(table):
     ]
 
 
-def update_analysis_for_dandi_standard(
-    filepath: str,
-    age: str = "P4M/P8M",
-    resolve_external_table: bool = True,
-):
-    """Function to resolve common nwb file format errors within the database
-
-    Parameters
-    ----------
-    filepath : str
-        abs path to the file to edit
-    age : str, optional
-        age to assign animal if missing, by default "P4M/P8M"
-    resolve_external_table : bool, optional
-        whether to update the external table. Set False if editing file
-        outside the database, by default True
-    """
-    from spyglass.common import LabMember
-
-    LabMember().check_admin_privilege(
-        error_message="Admin permissions required to edit existing analysis files"
-    )
-    file_name = filepath.split("/")[-1]
-    # edit the file
-    with h5py.File(filepath, "a") as file:
-        sex_value = file["/general/subject/sex"][()].decode("utf-8")
-        if sex_value not in ["Female", "Male", "F", "M", "O", "U"]:
-            raise ValueError(f"Unexpected value for sex: {sex_value}")
-
-        if len(sex_value) > 1:
-            new_sex_value = sex_value[0].upper()
-            logger.info(
-                f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'"
-            )
-            file["/general/subject/sex"][()] = new_sex_value
-
-        # replace subject species value "Rat" with "Rattus norvegicus"
-        species_value = file["/general/subject/species"][()].decode("utf-8")
-        if species_value == "Rat":
-            new_species_value = "Rattus norvegicus"
-            logger.info(
-                f"Adjusting subject species from '{species_value}' to "
-                + f"'{new_species_value}'."
-            )
-            file["/general/subject/species"][()] = new_species_value
-
-        elif not (
-            len(species_value.split(" ")) == 2 or "NCBITaxon" in species_value
-        ):
-            raise ValueError(
-                "Dandi upload requires species either be in Latin binomial form"
-                + " (e.g., 'Mus musculus' and 'Homo sapiens') or be a NCBI "
-                + "taxonomy link (e.g., "
-                + "'http://purl.obolibrary.org/obo/NCBITaxon_280675').\n "
-                + f"Please update species value of: {species_value}"
-            )
-
-        # add subject age dataset "P4M/P8M"
-        if "age" not in file["/general/subject"]:
-            new_age_value = age
-            logger.info(
-                f"Adding missing subject age, set to '{new_age_value}'."
-            )
-            file["/general/subject"].create_dataset(
-                name="age", data=new_age_value, dtype=STR_DTYPE
-            )
-
-        # format name to "Last, First"
-        experimenter_value = file["/general/experimenter"][:].astype(str)
-        new_experimenter_value = dandi_format_names(experimenter_value)
-        if experimenter_value != new_experimenter_value:
-            new_experimenter_value = new_experimenter_value.astype(STR_DTYPE)
-            logger.info(
-                f"Adjusting experimenter from {experimenter_value} to "
-                + f"{new_experimenter_value}."
-            )
-            file["/general/experimenter"][:] = new_experimenter_value
-
-    # update the datajoint external store table to reflect the changes
-    if resolve_external_table:
-        location = "raw" if filepath.endswith("_.nwb") else "analysis"
-        _resolve_external_table(filepath, file_name, location)
-
-
-def dandi_format_names(experimenter: List) -> List:
-    """Make names compliant with dandi standard of "Last, First"
-
-    Parameters
-    ----------
-    experimenter : List
-        List of experimenter names
-
-    Returns
-    -------
-    List
-        reformatted list of experimenter names
-    """
-    for i, name in enumerate(experimenter):
-        parts = name.split(" ")
-        new_name = " ".join(
-            parts[:-1],
-        )
-        new_name = f"{parts[-1]}, {new_name}"
-        experimenter[i] = new_name
-    return experimenter
-
-
 def _resolve_external_table(
     filepath: str, file_name: str, location: str = "analysis"
 ):
@@ -648,12 +539,23 @@ def make_file_obj_id_unique(nwb_path: str):
     """
     from spyglass.common.common_lab import LabMember  # noqa: F401
 
+    logger.info(f"Making unique object_id for {nwb_path}")
     LabMember().check_admin_privilege(
         error_message="Admin permissions required to edit existing analysis files"
     )
     new_id = str(uuid4())
-    with h5py.File(nwb_path, "a") as f:
-        f.attrs["object_id"] = new_id
+    try:
+        with h5py.File(nwb_path, "a") as f:
+            f.attrs["object_id"] = new_id
+    except (BlockingIOError, OSError) as e:
+        ExportErrorLog().insert1(
+            {
+                "file": nwb_path,
+                "source": "make_file_obj_id_unique",
+            },
+            skip_duplicates=True,
+        )
+        return
     location = "raw" if nwb_path.endswith("_.nwb") else "analysis"
     _resolve_external_table(
         nwb_path, nwb_path.split("/")[-1], location=location
@@ -824,3 +726,36 @@ def _replace_nan_with_default(data_dict, default_value=-1.0):
             result[key] = default_value
 
     return result
+
+
+# Log table for errors encountered during file edits
+schema = dj.schema("common_export_error_log")
+
+
+@schema
+class ExportErrorLog(dj.Manual):
+    definition = """
+    file: varchar(255)  # file being processed
+    source: varchar(255)  # source of the error (e.g., table name or function)
+    ---
+    """
+
+    @staticmethod
+    def _logger_warning(key):
+        logger.warning(
+            f"Logging export error for file: {key.get('file', 'unknown')}"
+            + f" from source: {key.get('source', 'unknown')}"
+        )
+
+    def insert1(self, key, **kwargs):
+        """Insert a new entry into the ExportErrorLog table.
+
+        Parameters
+        ----------
+        key : dict
+            Dictionary containing the primary key fields for the table.
+        **kwargs : dict
+            Additional keyword arguments for non-primary key fields.
+        """
+        self._logger_warning(key)
+        super().insert1(key, **kwargs)
