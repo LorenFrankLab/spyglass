@@ -564,7 +564,7 @@ class AnalysisMixin(BaseMixin):
                 + f"{type(analysis_nwb_file_name)}"
             )
 
-        query = cls() & file_key
+        query = cls().restrict(file_key, log_export=False)
         if bool(query):
             try:
                 return query.fetch1("analysis_file_abs_path", log_export=False)
