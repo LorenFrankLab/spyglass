@@ -1,5 +1,6 @@
 import pathlib
 import re
+from collections import defaultdict
 from functools import reduce
 from typing import Dict, List, Union
 
@@ -624,6 +625,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if not self.connection.in_transaction:
             self.populate(key)
             return
+
         if test_mode:
             skip_duplicates = True
 
@@ -655,11 +657,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         # Track import status explicitly for diagnostics
         video_inserts = []
-        failed_videos = {
-            "timestamp_mismatch": [],
-            "missing_camera": [],
-            "other": [],
-        }
+        failed_videos = defaultdict(list)
 
         # Process each video and track its fate
         for video_name, video in videos.items():
@@ -715,6 +713,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             self._report_partial_import(
                 nwb_file_name, failed_videos, total_videos, imported_count
             )
+
         elif imported_count == 0 and verbose:
             logger.info(
                 f"No video found corresponding to file {nwb_file_name}, "
@@ -723,7 +722,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     @staticmethod
     def _report_partial_import(
-        nwb_file_name, failed_videos, total_count, imported_count
+        nwb_file_name, failed_videos, total_videos, imported_count
     ):
         """Report specific reasons for partial video import.
 
@@ -744,26 +743,26 @@ class VideoFile(SpyglassMixin, dj.Imported):
         """
         msg_parts = [
             f"{nwb_file_name}: VideoFile Partial Import",
-            f"Imported {imported_count}/{total_count} ImageSeries",
+            f"Imported {imported_count}/{total_videos} ImageSeries",
         ]
 
         if failed_videos["timestamp_mismatch"]:
             msg_parts.append("\nTimestamp mismatches:")
             for item in failed_videos["timestamp_mismatch"]:
-                msg_parts.append(f"  • {item['name']}: {item['reason']}")
+                msg_parts.append(f"  - {item['name']}: {item['reason']}")
 
         if failed_videos["missing_camera"]:
             msg_parts.append("\nMissing camera devices:")
             for item in failed_videos["missing_camera"]:
                 msg_parts.append(
-                    f"  • {item['name']}: camera '{item['camera']}' "
+                    f"  - {item['name']}: camera '{item['camera']}' "
                     "not in CameraDevice table"
                 )
 
         if failed_videos["other"]:
             msg_parts.append("\nOther errors:")
             for item in failed_videos["other"]:
-                msg_parts.append(f"  • {item['name']}: {item['error']}")
+                msg_parts.append(f"  - {item['name']}: {item['error']}")
 
         logger.warning("\n".join(msg_parts))
 
