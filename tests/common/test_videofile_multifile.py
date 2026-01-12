@@ -190,6 +190,6 @@ def test_multifile_video_inserts(common, multifile_video_nwb):
     camera_names = [vf["camera_name"] for vf in video_files]
     expected_name = "test_multifile_video_camera"
     assert all(name == expected_name for name in camera_names), (
-        f"Expected all VideoFile entries to have camera_name='test_camera', "
-        f"but found: {set(camera_names)}"
+        f"Expected all VideoFile entries to have camera_name='{expected_name}',"
+        f" but found: {set(camera_names)}"
     )

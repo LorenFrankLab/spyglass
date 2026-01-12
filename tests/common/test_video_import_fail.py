@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import numpy as np
-import pynwb
 import pytest
 from ndx_franklab_novela import CameraDevice
 from pynwb import NWBHDF5IO

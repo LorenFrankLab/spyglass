@@ -19,10 +19,10 @@ from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
+    estimate_sampling_rate,
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
-    estimate_sampling_rate,
     get_valid_intervals,
 )
 
@@ -482,7 +482,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     _nwb_table = Nwbfile
 
-    def _prepare_video_entry(self, key, video_obj, cam_device_str):
+    def _prepare_video_entry(
+        self, key, video_obj, cam_device_str: str = r"camera_device (\d+)"
+    ):
         """Prepare a VideoFile entry dict for a given video object.
 
         Parameters
@@ -491,9 +493,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The primary key for the VideoFile entry
         video_obj : pynwb.image.ImageSeries
             The video object from the NWB file
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
+        cam_device_str : str, optional
+            Regular expression pattern to extract camera device number.
+            Default: r"camera_device (\d+)"
 
         Returns
         -------
@@ -506,22 +508,22 @@ class VideoFile(SpyglassMixin, dj.Imported):
             If camera_name is not found in CameraDevice table
         """
         nwb_cam_device = video_obj.device.name
-        key["video_file_num"] = int(re.match(cam_device_str, nwb_cam_device)[1])
-
         camera_name = video_obj.device.camera_name
+
         if not (CameraDevice & {"camera_name": camera_name}):
             raise KeyError(
                 f"No camera with camera_name: {camera_name} found "
                 "in CameraDevice table."
             )
 
-        key["camera_name"] = camera_name
-        key["video_file_object_id"] = video_obj.object_id
-        return key
+        return dict(
+            key,
+            video_file_num=int(re.match(cam_device_str, nwb_cam_device)[1]),
+            camera_name=camera_name,
+            video_file_object_id=video_obj.object_id,
+        )
 
-    def _process_video_timestamps(
-        self, video_obj, valid_times, key, cam_device_str
-    ):
+    def _process_video_timestamps(self, video_obj, valid_times, key):
         """Process video timestamps and collect VideoFile entries.
 
         Handles both single-file and multi-file ImageSeries. For multi-file
@@ -536,9 +538,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
             Valid time intervals for the current epoch
         key : dict
             The primary key for the VideoFile entry
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
@@ -551,12 +550,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
         # Check for multi-file ImageSeries
         if starting_frame is not None and len(starting_frame) > 1:
             return self._process_multifile_video(
-                video_obj,
-                timestamps,
-                starting_frame,
-                valid_times,
-                key,
-                cam_device_str,
+                video_obj=video_obj,
+                timestamps=timestamps,
+                starting_frame=starting_frame,
+                valid_times=valid_times,
+                key=key,
             )
 
         # Single-file ImageSeries: original logic for backward compatibility
@@ -564,7 +562,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if len(these_times) <= (0.9 * len(timestamps)):
             return []
 
-        entry = self._prepare_video_entry(key, video_obj, cam_device_str)
+        entry = self._prepare_video_entry(key, video_obj)
         return [entry]
 
     def _process_multifile_video(
@@ -574,7 +572,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
         starting_frame,
         valid_times,
         key,
-        cam_device_str,
     ):
         """Process multi-file ImageSeries with starting_frame parameter.
 
@@ -590,9 +587,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
             Valid time intervals for the current epoch
         key : dict
             The primary key for the VideoFile entry
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
@@ -619,9 +613,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 continue
 
             # This file segment matches the epoch - prepare VideoFile entry
-            entry = self._prepare_video_entry(
-                key.copy(), video_obj, cam_device_str
-            )
+            entry = self._prepare_video_entry(key.copy(), video_obj)
             entries.append(entry)
 
         return entries
@@ -660,7 +652,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
             }
         ).fetch_interval()
 
-        cam_device_str = r"camera_device (\d+)"
         video_inserts = []
 
         for video in videos.values():
@@ -669,10 +660,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
             for video_obj in video_list:
                 entries = self._process_video_timestamps(
-                    video_obj,
-                    valid_times,
-                    key.copy(),
-                    cam_device_str,
+                    video_obj=video_obj,
+                    valid_times=valid_times,
+                    key=key.copy(),
                 )
                 video_inserts.extend(entries)
 
