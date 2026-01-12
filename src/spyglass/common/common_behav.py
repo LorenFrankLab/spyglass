@@ -665,8 +665,13 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         # Issue #1444: Check for partial imports while file is already open
         if videos and len(video_inserts) < len(videos):
-            self._warn_partial_import(
-                nwb_file_name, len(videos), len(video_inserts)
+            logger.warning(
+                f"{nwb_file_name}: VideoFile Partial Import Warning\n"
+                f"Found {len(videos)} ImageSeries, "
+                f"but inserted {len(video_inserts)}.\nPossible reasons:\n"
+                f"1. Video timestamps don't overlap with TaskEpoch intervals\n"
+                f"2. Camera devices not registered in CameraDevice table\n"
+                f"3. Video device names don't match expected format\n"
             )
 
         if not video_inserts and verbose:
@@ -674,31 +679,6 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 f"No video found corresponding to file {nwb_file_name}, "
                 f"epoch {interval_list_name}"
             )
-
-    @staticmethod
-    def _warn_partial_import(nwb_file_name, total_count, imported_count):
-        """Warn about partial video import when file is already open.
-
-        Issue #1444: Some videos may not be imported due to timestamp
-        misalignment, camera device issues, or other problems.
-
-        Parameters
-        ----------
-        nwb_file_name : str
-            Name of the NWB file
-        total_count : int
-            Total number of ImageSeries found
-        imported_count : int
-            Number of ImageSeries successfully imported
-        """
-        logger.warning(
-            f"{nwb_file_name}: VideoFile Partial Import Warning\n"
-            f"Found {total_count} ImageSeries, but inserted {imported_count}.\n"
-            f"Possible reasons:\n"
-            f"1. Video timestamps don't overlap with TaskEpoch intervals\n"
-            f"2. Camera devices not registered in CameraDevice table\n"
-            f"3. Video device names don't match expected format\n"
-        )
 
     @classmethod
     def update_entries(cls, restrict=True):
