@@ -152,16 +152,15 @@ def test_get_tbl_method_exists(analysis_file_issues):
     assert callable(analysis_file_issues.get_tbl)
 
 
-def test_show_downstream_no_issues(analysis_file_issues, capsys):
+def test_show_downstream_no_issues(analysis_file_issues, caplog):
     """Test show_downstream() with no issues."""
     # Call with restriction that matches nothing
     result = analysis_file_issues.show_downstream(
         restriction={"analysis_file_name": "definitely_nonexistent_file.nwb"}
     )
 
-    captured = capsys.readouterr()
-    assert "No issues found" in captured.out
-    assert result is None
+    assert "No issues found" in caplog.text
+    assert not result  # Should return empty list
 
 
 def test_integration_check_all_files_method_exists(common_nwbfile):
