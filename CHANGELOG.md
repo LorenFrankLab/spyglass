@@ -86,6 +86,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
 
 - Decoding
 
