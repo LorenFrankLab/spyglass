@@ -9,6 +9,7 @@ import datajoint as dj
 from datajoint.expression import QueryExpression
 from datajoint.utils import to_camel_case
 from pandas import DataFrame
+from tqdm import tqdm
 
 from spyglass.utils.dj_helper_fn import (
     _quick_get_analysis_path,
@@ -294,15 +295,22 @@ class HelperMixin(BaseMixin):
 
     # --------------------------- Check disc usage ------------------------------
 
-    def get_table_storage_usage(self, human_readable=False):
+    def get_table_storage_usage(
+        self, human_readable=False, show_progress=False
+    ):
         """Total size of all analysis files in the table.
+
         Uses the analysis_file_name field to find the file paths and sum their
         sizes.
+
         Parameters
         ----------
         human_readable : bool, optional
             If True, return a human-readable string of the total size.
             Default False, returns total size in bytes.
+        show_progress : bool, optional
+            If True, show a progress bar while calculating the total size.
+            Default False.
 
         Returns
         -------
@@ -314,17 +322,22 @@ class HelperMixin(BaseMixin):
         """
         if "analysis_file_name" not in self.heading.names:
             self._logger.warning(
-                f"{self.full_table_name} does not have an analysis_file_name field."
+                f"{self.full_table_name} has no analysis_file_name field."
             )
             return "0 Mib" if human_readable else 0
-        file_names = self.fetch("analysis_file_name")
-        file_paths = [
-            _quick_get_analysis_path(file_name) for file_name in file_names
-        ]
-        file_paths = [path for path in file_paths if path is not None]
-        file_sizes = [os.stat(path).st_size for path in file_paths]
-        total_size = sum(file_sizes)
-        if not human_readable:
-            return total_size
-        human_size = bytes_to_human_readable(total_size)
-        return human_size
+
+        total_size = 0
+        for file_name in tqdm(  # edited to add progress bar
+            self.fetch("analysis_file_name"),
+            disable=not show_progress,
+            desc="Calculating storage",
+        ):
+            file_path = _quick_get_analysis_path(file_name)
+            if file_path and os.path.exists(file_path):
+                total_size += os.stat(file_path).st_size
+
+        return (
+            bytes_to_human_readable(total_size)
+            if human_readable
+            else total_size
+        )

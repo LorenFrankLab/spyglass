@@ -8,12 +8,37 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Alter Decoding v1 table
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
 
+# Alter v0 recompute table
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+# Alter v1 recompute table
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+
+# Fix LFPBandV1 issue #1481
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()  # See issue #1481
@@ -54,11 +79,13 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Allow for permissive name selection when identifying objects in ingestion nwb
     #1490
 - Update fixes for accessing files from DANDI #1477
-- Deprecate `populate` transaction workaround with tripart `make` calls #1422,
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
     #1505
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
+- Log expected recompute failures #1470
+- Track file created/deletion status of recomputes #1470
 
 ### Pipelines
 

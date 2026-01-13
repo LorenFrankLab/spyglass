@@ -1,6 +1,7 @@
+import json
 from pathlib import Path
 from shutil import rmtree as shutil_rmtree
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import datajoint as dj
 import numpy as np
@@ -297,6 +298,27 @@ class SpikeSortingPreprocessingParameters(SpyglassMixin, dj.Manual):
         }
         self.insert1(key, skip_duplicates=True)
 
+    def fetch_params(self, preproc_params_name: str) -> dict:
+        """Fetch preprocessing parameters for a given name.
+
+        Parameters
+        ----------
+        preproc_params_name : str
+            Name of the preprocessing parameters.
+
+        Returns
+        -------
+        dict
+            Dictionary of preprocessing parameters.
+        """
+        if isinstance(preproc_params_name, dict):
+            preproc_params_name = preproc_params_name.get("preproc_params_name")
+        if not preproc_params_name:
+            raise ValueError("preproc_params_name must be provided")
+
+        params_pk = {"preproc_params_name": preproc_params_name}
+        return (self & params_pk).fetch1("preproc_params")
+
 
 @schema
 class SpikeSortingRecordingSelection(SpyglassMixin, dj.Manual):
@@ -322,6 +344,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     """
 
     _parallel_make = True
+    _data_cache = dict()
 
     def make_fetch(self, key: dict) -> List[Interval]:
         """Fetch times for compute.
@@ -507,6 +530,187 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
                 key["preproc_params_name"],
                 # key["team_name"], # TODO: add team name, reflect PK structure
             ]
+        )
+
+    def _key_to_path(self, key: dict) -> Path:
+        """Convert a key to a recording path."""
+        rec_name = self._get_recording_name(key)
+        rec_path = Path(recording_dir) / Path(rec_name)
+        return rec_path
+
+    def _get_n_samples(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[int]:
+        """Get number of samples in the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            num_samples = self._data_cache[rec_path].get("num_samples")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                num_samples = data.get("num_samples", None)
+        else:
+            num_samples = None
+
+        # Fallback: if num_samples is None, read from source NWB
+        if num_samples is None and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                # Get the recording for the specific interval
+                valid_sort_times = self._get_sort_interval_valid_times(
+                    key
+                ).times
+                valid_sort_times_indices = np.array(
+                    [
+                        np.searchsorted(recording.get_times(), interval)
+                        for interval in valid_sort_times
+                    ]
+                )
+                # Calculate total samples across all intervals
+                num_samples = sum(
+                    end - start for start, end in valid_sort_times_indices
+                )
+            except (FileNotFoundError, KeyError, OSError, ValueError) as e:
+                logger.warning(f"Could not read num_samples from NWB: {e}")
+                return None
+
+        return num_samples
+
+    def _get_sampling_rate(
+        self,
+        key: dict = None,
+        rec_path: Path = None,
+        make_if_missing: bool = False,
+    ) -> Optional[float]:
+        """Get sampling rate of the filtered recording.
+
+        Parameters
+        ----------
+        key: dict, optional
+            specifies a entry of SpikeSortingRecording table
+        rec_path: Path, Optional
+            path to the recording folder. If not provided, key must be provided.
+        make_if_missing: bool
+            whether to create the recording file if it does not exist
+        """
+        if key is None and rec_path is None:
+            raise ValueError("Either key or rec_path must be provided")
+        if rec_path is None:
+            rec_path = self._key_to_path(key)
+        if not rec_path.exists() and make_if_missing:
+            self._make_file(key)
+
+        if rec_path in self._data_cache:
+            samp_rate = self._data_cache[rec_path].get("sampling_rate")
+        elif (rec_path / "si_folder.json").exists():
+            with open(rec_path / "si_folder.json") as f:
+                data = json.load(f)
+                self._data_cache[rec_path] = data
+                samp_rate = data.get("sampling_rate", None)
+        else:
+            samp_rate = None
+
+        def is_invalid(x):  # checks for None, nan, or <= 0
+            return (
+                x is None
+                or (isinstance(x, (float, np.floating)) and np.isnan(x))
+                or x <= 0
+            )
+
+        # Fallback: if sampling_rate is None or invalid, read from source NWB
+        if is_invalid(samp_rate) and key is not None:
+            try:
+                nwb_file_abs_path = Nwbfile().get_abs_path(key["nwb_file_name"])
+                recording = se.read_nwb_recording(
+                    nwb_file_abs_path, load_time_vector=True
+                )
+                samp_rate = recording.get_sampling_frequency()
+            except (FileNotFoundError, OSError, KeyError, ValueError) as e:
+                logger.warning(f"Could not read sampling rate from NWB: {e}")
+
+        if is_invalid(samp_rate):
+            logger.warning(f"Invalid sampling rate from NWB: {samp_rate}")
+            samp_rate = None
+
+        return samp_rate
+
+    def _get_min_segment_length(
+        self, key: dict, min_threshold: Optional[int] = None
+    ) -> Tuple[Optional[int], Optional[int]]:
+        """Get minimum segment length in samples.
+
+        Examines all segments in the recording and returns the minimum length.
+        If min_threshold is provided, returns early when a segment below the
+        threshold is found (for efficiency).
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with nwb_file_name, sort_interval_name, etc.
+        min_threshold : int, optional
+            If provided, return early when a segment below this threshold
+            is found. Default None (check all segments).
+
+        Returns
+        -------
+        min_length : int or None
+            Minimum segment length in samples, or None if cannot determine
+        segment_index : int or None
+            Index of the minimum segment, or None if cannot determine
+        """
+        # Get the valid sort times (segment boundaries)
+        valid_sort_times = self._get_sort_interval_valid_times(key).times
+        if len(valid_sort_times) == 0:
+            return None, None
+
+        # Get sampling rate to convert time to samples
+        samp_rate = self._get_sampling_rate(key=key)
+        if not samp_rate or samp_rate <= 0:
+            return None, None
+
+        # Check each segment length
+        min_length = float("inf")
+        min_index = None
+
+        for i, (start, end) in enumerate(valid_sort_times):
+            segment_duration = end - start  # in seconds
+            segment_samples = int(segment_duration * samp_rate)
+
+            # Early exit if below threshold
+            if min_threshold is not None and segment_samples < min_threshold:
+                return segment_samples, i
+
+            # Track minimum
+            if segment_samples < min_length:
+                min_length = segment_samples
+                min_index = i
+
+        return (
+            int(min_length) if min_length != float("inf") else None,
+            min_index,
         )
 
     @staticmethod
