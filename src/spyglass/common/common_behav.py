@@ -508,9 +508,16 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "in CameraDevice table."
             )
 
+        match = re.match(cam_device_str, nwb_cam_device)
+        if not match:
+            raise ValueError(
+                f"Camera device name '{nwb_cam_device}' does not match "
+                f"expected pattern '{cam_device_str}'"
+            )
+
         return dict(
             key,
-            video_file_num=int(re.match(cam_device_str, nwb_cam_device)[1]),
+            video_file_num=int(match[1]),
             camera_name=camera_name,
             video_file_object_id=video_obj.object_id,
         )
@@ -736,7 +743,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         failed_videos : dict
             Dictionary with keys 'timestamp_mismatch', 'missing_camera',
             'other', each containing list of failure details
-        total_count : int
+        total_videos : int
             Total number of ImageSeries found
         imported_count : int
             Number of ImageSeries successfully imported
