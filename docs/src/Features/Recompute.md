@@ -183,7 +183,7 @@ as JSON.
 
 To expand the functionality of this feature, please either post a GitHub issue
 or make a pull request with edits to
-`spyglas.utils.h5_helper_fn.H5pyComparator`.
+`spyglas.utils.recompute_helper_fn.H5pyComparator`.
 
 With this information, you can make changes to the environment to try another
 recompute attempt. For the best record keeping of attempts, we recommend cloning
