@@ -591,7 +591,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         Returns
         -------
         list
-            List of entry dicts for segments with valid timestamps (may be empty)
+            List of entry dicts for segments with valid timestamps. May be empty
         """
         entries = []
 
