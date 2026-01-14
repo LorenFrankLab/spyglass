@@ -1,19 +1,17 @@
 # ---
 # jupyter:
 #   jupytext:
-#     formats: ipynb,py:light
 #     text_representation:
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.18.1
+#       jupytext_version: 1.17.0
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
 #     name: python3
 # ---
 
-# + [markdown]
 # # Clusterless Decoding
 #
 # ## Overview
@@ -46,23 +44,22 @@
 # Let's start with grouping the Waveform Features. We will first inspect the waveform features that we have extracted to figure out the primary keys of the data that we want to decode from. We need to use the tables `SpikeSortingSelection` and `SpikeSortingOutput` to figure out the `merge_id` associated with `nwb_file_name` to get the waveform features associated with the NWB file of interest.
 #
 
-# -
+# +
 from pathlib import Path
-
 import datajoint as dj
 
 dj.config.load(
     Path("../dj_local_conf.json").absolute()
 )  # load config for database connection info
 
+# +
+from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 import spyglass.spikesorting.v1 as sgs
 from spyglass.decoding.v1.waveform_features import (
-    UnitWaveformFeatures,
     UnitWaveformFeaturesSelection,
+    UnitWaveformFeatures,
 )
 
-# -
-from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 
 nwb_copy_file_name = "mediumnwb20230802_.nwb"
 
@@ -82,7 +79,7 @@ feature_key = {"features_param_name": "amplitude"}
     sorter_keys, sources=["v1"], as_dict=True
 )
 
-# -
+# +
 from spyglass.decoding.v1.waveform_features import UnitWaveformFeaturesSelection
 
 # find the merge ids that correspond to the sorter key restrictions
@@ -100,11 +97,11 @@ for key in waveform_selection_keys:
     key["spikesorting_merge_id"] = key.pop("merge_id")
 
 UnitWaveformFeaturesSelection & waveform_selection_keys
+# -
 
-# + [markdown]
 # We will create a group called `test_group` that contains all of the tetrodes that we want to decode from. We will use the `create_group` function to create this group. This function takes two arguments: the name of the group, and the keys of the tables that we want to include in the group.
 
-# -
+# +
 from spyglass.decoding.v1.clusterless import UnitWaveformFeaturesGroup
 
 UnitWaveformFeaturesGroup().create_group(
@@ -113,17 +110,15 @@ UnitWaveformFeaturesGroup().create_group(
     keys=waveform_selection_keys,
 )
 UnitWaveformFeaturesGroup & {"waveform_features_group_name": "test_group"}
+# -
 
-# + [markdown]
 # We can see that we successfully associated "test_group" with the tetrodes that we want to decode from by using the `get_group` function.
 
-# -
 UnitWaveformFeaturesGroup.UnitFeatures & {
     "nwb_file_name": nwb_copy_file_name,
     "waveform_features_group_name": "test_group",
 }
 
-# + [markdown]
 # ### Grouping Position Data
 #
 # We will now create a group called `02_r1` that contains all of the position data that we want to decode from. As before, we will use the `create_group` function to create this group. This function takes two arguments: the name of the group, and the keys of the tables that we want to include in the group.
@@ -134,10 +129,10 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 #
 # You will also want to specify the name of the position variables if they are different from the default names. The default names are `position_x` and `position_y`.
 
+# +
+from spyglass.position import PositionOutput
 import spyglass.position as sgp
 
-# -
-from spyglass.position import PositionOutput
 
 sgp.v1.TrodesPosParams.insert1(
     {
@@ -170,7 +165,7 @@ sgp.v1.TrodesPosV1.populate(trodes_s_key)
 
 PositionOutput.TrodesPosV1 & trodes_s_key
 
-# -
+# +
 from spyglass.decoding.v1.core import PositionGroup
 
 position_merge_ids = (
@@ -193,20 +188,18 @@ PositionGroup & {
     "nwb_file_name": nwb_copy_file_name,
     "position_group_name": "test_group",
 }
-
 # -
+
 (
     PositionGroup
     & {"nwb_file_name": nwb_copy_file_name, "position_group_name": "test_group"}
 ).fetch1("position_variables")
 
-# -
 PositionGroup.Position & {
     "nwb_file_name": nwb_copy_file_name,
     "position_group_name": "test_group",
 }
 
-# + [markdown]
 # ## Decoding Model Parameters
 #
 # We will use the `non_local_detector` package to decode the data. This package is highly flexible and allows several different types of models to be used. In this case, we will use the `ContFragClusterlessClassifier` to decode the data. This has two discrete states: Continuous and Fragmented, which correspond to different types of movement models. To read more about this model, see:
@@ -215,15 +208,15 @@ PositionGroup.Position & {
 # Let's first look at the model and the default parameters:
 #
 
-# -
+# +
 from non_local_detector.models import ContFragClusterlessClassifier
 
 ContFragClusterlessClassifier()
+# -
 
-# + [markdown]
 # You can change these parameters like so:
 
-# -
+# +
 from non_local_detector.models import ContFragClusterlessClassifier
 
 ContFragClusterlessClassifier(
@@ -233,12 +226,13 @@ ContFragClusterlessClassifier(
         "waveform_std": 24.0,
     },
 )
+# -
 
-# + [markdown]
 # This is how to insert the model parameters into the database:
 
-# -
+# +
 from spyglass.decoding.v1.core import DecodingParameters
+
 
 DecodingParameters.insert1(
     {
@@ -250,31 +244,28 @@ DecodingParameters.insert1(
 )
 
 DecodingParameters & {"decoding_param_name": "contfrag_clusterless"}
+# -
 
-# + [markdown]
 # We can retrieve these parameters and rebuild the model like so:
 
-# -
+# +
 model_params = (
     DecodingParameters & {"decoding_param_name": "contfrag_clusterless"}
 ).fetch1()
 
 ContFragClusterlessClassifier(**model_params["decoding_params"])
+# -
 
-# + [markdown]
 # ### 1D Decoding
 #
 # If you want to do 1D decoding, you will need to specify the `track_graph`, `edge_order`, and `edge_spacing` in the `environments` parameter. You can read more about these parameters in the [linearization notebook](./24_Linearization.ipynb). You can retrieve these parameters from the `TrackGraph` table if you have stored them there. These will then go into the `environments` parameter of the `ContFragClusterlessClassifier` model.
 
-# -
+# +
 from non_local_detector.environment import Environment
 
-# -
-from spyglass.decoding.v1.clusterless import ClusterlessDecodingSelection
-
 # ?Environment
+# -
 
-# + [markdown]
 # ## Decoding
 #
 # Now that we have grouped the data and defined the model parameters, we have finally set up the elements in tables that we need to decode the data. We now need to use the `ClusterlessDecodingSelection` to fully specify all the parameters and data that we want.
@@ -304,15 +295,17 @@ from spyglass.decoding.v1.clusterless import ClusterlessDecodingSelection
 # NOTE: If estimating parameters, then we need to treat times outside decoding interval as missing. this means that times outside the decoding interval will not use the spiking data and only the state transition matrix and previous time step will be used. This may or may not be desired depending on the length of this missing interval.
 #
 
+# +
+from spyglass.decoding.v1.clusterless import ClusterlessDecodingSelection
 
 ClusterlessDecodingSelection()
 
-# -
+# +
 from spyglass.common import IntervalList
 
 IntervalList & {"nwb_file_name": nwb_copy_file_name}
 
-# -
+# +
 decoding_interval_valid_times = [
     [1625935714.6359036, 1625935714.6359036 + 15.0]
 ]
@@ -325,11 +318,11 @@ IntervalList.insert1(
     },
     skip_duplicates=True,
 )
+# -
 
-# + [markdown]
 # Once we have figured out the keys that we need, we can insert the `ClusterlessDecodingSelection` into the database.
 
-# -
+# +
 selection_key = {
     "waveform_features_group_name": "test_group",
     "position_group_name": "test_group",
@@ -346,40 +339,35 @@ ClusterlessDecodingSelection.insert1(
 )
 
 ClusterlessDecodingSelection & selection_key
-
 # -
+
 ClusterlessDecodingSelection()
 
-# + [markdown]
 # To run decoding, we simply populate the `ClusterlessDecodingOutput` table. This will run the decoding and insert the results into the database. We can then retrieve the results from the database.
 
-# -
+# +
 from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
 
 ClusterlessDecodingV1.populate(selection_key)
+# -
 
-# + [markdown]
 # We can now see it as an entry in the `DecodingOutput` table.
 
-# -
+# +
 from spyglass.decoding.decoding_merge import DecodingOutput
 
 DecodingOutput.ClusterlessDecodingV1 & selection_key
+# -
 
-# + [markdown]
 # We can load the results of the decoding:
 
-# -
 decoding_results = (ClusterlessDecodingV1 & selection_key).fetch_results()
 decoding_results
 
-# + [markdown]
 # Finally, if we deleted the results, we can use the `cleanup` function to delete the results from the file system:
 
-# -
 DecodingOutput().cleanup()
 
-# + [markdown]
 # ## Visualization of decoding output.
 #
 # The output of decoding can be challenging to visualize with static graphs, especially if the decoding is performed on 2D data.
@@ -391,7 +379,7 @@ DecodingOutput().cleanup()
 # For each user, you will need to run `kachery-cloud-init` in the terminal and follow the instructions to associate your computer with your GitHub user on the kachery-cloud network.
 #
 
-# -
+# +
 # from non_local_detector.visualization import (
 #     create_interactive_2D_decoding_figurl,
 # )
@@ -400,30 +388,27 @@ DecodingOutput().cleanup()
 #     position_info,
 #     position_variable_names,
 # ) = ClusterlessDecodingV1.fetch_position_info(selection_key)
-
-# # Get time values from results (no longer need .isel(intervals=0))
-# results_time = decoding_results.time.values
+# results_time = decoding_results.acausal_posterior.isel(intervals=0).time.values
 # position_info = position_info.loc[results_time[0] : results_time[-1]]
 
 # env = ClusterlessDecodingV1.fetch_environments(selection_key)[0]
 # spike_times, _ = ClusterlessDecodingV1.fetch_spike_data(selection_key)
 
-# # For multiple intervals, filter to specific interval using interval_labels:
-# # posterior = decoding_results.where(decoding_results.interval_labels == 0, drop=True)
-# #     .acausal_posterior.unstack("state_bins").sum("state")
 
 # create_interactive_2D_decoding_figurl(
 #     position_time=position_info.index.to_numpy(),
 #     position=position_info[position_variable_names],
 #     env=env,
 #     results=decoding_results,
-#     posterior=decoding_results.acausal_posterior.unstack("state_bins").sum("state"),
+#     posterior=decoding_results.acausal_posterior.isel(intervals=0)
+#     .unstack("state_bins")
+#     .sum("state"),
 #     spike_times=spike_times,
 #     head_dir=position_info["orientation"],
 #     speed=position_info["speed"],
 # )
+# -
 
-# + [markdown]
 # ## GPUs
 # We can use GPUs for decoding which will result in a significant speedup. This is achieved using the [jax](https://jax.readthedocs.io/en/latest/) package.
 #
@@ -432,22 +417,22 @@ DecodingOutput().cleanup()
 #
 # In the following instance, we do not have a GPU:
 
-# -
+# +
 import jax
 
 jax.devices()
+# -
 
-# + [markdown]
 # ### Selecting a GPU
 # If you do have multiple GPUs, you can use the `jax` package to set the device (GPU) that you want to use. For example, if you want to use the second GPU, you can use the following code (uncomment first):
 
-# -
+# +
 # device_id = 2
 # device = jax.devices()[device_id]
 # jax.config.update("jax_default_device", device)
 # device
+# -
 
-# + [markdown]
 # ### Monitoring GPU Usage
 #
 # You can see which GPUs are occupied (if you have multiple GPUs) by running the command `nvidia-smi` in
