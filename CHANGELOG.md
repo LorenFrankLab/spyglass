@@ -13,10 +13,18 @@ from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
+```
 
+#### LFPBandV1 Fix
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the following after updating:
+
+```python
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
-LFPBandV1().fix_1481()  # See issue #1481
+LFPBandV1().fix_1481()
 ```
 
 ### Breaking Changes
@@ -57,12 +65,6 @@ for label, interval_data in results.groupby('interval_labels'):
 - `0, 1, 2, ...` - Sequential interval indices (0-indexed)
 - `-1` - Time points outside any decoding interval (only when
   `estimate_decoding_params=True`)
-  
-### LFPBandV1
-
-If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
-2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Documentation
 
@@ -136,7 +138,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - **BREAKING**: Remove `intervals` dimension from decoding results. Results
       from multiple intervals are now concatenated along the `time` dimension
       with an `interval_labels` coordinate to track interval membership. This
-      eliminates NaN padding and reduces memory usage. See migration guide below.
+      eliminates NaN padding and reduces memory usage. See migration guide above.
 
 - LFP
 
