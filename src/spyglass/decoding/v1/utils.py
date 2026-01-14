@@ -177,10 +177,10 @@ def get_valid_kwargs(
     predict_kwargs : dict
         Kwargs valid for classifier.predict
     """
-    sig = inspect.signature(classifier.fit)
-    valid_fit_kwargs: set[str] = set(sig.parameters.keys())
-    sig = inspect.signature(classifier.predict)
-    valid_predict_kwargs: set[str] = set(sig.parameters.keys())
+    fit_sig = inspect.signature(classifier.fit)
+    valid_fit_kwargs: set[str] = set(fit_sig.parameters.keys())
+    predict_sig = inspect.signature(classifier.predict)
+    valid_predict_kwargs: set[str] = set(predict_sig.parameters.keys())
 
     # Warn about kwargs that are not valid for either fit or predict
     if decoding_kwargs:
