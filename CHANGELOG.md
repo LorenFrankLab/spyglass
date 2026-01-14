@@ -35,6 +35,8 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Infrastructure
 
+- Add cross-platform installer script with Docker support, input validation,
+    and automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
