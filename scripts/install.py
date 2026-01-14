@@ -1178,37 +1178,27 @@ def build_directory_structure(
     return directories
 
 
-def determine_tls(host: str, schema: Optional[Dict[str, Any]] = None) -> bool:
-    """Automatically determine if TLS should be used.
+def determine_tls(host: str) -> bool:
+    """Automatically determine if TLS should be used, with user messaging.
 
-    Uses smart defaults - no user prompt needed.
+    This is a verbose wrapper around Validators.should_use_tls() that adds
+    user-friendly console output explaining the security configuration.
 
     Parameters
     ----------
     host : str
         Database hostname
-    schema : Dict[str, Any], optional
-        Pre-loaded schema. If None, will load from file.
 
     Returns
     -------
     bool
         Whether to use TLS
     """
-    if schema is None:
-        schema = load_full_schema()
-
-    tls_config = schema.get("tls", {})
-    localhost_addresses = tls_config.get(
-        "localhost_addresses", ["localhost", "127.0.0.1", "::1"]
-    )
-
-    # Automatic decision: enable for remote, disable for local
-    is_local = host in localhost_addresses
-    use_tls = not is_local
+    # Delegate to Validators for the actual logic (single source of truth)
+    use_tls = Validators.should_use_tls(host)
 
     # User-friendly messaging (plain language instead of technical terms)
-    if is_local:
+    if not use_tls:  # localhost
         Console.info(f"✓ Connecting to local database at {host}")
         print("  Security: Using unencrypted connection (safe for localhost)")
     else:
@@ -1260,13 +1250,13 @@ def create_database_config(
     if base_dir is None:
         base_dir = get_base_directory()
 
-    # Load schema once for efficiency (used by both TLS and directory creation)
+    # Load schema for directory creation
     full_schema = load_full_schema()
     dir_schema = full_schema["directory_schema"]
 
     # Auto-determine TLS if not explicitly provided
     if use_tls is None:
-        use_tls = determine_tls(host, schema=full_schema)
+        use_tls = determine_tls(host)
 
     # Build directory structure from JSON schema
     dirs = build_directory_structure(
@@ -1635,6 +1625,35 @@ class Validators:
 
         return len(errors) == 0, errors
 
+    @staticmethod
+    def should_use_tls(host: str) -> bool:
+        """Determine if TLS should be used based on hostname.
+
+        TLS is required for non-localhost connections for security.
+        Localhost connections (127.0.0.1, ::1, localhost) skip TLS since
+        the connection never leaves the machine.
+
+        Parameters
+        ----------
+        host : str
+            Hostname or IP address to check
+
+        Returns
+        -------
+        bool
+            True if TLS should be used, False for localhost connections
+
+        Examples
+        --------
+        >>> Validators.should_use_tls("localhost")
+        False
+        >>> Validators.should_use_tls("127.0.0.1")
+        False
+        >>> Validators.should_use_tls("db.example.com")
+        True
+        """
+        return host not in LOCALHOST_ADDRESSES
+
 
 # =============================================================================
 # Port Availability Check
@@ -1680,7 +1699,7 @@ def is_port_available(host: str, port: int) -> Tuple[bool, str]:
     except socket.gaierror:
         return False, f"Cannot resolve hostname: {host}"
 
-    is_local = host in LOCALHOST_ADDRESSES
+    is_local = not Validators.should_use_tls(host)
     any_success = False
     last_error: Optional[Exception] = None
 
@@ -2587,7 +2606,7 @@ def setup_database_remote(
         return False
 
     # Check if port is reachable (for remote hosts only)
-    if host not in LOCALHOST_ADDRESSES:
+    if Validators.should_use_tls(host):
         print(f"  Testing connection to {host}:{port}...")
         port_reachable, port_msg = is_port_available(host, port)
         if not port_reachable:
@@ -2606,7 +2625,7 @@ def setup_database_remote(
             print("  ✓ Port is reachable")
 
     # Determine TLS based on host (use TLS for non-localhost)
-    use_tls = host not in LOCALHOST_ADDRESSES
+    use_tls = Validators.should_use_tls(host)
     config["use_tls"] = use_tls
 
     print(f"  Connecting to {host}:{port} as {user}")
@@ -2642,7 +2661,7 @@ def setup_database_remote(
         return False
 
     # Offer password change for new lab members (only for non-localhost)
-    if config["host"] not in LOCALHOST_ADDRESSES:
+    if Validators.should_use_tls(config["host"]):
         new_password = change_database_password(
             host=config["host"],
             port=config["port"],

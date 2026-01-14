@@ -359,6 +359,37 @@ class TestValidatePort:
 
 
 # =============================================================================
+# TLS Determination Tests
+# =============================================================================
+
+
+class TestShouldUseTls:
+    """Tests for Validators.should_use_tls()."""
+
+    def test_localhost_returns_false(self):
+        """Returns False for localhost."""
+        assert Validators.should_use_tls("localhost") is False
+
+    def test_ipv4_loopback_returns_false(self):
+        """Returns False for IPv4 loopback address."""
+        assert Validators.should_use_tls("127.0.0.1") is False
+
+    def test_ipv6_loopback_returns_false(self):
+        """Returns False for IPv6 loopback address."""
+        assert Validators.should_use_tls("::1") is False
+
+    def test_remote_hostname_returns_true(self):
+        """Returns True for remote hostnames."""
+        assert Validators.should_use_tls("db.example.com") is True
+        assert Validators.should_use_tls("lmf-db.cin.ucsf.edu") is True
+
+    def test_remote_ip_returns_true(self):
+        """Returns True for non-loopback IP addresses."""
+        assert Validators.should_use_tls("192.168.1.1") is True
+        assert Validators.should_use_tls("10.0.0.1") is True
+
+
+# =============================================================================
 # Database Configuration Validation Tests
 # =============================================================================
 
