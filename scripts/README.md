@@ -429,20 +429,20 @@ The installer must follow this order to avoid circular dependencies:
 
 ### Why Inline Docker Code?
 
-The installer uses inline Docker operations instead of importing from
-`spyglass.utils.docker` because:
+The installer uses inline Docker operations because:
 
 - Spyglass is not installed yet when the installer runs
 - Cannot create circular dependency (installer → spyglass → installer)
 - Must be self-contained with stdlib only
 
-The reusable Docker utilities are in `src/spyglass/utils/docker.py`.
+For post-installation Docker management, users should use `docker compose`
+commands directly (see `docker-compose.yml` header for common tasks).
 
 ## Related Files
 
 - `environments/environment_min.yml` - Minimal dependencies
 - `environments/environment.yml` - Full dependencies
-- `src/spyglass/utils/docker.py` - Reusable Docker utilities
+- `docker-compose.yml` - Docker Compose configuration for database
 - `tests/setup/test_install.py` - Unit tests
 - `pyproject.toml` - Python version requirements (single source of truth)
 

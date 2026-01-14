@@ -1331,37 +1331,6 @@ class TestConfigOnlyErrorScenarios:
 
 
 # =============================================================================
-# Docker Utilities Module Tests
-# =============================================================================
-
-
-class TestDockerUtilities:
-    """Tests for docker utility module."""
-
-    def test_docker_module_exists(self):
-        """docker utilities module exists."""
-        docker_module = (
-            Path(__file__).parent.parent.parent
-            / "src"
-            / "spyglass"
-            / "utils"
-            / "docker.py"
-        )
-        assert docker_module.exists()
-
-    def test_docker_module_imports(self):
-        """docker utilities can be imported."""
-        try:
-            from spyglass.utils import docker
-
-            assert hasattr(docker, "DockerConfig")
-            assert hasattr(docker, "is_docker_available")
-            assert hasattr(docker, "start_database_container")
-        except ImportError:
-            pytest.skip("Spyglass not installed")
-
-
-# =============================================================================
 # Schema Loading Tests
 # =============================================================================
 
