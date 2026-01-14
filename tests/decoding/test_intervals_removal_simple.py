@@ -273,7 +273,12 @@ class MockClassifier:
         pass
 
     def predict(
-        self, position_time, position, spike_times, time, custom_predict_param=None
+        self,
+        position_time,
+        position,
+        spike_times,
+        time,
+        custom_predict_param=None,
     ):
         """Mock predict method with specific signature."""
         pass
@@ -329,7 +334,9 @@ class TestGetValidKwargs:
         with caplog.at_level(logging.WARNING):
             get_valid_kwargs(classifier, decoding_kwargs, logger)
 
-        assert "not valid for classifier.fit or classifier.predict" in caplog.text
+        assert (
+            "not valid for classifier.fit or classifier.predict" in caplog.text
+        )
         assert "invalid_param" in caplog.text
         assert "another_bad_one" in caplog.text
 

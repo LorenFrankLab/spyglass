@@ -958,7 +958,9 @@ def mock_clusterless_decoder():
         decoding_interval,
     ):
         """Mocked version of _run_decoder that returns fake results instantly."""
-        return _create_mock_decoder_results(key, position_info, decoding_interval)
+        return _create_mock_decoder_results(
+            key, position_info, decoding_interval
+        )
 
     return _mock_run_decoder
 
@@ -999,6 +1001,8 @@ def mock_sorted_spikes_decoder():
         decoding_interval,
     ):
         """Mocked version of _run_decoder that returns fake results instantly."""
-        return _create_mock_decoder_results(key, position_info, decoding_interval)
+        return _create_mock_decoder_results(
+            key, position_info, decoding_interval
+        )
 
     return _mock_run_decoder

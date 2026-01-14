@@ -11,7 +11,6 @@ estimate_decoding_params=True (estimate_parameters branch).
 import numpy as np
 import pytest
 
-
 # ============================================================================
 # Parametrized fixtures for decoder types
 # ============================================================================
