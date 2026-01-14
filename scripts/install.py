@@ -991,9 +991,11 @@ class DockerManager:
                         if not value:
                             raise ValueError("MYSQL_PORT is empty")
                         port = int(value)
+                        # Basic range check only - don't reject privileged ports
+                        # here since .env might intentionally specify them
                         if port < 1 or port > 65535:
                             raise ValueError(
-                                f"MYSQL_PORT {port} is out of range"
+                                f"MYSQL_PORT {port} is out of range (1-65535)"
                             )
                     elif key == "MYSQL_ROOT_PASSWORD":
                         if not value:
