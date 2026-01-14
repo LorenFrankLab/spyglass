@@ -28,7 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 # Color codes for cross-platform output
 # Windows fallback uses ASCII symbols instead of empty strings for accessibility
@@ -882,7 +882,7 @@ class DockerManager:
             return False
 
     @staticmethod
-    def get_compose_command() -> list[str]:
+    def get_compose_command() -> List[str]:
         """Get the Docker Compose command prefix."""
         return ["docker", "compose"]
 
