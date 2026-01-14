@@ -108,13 +108,14 @@ def get_required_python_version() -> tuple[int, int]:
     Future: Consider extracting to scripts/_shared.py if the installer
     becomes a package, but for now standalone scripts are simpler.
     """
+    fallback = (3, 9)
     try:
         import tomllib  # Python 3.11+
     except ImportError:
         try:
             import tomli as tomllib  # Python 3.9-3.10
         except ImportError:
-            return (3, 9)  # Safe fallback
+            return fallback
 
     try:
         pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
@@ -130,7 +131,7 @@ def get_required_python_version() -> tuple[int, int]:
         # Expected errors during parsing - use safe fallback
         pass
 
-    return (3, 9)  # Safe fallback
+    return fallback
 
 
 def check_conda() -> None:
