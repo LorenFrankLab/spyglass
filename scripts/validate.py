@@ -183,12 +183,17 @@ def check_spyglass_import() -> None:
     Raises
     ------
     RuntimeError
-        If spyglass package cannot be imported
+        If spyglass package cannot be imported or version is unavailable
     """
     try:
         import spyglass
 
-        version = getattr(spyglass, "__version__", "unknown")
+        version = getattr(spyglass, "__version__", None)
+        if version is None:
+            raise RuntimeError(
+                "Spyglass version not available. This usually means the package "
+                "was not installed properly. Try: pip install -e . (from repo root)"
+            )
         print(f"✓ Spyglass version: {version}")
     except ImportError as e:
         raise RuntimeError(f"Cannot import spyglass: {e}")
