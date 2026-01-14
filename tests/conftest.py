@@ -21,6 +21,7 @@ from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
 from pandas.errors import PerformanceWarning
 
+from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
@@ -39,84 +40,6 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
-
-
-class _TestDatabaseManager:
-    """Manages test database connection (service container or local Docker).
-
-    Provides minimal interface compatible with old DockerMySQLManager for tests.
-    """
-
-    def __init__(self, container_name="mysql", port=None, null_server=False):
-        self.container_name = container_name
-        # Use 3308 as default (GitHub Actions service container port)
-        self.port = port if port is not None else 3308
-        self.null_server = null_server
-        self.branch_name = (
-            None  # No branch-specific naming for service containers
-        )
-
-    def wait(self, timeout=120, wait_interval=3):
-        """Wait for database to be ready.
-
-        For service containers (null_server=False), does minimal verification.
-        Config setup is handled by test fixtures (server_credentials + dj_conn).
-
-        Parameters
-        ----------
-        timeout : int
-            Maximum time to wait in seconds. Default 120.
-        wait_interval : int
-            Time between connection attempts in seconds. Default 3.
-        """
-        if self.null_server:
-            return
-
-        # Service container should be ready if health check passed
-        # Let test fixtures handle actual connection verification
-
-    def stop(self):
-        """Stop database. No-op as service container is managed by GitHub Actions."""
-        if self.null_server:
-            return
-        # Service container cleanup is handled by GitHub Actions
-
-    @property
-    def credentials(self):
-        """Database credentials for test connection."""
-        return {
-            "database.host": "localhost",
-            "database.password": "tutorial",
-            "database.user": "root",
-            "database.port": int(self.port),
-            "safemode": "false",
-            "custom": {"test_mode": True, "debug_mode": False},
-        }
-
-    @property
-    def container(self):
-        """Docker container object.
-
-        Returns None for service containers (managed by GitHub Actions) or
-        null_server mode, since we don't have Python Docker API access.
-        """
-        return None
-
-    @property
-    def connected(self):
-        """Check if database connection is available.
-
-        Updates dj.config and verifies connection works. This ensures test_mode
-        is set in dj.config before any spyglass imports happen in mini_insert.
-        """
-        try:
-            import datajoint as dj
-
-            # Update config to ensure test_mode is set (needed for electrode validation skip)
-            dj.config.update(self.credentials)
-            return dj.conn().is_connected
-        except Exception:
-            return False
 
 
 def pytest_addoption(parser):
@@ -203,19 +126,13 @@ def pytest_configure(config):
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
     os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # Disable GPU for tests
 
-    # Check if docker module is available for local testing
-    try:
-        import docker as _docker_check
-
-        docker_available = True
-    except ImportError:
-        docker_available = False
-
-    # Use GitHub Actions service container or local Docker for tests
-    SERVER = _TestDatabaseManager(
+    SERVER = DockerMySQLManager(
         container_name=config.option.container_name,
         port=config.option.container_port,
-        null_server=config.option.no_docker or not docker_available,
+        restart=TEARDOWN,
+        shutdown=TEARDOWN,
+        null_server=config.option.no_docker,
+        verbose=VERBOSE,
     )
 
     DOWNLOADS = DataDownloader(
