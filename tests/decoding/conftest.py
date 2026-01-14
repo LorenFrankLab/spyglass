@@ -609,8 +609,12 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
 
     # Create realistic-looking posterior probabilities
     # Shape: (n_time, n_state_bins) - flattened across position and state
-    position_mean = n_position_bins // 2
-    position_std = n_position_bins // 10
+    # Center posterior at middle of position bins
+    POSITION_CENTER_FRACTION = 0.5
+    position_mean = int(n_position_bins * POSITION_CENTER_FRACTION)
+    # Spread posterior over ~10% of position range for realistic Gaussian shape
+    POSITION_SPREAD_FRACTION = 0.1
+    position_std = max(1, int(n_position_bins * POSITION_SPREAD_FRACTION))
 
     posterior = np.zeros((n_time, n_state_bins))
     for t in range(n_time):
@@ -647,6 +651,63 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
 # ============================================================================
 # In-Memory Mock Storage (avoids netCDF4/HDF5 file I/O issues in CI)
 # ============================================================================
+
+
+def _create_mock_save_function(mock_results_storage):
+    """Create a mock save function for decoder results.
+
+    This shared helper contains the common logic for both the global
+    mock_save_decoder_results_globally fixture and the mock_decoder_save
+    fixture. It saves results to netCDF with explicit engine and stores
+    data in memory for loading.
+
+    Parameters
+    ----------
+    mock_results_storage : dict
+        Dictionary with 'results' and 'classifiers' keys for in-memory storage
+
+    Returns
+    -------
+    callable
+        Mock save function compatible with _save_decoder_results signature
+    """
+    import os
+    import pickle
+    import uuid
+    from pathlib import Path
+
+    def _mock_save_results(self, classifier, results, key):
+        """Mocked version that creates files with explicit netcdf4 engine."""
+        # Generate unique identifier for this result set
+        unique_id = str(uuid.uuid4())[:8]
+        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
+
+        # Use absolute path to match environment expectations
+        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
+        analysis_dir = Path(base_dir) / "analysis"
+        subdir = analysis_dir / nwb_file_name
+        subdir.mkdir(parents=True, exist_ok=True)
+
+        # Create file paths
+        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
+        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
+
+        # Write netCDF file with explicit netcdf4 engine
+        results.to_netcdf(results_path, engine="netcdf4")
+
+        # Write classifier as pickle (non-xarray object)
+        with open(classifier_path, "wb") as f:
+            pickle.dump(classifier, f)
+
+        # Store actual data in memory for loading
+        results_path_str = str(results_path)
+        classifier_path_str = str(classifier_path)
+        mock_results_storage["results"][results_path_str] = results
+        mock_results_storage["classifiers"][classifier_path_str] = classifier
+
+        return results_path_str, classifier_path_str
+
+    return _mock_save_results
 
 
 @pytest.fixture(scope="session")
@@ -735,42 +796,10 @@ def mock_save_decoder_results_globally(mock_results_storage):
     1. Writing netCDF files with explicit netcdf4 engine
     2. Storing actual data in memory for loading via mock_detector_io_globally
     """
-    import os
-    import pickle
-    import uuid
-    from pathlib import Path
     from unittest.mock import patch
 
-    def _mock_save_results(self, classifier, results, key):
-        """Mocked version that creates files with explicit netcdf4 engine."""
-        # Generate unique identifier for this result set
-        unique_id = str(uuid.uuid4())[:8]
-        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
-
-        # Use absolute path to match environment expectations
-        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
-        analysis_dir = Path(base_dir) / "analysis"
-        subdir = analysis_dir / nwb_file_name
-        subdir.mkdir(parents=True, exist_ok=True)
-
-        # Create file paths
-        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
-        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
-
-        # Write netCDF file with explicit netcdf4 engine
-        results.to_netcdf(results_path, engine="netcdf4")
-
-        # Write classifier as pickle (non-xarray object)
-        with open(classifier_path, "wb") as f:
-            pickle.dump(classifier, f)
-
-        # Store actual data in memory for loading
-        results_path_str = str(results_path)
-        classifier_path_str = str(classifier_path)
-        mock_results_storage["results"][results_path_str] = results
-        mock_results_storage["classifiers"][classifier_path_str] = classifier
-
-        return results_path_str, classifier_path_str
+    # Use shared helper to create mock save function
+    _mock_save_results = _create_mock_save_function(mock_results_storage)
 
     # Import the decoding table classes
     from spyglass.decoding.v1.clusterless import ClusterlessDecodingV1
@@ -789,6 +818,122 @@ def mock_save_decoder_results_globally(mock_results_storage):
 
 
 # ============================================================================
+# Shared Mock Decoder Logic
+# ============================================================================
+
+
+def _create_mock_decoder_results(key, position_info, decoding_interval):
+    """Create mock decoder results for testing.
+
+    This shared helper contains the common logic for both clusterless and
+    sorted spikes mock decoders. It handles both estimate_decoding_params
+    branches and returns a fake classifier and results dataset.
+
+    Parameters
+    ----------
+    key : dict
+        Decoding selection key containing estimate_decoding_params flag
+    position_info : pd.DataFrame
+        Position data with time index
+    decoding_interval : np.ndarray
+        Array of (start, end) interval tuples
+
+    Returns
+    -------
+    classifier : object
+        Fake classifier with required attributes
+    results : xr.Dataset
+        Mock decoding results with interval_labels coordinate
+    """
+    import xarray as xr
+    from scipy.ndimage import label
+
+    classifier = create_fake_classifier()
+
+    if key.get("estimate_decoding_params", False):
+        # estimate_decoding_params=True branch:
+        # Results span ALL time points in position_info
+        all_time = position_info.index.to_numpy()
+
+        # Create is_missing mask (same as real code)
+        is_missing = np.ones(len(position_info), dtype=bool)
+        for interval_start, interval_end in decoding_interval:
+            is_missing[
+                np.logical_and(
+                    position_info.index >= interval_start,
+                    position_info.index <= interval_end,
+                )
+            ] = False
+
+        # Create fake results for all time points
+        results = create_fake_decoding_results(
+            n_time=len(all_time), n_position_bins=50, n_states=2
+        )
+        results = results.assign_coords(time=all_time)
+
+        # Create interval_labels using scipy.ndimage.label (same as real code)
+        labels_arr, _ = label(~is_missing)
+        interval_labels = labels_arr - 1
+
+        results = results.assign_coords(
+            interval_labels=("time", interval_labels)
+        )
+    else:
+        # estimate_decoding_params=False branch:
+        # Results only for time points within intervals
+        results_list = []
+        interval_labels = []
+
+        for interval_idx, (interval_start, interval_end) in enumerate(
+            decoding_interval
+        ):
+            # Get time points for this interval
+            interval_time = position_info.loc[
+                interval_start:interval_end
+            ].index.to_numpy()
+
+            if interval_time.size == 0:
+                continue
+
+            # Create fake results for this interval
+            interval_results = create_fake_decoding_results(
+                n_time=len(interval_time), n_position_bins=50, n_states=2
+            )
+            # Update time coordinates to match actual interval times
+            interval_results = interval_results.assign_coords(
+                time=interval_time
+            )
+            results_list.append(interval_results)
+            interval_labels.extend([interval_idx] * len(interval_time))
+
+        # Concatenate along time dimension (as the real code now does)
+        if len(results_list) == 1:
+            results = results_list[0]
+        else:
+            results = xr.concat(results_list, dim="time")
+
+        # Add interval_labels coordinate (as the real code now does)
+        results = results.assign_coords(
+            interval_labels=("time", interval_labels)
+        )
+
+    # Add metadata (same as real implementation)
+    results["initial_conditions"] = xr.DataArray(
+        classifier.initial_conditions_,
+        dims=("state_bins",),
+        coords={"state_bins": results.coords["state_bins"]},
+        name="initial_conditions",
+    )
+    results["discrete_state_transitions"] = xr.DataArray(
+        classifier.discrete_state_transitions_,
+        dims=("states_from", "states_to"),
+        name="discrete_state_transitions",
+    )
+
+    return classifier, results
+
+
+# ============================================================================
 # Mock Fixtures for ClusterlessDecodingV1
 # ============================================================================
 
@@ -800,8 +945,6 @@ def mock_clusterless_decoder():
     Returns a function that can be used with monkeypatch to replace
     the real _run_decoder method.
     """
-    import xarray as xr
-    from scipy.ndimage import label
 
     def _mock_run_decoder(
         self,
@@ -814,102 +957,8 @@ def mock_clusterless_decoder():
         spike_waveform_features,
         decoding_interval,
     ):
-        """Mocked version of _run_decoder that returns fake results instantly.
-
-        This mocks the expensive non_local_detector operations (~220s)
-        while preserving all the Spyglass logic in make().
-
-        Handles both estimate_decoding_params=True and False branches:
-        - True: Returns results for ALL time points, with interval_labels
-                using scipy.ndimage.label approach (-1 for outside intervals)
-        - False: Returns results only for interval time points, with
-                interval_labels using enumerate approach (0, 1, 2, ...)
-        """
-        classifier = create_fake_classifier()
-
-        if key.get("estimate_decoding_params", False):
-            # estimate_decoding_params=True branch:
-            # Results span ALL time points in position_info
-            all_time = position_info.index.to_numpy()
-
-            # Create is_missing mask (same as real code)
-            is_missing = np.ones(len(position_info), dtype=bool)
-            for interval_start, interval_end in decoding_interval:
-                is_missing[
-                    np.logical_and(
-                        position_info.index >= interval_start,
-                        position_info.index <= interval_end,
-                    )
-                ] = False
-
-            # Create fake results for all time points
-            results = create_fake_decoding_results(
-                n_time=len(all_time), n_position_bins=50, n_states=2
-            )
-            results = results.assign_coords(time=all_time)
-
-            # Create interval_labels using scipy.ndimage.label (same as real code)
-            labels_arr, _ = label(~is_missing)
-            interval_labels = labels_arr - 1
-
-            results = results.assign_coords(
-                interval_labels=("time", interval_labels)
-            )
-        else:
-            # estimate_decoding_params=False branch:
-            # Results only for time points within intervals
-            results_list = []
-            interval_labels = []
-
-            for interval_idx, (interval_start, interval_end) in enumerate(
-                decoding_interval
-            ):
-                # Get time points for this interval
-                interval_time = position_info.loc[
-                    interval_start:interval_end
-                ].index.to_numpy()
-
-                if interval_time.size == 0:
-                    continue
-
-                # Create fake results for this interval
-                interval_results = create_fake_decoding_results(
-                    n_time=len(interval_time), n_position_bins=50, n_states=2
-                )
-                # Update time coordinates to match actual interval times
-                interval_results = interval_results.assign_coords(
-                    time=interval_time
-                )
-                results_list.append(interval_results)
-                interval_labels.extend([interval_idx] * len(interval_time))
-
-            # Concatenate along time dimension (as the real code now does)
-            if len(results_list) == 1:
-                results = results_list[0]
-            else:
-                results = xr.concat(results_list, dim="time")
-
-            # Add interval_labels coordinate (as the real code now does)
-            results = results.assign_coords(
-                interval_labels=("time", interval_labels)
-            )
-
-        # Add metadata (same as real implementation)
-        # initial_conditions: shape (n_state_bins,) where n_state_bins = n_position_bins * n_states
-        results["initial_conditions"] = xr.DataArray(
-            classifier.initial_conditions_,
-            dims=("state_bins",),
-            coords={"state_bins": results.coords["state_bins"]},
-            name="initial_conditions",
-        )
-        # discrete_state_transitions: shape (n_states, n_states) with explicit dims
-        results["discrete_state_transitions"] = xr.DataArray(
-            classifier.discrete_state_transitions_,
-            dims=("states_from", "states_to"),
-            name="discrete_state_transitions",
-        )
-
-        return classifier, results
+        """Mocked version of _run_decoder that returns fake results instantly."""
+        return _create_mock_decoder_results(key, position_info, decoding_interval)
 
     return _mock_run_decoder
 
@@ -922,43 +971,8 @@ def mock_decoder_save(mock_results_storage):
     the real _save_decoder_results method. Creates netCDF files using
     the netcdf4 engine explicitly to avoid engine detection issues.
     """
-    import os
-    import pickle
-    import uuid
-    from pathlib import Path
-
-    def _mock_save_results(self, classifier, results, key):
-        """Mocked version that creates files with explicit netcdf4 engine."""
-        # Generate unique identifier for this result set
-        unique_id = str(uuid.uuid4())[:8]
-        nwb_file_name = key["nwb_file_name"].replace("_.nwb", "")
-
-        # Use absolute path to match environment expectations
-        base_dir = os.environ.get("SPYGLASS_BASE_DIR", "tests/_data")
-        analysis_dir = Path(base_dir) / "analysis"
-        subdir = analysis_dir / nwb_file_name
-        subdir.mkdir(parents=True, exist_ok=True)
-
-        # Create file paths
-        results_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.nc"
-        classifier_path = subdir / f"{nwb_file_name}_{unique_id}_mocked.pkl"
-
-        # Write netCDF file with explicit netcdf4 engine
-        results.to_netcdf(results_path, engine="netcdf4")
-
-        # Write classifier as pickle (non-xarray object)
-        with open(classifier_path, "wb") as f:
-            pickle.dump(classifier, f)
-
-        # Store actual data in memory for loading
-        results_path_str = str(results_path)
-        classifier_path_str = str(classifier_path)
-        mock_results_storage["results"][results_path_str] = results
-        mock_results_storage["classifiers"][classifier_path_str] = classifier
-
-        return results_path_str, classifier_path_str
-
-    return _mock_save_results
+    # Use shared helper to create mock save function
+    return _create_mock_save_function(mock_results_storage)
 
 
 # ============================================================================
@@ -968,9 +982,11 @@ def mock_decoder_save(mock_results_storage):
 
 @pytest.fixture
 def mock_sorted_spikes_decoder():
-    """Mock the _run_decoder helper for SortedSpikesDecodingV1."""
-    import xarray as xr
-    from scipy.ndimage import label
+    """Mock the _run_decoder helper for SortedSpikesDecodingV1.
+
+    Returns a function that can be used with monkeypatch to replace
+    the real _run_decoder method.
+    """
 
     def _mock_run_decoder(
         self,
@@ -982,98 +998,7 @@ def mock_sorted_spikes_decoder():
         spike_times,
         decoding_interval,
     ):
-        """Mocked version that returns fake results instantly.
-
-        Handles both estimate_decoding_params=True and False branches:
-        - True: Returns results for ALL time points, with interval_labels
-                using scipy.ndimage.label approach (-1 for outside intervals)
-        - False: Returns results only for interval time points, with
-                interval_labels using enumerate approach (0, 1, 2, ...)
-        """
-        classifier = create_fake_classifier()
-
-        if key.get("estimate_decoding_params", False):
-            # estimate_decoding_params=True branch:
-            # Results span ALL time points in position_info
-            all_time = position_info.index.to_numpy()
-
-            # Create is_missing mask (same as real code)
-            is_missing = np.ones(len(position_info), dtype=bool)
-            for interval_start, interval_end in decoding_interval:
-                is_missing[
-                    np.logical_and(
-                        position_info.index >= interval_start,
-                        position_info.index <= interval_end,
-                    )
-                ] = False
-
-            # Create fake results for all time points
-            results = create_fake_decoding_results(
-                n_time=len(all_time), n_position_bins=50, n_states=2
-            )
-            results = results.assign_coords(time=all_time)
-
-            # Create interval_labels using scipy.ndimage.label (same as real code)
-            labels_arr, _ = label(~is_missing)
-            interval_labels = labels_arr - 1
-
-            results = results.assign_coords(
-                interval_labels=("time", interval_labels)
-            )
-        else:
-            # estimate_decoding_params=False branch:
-            # Results only for time points within intervals
-            results_list = []
-            interval_labels = []
-
-            for interval_idx, (interval_start, interval_end) in enumerate(
-                decoding_interval
-            ):
-                # Get time points for this interval
-                interval_time = position_info.loc[
-                    interval_start:interval_end
-                ].index.to_numpy()
-
-                if interval_time.size == 0:
-                    continue
-
-                # Create fake results for this interval
-                interval_results = create_fake_decoding_results(
-                    n_time=len(interval_time), n_position_bins=50, n_states=2
-                )
-                # Update time coordinates to match actual interval times
-                interval_results = interval_results.assign_coords(
-                    time=interval_time
-                )
-                results_list.append(interval_results)
-                interval_labels.extend([interval_idx] * len(interval_time))
-
-            # Concatenate along time dimension (as the real code now does)
-            if len(results_list) == 1:
-                results = results_list[0]
-            else:
-                results = xr.concat(results_list, dim="time")
-
-            # Add interval_labels coordinate (as the real code now does)
-            results = results.assign_coords(
-                interval_labels=("time", interval_labels)
-            )
-
-        # Add metadata (same as real implementation)
-        # initial_conditions: shape (n_state_bins,) where n_state_bins = n_position_bins * n_states
-        results["initial_conditions"] = xr.DataArray(
-            classifier.initial_conditions_,
-            dims=("state_bins",),
-            coords={"state_bins": results.coords["state_bins"]},
-            name="initial_conditions",
-        )
-        # discrete_state_transitions: shape (n_states, n_states) with explicit dims
-        results["discrete_state_transitions"] = xr.DataArray(
-            classifier.discrete_state_transitions_,
-            dims=("states_from", "states_to"),
-            name="discrete_state_transitions",
-        )
-
-        return classifier, results
+        """Mocked version of _run_decoder that returns fake results instantly."""
+        return _create_mock_decoder_results(key, position_info, decoding_interval)
 
     return _mock_run_decoder

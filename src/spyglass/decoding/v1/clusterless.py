@@ -9,7 +9,6 @@ speeds. eLife 10, e64505 (2021).
 
 """
 
-import inspect
 import uuid
 from pathlib import Path
 
@@ -29,6 +28,7 @@ from spyglass.decoding.v1.utils import (
     _get_interval_range,
     concatenate_interval_results,
     create_interval_labels,
+    get_valid_kwargs,
 )
 from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
@@ -331,14 +331,9 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 interval_labels=("time", interval_labels)
             )
         else:
-            sig = inspect.signature(classifier.fit)
-            valid_fit_kwargs = list(sig.parameters.keys())
-
-            fit_kwargs = {
-                k: value
-                for k, value in decoding_kwargs.items()
-                if k in valid_fit_kwargs
-            }
+            fit_kwargs, predict_kwargs = get_valid_kwargs(
+                classifier, decoding_kwargs, logger
+            )
 
             classifier.fit(
                 position_time=position_info.index.to_numpy(),
@@ -347,13 +342,6 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
                 spike_waveform_features=spike_waveform_features,
                 **fit_kwargs,
             )
-            sig = inspect.signature(classifier.predict)
-            valid_predict_kwargs = list(sig.parameters.keys())
-            predict_kwargs = {
-                k: value
-                for k, value in decoding_kwargs.items()
-                if k in valid_predict_kwargs
-            }
 
             # We treat each decoding interval as a separate sequence
             interval_results = []
@@ -463,12 +451,19 @@ class ClusterlessDecodingV1(SpyglassMixin, dj.Computed):
         return results_path, classifier_path
 
     def fetch_results(self) -> xr.Dataset:
-        """Retrieve the decoding results
+        """Retrieve the decoding results.
 
         Returns
         -------
         xr.Dataset
-            The decoding results (posteriors, etc.)
+            The decoding results (posteriors, etc.) with an ``interval_labels``
+            coordinate tracking which interval each time point belongs to.
+
+        Notes
+        -----
+        Changed in v0.5.6: Results use ``time`` dimension with ``interval_labels``
+        coordinate instead of separate ``intervals`` dimension. See CHANGELOG.md
+        for migration guide.
         """
         return ClusterlessDetector.load_results(self.fetch1("results_path"))
 

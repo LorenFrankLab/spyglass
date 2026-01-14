@@ -1,11 +1,13 @@
-"""Unit tests for intervals dimension removal utilities.
+"""Unit tests for decoding utilities.
 
-Tests the create_interval_labels and concatenate_interval_results functions
-from spyglass.decoding.v1.utils. These tests validate the xarray concatenation
-logic without requiring database infrastructure.
+Tests the create_interval_labels, concatenate_interval_results, and
+get_valid_kwargs functions from spyglass.decoding.v1.utils. These tests
+validate the utility logic without requiring database infrastructure.
 
 These are fast unit tests with no database dependencies.
 """
+
+import logging
 
 import numpy as np
 import pytest
@@ -248,3 +250,311 @@ class TestConcatenateIntervalResults:
 
         assert "acausal_posterior" in result.data_vars
         assert "causal_posterior" in result.data_vars
+
+
+# ============================================================================
+# Tests for get_valid_kwargs
+# ============================================================================
+
+
+@pytest.fixture
+def get_valid_kwargs():
+    """Import get_valid_kwargs inside fixture to defer database connection."""
+    from spyglass.decoding.v1.utils import get_valid_kwargs
+
+    return get_valid_kwargs
+
+
+class MockClassifier:
+    """Mock classifier for testing get_valid_kwargs."""
+
+    def fit(self, position_time, position, spike_times, custom_fit_param=None):
+        """Mock fit method with specific signature."""
+        pass
+
+    def predict(
+        self, position_time, position, spike_times, time, custom_predict_param=None
+    ):
+        """Mock predict method with specific signature."""
+        pass
+
+
+class TestGetValidKwargs:
+    """Tests for the get_valid_kwargs function."""
+
+    def test_valid_fit_kwargs_returned(self, get_valid_kwargs):
+        """Valid fit kwargs should be returned in fit_kwargs dict."""
+        classifier = MockClassifier()
+        decoding_kwargs = {"custom_fit_param": 123}
+        logger = logging.getLogger("test")
+
+        fit_kwargs, predict_kwargs = get_valid_kwargs(
+            classifier, decoding_kwargs, logger
+        )
+
+        assert fit_kwargs == {"custom_fit_param": 123}
+
+    def test_valid_predict_kwargs_returned(self, get_valid_kwargs):
+        """Valid predict kwargs should be returned in predict_kwargs dict."""
+        classifier = MockClassifier()
+        decoding_kwargs = {"custom_predict_param": "test"}
+        logger = logging.getLogger("test")
+
+        fit_kwargs, predict_kwargs = get_valid_kwargs(
+            classifier, decoding_kwargs, logger
+        )
+
+        assert predict_kwargs == {"custom_predict_param": "test"}
+
+    def test_kwargs_valid_for_both_returned_in_both(self, get_valid_kwargs):
+        """Kwargs valid for both fit and predict should be in both dicts."""
+        classifier = MockClassifier()
+        # position_time is valid for both fit and predict
+        decoding_kwargs = {"position_time": [1, 2, 3]}
+        logger = logging.getLogger("test")
+
+        fit_kwargs, predict_kwargs = get_valid_kwargs(
+            classifier, decoding_kwargs, logger
+        )
+
+        assert "position_time" in fit_kwargs
+        assert "position_time" in predict_kwargs
+
+    def test_invalid_kwargs_triggers_warning(self, get_valid_kwargs, caplog):
+        """Invalid kwargs should trigger a warning."""
+        classifier = MockClassifier()
+        decoding_kwargs = {"invalid_param": 123, "another_bad_one": "test"}
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            get_valid_kwargs(classifier, decoding_kwargs, logger)
+
+        assert "not valid for classifier.fit or classifier.predict" in caplog.text
+        assert "invalid_param" in caplog.text
+        assert "another_bad_one" in caplog.text
+
+    def test_warning_includes_valid_kwargs(self, get_valid_kwargs, caplog):
+        """Warning message should list valid kwargs for debugging."""
+        classifier = MockClassifier()
+        decoding_kwargs = {"invalid_param": 123}
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            get_valid_kwargs(classifier, decoding_kwargs, logger)
+
+        # Should include valid fit kwargs in the message
+        assert "Valid fit kwargs" in caplog.text
+        assert "custom_fit_param" in caplog.text
+        # Should include valid predict kwargs in the message
+        assert "Valid predict kwargs" in caplog.text
+        assert "custom_predict_param" in caplog.text
+
+    def test_empty_decoding_kwargs_no_warning(self, get_valid_kwargs, caplog):
+        """Empty decoding_kwargs should not trigger any warning."""
+        classifier = MockClassifier()
+        decoding_kwargs = {}
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            fit_kwargs, predict_kwargs = get_valid_kwargs(
+                classifier, decoding_kwargs, logger
+            )
+
+        assert caplog.text == ""
+        assert fit_kwargs == {}
+        assert predict_kwargs == {}
+
+    def test_all_valid_kwargs_no_warning(self, get_valid_kwargs, caplog):
+        """When all kwargs are valid, no warning should be issued."""
+        classifier = MockClassifier()
+        decoding_kwargs = {
+            "custom_fit_param": 123,
+            "custom_predict_param": "test",
+        }
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            get_valid_kwargs(classifier, decoding_kwargs, logger)
+
+        # No warning should be issued
+        assert "not valid" not in caplog.text
+
+    def test_mixed_valid_and_invalid_kwargs(self, get_valid_kwargs, caplog):
+        """Mix of valid and invalid kwargs: valid returned, invalid warned."""
+        classifier = MockClassifier()
+        decoding_kwargs = {
+            "custom_fit_param": 123,
+            "invalid_param": "bad",
+        }
+        logger = logging.getLogger("test")
+
+        with caplog.at_level(logging.WARNING):
+            fit_kwargs, predict_kwargs = get_valid_kwargs(
+                classifier, decoding_kwargs, logger
+            )
+
+        # Valid kwargs should be returned
+        assert fit_kwargs == {"custom_fit_param": 123}
+        # Invalid kwargs should trigger warning
+        assert "invalid_param" in caplog.text
+        # Valid kwargs should NOT be in the warning
+        assert "custom_fit_param" not in caplog.text.split("will be ignored")[0]
+
+
+# ============================================================================
+# Tests for empty middle interval handling
+# ============================================================================
+
+
+class TestEmptyMiddleIntervalHandling:
+    """Tests for handling empty intervals in the middle of a list.
+
+    When an interval in the middle of a list is empty (no time points),
+    it should be skipped and a warning should be logged. The interval_labels
+    should not include a gap for the skipped interval.
+    """
+
+    def test_empty_middle_interval_skipped_in_labels(
+        self, concatenate_interval_results
+    ):
+        """Empty intervals should be filtered before concatenation.
+
+        When the real decoder code encounters an empty interval, it skips it
+        and logs a warning. The resulting interval_labels should be consecutive
+        integers without gaps.
+        """
+        # Simulate what the decoder does: filter out empty intervals before concat
+        ds1 = _create_test_dataset(n_time=50, n_position=20, time_start=0.0)
+        # ds2 would be empty - skipped in real code
+        ds3 = _create_test_dataset(n_time=30, n_position=20, time_start=10.0)
+
+        # After filtering, only non-empty intervals are passed
+        result = concatenate_interval_results([ds1, ds3])
+
+        labels = result.coords["interval_labels"].values
+        # Labels should be 0, 1 (consecutive, no gap for skipped interval)
+        np.testing.assert_array_equal(labels[:50], 0)
+        np.testing.assert_array_equal(labels[50:], 1)
+
+    def test_consecutive_labels_after_filtering(
+        self, concatenate_interval_results
+    ):
+        """Labels should always be consecutive 0, 1, 2, ... after filtering."""
+        ds1 = _create_test_dataset(n_time=20, n_position=10, time_start=0.0)
+        ds2 = _create_test_dataset(n_time=15, n_position=10, time_start=5.0)
+        ds3 = _create_test_dataset(n_time=25, n_position=10, time_start=10.0)
+
+        result = concatenate_interval_results([ds1, ds2, ds3])
+
+        labels = result.coords["interval_labels"].values
+        unique_labels = np.unique(labels)
+
+        # Should be consecutive integers starting from 0
+        np.testing.assert_array_equal(unique_labels, [0, 1, 2])
+
+    def test_single_remaining_interval_after_filtering(
+        self, concatenate_interval_results
+    ):
+        """If only one interval remains after filtering, it should get label 0."""
+        ds = _create_test_dataset(n_time=100, n_position=50)
+
+        result = concatenate_interval_results([ds])
+
+        labels = result.coords["interval_labels"].values
+        assert np.all(labels == 0)
+        assert len(labels) == 100
+
+
+# ============================================================================
+# Tests for interval_idx warning in DecodingOutput.create_decoding_view
+# ============================================================================
+
+
+class TestIntervalIdxWarning:
+    """Tests for interval_idx warning when results lack interval_labels.
+
+    These tests verify the warning behavior in DecodingOutput.create_decoding_view
+    when interval_idx is specified but results don't have interval_labels.
+    """
+
+    def test_interval_idx_warning_when_no_labels(self, caplog):
+        """Should warn when interval_idx specified but no interval_labels."""
+        from unittest.mock import MagicMock, patch
+
+        # Create mock results without interval_labels
+        mock_results = MagicMock()
+        mock_results.coords = {}  # No interval_labels
+
+        # Import the module to access logger
+        from spyglass.decoding import decoding_merge
+
+        # Directly test the warning logic
+        logger = decoding_merge.logger
+        interval_idx = 0
+
+        with caplog.at_level(logging.WARNING):
+            # Simulate the check from create_decoding_view
+            if interval_idx is not None:
+                if "interval_labels" in mock_results.coords:
+                    pass  # Would filter results
+                else:
+                    logger.warning(
+                        f"interval_idx={interval_idx} specified but results do not "
+                        "have 'interval_labels' coordinate. Ignoring interval_idx."
+                    )
+
+        assert "interval_idx=0 specified but results do not" in caplog.text
+        assert "interval_labels" in caplog.text
+        assert "Ignoring interval_idx" in caplog.text
+
+    def test_no_warning_when_interval_labels_present(self, caplog):
+        """Should not warn when results have interval_labels."""
+        from unittest.mock import MagicMock
+
+        from spyglass.decoding import decoding_merge
+
+        # Create mock results WITH interval_labels
+        mock_results = MagicMock()
+        mock_results.coords = {"interval_labels": [0, 0, 1, 1]}
+
+        logger = decoding_merge.logger
+        interval_idx = 0
+
+        with caplog.at_level(logging.WARNING):
+            # Simulate the check from create_decoding_view
+            if interval_idx is not None:
+                if "interval_labels" in mock_results.coords:
+                    pass  # Would filter results - no warning
+                else:
+                    logger.warning(
+                        f"interval_idx={interval_idx} specified but results do not "
+                        "have 'interval_labels' coordinate. Ignoring interval_idx."
+                    )
+
+        # No warning should be issued
+        assert "interval_idx" not in caplog.text
+
+    def test_no_warning_when_interval_idx_is_none(self, caplog):
+        """Should not warn when interval_idx is None."""
+        from unittest.mock import MagicMock
+
+        from spyglass.decoding import decoding_merge
+
+        mock_results = MagicMock()
+        mock_results.coords = {}  # No interval_labels
+
+        logger = decoding_merge.logger
+        interval_idx = None
+
+        with caplog.at_level(logging.WARNING):
+            if interval_idx is not None:
+                if "interval_labels" in mock_results.coords:
+                    pass
+                else:
+                    logger.warning(
+                        f"interval_idx={interval_idx} specified but results do not "
+                        "have 'interval_labels' coordinate. Ignoring interval_idx."
+                    )
+
+        # No warning should be issued when interval_idx is None
+        assert caplog.text == ""

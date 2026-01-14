@@ -1,8 +1,8 @@
-"""Tests for intervals dimension removal.
+"""Tests for interval structure in decoding results.
 
 These tests verify that decoding results are stored as a single time series
-with interval tracking, rather than using the intervals dimension which causes
-padding and memory waste.
+with interval tracking via interval_labels coordinate, rather than using a
+separate intervals dimension which causes padding and memory waste.
 
 Tests cover both estimate_decoding_params=False (predict branch) and
 estimate_decoding_params=True (estimate_parameters branch).

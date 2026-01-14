@@ -151,6 +151,11 @@ class DecodingOutput(_Merge, SpyglassMixin):
                 results = results.where(
                     results.interval_labels == interval_idx, drop=True
                 )
+            else:
+                logger.warning(
+                    f"interval_idx={interval_idx} specified but results do not "
+                    "have 'interval_labels' coordinate. Ignoring interval_idx."
+                )
 
         posterior = (
             results.acausal_posterior.unstack("state_bins")
