@@ -60,15 +60,7 @@ class SpyglassConfig:
         if "directory_schema" not in schema:
             raise ValueError("Schema missing 'directory_schema' key")
 
-        # Check schema version for compatibility
-        schema_version = schema.get("_schema_version", "1.0.0")
-        expected_version = "1.0.0"
-        if schema_version != expected_version:
-            logger.warning(
-                f"Config schema version mismatch: expected {expected_version}, "
-                f"got {schema_version}. This may cause compatibility issues."
-            )
-
+        # Note: _schema_version field is informational only, not enforced
         return schema["directory_schema"]
 
     def __init__(self, base_dir: str = None, **kwargs) -> None:

@@ -54,8 +54,6 @@ SYMBOLS = (
 # System constants
 BYTES_PER_GB = 1024**3
 LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
-CURRENT_SCHEMA_VERSION = "1.0.0"  # Config schema version compatibility
-
 # Repository root - works regardless of where script is run from
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -1072,15 +1070,7 @@ def load_full_schema() -> Dict[str, Any]:
     if not isinstance(schema, dict):
         raise ValueError(f"Schema should be a dict, got {type(schema)}")
 
-    # Check schema version for compatibility
-    schema_version = schema.get("_schema_version")
-    if schema_version and schema_version != CURRENT_SCHEMA_VERSION:
-        Console.warning(
-            f"Schema version mismatch: expected {CURRENT_SCHEMA_VERSION}, "
-            f"got {schema_version}. This may cause compatibility issues."
-        )
-
-    # Validate schema
+    # Validate schema structure (version field is informational only)
     validate_schema(schema)
 
     return schema
@@ -1131,13 +1121,9 @@ def build_directory_structure(
     """
     if schema is None:
         schema = load_directory_schema()
-
-    # Validate schema loaded successfully
-    if not schema:
-        raise ValueError(
-            "Directory schema could not be loaded. "
-            "Check directory_schema.json exists in src/spyglass/."
-        )
+    # Note: No need to check if schema is empty - load_directory_schema()
+    # raises FileNotFoundError if the file is missing, and validate_schema()
+    # ensures required prefixes exist
 
     directories = {}
 
