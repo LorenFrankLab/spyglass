@@ -166,6 +166,35 @@ class Console:
         )
 
     @staticmethod
+    def info(msg: str, indent: bool = False) -> None:
+        """Print info message (blue color)."""
+        prefix = "  " if indent else ""
+        print(f"{prefix}{COLORS['blue']}{msg}{COLORS['reset']}")
+
+    @staticmethod
+    def banner(msg: str, color: str = "blue", width: int = 60) -> None:
+        """Print a banner/header line.
+
+        Parameters
+        ----------
+        msg : str
+            Message to display (empty string for separator line only)
+        color : str
+            Color name: "blue", "green", "yellow"
+        width : int
+            Width of the separator line
+        """
+        separator = "=" * width
+        c = COLORS.get(color, COLORS["reset"])
+        r = COLORS["reset"]
+        if msg:
+            print(f"{c}{separator}{r}")
+            print(f"{c}{msg}{r}")
+            print(f"{c}{separator}{r}")
+        else:
+            print(f"{c}{separator}{r}")
+
+    @staticmethod
     def manual_password_instructions(env_name: str) -> None:
         """Print instructions for manual password change."""
         print("\nYou can change it manually later:")
@@ -1178,14 +1207,10 @@ def determine_tls(host: str, schema: Optional[Dict[str, Any]] = None) -> bool:
 
     # User-friendly messaging (plain language instead of technical terms)
     if is_local:
-        print(
-            f"{COLORS['blue']}✓ Connecting to local database at {host}{COLORS['reset']}"
-        )
+        Console.info(f"✓ Connecting to local database at {host}")
         print("  Security: Using unencrypted connection (safe for localhost)")
     else:
-        print(
-            f"{COLORS['blue']}✓ Connecting to remote database at {host}{COLORS['reset']}"
-        )
+        Console.info(f"✓ Connecting to remote database at {host}")
         print(
             "  Security: Using encrypted connection (TLS) to protect your data"
         )
@@ -2683,9 +2708,9 @@ def validate_installation(env_name: str) -> bool:
 
 def print_installation_header() -> None:
     """Print installation header banner."""
-    print(f"\n{COLORS['blue']}{'='*60}{COLORS['reset']}")
-    print(f"{COLORS['blue']}  Spyglass Installation{COLORS['reset']}")
-    print(f"{COLORS['blue']}{'='*60}{COLORS['reset']}\n")
+    print()
+    Console.banner("  Spyglass Installation", color="blue")
+    print()
 
 
 def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
@@ -2772,15 +2797,13 @@ def print_completion_message(env_name: str, validation_passed: bool) -> None:
     validation_passed : bool
         Whether validation checks passed
     """
-    print(f"\n{COLORS['green']}{'='*60}{COLORS['reset']}")
+    print()
     if validation_passed:
-        print(f"{COLORS['green']}Installation complete!{COLORS['reset']}")
-        print(f"{COLORS['green']}{'='*60}{COLORS['reset']}\n")
+        Console.banner("Installation complete!", color="green")
+        print()
     else:
-        print(
-            f"{COLORS['yellow']}Installation complete with warnings{COLORS['reset']}"
-        )
-        print(f"{COLORS['yellow']}{'='*60}{COLORS['reset']}\n")
+        Console.banner("Installation complete with warnings", color="yellow")
+        print()
         print("Core installation succeeded but some features may not work.")
         print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
 
