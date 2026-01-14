@@ -2036,3 +2036,137 @@ class TestSetupFranklabScript:
         )
         assert "lmf-db.cin.ucsf.edu" in result.stdout
         assert "3306" in result.stdout
+
+
+# =============================================================================
+# Config Compatibility Tests
+# =============================================================================
+
+
+def _get_all_keys(d: dict, prefix: str = "") -> set:
+    """Recursively get all keys in a nested dictionary.
+
+    Parameters
+    ----------
+    d : dict
+        Dictionary to extract keys from
+    prefix : str, optional
+        Prefix for nested keys (default: "")
+
+    Returns
+    -------
+    set
+        Set of all key paths in dot notation
+    """
+    keys = set()
+    for k, v in d.items():
+        full_key = f"{prefix}.{k}" if prefix else k
+        keys.add(full_key)
+        if isinstance(v, dict):
+            keys.update(_get_all_keys(v, full_key))
+    return keys
+
+
+class TestConfigCompatibility:
+    """Tests that install.py and settings.py produce compatible configs.
+
+    These tests ensure the installer generates configs that SpyglassConfig
+    can consume without missing required keys.
+    """
+
+    def test_installer_has_all_settings_keys(self, tmp_path):
+        """Installer config contains all keys expected by settings.py."""
+        from spyglass.settings import SpyglassConfig
+
+        base_dir = tmp_path / "spyglass_data"
+        dir_schema = load_directory_schema()
+        dirs = build_directory_structure(
+            base_dir, schema=dir_schema, create=True, verbose=False
+        )
+
+        # Build installer config (replicates create_database_config structure)
+        installer_config = {
+            "database.host": "localhost",
+            "database.port": 3306,
+            "database.user": "testuser",
+            "database.password": "testpass",
+            "database.use_tls": False,
+            "database.reconnect": True,
+            "connection.init_function": None,
+            "connection.charset": "",
+            "loglevel": "INFO",
+            "safemode": True,
+            "fetch_format": "array",
+            "display.limit": 12,
+            "display.width": 14,
+            "display.show_tuple_count": True,
+            "add_hidden_timestamp": False,
+            "filepath_checksum_size_limit": 1 * 1024**3,
+            "enable_python_native_blobs": True,
+            "stores": {
+                "raw": {
+                    "protocol": "file",
+                    "location": str(dirs["spyglass_raw"]),
+                    "stage": str(dirs["spyglass_raw"]),
+                },
+                "analysis": {
+                    "protocol": "file",
+                    "location": str(dirs["spyglass_analysis"]),
+                    "stage": str(dirs["spyglass_analysis"]),
+                },
+            },
+            "custom": {
+                "debug_mode": False,
+                "test_mode": False,
+                "kachery_zone": "franklab.default",
+                "spyglass_dirs": {
+                    "base": str(base_dir),
+                    "raw": str(dirs["spyglass_raw"]),
+                    "analysis": str(dirs["spyglass_analysis"]),
+                    "recording": str(dirs["spyglass_recording"]),
+                    "sorting": str(dirs["spyglass_sorting"]),
+                    "waveforms": str(dirs["spyglass_waveforms"]),
+                    "temp": str(dirs["spyglass_temp"]),
+                    "video": str(dirs["spyglass_video"]),
+                    "export": str(dirs["spyglass_export"]),
+                },
+                "kachery_dirs": {
+                    "cloud": str(dirs["kachery_cloud"]),
+                    "storage": str(dirs["kachery_storage"]),
+                    "temp": str(dirs["kachery_temp"]),
+                },
+                "dlc_dirs": {
+                    "base": str(base_dir / "deeplabcut"),
+                    "project": str(dirs["dlc_project"]),
+                    "video": str(dirs["dlc_video"]),
+                    "output": str(dirs["dlc_output"]),
+                },
+                "moseq_dirs": {
+                    "base": str(base_dir / "moseq"),
+                    "project": str(dirs["moseq_project"]),
+                    "video": str(dirs["moseq_video"]),
+                },
+            },
+        }
+
+        # Get settings.py config structure
+        sg_config = SpyglassConfig()
+        settings_config = sg_config._generate_dj_config(
+            base_dir=str(base_dir),
+            database_user="testuser",
+            database_password="testpass",
+            database_host="localhost",
+            database_port=3306,
+            database_use_tls=False,
+        )
+
+        # Compare keys
+        installer_keys = _get_all_keys(installer_config)
+        settings_keys = _get_all_keys(settings_config)
+        missing_keys = settings_keys - installer_keys
+
+        assert not missing_keys, (
+            f"Installer config missing keys required by settings.py: "
+            f"{sorted(missing_keys)}. "
+            f"Update create_database_config() in install.py."
+        )
