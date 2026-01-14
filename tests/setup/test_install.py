@@ -31,6 +31,7 @@ sys.path.insert(0, str(scripts_dir))
 from install import (
     CondaManager,
     DockerManager,
+    Validators,
     build_directory_structure,
     check_disk_space,
     check_prerequisites,
@@ -40,9 +41,6 @@ from install import (
     get_required_python_version,
     is_port_available,
     load_directory_schema,
-    validate_database_config,
-    validate_hostname,
-    validate_port,
     validate_schema,
 )
 
@@ -247,62 +245,62 @@ class TestCheckDiskSpace:
 
 
 class TestValidateHostname:
-    """Tests for validate_hostname()."""
+    """Tests for Validators.hostname()."""
 
     def test_accepts_localhost(self):
         """Accepts 'localhost'."""
-        assert validate_hostname("localhost") is True
+        assert Validators.hostname("localhost") is True
 
     def test_accepts_ipv4_localhost(self):
         """Accepts IPv4 localhost address."""
-        assert validate_hostname("127.0.0.1") is True
+        assert Validators.hostname("127.0.0.1") is True
 
     def test_accepts_ipv6_localhost(self):
         """Accepts IPv6 localhost address."""
-        assert validate_hostname("::1") is True
+        assert Validators.hostname("::1") is True
 
     def test_accepts_domain_name(self):
         """Accepts valid domain names."""
-        assert validate_hostname("db.example.com") is True
-        assert validate_hostname("lmf-db.cin.ucsf.edu") is True
+        assert Validators.hostname("db.example.com") is True
+        assert Validators.hostname("lmf-db.cin.ucsf.edu") is True
 
     def test_accepts_ip_address(self):
         """Accepts valid IP addresses."""
-        assert validate_hostname("192.168.1.100") is True
-        assert validate_hostname("10.0.0.1") is True
+        assert Validators.hostname("192.168.1.100") is True
+        assert Validators.hostname("10.0.0.1") is True
 
     def test_rejects_empty_string(self):
         """Rejects empty hostname."""
-        assert validate_hostname("") is False
+        assert Validators.hostname("") is False
 
     def test_rejects_spaces(self):
         """Rejects hostname with spaces."""
-        assert validate_hostname("host with spaces") is False
-        assert validate_hostname(" localhost") is False
-        assert validate_hostname("localhost ") is False
+        assert Validators.hostname("host with spaces") is False
+        assert Validators.hostname(" localhost") is False
+        assert Validators.hostname("localhost ") is False
 
     def test_rejects_control_characters(self):
         """Rejects hostname with control characters."""
-        assert validate_hostname("host\tname") is False
-        assert validate_hostname("host\nname") is False
+        assert Validators.hostname("host\tname") is False
+        assert Validators.hostname("host\nname") is False
 
     def test_rejects_leading_dot(self):
         """Rejects hostname starting with dot."""
-        assert validate_hostname(".example.com") is False
+        assert Validators.hostname(".example.com") is False
 
     def test_rejects_trailing_dot(self):
         """Rejects hostname ending with dot."""
-        assert validate_hostname("example.com.") is False
+        assert Validators.hostname("example.com.") is False
 
     def test_rejects_consecutive_dots(self):
         """Rejects hostname with consecutive dots."""
-        assert validate_hostname("example..com") is False
-        assert validate_hostname("..invalid") is False
+        assert Validators.hostname("example..com") is False
+        assert Validators.hostname("..invalid") is False
 
     def test_rejects_overly_long_hostname(self):
         """Rejects hostname exceeding 253 characters."""
         long_hostname = "a" * 254
-        assert validate_hostname(long_hostname) is False
+        assert Validators.hostname(long_hostname) is False
 
 
 # =============================================================================
@@ -311,51 +309,51 @@ class TestValidateHostname:
 
 
 class TestValidatePort:
-    """Tests for validate_port()."""
+    """Tests for Validators.port()."""
 
     def test_accepts_mysql_default_port(self):
         """Accepts MySQL default port 3306."""
-        valid, msg = validate_port(3306)
+        valid, msg = Validators.port(3306)
         assert valid is True
         assert msg == ""
 
     def test_accepts_non_privileged_ports(self):
         """Accepts ports in non-privileged range (1024-65535)."""
-        valid, _ = validate_port(1024)
+        valid, _ = Validators.port(1024)
         assert valid is True
 
-        valid, _ = validate_port(65535)
+        valid, _ = Validators.port(65535)
         assert valid is True
 
-        valid, _ = validate_port(8080)
+        valid, _ = Validators.port(8080)
         assert valid is True
 
     def test_rejects_privileged_ports(self):
         """Rejects privileged ports (1-1023)."""
-        valid, msg = validate_port(80)
+        valid, msg = Validators.port(80)
         assert valid is False
         assert "privileged" in msg.lower()
 
-        valid, msg = validate_port(1)
+        valid, msg = Validators.port(1)
         assert valid is False
 
-        valid, msg = validate_port(1023)
+        valid, msg = Validators.port(1023)
         assert valid is False
 
     def test_rejects_port_zero(self):
         """Rejects port 0."""
-        valid, msg = validate_port(0)
+        valid, msg = Validators.port(0)
         assert valid is False
         assert "out of valid range" in msg.lower()
 
     def test_rejects_negative_port(self):
         """Rejects negative port numbers."""
-        valid, msg = validate_port(-1)
+        valid, msg = Validators.port(-1)
         assert valid is False
 
     def test_rejects_port_above_65535(self):
         """Rejects ports above 65535."""
-        valid, msg = validate_port(65536)
+        valid, msg = Validators.port(65536)
         assert valid is False
         assert "out of valid range" in msg.lower()
 
@@ -366,11 +364,11 @@ class TestValidatePort:
 
 
 class TestValidateDatabaseConfig:
-    """Tests for validate_database_config()."""
+    """Tests for Validators.database_config()."""
 
     def test_accepts_valid_config(self):
         """Accepts valid database configuration."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="localhost",
             port=3306,
             user="root",
@@ -381,7 +379,7 @@ class TestValidateDatabaseConfig:
 
     def test_accepts_remote_config(self):
         """Accepts valid remote database configuration."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="lmf-db.cin.ucsf.edu",
             port=3306,
             user="myuser",
@@ -392,7 +390,7 @@ class TestValidateDatabaseConfig:
 
     def test_rejects_empty_hostname(self):
         """Rejects empty hostname."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="",
             port=3306,
             user="root",
@@ -403,7 +401,7 @@ class TestValidateDatabaseConfig:
 
     def test_rejects_invalid_hostname(self):
         """Rejects invalid hostname format."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="host with spaces",
             port=3306,
             user="root",
@@ -416,7 +414,7 @@ class TestValidateDatabaseConfig:
 
     def test_rejects_invalid_port(self):
         """Rejects invalid port number."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="localhost",
             port=80,  # Privileged port
             user="root",
@@ -427,7 +425,7 @@ class TestValidateDatabaseConfig:
 
     def test_rejects_empty_username(self):
         """Rejects empty username."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="localhost",
             port=3306,
             user="",
@@ -438,7 +436,7 @@ class TestValidateDatabaseConfig:
 
     def test_rejects_long_username(self):
         """Rejects username exceeding 32 characters."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="localhost",
             port=3306,
             user="a" * 33,
@@ -451,7 +449,7 @@ class TestValidateDatabaseConfig:
 
     def test_collects_multiple_errors(self):
         """Collects all validation errors, not just the first."""
-        valid, errors = validate_database_config(
+        valid, errors = Validators.database_config(
             host="",
             port=0,
             user="",

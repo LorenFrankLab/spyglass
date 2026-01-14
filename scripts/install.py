@@ -1447,175 +1447,194 @@ def create_database_config(
     print("Need help? See: https://lorenfranklab.github.io/spyglass/")
 
 
-def validate_hostname(hostname: str) -> bool:
-    """Validate hostname format to prevent common typos.
+# =============================================================================
+# Validators Class - Input Validation Utilities
+# =============================================================================
 
-    Performs basic validation to catch obvious errors like spaces,
-    control characters, multiple consecutive dots, or invalid length.
 
-    Parameters
-    ----------
-    hostname : str
-        Hostname or IP address to validate
+class Validators:
+    """Input validation utilities for the installer.
 
-    Returns
-    -------
-    bool
-        True if hostname appears valid, False otherwise
-
-    Examples
-    --------
-    >>> validate_hostname("localhost")
-    True
-    >>> validate_hostname("db.example.com")
-    True
-    >>> validate_hostname("host with spaces")
-    False
-    >>> validate_hostname("..invalid")
-    False
-
-    Notes
-    -----
-    This is intentionally permissive - only catches obvious typos.
-    DNS resolution will be the final validation.
+    Groups all validation functions together for easier maintenance and
+    mental organization during code review. All methods are static since
+    no instance state is needed.
     """
-    if not hostname:
-        return False
 
-    # Reject hostnames with whitespace or control characters
-    if any(c.isspace() or ord(c) < 32 for c in hostname):
-        return False
+    @staticmethod
+    def hostname(hostname: str) -> bool:
+        """Validate hostname format to prevent common typos.
 
-    # Reject obvious typos (multiple dots, leading/trailing dots)
-    if hostname.startswith(".") or hostname.endswith(".") or ".." in hostname:
-        return False
+        Performs basic validation to catch obvious errors like spaces,
+        control characters, multiple consecutive dots, or invalid length.
 
-    # Check length (DNS hostname max is 253 characters)
-    if len(hostname) > 253:
-        return False
+        Parameters
+        ----------
+        hostname : str
+            Hostname or IP address to validate
 
-    return True
+        Returns
+        -------
+        bool
+            True if hostname appears valid, False otherwise
 
+        Examples
+        --------
+        >>> Validators.hostname("localhost")
+        True
+        >>> Validators.hostname("db.example.com")
+        True
+        >>> Validators.hostname("host with spaces")
+        False
+        >>> Validators.hostname("..invalid")
+        False
 
-def validate_port(port: int) -> Tuple[bool, str]:
-    """Validate port number is in valid range.
+        Notes
+        -----
+        This is intentionally permissive - only catches obvious typos.
+        DNS resolution will be the final validation.
+        """
+        if not hostname:
+            return False
 
-    Parameters
-    ----------
-    port : int
-        Port number to validate
+        # Reject hostnames with whitespace or control characters
+        if any(c.isspace() or ord(c) < 32 for c in hostname):
+            return False
 
-    Returns
-    -------
-    valid : bool
-        True if port is valid, False otherwise
-    message : str
-        Error or warning message
+        # Reject obvious typos (multiple dots, leading/trailing dots)
+        if hostname.startswith(".") or hostname.endswith(".") or ".." in hostname:
+            return False
 
-    Notes
-    -----
-    Valid ports are 1024-65535 (non-privileged).
-    Ports 1-1023 require root access on Unix systems.
-    """
-    if not isinstance(port, int):
-        return False, f"Port must be an integer, got {type(port).__name__}"
+        # Check length (DNS hostname max is 253 characters)
+        if len(hostname) > 253:
+            return False
 
-    if port < 1 or port > 65535:
-        return (
-            False,
-            f"Port {port} is out of valid range (1-65535). MySQL typically uses 3306.",
-        )
+        return True
 
-    if port < 1024:
-        return (
-            False,
-            f"Port {port} is privileged (requires root). Use port 1024-65535.",
-        )
+    @staticmethod
+    def port(port: int) -> Tuple[bool, str]:
+        """Validate port number is in valid range.
 
-    return True, ""
+        Parameters
+        ----------
+        port : int
+            Port number to validate
 
+        Returns
+        -------
+        valid : bool
+            True if port is valid, False otherwise
+        message : str
+            Error or warning message (empty string if valid)
 
-def validate_database_config(
-    host: str,
-    port: int,
-    user: str,
-    password: str,
-) -> Tuple[bool, list[str]]:
-    """Validate database configuration parameters.
+        Notes
+        -----
+        Valid ports are 1024-65535 (non-privileged).
+        Ports 1-1023 require root access on Unix systems.
+        """
+        if not isinstance(port, int):
+            return False, f"Port must be an integer, got {type(port).__name__}"
 
-    Performs comprehensive validation of database connection parameters
-    before attempting to connect or save configuration.
-
-    Parameters
-    ----------
-    host : str
-        Database hostname or IP address
-    port : int
-        Database port number
-    user : str
-        Database username
-    password : str
-        Database password
-
-    Returns
-    -------
-    valid : bool
-        True if all parameters are valid
-    errors : list of str
-        List of validation error messages (empty if valid)
-
-    Examples
-    --------
-    >>> valid, errors = validate_database_config("localhost", 3306, "root", "pass")
-    >>> if not valid:
-    ...     for err in errors:
-    ...         print(f"Error: {err}")
-    """
-    errors = []
-
-    # Validate hostname
-    if not host:
-        errors.append("Hostname cannot be empty")
-    elif not validate_hostname(host):
-        errors.append(
-            f"Invalid hostname '{host}': cannot contain spaces, "
-            "control characters, or consecutive dots"
-        )
-
-    # Validate port
-    port_valid, port_msg = validate_port(port)
-    if not port_valid:
-        errors.append(port_msg)
-
-    # Validate username
-    if not user:
-        errors.append("Username cannot be empty")
-    elif len(user) > 32:
-        errors.append(f"Username too long ({len(user)} chars, max 32)")
-    elif not re.match(r"^[a-zA-Z0-9_@.-]+$", user):
-        # MySQL usernames allow alphanumeric, underscore, @, dot, hyphen
-        errors.append(
-            f"Username '{user}' contains invalid characters.\n"
-            "  Valid: letters, numbers, underscore, @, dot, hyphen"
-        )
-
-    # Validate password (basic checks only - actual auth is server-side)
-    # Defense in depth: warn about shell metacharacters that could cause issues
-    if not password:
-        errors.append("Password cannot be empty")
-    else:
-        # Characters that could cause shell escaping issues if mishandled
-        shell_metacharacters = ["`", "$", "\\", '"', "'", ";", "&", "|"]
-        found_dangerous = [c for c in shell_metacharacters if c in password]
-        if found_dangerous:
-            # Warning, not error - password might legitimately contain these
-            Console.warning(
-                f"Password contains special characters: {found_dangerous}\n"
-                "  This should work, but if you encounter issues, consider\n"
-                "  using a password without: ` $ \\ \" ' ; & |"
+        if port < 1 or port > 65535:
+            return (
+                False,
+                f"Port {port} is out of valid range (1-65535). MySQL typically uses 3306.",
             )
 
-    return len(errors) == 0, errors
+        if port < 1024:
+            return (
+                False,
+                f"Port {port} is privileged (requires root). Use port 1024-65535.",
+            )
+
+        return True, ""
+
+    @staticmethod
+    def database_config(
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+    ) -> Tuple[bool, List[str]]:
+        """Validate database configuration parameters.
+
+        Performs comprehensive validation of database connection parameters
+        before attempting to connect or save configuration.
+
+        Parameters
+        ----------
+        host : str
+            Database hostname or IP address
+        port : int
+            Database port number
+        user : str
+            Database username
+        password : str
+            Database password
+
+        Returns
+        -------
+        valid : bool
+            True if all parameters are valid
+        errors : list of str
+            List of validation error messages (empty if valid)
+
+        Examples
+        --------
+        >>> valid, errors = Validators.database_config("localhost", 3306, "root", "pass")
+        >>> if not valid:
+        ...     for err in errors:
+        ...         print(f"Error: {err}")
+        """
+        errors = []
+
+        # Validate hostname
+        if not host:
+            errors.append("Hostname cannot be empty")
+        elif not Validators.hostname(host):
+            errors.append(
+                f"Invalid hostname '{host}': cannot contain spaces, "
+                "control characters, or consecutive dots"
+            )
+
+        # Validate port
+        port_valid, port_msg = Validators.port(port)
+        if not port_valid:
+            errors.append(port_msg)
+
+        # Validate username
+        if not user:
+            errors.append("Username cannot be empty")
+        elif len(user) > 32:
+            errors.append(f"Username too long ({len(user)} chars, max 32)")
+        elif not re.match(r"^[a-zA-Z0-9_@.-]+$", user):
+            # MySQL usernames allow alphanumeric, underscore, @, dot, hyphen
+            errors.append(
+                f"Username '{user}' contains invalid characters.\n"
+                "  Valid: letters, numbers, underscore, @, dot, hyphen"
+            )
+
+        # Validate password (basic checks only - actual auth is server-side)
+        # Defense in depth: warn about shell metacharacters that could cause issues
+        if not password:
+            errors.append("Password cannot be empty")
+        else:
+            # Characters that could cause shell escaping issues if mishandled
+            shell_metacharacters = ["`", "$", "\\", '"', "'", ";", "&", "|"]
+            found_dangerous = [c for c in shell_metacharacters if c in password]
+            if found_dangerous:
+                # Warning, not error - password might legitimately contain these
+                Console.warning(
+                    f"Password contains special characters: {found_dangerous}\n"
+                    "  This should work, but if you encounter issues, consider\n"
+                    "  using a password without: ` $ \\ \" ' ; & |"
+                )
+
+        return len(errors) == 0, errors
+
+
+# =============================================================================
+# Port Availability Check
+# =============================================================================
 
 
 def is_port_available(host: str, port: int) -> Tuple[bool, str]:
@@ -1723,7 +1742,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             return None
 
         # Validate hostname format
-        if not validate_hostname(host):
+        if not Validators.hostname(host):
             Console.error(f"Invalid hostname: {host}")
             print("  Hostname cannot contain spaces or invalid characters")
             print("  Valid examples: localhost, db.example.com, 192.168.1.100")
@@ -1743,7 +1762,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             Console.error(f"Invalid port: '{port_str}' is not a number")
             return None
 
-        port_valid, port_msg = validate_port(port)
+        port_valid, port_msg = Validators.port(port)
         if not port_valid:
             Console.error(port_msg)
             return None
@@ -1905,9 +1924,8 @@ def prompt_database_setup() -> str:
 
     # If Docker not available, guide user
     if not compose_available:
-        print(
-            f"\n{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} Docker is not available"
-        )
+        print()
+        Console.warning("Docker is not available")
         print("  To enable Docker setup:")
         print(
             "    1. Install Docker Desktop: https://docs.docker.com/get-docker/"
@@ -2483,8 +2501,8 @@ print("SUCCESS")
 """
     conda_cmd = CondaManager.get_command()
 
+    env = os.environ.copy()
     try:
-        env = os.environ.copy()
         env["SPYGLASS_DB_HOST"] = host
         env["SPYGLASS_DB_PORT"] = str(port)
         env["SPYGLASS_DB_USER"] = user
@@ -2519,6 +2537,19 @@ print("SUCCESS")
         Console.error(f"Password change failed: {e}")
         Console.manual_password_instructions(env_name)
         return None
+    finally:
+        # Security: Clear sensitive data from environment copy
+        # Note: The subprocess receives its own copy, but clearing here
+        # prevents accidental reuse of this dict
+        for key in [
+            "SPYGLASS_OLD_PASSWORD",
+            "SPYGLASS_NEW_PASSWORD",
+            "SPYGLASS_DB_HOST",
+            "SPYGLASS_DB_PORT",
+            "SPYGLASS_DB_USER",
+            "SPYGLASS_USE_TLS",
+        ]:
+            env.pop(key, None)
 
 
 def setup_database_remote(
@@ -2575,7 +2606,7 @@ def setup_database_remote(
             port = 3306
 
         # Validate all database configuration parameters
-        valid, errors = validate_database_config(host, port, user, password)
+        valid, errors = Validators.database_config(host, port, user, password)
         if not valid:
             Console.error("Invalid database configuration:")
             for err in errors:
@@ -2974,7 +3005,7 @@ def run_config_only(args: argparse.Namespace) -> None:
             password = getpass.getpass("Database password: ")
 
     # Validate database config
-    valid, errors = validate_database_config(host, port, user, password)
+    valid, errors = Validators.database_config(host, port, user, password)
     if not valid:
         for error in errors:
             Console.error(error)
