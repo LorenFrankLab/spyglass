@@ -312,7 +312,7 @@ def check_disk_space(required_gb: int, path: Path) -> Tuple[bool, int]:
     ...     print(f"OK: {available} GB available")
     """
     # Find existing path to check
-    check_path = path # original input preserved for debugging
+    check_path = path  # original input preserved for debugging
     while not check_path.exists() and check_path != check_path.parent:
         check_path = check_path.parent
 
@@ -805,7 +805,7 @@ def prompt_install_type() -> Tuple[str, str]:
     Returns
     -------
     env_file : str
-        Path to environment YAML file ("environments/environment_min.yml" or 
+        Path to environment YAML file ("environments/environment_min.yml" or
         "environments/environment.yml")
     install_type : str
         Installation type identifier ("minimal" or "full")
@@ -1501,7 +1501,11 @@ class Validators:
             return False
 
         # Reject obvious typos (multiple dots, leading/trailing dots)
-        if hostname.startswith(".") or hostname.endswith(".") or ".." in hostname:
+        if (
+            hostname.startswith(".")
+            or hostname.endswith(".")
+            or ".." in hostname
+        ):
             return False
 
         # Check length (DNS hostname max is 253 characters)
