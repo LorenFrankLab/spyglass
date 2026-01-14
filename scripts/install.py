@@ -260,7 +260,7 @@ def get_required_python_version() -> Tuple[int, int]:
     Future: Consider extracting to scripts/_shared.py if the installer
     becomes a package, but for now standalone scripts are simpler.
     """
-    fallback = (3, 9) # Safe fallback version
+    fallback = (3, 9)  # Safe fallback version
     try:
         import tomllib  # Python 3.11+
     except ImportError:
