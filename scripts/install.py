@@ -1712,8 +1712,8 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     """Prompt user for remote database connection details.
 
     Interactively asks for host, port, user, and password. Uses getpass
-    for secure password input. Automatically enables TLS for remote hosts.
-    Validates hostname format to prevent typos.
+    for secure password input. Does minimal validation - full validation
+    and reachability checks are handled by setup_database_remote().
 
     Parameters
     ----------
@@ -1722,7 +1722,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     Returns
     -------
     dict or None
-        Dictionary with keys: 'host', 'port', 'user', 'password', 'use_tls'
+        Dictionary with keys: 'host', 'port', 'user', 'password'
         Returns None if user cancels (Ctrl+C)
 
     Examples
@@ -1745,12 +1745,6 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
             print("  Ask your lab admin for the database hostname")
             return None
 
-        # Validate hostname format
-        if not Validators.hostname(host):
-            Console.error(f"Invalid hostname: {host}")
-            print("  Hostname cannot contain spaces or invalid characters")
-            print("  Valid examples: localhost, db.example.com, 192.168.1.100")
-            return None
         port_str = input("  Port [3306]: ").strip() or "3306"
         user = input("  User [root]: ").strip() or "root"
 
@@ -1759,52 +1753,18 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
 
         password = getpass.getpass("  Password: ")
 
-        # Parse and validate port
+        # Parse port (full validation done in setup_database_remote)
         try:
             port = int(port_str)
         except ValueError:
             Console.error(f"Invalid port: '{port_str}' is not a number")
             return None
 
-        port_valid, port_msg = Validators.port(port)
-        if not port_valid:
-            Console.error(port_msg)
-            return None
-
-        # Check if port is reachable
-        print(f"  Testing connection to {host}:{port}...")
-        port_reachable, port_msg = is_port_available(host, port)
-
-        if host not in LOCALHOST_ADDRESSES and not port_reachable:
-            # Remote host, port not reachable
-            Console.warning(port_msg)
-            print("\n  Possible causes:")
-            print("    • Wrong port number (MySQL usually uses 3306)")
-            print("    • Firewall blocking connections")
-            print("    • Database server not running")
-            print("    • Wrong hostname")
-            print("\n  Common MySQL ports:")
-            print("    • Standard MySQL: 3306")
-            print("    • SSH tunnel: Check your tunnel configuration")
-
-            if not Console.prompt_yes_no(
-                "\n  Continue anyway?", default_yes=False
-            ):
-                return None
-        elif port_reachable:
-            print("  ✓ Port is reachable")
-
-        # Determine TLS based on host (use TLS for non-localhost)
-        # This is automatic - no prompt needed. TLS is required for security
-        # on remote connections.
-        use_tls = host not in LOCALHOST_ADDRESSES
-
         return {
             "host": host,
             "port": port,
             "user": user,
             "password": password,
-            "use_tls": use_tls,
         }
 
     except KeyboardInterrupt:
@@ -2596,56 +2556,62 @@ def setup_database_remote(
     """
     print("Setting up remote database connection...")
 
-    # If any parameters are missing, prompt interactively
+    # Get config either from prompt or from provided parameters
     if host is None or user is None or password is None:
         config = prompt_remote_database_config()
         if config is None:
             return False
     else:
         # Non-interactive mode - use provided parameters
-        # (host, user, and password are all not None at this point)
-
-        # Use defaults for optional parameters
         if port is None:
             port = 3306
-
-        # Validate all database configuration parameters
-        valid, errors = Validators.database_config(host, port, user, password)
-        if not valid:
-            Console.error("Invalid database configuration:")
-            for err in errors:
-                print(f"  - {err}")
-            return False
-
-        # Check if port is reachable (for remote hosts only)
-        if host not in LOCALHOST_ADDRESSES:
-            print(f"  Testing connection to {host}:{port}...")
-            port_reachable, port_msg = is_port_available(host, port)
-            if not port_reachable:
-                Console.warning(port_msg)
-                print("  Port may be blocked by firewall or wrong port number")
-                print("  Continuing anyway (connection test will verify)...")
-            else:
-                print("  ✓ Port is reachable")
-
-        # Determine TLS based on host
-        use_tls = host not in LOCALHOST_ADDRESSES
-
         config = {
             "host": host,
             "port": port,
             "user": user,
             "password": password,
-            "use_tls": use_tls,
         }
 
-        print(f"  Connecting to {host}:{port} as {user}")
-        if use_tls:
-            print("  TLS: enabled")
-
+    # Extract values for validation
     host = config["host"]
     port = config["port"]
     user = config["user"]
+    password = config["password"]
+
+    # Validate all database configuration parameters (single validation point)
+    valid, errors = Validators.database_config(host, port, user, password)
+    if not valid:
+        Console.error("Invalid database configuration:")
+        for err in errors:
+            print(f"  - {err}")
+        return False
+
+    # Check if port is reachable (for remote hosts only)
+    if host not in LOCALHOST_ADDRESSES:
+        print(f"  Testing connection to {host}:{port}...")
+        port_reachable, port_msg = is_port_available(host, port)
+        if not port_reachable:
+            Console.warning(port_msg)
+            print("\n  Possible causes:")
+            print("    • Wrong port number (MySQL usually uses 3306)")
+            print("    • Firewall blocking connections")
+            print("    • Database server not running")
+            print("    • Wrong hostname")
+
+            if not Console.prompt_yes_no(
+                "\n  Continue anyway?", default_yes=False
+            ):
+                return False
+        else:
+            print("  ✓ Port is reachable")
+
+    # Determine TLS based on host (use TLS for non-localhost)
+    use_tls = host not in LOCALHOST_ADDRESSES
+    config["use_tls"] = use_tls
+
+    print(f"  Connecting to {host}:{port} as {user}")
+    if use_tls:
+        print("  TLS: enabled")
 
     # Test connection before saving
     success, _error = test_database_connection(**config)
