@@ -151,8 +151,6 @@ def single_transaction_make(
                     log_insert_error(
                         table=table, err=err, error_constants=error_constants
                     )
-            # if table_name in ["TaskEpoch"]:
-            #     __import__("pdb").set_trace()
 
 
 def populate_all_common(
