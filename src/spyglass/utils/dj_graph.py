@@ -6,15 +6,17 @@ NOTE: read `ft` as FreeTable and `restr` as restriction.
 from abc import ABC, abstractmethod
 from copy import deepcopy
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, lru_cache
 from hashlib import md5 as hash_md5
 from itertools import chain as iter_chain
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Set, Tuple, Union
 
+import datajoint as dj
 from datajoint import FreeTable, Table, VirtualModule
 from datajoint import config as dj_config
 from datajoint.condition import make_condition
+from datajoint.expression import QueryExpression
 from datajoint.hash import key_hash
 from datajoint.user_tables import TableMeta
 from datajoint.utils import get_master, to_camel_case
@@ -29,7 +31,7 @@ from tqdm import tqdm
 
 from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (
+from spyglass.utils.dj_helper_fn import (  # is_nonempty,
     PERIPHERAL_TABLES,
     ensure_names,
     fuzzy_get,
@@ -245,27 +247,88 @@ class AbstractGraph(ABC):
         """Get restriction from graph node."""
         return self._get_node(ensure_names(table)).get("restr")
 
-    def _set_restr(self, table, restriction, replace=False):
-        """Add restriction to graph node. If one exists, merge with new."""
+    def _get_restr_list(self, table):
+        """Get restriction list from graph node."""
+        return self._get_node(ensure_names(table)).get("restr_list", [])
+
+    @staticmethod
+    def _coerce_to_condition(ft: FreeTable, r: Any) -> str | QueryExpression:
+        """Coerce restriction to a valid condition.
+
+        If r is a QueryExpression, project to primary key to keep relational. This saves
+        on database requests while propagating restrictions. Otherwise, returns a
+        valid restriction string or condition.
+
+        Parameters
+        ----------
+        ft : FreeTable
+            The FreeTable to apply the restriction to.
+        r : Any
+            The restriction to apply. Can be a string, dict, list, or QueryExpression.
+
+        Returns
+        -------
+        str | QueryExpression
+            The restriction as a string or QueryExpression.
+        """
+
+        if isinstance(r, str):
+            return r
+        if isinstance(r, QueryExpression):
+            return r.proj(*ft.primary_key)  # keep relational
+
+        # dict/list → condition (fallback)
+        return make_condition(ft, r, set())
+
+    def _set_restr(
+        self, table, restriction, replace=False
+    ) -> str | QueryExpression:
+        """
+        Add restriction to graph node. If one exists, merge with new.
+
+        Parameters
+        ----------
+        table : str
+            Table name
+        restriction : str | QueryExpression
+            Restriction to log to node
+        replace : bool, optional
+            Whether to replace existing restriction. Default False will combine
+            with OR logic.
+
+        Returns
+        -------
+        str | QueryExpression
+            The resulting restriction after addition/merging.
+        """
         ft = self._get_ft(table)
-        restriction = (  # Convert to condition if list or dict
-            make_condition(ft, restriction, set())
-            if not isinstance(restriction, str)
-            else restriction
-        )
+        restriction = self._coerce_to_condition(ft, restriction)
         existing = self._get_restr(table)
 
-        if not replace and existing:
-            if restriction == existing:
-                return
-            join = ft & [existing, restriction]
-            if len(join) == len(ft & existing):
-                return  # restriction is a subset of existing
-            restriction = make_condition(
-                ft, unique_dicts(join.fetch("KEY", as_dict=True)), set()
-            )
+        if (not existing) or replace:
+            self._set_node(table, "restr_list", [restriction])
+            self._set_node(table, "restr", restriction)
+            return restriction
 
+        # Merge restrictions
+        restr_list = self._get_restr_list(table) + [restriction]
+        self._set_node(table, "restr_list", restr_list)
+        restriction = self._coerce_to_condition(ft, ft & restr_list)
         self._set_node(table, "restr", restriction)
+        return restriction
+
+    @lru_cache(maxsize=128)
+    def _get_ft_with_restr(self, table, restr):
+        """Get FreeTable from graph node with restriction applied.
+
+        This helper method is cached to avoid redundant FreeTable creation while
+        ensuring that any updated restrictions are applied correctly.
+        """
+        if not (ft := self._get_node(table).get("ft")):
+            ft = FreeTable(self.connection, table)
+            self._set_node(table, "ft", ft)
+
+        return ft & restr
 
     def _get_ft(self, table, with_restr=False, warn=True):
         """Get FreeTable from graph node. If one doesn't exist, create it."""
@@ -277,11 +340,7 @@ class AbstractGraph(ABC):
         else:
             restr = True
 
-        if not (ft := self._get_node(table).get("ft")):
-            ft = FreeTable(self.connection, table)
-            self._set_node(table, "ft", ft)
-
-        return ft & restr
+        return self._get_ft_with_restr(table, restr)
 
     def _has_out_prefix(self, table):
         return (
@@ -298,6 +357,7 @@ class AbstractGraph(ABC):
         self.graph.add_nodes_from(v_graph.nodes(data=True))
         self.graph.add_edges_from(v_graph.edges(data=True))
 
+    @lru_cache(maxsize=1024)
     def _is_out(self, table, warn=True):
         """Check if table is outside of spyglass."""
         table = ensure_names(table)
@@ -328,6 +388,21 @@ class AbstractGraph(ABC):
         if warn and ret:  # Log warning if outside
             logger.warning(f"Skipping unimported: {table}")  # pragma: no cover
         return ret
+
+    def enforce_restr_strings(self):
+        """Ensure all restrictions are strings.
+
+        Converts any non-string restrictions to string conditions.
+        """
+        for table in self.graph.nodes:
+            if not self.graph.nodes.get(table):
+                continue
+            restr = self._get_restr(table)
+            if not restr or isinstance(restr, str):
+                continue
+            ft = self._get_ft(table)
+            new_restr = make_condition(ft, (ft & restr).fetch("KEY"), set())
+            self._set_node(table, "restr", new_restr)
 
     # ---------------------------- Graph Traversal -----------------------------
 
@@ -382,22 +457,25 @@ class AbstractGraph(ABC):
 
         path = f"{self._camel(table1)} -> {self._camel(table2)}"
 
-        if len(ft1) == 0 or len(ft2) == 0:
+        if not (bool(ft1) and bool(ft2)):
             self._log_truncate(f"Bridge Link: {path}: result EMPTY INPUT")
             return ["False"]
 
         if bool(set(attr_map.values()) - set(ft1.heading.names)):
             attr_map = {v: k for k, v in attr_map.items()}  # reverse
 
-        join = ft1.proj(**attr_map) * ft2
-        ret = unique_dicts(join.fetch(*ft2.primary_key, as_dict=True))
+        ret = ft2 & (ft1.proj(**attr_map))
 
         if self.verbose:  # For debugging. Not required for typical use.
-            is_empty = len(ret) == 0
-            is_full = len(ft2) == len(ret)
-            result = "EMPTY" if is_empty else "FULL" if is_full else "partial"
+            if not bool(ret):
+                result = "EMPTY"
+            elif not bool(ft2 - ret.proj()):
+                result = "FULL"
+            else:
+                result = "partial"
             self._log_truncate(f"Bridge Link: {path}: result {result}")
-            logger.debug(join)
+            logger.debug(ret)
+            pass
 
         return ret
 
@@ -525,7 +603,7 @@ class AbstractGraph(ABC):
         if count > 100:
             raise RecursionError("Cascade1: Recursion limit reached.")
 
-        self._set_restr(table, restriction, replace=replace)
+        restriction = self._set_restr(table, restriction, replace=replace)
         self.visited.add(table)
 
         if getattr(self, "found_path", None):  # * Avoid refactor #1356
@@ -614,7 +692,21 @@ class AbstractGraph(ABC):
         Topological sort logic adopted from datajoint.diagram.
         """
         self.cascade(warn=False)
-        nodes = [n for n in self.visited if not n.isnumeric()]
+        nodes = [n for n in self.included_tables if not n.isnumeric()]
+        return [
+            self._get_ft(table, with_restr=True, warn=False)
+            for table in self._topo_sort(nodes, subgraph=True, reverse=False)
+        ]
+
+    @property
+    def restr_analysis_file_linked_ft(self):
+        self.cascade(warn=False)
+        valid_tables = self.analysis_file_tbl.children()
+        nodes = [
+            n
+            for n in self.included_tables
+            if not n.isnumeric() and n in valid_tables
+        ]
         return [
             self._get_ft(table, with_restr=True, warn=False)
             for table in self._topo_sort(nodes, subgraph=True, reverse=False)
@@ -623,7 +715,7 @@ class AbstractGraph(ABC):
     @property
     def restr_ft(self):
         """Get non-empty restricted FreeTables from all visited nodes."""
-        return [ft for ft in self.all_ft if len(ft) > 0]
+        return [ft for ft in self.all_ft if bool(ft)]
 
     def ft_from_list(
         self,
@@ -653,7 +745,7 @@ class AbstractGraph(ABC):
             )
         ]
 
-        return fts if return_empty else [ft for ft in fts if len(ft) > 0]
+        return fts if return_empty else [ft for ft in fts if bool(ft)]
 
     @property
     def as_dict(self) -> List[Dict[str, str]]:
@@ -661,9 +753,16 @@ class AbstractGraph(ABC):
         self.cascade()
         return [
             {"table_name": table, "restriction": self._get_restr(table)}
-            for table in self.visited
+            for table in self.included_tables
             if self._get_restr(table)
         ]
+
+    @property
+    def included_tables(self) -> Set[str]:
+        """Get all tables included in the graph that are included from the cascade."""
+        if not self.cascaded:
+            return {}
+        return set([table for table, node in self.graph.nodes.items() if node])
 
 
 class RestrGraph(AbstractGraph):
@@ -864,20 +963,195 @@ class RestrGraph(AbstractGraph):
 
         to_visit = self.leaves - self.visited
 
-        for table in tqdm(
-            to_visit,
-            desc="RestrGraph: cascading restrictions",
-            total=len(to_visit),
-            disable=not (show_progress or self.verbose),
-        ):
+        if len(to_visit) == 0:
+            if warn:
+                self._log_truncate("No new leaves to cascade")
+            self.cascaded = True
+            return
+
+        if len(to_visit) == 1:
+            table = to_visit.pop()
             restr = self._get_restr(table)
             self._log_truncate(
                 f"Start  {direction:<4}: {self._camel(table)}, {restr}"
             )
-            self.cascade1(table, restr, direction=direction)
+            self.cascade1(table, restr, direction=direction, replace=False)
+
+        else:
+            # Run the cascade of each leaf separately to avoid order dependence
+            # Then combine results with __add__
+            self.cascaded = True  # set now so can be added with (+)
+            cascaded_leaves = []
+            for table in tqdm(
+                to_visit,
+                desc="RestrGraph: cascading restrictions",
+                total=len(to_visit),
+                disable=not (show_progress or self.verbose),
+            ):
+                leaf_graph = RestrGraph(
+                    seed_table=self.seed_table,
+                    leaves=[
+                        {
+                            "table_name": table,
+                            "restriction": self._get_restr(table),
+                        }
+                    ],
+                    include_files=False,  # only need after merging the leaf graphs
+                    direction=direction,
+                    verbose=self.verbose,
+                    cascade=True,
+                )
+                cascaded_leaves.append(leaf_graph)
+            logger.info("adding cascaded leaves")
+            self = self + cascaded_leaves
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
         self.cascade_files()  # Otherwise attempts to re-cascade, recursively
+
+    # ---------------------------- Graph Intersection ---------------------------
+    def _graph_intersect(self, other: "RestrGraph") -> "RestrGraph":
+        """Returns intersection of two RestrGraphs.
+
+        Only tables present in both graphs are retained, with restrictions
+        combined with AND logic.
+
+        Parameters
+        ----------
+        other : RestrGraph
+            Another RestrGraph to intersect with self.
+
+        Returns
+        -------
+        RestrGraph
+
+            New un-cascaded RestrGraph representing the intersection of self and other.
+        """
+        if self.cascaded:
+            graph_1_tables = [
+                tbl for tbl in self.included_tables if self._get_restr(tbl)
+            ]
+        else:
+            # If not cascaded, apply intersection to leaves only
+            graph_1_tables = self.leaves
+
+        other.enforce_restr_strings()
+        graph_2_tables = [
+            tbl for tbl in other.included_tables if other._get_restr(tbl)
+        ]
+        if not graph_1_tables or not graph_2_tables:
+            # If either graph has no tables with restrictions, return empty RestrGraph
+            return RestrGraph(
+                seed_table=self.seed_table,
+                leaves=[],
+                include_files=self.include_files,
+                cascade=False,
+                verbose=self.verbose,
+            )
+
+        table_dicts = []
+
+        for table in graph_1_tables:
+            if table not in graph_2_tables:
+                continue
+            ft = self._get_ft(table)
+            intersect_restriction = ft & dj.AndList(
+                [
+                    self._get_restr(table),
+                    other._get_restr(table),
+                ]
+            )
+
+            table_dicts.append(
+                {
+                    "table_name": table,
+                    "restriction": make_condition(
+                        ft, intersect_restriction.fetch("KEY"), set()
+                    ),
+                }
+            )
+        return RestrGraph(
+            seed_table=self.seed_table,
+            leaves=table_dicts,
+            include_files=self.include_files,
+            cascade=False,
+            verbose=self.verbose,
+        )
+
+    def __and__(self, other: "RestrGraph") -> "RestrGraph":
+        """Return intersection of two RestrGraphs."""
+        if not isinstance(other, RestrGraph):
+            raise TypeError(f"Cannot AND RestrGraph with {type(other)}")
+        return self._graph_intersect(other)
+
+    def whitelist(self, other: "RestrGraph") -> "RestrGraph":
+        """
+        Return a new RestrGraph restricted to the intersect of both graphs.
+
+        This is a convenience alias for the bitwise AND operator
+        (``self & other``) and has identical semantics and return value.
+
+        Parameters
+        ----------
+        other : RestrGraph
+            Another RestrGraph whose restrictions will be intersected with
+            this one.
+        Returns
+        -------
+        RestrGraph
+            A new RestrGraph representing the intersection of ``self`` and
+            ``other``.
+        """
+        return self & other
+
+    # ----------------------------- Graph Addition -----------------------------
+
+    def _graph_union(self, other: "RestrGraph") -> "RestrGraph":
+        if not (self.cascaded and other.cascaded):
+            raise ValueError("Both RestrGraphs must be cascaded before union.")
+        other_dicts = other.as_dict
+
+        for dict in other_dicts:
+            table = dict["table_name"]
+            new_restr_list = self._get_restr_list(
+                table
+            ) + other._get_restr_list(table)
+
+            self._set_node(table, "restr_list", new_restr_list)
+            ft = self._get_ft(table)
+            restriction = self._coerce_to_condition(ft, ft & new_restr_list)
+            self._set_node(table, "restr", restriction)
+        return self
+
+    def _graph_union_list(self, other: "List") -> "RestrGraph":
+        if not all(isinstance(x, RestrGraph) for x in other):
+            raise TypeError("All items in list must be RestrGraph objects.")
+        if not self.cascaded and all([x.cascaded for x in other]):
+            raise ValueError("All RestrGraphs must be cascaded before union.")
+
+        other_dicts_list = [x.as_dict for x in other]
+        all_table_names = []
+        for other_dicts in other_dicts_list:
+            all_table_names += [d["table_name"] for d in other_dicts]
+        all_table_names = set(all_table_names)
+        for table in all_table_names:
+            new_restr_list = self._get_restr_list(table)
+            for other_graph in other:
+                new_restr_list += other_graph._get_restr_list(table)
+            self._set_node(table, "restr_list", new_restr_list)
+            ft = self._get_ft(table)
+            restriction = self._coerce_to_condition(ft, ft & new_restr_list)
+            self._set_node(table, "restr", restriction)
+        return self
+
+    def __add__(self, other: "RestrGraph") -> "RestrGraph":
+        """Return union of two RestrGraphs."""
+        if isinstance(other, RestrGraph):
+            return self._graph_union(other)
+
+        elif isinstance(other, List):
+            return self._graph_union_list(other)
+
+        raise TypeError(f"Cannot OR RestrGraph with {type(other)}")
 
     # ----------------------------- File Handling -----------------------------
 
@@ -906,11 +1180,12 @@ class RestrGraph(AbstractGraph):
             return  # if _hash_upstream, may cause 'missing node' error
 
         analysis_pk = self.analysis_file_tbl.primary_key
-        for ft in self.restr_ft:
+        for ft in self.restr_analysis_file_linked_ft:
             if not set(analysis_pk).issubset(ft.heading.names):
                 continue
             files = list(ft.fetch(*analysis_pk))
-            self._set_node(ft, "files", files)
+            if len(files):
+                self._set_node(ft, "files", files)
 
         raw_ext = self.file_externals["raw"].full_table_name
         analysis_ext = self.file_externals["analysis"].full_table_name
@@ -970,7 +1245,7 @@ class RestrGraph(AbstractGraph):
 
         files = {
             file
-            for table in self.visited
+            for table in self.included_tables
             for file in self._get_node(table).get("files", [])
         }
 
@@ -1399,6 +1674,7 @@ class TableChain(RestrGraph):
                 if table is not start:
                     self._set_restr(table, False, replace=True)
 
+        self.cascaded = True
         return self._get_ft(end, with_restr=True)
 
     def restrict_by(self, *args, **kwargs) -> None:

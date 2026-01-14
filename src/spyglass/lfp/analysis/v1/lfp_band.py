@@ -296,16 +296,19 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
     lfp_band_object_id: varchar(40)  # the NWB object ID for loading this object from the file
     """
 
-    def make(self, key: dict) -> None:
-        """Populate LFPBandV1"""
-        # create the analysis nwb file to store the results.
-        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
-        # get the NWB object with the lfp data;
-        # FIX: change to fetch with additional infrastructure
-        lfp_key = {"merge_id": key["lfp_merge_id"]}
-        lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
+    def _fetch_and_sort_electrodes(self, key: dict) -> tuple:
+        """Fetch and sort electrode IDs and reference IDs
 
-        # get the electrodes to be filtered and their references
+        Parameters
+        ----------
+        key : dict
+            The key containing the LFP band selection parameters
+
+        Returns
+        -------
+        tuple
+            (lfp_band_elect_id, lfp_band_ref_id) as sorted numpy arrays
+        """
         lfp_band_elect_id, lfp_band_ref_id = (
             LFPBandSelection().LFPBandElectrode() & key
         ).fetch("electrode_id", "reference_elect_id")
@@ -317,19 +320,40 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         lfp_band_elect_id = lfp_band_elect_id[lfp_sort_order]
         lfp_band_ref_id = lfp_band_ref_id[lfp_sort_order]
 
+        return lfp_band_elect_id, lfp_band_ref_id
+
+    def _compute_interval_times(self, key: dict, lfp_key: dict) -> tuple:
+        """Compute the valid interval times for LFP band processing
+
+        Parameters
+        ----------
+        key : dict
+            The key containing the LFP band selection parameters
+        lfp_key : dict
+            The key for the LFP output data
+
+        Returns
+        -------
+        tuple
+            (lfp_sampling_rate, lfp_band_valid_times, interval_list_name,
+             lfp_band_sampling_rate, decimation)
+        """
         lfp_sampling_rate, lfp_interval_list = LFPOutput.merge_get_parent(
             lfp_key
         ).fetch1("lfp_sampling_rate", "interval_list_name")
+
         interval_list_name, lfp_band_sampling_rate = (
             LFPBandSelection() & key
         ).fetch1("target_interval_list_name", "lfp_band_sampling_rate")
+
         valid_times = (
             IntervalList()
             & {
                 "nwb_file_name": key["nwb_file_name"],
-                "interval_list_name": interval_list_name,
+                "interval_list_name": str(interval_list_name),
             }
         ).fetch_interval()
+
         # the valid_times for this interval may be slightly beyond the valid
         # times for the lfp itself, so we have to intersect the two lists
         lfp_valid_times = (
@@ -345,16 +369,44 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             min_length=(LFPBandSelection & key).fetch1("min_interval_len"),
         )
 
-        filter_name, filter_sampling_rate, lfp_band_sampling_rate = (
-            LFPBandSelection() & key
-        ).fetch1(
-            "filter_name", "filter_sampling_rate", "lfp_band_sampling_rate"
-        )
-
         decimation = int(lfp_sampling_rate) // lfp_band_sampling_rate
 
+        return (
+            lfp_sampling_rate,
+            lfp_band_valid_times,
+            interval_list_name,
+            lfp_band_sampling_rate,
+            decimation,
+        )
+
+    def _load_lfp_data_with_referencing(
+        self,
+        lfp_object: pynwb.ecephys.ElectricalSeries,
+        lfp_band_elect_id: np.ndarray,
+        lfp_band_ref_id: np.ndarray,
+        lfp_band_valid_times,
+    ) -> tuple:
+        """Load LFP data and apply referencing
+
+        Parameters
+        ----------
+        lfp_object : pynwb.ecephys.ElectricalSeries
+            The LFP electrical series object
+        lfp_band_elect_id : np.ndarray
+            Array of electrode IDs to be filtered
+        lfp_band_ref_id : np.ndarray
+            Array of reference electrode IDs
+        lfp_band_valid_times
+            The valid time intervals
+
+        Returns
+        -------
+        tuple
+            (timestamps, lfp_data, lfp_band_elect_index)
+        """
         # load in the timestamps
         timestamps = np.asarray(lfp_object.timestamps)
+
         # get the indices of the first timestamp and the last timestamp that
         # are within the valid times
         included_indices = lfp_band_valid_times.contains(
@@ -384,19 +436,106 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
                     - lfp_data_original[:, lfp_band_ref_index[index]]
                 )
 
-        # get the LFP filter that matches the raw data
+        return timestamps, lfp_data, lfp_band_elect_index
+
+    def _fetch_filter_coefficients(
+        self, filter_name: str, filter_sampling_rate: int
+    ) -> np.ndarray:
+        """Fetch filter coefficients for the given filter
+
+        Parameters
+        ----------
+        filter_name : str
+            Name of the filter
+        filter_sampling_rate : int
+            Sampling rate of the filter
+
+        Returns
+        -------
+        np.ndarray
+            Filter coefficients, or None if not found
+        """
         filter = (
             FirFilterParameters()
             & {"filter_name": filter_name}
             & {"filter_sampling_rate": filter_sampling_rate}
         ).fetch(as_dict=True)
 
-        filter_coeff = filter[0]["filter_coeff"]
-        if len(filter_coeff) == 0:
+        if not filter or len(filter[0]["filter_coeff"]) == 0:
             logger.error(
-                "LFPBand: no filter found with data "
-                + f"sampling rate of {lfp_band_sampling_rate}"
+                f"LFPBand: no filter found with name {filter_name} "
+                + f"and sampling rate {filter_sampling_rate}"
             )
+            return None
+
+        return filter[0]["filter_coeff"]
+
+    def _create_interval_list_name(
+        self, interval_list_name: str, lfp_band_sampling_rate: int
+    ) -> str:
+        """Create the interval list name for LFP band data
+
+        Parameters
+        ----------
+        interval_list_name : str
+            Base interval list name
+        lfp_band_sampling_rate : int
+            Sampling rate of the LFP band data
+
+        Returns
+        -------
+        str
+            Full interval list name with sampling rate suffix
+        """
+        return (
+            interval_list_name
+            + " lfp band "
+            + str(lfp_band_sampling_rate)
+            + "Hz"
+        )
+
+    def make(self, key: dict) -> None:
+        """Populate LFPBandV1"""
+        # create the analysis nwb file to store the results.
+        lfp_band_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+
+        # get the NWB object with the lfp data
+        lfp_key = {"merge_id": key["lfp_merge_id"]}
+        lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
+
+        # fetch and sort electrode IDs
+        lfp_band_elect_id, lfp_band_ref_id = self._fetch_and_sort_electrodes(
+            key
+        )
+
+        # compute interval times and parameters
+        (
+            lfp_sampling_rate,
+            lfp_band_valid_times,
+            interval_list_name,
+            lfp_band_sampling_rate,
+            decimation,
+        ) = self._compute_interval_times(key, lfp_key)
+
+        # load LFP data with referencing applied
+        timestamps, lfp_data, lfp_band_elect_index = (
+            self._load_lfp_data_with_referencing(
+                lfp_object,
+                lfp_band_elect_id,
+                lfp_band_ref_id,
+                lfp_band_valid_times,
+            )
+        )
+
+        # fetch filter parameters
+        filter_name, filter_sampling_rate = (LFPBandSelection() & key).fetch1(
+            "filter_name", "filter_sampling_rate"
+        )
+
+        filter_coeff = self._fetch_filter_coefficients(
+            filter_name, filter_sampling_rate
+        )
+        if filter_coeff is None:
             return None
 
         lfp_band_file_abspath = AnalysisNwbfile().get_abs_path(
@@ -448,11 +587,8 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
 
         # finally, censor the valid times to account for the downsampling if
         # this is the first time we've downsampled these data
-        key["interval_list_name"] = (
-            interval_list_name
-            + " lfp band "
-            + str(lfp_band_sampling_rate)
-            + "Hz"
+        key["interval_list_name"] = self._create_interval_list_name(
+            interval_list_name, lfp_band_sampling_rate
         )
         tmp_valid_times = (
             IntervalList
@@ -462,10 +598,10 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             }
         ).fetch("valid_times")
         lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
-        lfp_valid_times.set_key(**key, pipeline="lfp band")
+        lfp_band_valid_times.set_key(**key, pipeline="lfp band")
         if len(tmp_valid_times) == 0:  # TODO: swap for cautious_insert
-            # add an interval list for the LFP valid times
-            IntervalList.insert1(lfp_valid_times.as_dict)
+            # add an interval list for the LFP band valid times
+            IntervalList.insert1(lfp_band_valid_times.as_dict)
         else:
             # check that the valid times are the same
             assert np.isclose(
@@ -583,3 +719,126 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
             columns=analytic_signal_df.columns,
             index=analytic_signal_df.index,
         )
+
+    def fix_1481(self, restriction: Optional[dict] = True) -> None:
+        """Fixes the 1481 bug in the LFPBandV1 table
+
+        Parameters
+        ----------
+        restriction : dict, optional
+            A restriction to apply to the LFPBandV1 table, by default None
+        """
+
+        fixed_keys = [
+            key
+            for key in (self & restriction).proj()
+            if self._fix1_1481(key) is not None
+        ]
+
+        if not fixed_keys:
+            logger.info("No entries needed to be fixed for the 1481 bug.")
+            return
+
+        from spyglass.ripple.v1.ripple import RippleTimesV1
+
+        logger.info(
+            f"Fixing {len(fixed_keys)} entries in the RippleTimesV1 table "
+            "due to the 1481 bug. See github issue #1481 for more details."
+        )
+        (RippleTimesV1 & fixed_keys).delete(safemode=False)
+        RippleTimesV1().populate(
+            fixed_keys, suppress_errors=False, display_progress=True
+        )
+
+    def _fix1_1481(self, key: dict) -> Optional[dict]:
+        """Fixes a single entry in the LFPBandV1 table for the 1481 bug
+
+        Parameters
+        ----------
+        key : dict
+            The key of the entry to fix
+
+        Returns
+        -------
+        Optional[dict]
+            The key if it was fixed, None otherwise
+        """
+        # get the NWB object with the lfp data
+        lfp_key = {"merge_id": key["lfp_merge_id"]}
+        lfp_object = (LFPOutput & lfp_key).fetch_nwb()[0]["lfp"]
+
+        # fetch and sort electrode IDs
+        lfp_band_elect_id, lfp_band_ref_id = self._fetch_and_sort_electrodes(
+            key
+        )
+
+        # compute interval times and parameters
+        (
+            lfp_sampling_rate,
+            lfp_band_valid_times,
+            interval_list_name,
+            lfp_band_sampling_rate,
+            decimation,
+        ) = self._compute_interval_times(key, lfp_key)
+
+        # load LFP data with referencing applied
+        timestamps, lfp_data, lfp_band_elect_index = (
+            self._load_lfp_data_with_referencing(
+                lfp_object,
+                lfp_band_elect_id,
+                lfp_band_ref_id,
+                lfp_band_valid_times,
+            )
+        )
+
+        # fetch filter parameters
+        filter_name, filter_sampling_rate = (LFPBandSelection() & key).fetch1(
+            "filter_name", "filter_sampling_rate"
+        )
+
+        filter_coeff = self._fetch_filter_coefficients(
+            filter_name, filter_sampling_rate
+        )
+        if filter_coeff is None:
+            return None
+
+        # filter the data to get new timestamps
+        _, new_timestamps = FirFilterParameters().filter_data(
+            timestamps,
+            lfp_data,
+            filter_coeff,
+            lfp_band_valid_times.times,
+            lfp_band_elect_index,
+            decimation,
+        )
+
+        # censor the valid times to account for the downsampling
+        key["interval_list_name"] = self._create_interval_list_name(
+            interval_list_name, lfp_band_sampling_rate
+        )
+        lfp_band_valid_times = lfp_band_valid_times.censor(new_timestamps)
+
+        # fetch the pre-existing interval list from the database
+        lfp_valid_times = (
+            IntervalList()
+            & {
+                "nwb_file_name": key["nwb_file_name"],
+                "interval_list_name": key["interval_list_name"],
+            }
+        ).fetch_interval()
+
+        # check if pre-existing matches newly computed band times
+        try:
+            has_issue = not np.isclose(
+                lfp_valid_times.times, lfp_band_valid_times.times
+            ).all()
+        except ValueError:  # If shapes don't match, we definitely have an issue
+            has_issue = True
+
+        if not has_issue:
+            return None
+
+        lfp_band_valid_times.set_key(**key, pipeline="lfp band")
+        IntervalList().update1(lfp_band_valid_times.as_dict)
+
+        return key

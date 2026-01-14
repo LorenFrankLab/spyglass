@@ -1,11 +1,7 @@
 import os
-import random
 import re
-import string
-import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Union
-from uuid import uuid4
 
 import datajoint as dj
 import h5py
@@ -160,8 +156,9 @@ class AnalysisRegistry(dj.Manual):
 
     Key Methods:
         get_class(prefix) - Get AnalysisNwbfile class for a specific team prefix
-        get_all_classes() - Get all registered AnalysisNwbfile classes
+        get_all_classes() - Get all registered AnalysisNwbfile class objects
         get_tracked_files() - Get all files tracked across all custom tables
+        clear_cache() - Clear the class cache (useful for testing)
 
     Usage:
         from spyglass.common import AnalysisRegistry
@@ -171,6 +168,12 @@ class AnalysisRegistry(dj.Manual):
 
         # Get a specific team's table
         MyTeamAnalysis = AnalysisRegistry().get_class("myteam")
+
+        # Get an instance
+        my_team_analysis = MyTeamAnalysis()
+
+        # Use enhanced helper methods
+        my_team_analysis.get_prefix()  # 'myteam'
     """
 
     definition = """
@@ -179,6 +182,9 @@ class AnalysisRegistry(dj.Manual):
     created_at = CURRENT_TIMESTAMP: timestamp  # when registered
     created_by : varchar(32)                   # who registered
     """
+
+    # Class-level cache for dynamic table classes
+    _class_cache: dict = {}
 
     def insert1(self, key: Union[str, dict], **kwargs) -> None:
         """Auto-add created_by if not provided.
@@ -194,9 +200,9 @@ class AnalysisRegistry(dj.Manual):
         if isinstance(key, str):
             key = {"full_table_name": key}
 
-        if self & dict(full_table_name=key["full_table_name"]):
+        if query := self & key:
             logger.debug(f"Entry already exists: {key['full_table_name']}")
-            return
+            return query
 
         if "created_by" not in key:
             key["created_by"] = dj.config["database.user"]
@@ -211,7 +217,7 @@ class AnalysisRegistry(dj.Manual):
     ) -> tuple[str, str, str, str]:
         """Parse full table name into components.
 
-        Extracts database, table name, prefix, and suffix from a full table name.
+        Extracts database, table name, prefix, and suffix from a full name.
 
         Parameters
         ----------
@@ -283,8 +289,83 @@ class AnalysisRegistry(dj.Manual):
 
         return err is None
 
-    def _get_tbl_from_name(self, full_name: str) -> SpyglassAnalysis:
-        """Return the DataJoint table object for the given full_table_name.
+    @classmethod
+    def _create_class(cls, full_name: str) -> type:
+        """Create an enhanced custom analysis table class.
+
+        Returns a class with:
+        - All AnalysisMixin methods
+        - Cached for reuse
+        - Helper methods for common operations
+        - Better repr and documentation
+
+        Parameters
+        ----------
+        full_name : str
+            Full table name (e.g., "`myteam_nwbfile`.`analysis_nwbfile`")
+
+        Returns
+        -------
+        type
+            Enhanced table class with helper methods
+        """
+        database, table_name, prefix, _ = cls._parse_table_name(full_name)
+        camel_name = dj.utils.to_camel_case(table_name)
+
+        if (
+            database not in dj.list_schemas()
+            or table_name not in dj.Schema(database).list_tables()
+        ):
+            raise dj.errors.MissingTableError(
+                f"Cannot create class for missing table: {full_name}. "
+                "Ensure the schema is created and you have permissions to it."
+                f"with dj.list_schemas(); dj.Schema({database}).list_tables()"
+            )
+
+        class AnalysisMeta(type):
+            """Metaclass for custom AnalysisNwbfile classes."""
+
+            def __repr__(cls):
+                """Enhanced class repr showing prefix."""
+                return (
+                    f"<class '{cls.__name__}'"
+                    + f"prefix='{cls._analysis_prefix}'>"
+                )
+
+        class EnhancedAnalysisNwbfile(
+            SpyglassAnalysis, dj.FreeTable, metaclass=AnalysisMeta
+        ):
+            f"""Custom AnalysisNwbfile table for {prefix}.
+
+            Automatically created by AnalysisRegistry for schema {full_name}.
+            Provides same functionality as common AnalysisNwbfile but with
+            isolated database locks.
+            """
+
+            _full_table_name = full_name
+            _analysis_prefix = prefix
+
+            def __init__(self):
+                # Always pass connection and table name to FreeTable
+                super().__init__(conn=dj.conn(), full_table_name=full_name)
+
+            def __repr__(self) -> str:
+                """Enhanced repr showing custom table info."""
+                return f"<{camel_name} (custom '{prefix}' analysis table)>"
+
+        # Set the class name dynamically
+        EnhancedAnalysisNwbfile.__name__ = camel_name
+        EnhancedAnalysisNwbfile.__qualname__ = camel_name
+        EnhancedAnalysisNwbfile.__module__ = (
+            f"spyglass.common.common_nwbfile[{prefix}]"
+        )
+
+        return EnhancedAnalysisNwbfile
+
+    def _get_tbl_from_name(self, full_name: str) -> type:
+        """Return cached or create enhanced table class.
+
+        Now uses caching and creates enhanced classes with helper methods.
 
         Parameters
         ----------
@@ -293,20 +374,20 @@ class AnalysisRegistry(dj.Manual):
 
         Returns
         -------
-        table_obj : dj.FreeTable
-            The DataJoint table object for the given full_table_name.
+        type
+            Enhanced table class with caching
         """
-        camel_name = dj.utils.to_camel_case(full_name.split(".")[-1])
+        # Check cache first
+        if full_name in self._class_cache:
+            return self._class_cache[full_name]
 
-        return type(
-            camel_name,
-            (SpyglassAnalysis, dj.FreeTable),
-            {
-                "__init__": lambda self: dj.FreeTable.__init__(
-                    self, dj.conn(), full_name
-                )
-            },
-        )
+        # Create enhanced class
+        cls = self._create_class(full_name)
+
+        # Cache it
+        self._class_cache[full_name] = cls
+
+        return cls
 
     def get_class(self, key: Union[str, Dict]) -> Optional[type]:
         """Return the class object for the given full_table_name, uninitialized.
@@ -314,7 +395,7 @@ class AnalysisRegistry(dj.Manual):
         Parameters
         ----------
         key : str or dict
-            The full_table_name as a string or a dict with the key
+            The prefix or full_table_name as a string or a dict with the key
             'full_table_name'.
 
         Returns
@@ -326,6 +407,15 @@ class AnalysisRegistry(dj.Manual):
             key = f"`{key}_nwbfile`.`analysis_nwbfile`"
         if isinstance(key, str):
             key = {"full_table_name": key}
+
+        # TODO: Add common case to table on registry declaration
+        common_map = {
+            Nwbfile().full_table_name: Nwbfile,
+            AnalysisNwbfile().full_table_name: AnalysisNwbfile,
+        }
+
+        if key["full_table_name"] in common_map:
+            return common_map[key["full_table_name"]]
 
         if not (self & key):
             logger.warning(f"Entry not found: {key['full_table_name']}")
@@ -347,6 +437,21 @@ class AnalysisRegistry(dj.Manual):
             for key in self.fetch(as_dict=True)
             if self._is_valid_entry(key["full_table_name"], raise_err=False)
         ]
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear the class cache.
+
+        Useful for testing or when custom tables are modified.
+        After clearing, the next call to get_class() will recreate
+        the class objects.
+
+        Examples
+        --------
+        >>> AnalysisRegistry.clear_cache()
+        >>> # Next get_class() call will create fresh class instances
+        """
+        cls._class_cache.clear()
 
     def get_externals(
         self, store: str = "analysis"
@@ -425,19 +530,27 @@ class AnalysisRegistry(dj.Manual):
         result = dj.conn().query(SQL_TRIGGER_QUERY.format(**kwargs))
         return result.fetchone()[0] > 0
 
-    def _block_single_table(self, table: str) -> Optional[str]:
+    def _block_single_table(
+        self, table: str, dry_run: bool = False
+    ) -> Optional[str]:
         """Block new inserts into a single analysis table.
 
         Parameters
         ----------
         table : str
             The full table name of the analysis table to block.
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Returns
         -------
         error_msg : str or None
             An error message if blocking fails, otherwise None.
         """
+        if dry_run:
+            logger.info(f"Dry run: would block inserts into {table}")
+            return None
+
         try:
             database, trigger = self._get_block_info(table)
             kwargs = dict(database=database, trigger=trigger, table=table)
@@ -453,11 +566,16 @@ class AnalysisRegistry(dj.Manual):
 
         return None
 
-    def block_new_inserts(self) -> None:
+    def block_new_inserts(self, dry_run: bool = False) -> None:
         """Block new inserts into all registered analysis tables.
 
         Creates BEFORE INSERT triggers on all registered custom analysis tables
         to prevent data modifications during maintenance operations.
+
+        Parameters
+        ----------
+        dry_run : bool, optional
+            If True, log blocking without making changes. Defaults to False.
 
         Raises
         ------
@@ -466,7 +584,7 @@ class AnalysisRegistry(dj.Manual):
         """
         errors = []
         for table in self.fetch("full_table_name"):
-            error = self._block_single_table(table)
+            error = self._block_single_table(table, dry_run=dry_run)
             if error is not None:
                 errors.append(error)
 
@@ -559,7 +677,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         to_delete = set()
         for path in tqdm(
             Path(self._analysis_dir).rglob("*.nwb"),
-            desc="Scanning analysis files",
+            desc="Scanning analysis files  ",  # Note extra spaces for alignment
         ):
             is_empty_file = path.is_file() and path.stat().st_size == 0
             is_empty_dir = path.is_dir() and not any(path.iterdir())
@@ -569,6 +687,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 to_delete.add(path)
 
         if dry_run:
+            logger.info(f"  {len(to_delete)} untracked or empty analysis files")
             return to_delete, tracked
 
         for path in to_delete:
@@ -579,7 +698,56 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         return to_delete, tracked
 
-    def cleanup(self) -> None:
+    def _cleanup_custom_table(
+        self,
+        analysis_tbl: SpyglassAnalysis,
+        common_orphans: dj.expression.QueryExpression,
+        dry_run: bool,
+        table_num: int,
+        num_tables: int,
+    ) -> dj.expression.QueryExpression:
+        """Clean up a single custom analysis table.
+
+        Parameters
+        ----------
+        analysis_tbl : SpyglassAnalysis
+            The custom analysis table to clean up.
+        common_orphans : dj.expression.QueryExpression
+            The common orphans to update with valid entries.
+        dry_run : bool
+            If True, only report what would be deleted.
+        table_num : int
+            Current table number for logging.
+        num_tables : int
+            Total number of tables for logging.
+
+        Returns
+        -------
+        dj.expression.QueryExpression
+            Updated common orphans with valid entries removed.
+        """
+        prefix = analysis_tbl.database.split("_")[0]
+
+        # Delete orphans from this analysis table
+        orphans = analysis_tbl.delete_orphans(dry_run=dry_run, safemode=False)
+        n_orphans = len(orphans) if orphans is not None else 0
+
+        # Clean up this table's external entries
+        unused = analysis_tbl.cleanup_external(
+            dry_run=dry_run, delete_external_files=True
+        )
+        logger.info(
+            f"  [{table_num}/{num_tables}] {prefix}: {n_orphans} orphans, "
+            + f"{len(unused)} unused externals"
+        )
+
+        # Remove valid entries from common orphans
+        if bool(analysis_tbl):
+            common_orphans -= analysis_tbl.proj()
+
+        return common_orphans
+
+    def cleanup(self, dry_run: bool = False) -> None:
         """Clean up common and all custom AnalysisNwbfile tables.
 
         Removes orphaned analysis files across both common and custom tables.
@@ -600,7 +768,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             from spyglass.common import AnalysisNwbfile
 
             # Run cleanup across all tables
-            AnalysisNwbfile().cleanup()
+            AnalysisNwbfile().cleanup(dry_run=False)
 
         Note:
             This is a destructive operation. Ensure you have backups before
@@ -609,40 +777,55 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         See Also:
             docs/src/ForDevelopers/Management.md for detailed cleanup guide.
+
+        Parameters
+        ----------
+        dry_run : bool
+            If True, perform a non-destructive dry run: log and report all
+            cleanup actions without deleting database entries or files.
+            If False, apply the cleanup changes, including deleting orphaned
+            entries and associated files.
         """
-        logger.info("Analysis cleanup")
+        heading = "============== Analysis Cleanup "
+        suffix = "(Dry Run) ==============" if dry_run else "=============="
+        logger.info(heading + suffix)
+
         registry = AnalysisRegistry()
-        registry.block_new_inserts()
+
+        registry.block_new_inserts(dry_run=dry_run)
 
         # Get all custom tables first so we can check their tracked files
         custom_tables = list(registry.all_classes)
-        num_tables = len(custom_tables)
+        num_tables = len(custom_tables) + 1  # +1 for common table
         common_orphans = self.get_orphans().proj()
 
-        try:  # Long try block ensures that we always unblock inserts after
+        try:
+            # Process each custom analysis table.
+            # Subtract valid entries from common_orphans
             for i, analysis_tbl in enumerate(custom_tables, start=1):
-                tbl_name = analysis_tbl.full_table_name
-                logger.info(f"  [{i}/{num_tables}] Processing {tbl_name}")
+                common_orphans = self._cleanup_custom_table(
+                    analysis_tbl, common_orphans, dry_run, i, num_tables
+                )
 
-                # Step 1a: Get orphans from this analysis table
-                _ = analysis_tbl.delete_orphans(dry_run=False, safemode=False)
+            # Delete remaining common orphans
+            n_orphans = len(common_orphans)
 
-                # Step 1b: Clean up this table's external entries
-                _ = analysis_tbl.cleanup_external()
-
-                # Step 1c: Remove valid entries from common orphans.
-                if bool(analysis_tbl):
-                    common_orphans -= analysis_tbl.proj()
-
-            # Step 3: Delete remaining common orphans.
-            if bool(common_orphans):
+            if bool(common_orphans) and not dry_run:
                 common_orphans.delete_quick()
 
-            # Step 4: Clean up common external table entries
-            _ = self.cleanup_external()
+            # Clean up common external table entries
+            unused = self.cleanup_external(
+                dry_run=dry_run, delete_external_files=False
+            )
 
-            # Remove untracked files, checking both common and custom tables
-            _ = self._remove_untracked_files(custom_tables, dry_run=False)
+            logger.info(
+                f"  [{num_tables}/{num_tables}] common: {n_orphans} "
+                f"orphans, {len(unused)} unused externals"
+            )
 
-        finally:
-            registry.unblock_new_inserts()
+            # Remove untracked files
+            _ = self._remove_untracked_files(custom_tables, dry_run=dry_run)
+
+        finally:  # always unblock inserts
+            if not dry_run:
+                registry.unblock_new_inserts()
