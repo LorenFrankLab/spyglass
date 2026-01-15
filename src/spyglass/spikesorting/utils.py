@@ -76,7 +76,7 @@ def get_group_by_shank(
 
             if references:  # Use 'references' if passed
                 sort_ref_id = references.get(e_group, None)
-                if not sort_ref_id:
+                if sort_ref_id is None:
                     raise Exception(
                         f"electrode group {e_group} not a key in "
                         + "references, so cannot set reference"
