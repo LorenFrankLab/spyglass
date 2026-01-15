@@ -390,6 +390,7 @@ class TestTLSDetermination:
         """Test that remote IP addresses enable TLS."""
         assert determine_tls("192.168.1.100") is True
 
+
 class TestSchemaVersioning:
     """Tests for schema versioning."""
 
