@@ -106,43 +106,45 @@ class TestSchemaConsistency:
         schema = load_directory_schema()
         assert set(schema.keys()) == {"spyglass", "kachery", "dlc", "moseq"}
 
-    def test_schema_has_correct_directory_counts(self):
+    @pytest.mark.parametrize(
+        "prefix,expected_count",
+        [
+            ("spyglass", 8),
+            ("kachery", 3),
+            ("dlc", 3),
+            ("moseq", 2),
+        ],
+    )
+    def test_schema_has_correct_directory_counts(self, prefix, expected_count):
         """Test that each prefix has expected number of directories."""
         schema = load_directory_schema()
+        assert len(schema[prefix]) == expected_count
 
-        assert (
-            len(schema["spyglass"]) == 8
-        ), "spyglass should have 8 directories"
-        assert len(schema["kachery"]) == 3, "kachery should have 3 directories"
-        assert len(schema["dlc"]) == 3, "dlc should have 3 directories"
-        assert len(schema["moseq"]) == 2, "moseq should have 2 directories"
-
-    def test_spyglass_directories_are_correct(self):
-        """Test that spyglass directories have correct keys."""
+    @pytest.mark.parametrize(
+        "prefix,expected_keys",
+        [
+            (
+                "spyglass",
+                {
+                    "raw",
+                    "analysis",
+                    "recording",
+                    "sorting",
+                    "waveforms",
+                    "temp",
+                    "video",
+                    "export",
+                },
+            ),
+            ("kachery", {"cloud", "temp", "storage"}),
+            ("dlc", {"project", "video", "output"}),
+            ("moseq", {"project", "video"}),
+        ],
+    )
+    def test_directories_have_correct_keys(self, prefix, expected_keys):
+        """Test that each prefix has the correct directory keys."""
         schema = load_directory_schema()
-        expected_keys = {
-            "raw",
-            "analysis",
-            "recording",
-            "sorting",
-            "waveforms",
-            "temp",
-            "video",
-            "export",
-        }
-        assert set(schema["spyglass"].keys()) == expected_keys
-
-    def test_dlc_directories_are_correct(self):
-        """Test that DLC directories have correct keys."""
-        schema = load_directory_schema()
-        expected_keys = {"project", "video", "output"}
-        assert set(schema["dlc"].keys()) == expected_keys
-
-    def test_moseq_directories_are_correct(self):
-        """Test that MoSeq directories have correct keys."""
-        schema = load_directory_schema()
-        expected_keys = {"project", "video"}
-        assert set(schema["moseq"].keys()) == expected_keys
+        assert set(schema[prefix].keys()) == expected_keys
 
 
 class TestInstallerConfig:

@@ -247,60 +247,41 @@ class TestCheckDiskSpace:
 class TestValidateHostname:
     """Tests for Validators.hostname()."""
 
-    def test_accepts_localhost(self):
-        """Accepts 'localhost'."""
-        assert Validators.hostname("localhost") is True
+    @pytest.mark.parametrize(
+        "hostname",
+        [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+            "db.example.com",
+            "lmf-db.cin.ucsf.edu",
+            "192.168.1.100",
+            "10.0.0.1",
+        ],
+    )
+    def test_accepts_valid_hostnames(self, hostname):
+        """Accepts valid hostnames including localhost, IPs, and domains."""
+        assert Validators.hostname(hostname) is True
 
-    def test_accepts_ipv4_localhost(self):
-        """Accepts IPv4 localhost address."""
-        assert Validators.hostname("127.0.0.1") is True
-
-    def test_accepts_ipv6_localhost(self):
-        """Accepts IPv6 localhost address."""
-        assert Validators.hostname("::1") is True
-
-    def test_accepts_domain_name(self):
-        """Accepts valid domain names."""
-        assert Validators.hostname("db.example.com") is True
-        assert Validators.hostname("lmf-db.cin.ucsf.edu") is True
-
-    def test_accepts_ip_address(self):
-        """Accepts valid IP addresses."""
-        assert Validators.hostname("192.168.1.100") is True
-        assert Validators.hostname("10.0.0.1") is True
-
-    def test_rejects_empty_string(self):
-        """Rejects empty hostname."""
-        assert Validators.hostname("") is False
-
-    def test_rejects_spaces(self):
-        """Rejects hostname with spaces."""
-        assert Validators.hostname("host with spaces") is False
-        assert Validators.hostname(" localhost") is False
-        assert Validators.hostname("localhost ") is False
-
-    def test_rejects_control_characters(self):
-        """Rejects hostname with control characters."""
-        assert Validators.hostname("host\tname") is False
-        assert Validators.hostname("host\nname") is False
-
-    def test_rejects_leading_dot(self):
-        """Rejects hostname starting with dot."""
-        assert Validators.hostname(".example.com") is False
-
-    def test_rejects_trailing_dot(self):
-        """Rejects hostname ending with dot."""
-        assert Validators.hostname("example.com.") is False
-
-    def test_rejects_consecutive_dots(self):
-        """Rejects hostname with consecutive dots."""
-        assert Validators.hostname("example..com") is False
-        assert Validators.hostname("..invalid") is False
-
-    def test_rejects_overly_long_hostname(self):
-        """Rejects hostname exceeding 253 characters."""
-        long_hostname = "a" * 254
-        assert Validators.hostname(long_hostname) is False
+    @pytest.mark.parametrize(
+        "hostname,reason",
+        [
+            ("", "empty string"),
+            ("host with spaces", "contains spaces"),
+            (" localhost", "leading space"),
+            ("localhost ", "trailing space"),
+            ("host\tname", "contains tab"),
+            ("host\nname", "contains newline"),
+            (".example.com", "leading dot"),
+            ("example.com.", "trailing dot"),
+            ("example..com", "consecutive dots"),
+            ("..invalid", "starts with consecutive dots"),
+            ("a" * 254, "exceeds 253 characters"),
+        ],
+    )
+    def test_rejects_invalid_hostnames(self, hostname, reason):
+        """Rejects invalid hostnames: {reason}."""
+        assert Validators.hostname(hostname) is False
 
 
 # =============================================================================
@@ -311,51 +292,39 @@ class TestValidateHostname:
 class TestValidatePort:
     """Tests for Validators.port()."""
 
-    def test_accepts_mysql_default_port(self):
-        """Accepts MySQL default port 3306."""
-        valid, msg = Validators.port(3306)
+    @pytest.mark.parametrize(
+        "port",
+        [
+            3306,  # MySQL default
+            1024,  # First non-privileged
+            1025,
+            8080,
+            65535,  # Maximum valid
+        ],
+    )
+    def test_accepts_valid_ports(self, port):
+        """Accepts valid non-privileged ports (1024-65535)."""
+        valid, msg = Validators.port(port)
         assert valid is True
         assert msg == ""
 
-    def test_accepts_non_privileged_ports(self):
-        """Accepts ports in non-privileged range (1024-65535)."""
-        valid, _ = Validators.port(1025)
-        assert valid is True
-
-        valid, _ = Validators.port(65535)
-        assert valid is True
-
-        valid, _ = Validators.port(8080)
-        assert valid is True
-
-    def test_rejects_privileged_ports(self):
-        """Rejects privileged ports (1-1023)."""
-        valid, msg = Validators.port(80)
+    @pytest.mark.parametrize(
+        "port,expected_msg",
+        [
+            (80, "privileged"),
+            (1, "privileged"),
+            (1023, "privileged"),
+            (0, "out of valid range"),
+            (-1, "out of valid range"),
+            (65536, "out of valid range"),
+            (100000, "out of valid range"),
+        ],
+    )
+    def test_rejects_invalid_ports(self, port, expected_msg):
+        """Rejects invalid ports (privileged or out of range)."""
+        valid, msg = Validators.port(port)
         assert valid is False
-        assert "privileged" in msg.lower()
-
-        valid, msg = Validators.port(1)
-        assert valid is False
-
-        valid, msg = Validators.port(1023)
-        assert valid is False
-
-    def test_rejects_port_zero(self):
-        """Rejects port 0."""
-        valid, msg = Validators.port(0)
-        assert valid is False
-        assert "out of valid range" in msg.lower()
-
-    def test_rejects_negative_port(self):
-        """Rejects negative port numbers."""
-        valid, msg = Validators.port(-1)
-        assert valid is False
-
-    def test_rejects_port_above_65535(self):
-        """Rejects ports above 65535."""
-        valid, msg = Validators.port(65536)
-        assert valid is False
-        assert "out of valid range" in msg.lower()
+        assert expected_msg in msg.lower()
 
 
 # =============================================================================
@@ -366,27 +335,30 @@ class TestValidatePort:
 class TestShouldUseTls:
     """Tests for Validators.should_use_tls()."""
 
-    def test_localhost_returns_false(self):
-        """Returns False for localhost."""
-        assert Validators.should_use_tls("localhost") is False
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        ],
+    )
+    def test_local_hosts_return_false(self, host):
+        """Returns False for localhost and loopback addresses."""
+        assert Validators.should_use_tls(host) is False
 
-    def test_ipv4_loopback_returns_false(self):
-        """Returns False for IPv4 loopback address."""
-        assert Validators.should_use_tls("127.0.0.1") is False
-
-    def test_ipv6_loopback_returns_false(self):
-        """Returns False for IPv6 loopback address."""
-        assert Validators.should_use_tls("::1") is False
-
-    def test_remote_hostname_returns_true(self):
-        """Returns True for remote hostnames."""
-        assert Validators.should_use_tls("db.example.com") is True
-        assert Validators.should_use_tls("lmf-db.cin.ucsf.edu") is True
-
-    def test_remote_ip_returns_true(self):
-        """Returns True for non-loopback IP addresses."""
-        assert Validators.should_use_tls("192.168.1.1") is True
-        assert Validators.should_use_tls("10.0.0.1") is True
+    @pytest.mark.parametrize(
+        "host",
+        [
+            "db.example.com",
+            "lmf-db.cin.ucsf.edu",
+            "192.168.1.1",
+            "10.0.0.1",
+        ],
+    )
+    def test_remote_hosts_return_true(self, host):
+        """Returns True for remote hostnames and non-loopback IPs."""
+        assert Validators.should_use_tls(host) is True
 
 
 # =============================================================================
