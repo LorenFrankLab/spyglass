@@ -996,7 +996,7 @@ class DockerManager:
                         # here since .env might intentionally specify them
                         if port < 1 or port > 65535:
                             raise ValueError(
-                                f"MYSQL_PORT {port} is out of range (1-65535)"
+                                f"MYSQL_PORT {port} is out of range (1025-65535)"
                             )
                     elif key == "MYSQL_ROOT_PASSWORD":
                         if not value:
