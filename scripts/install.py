@@ -1153,9 +1153,6 @@ def build_directory_structure(
     """
     if schema is None:
         schema = load_directory_schema()
-    # Note: No need to check if schema is empty - load_directory_schema()
-    # raises FileNotFoundError if the file is missing, and validate_schema()
-    # ensures required prefixes exist
 
     directories = {}
 
