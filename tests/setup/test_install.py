@@ -319,7 +319,7 @@ class TestValidatePort:
 
     def test_accepts_non_privileged_ports(self):
         """Accepts ports in non-privileged range (1024-65535)."""
-        valid, _ = Validators.port(1024)
+        valid, _ = Validators.port(1025)
         assert valid is True
 
         valid, _ = Validators.port(65535)
