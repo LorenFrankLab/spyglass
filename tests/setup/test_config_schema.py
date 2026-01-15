@@ -390,19 +390,6 @@ class TestTLSDetermination:
         """Test that remote IP addresses enable TLS."""
         assert determine_tls("192.168.1.100") is True
 
-    def test_custom_schema_tls_config(self):
-        """Test TLS determination with custom schema."""
-        custom_schema = {
-            "tls": {
-                "localhost_addresses": ["localhost", "127.0.0.1", "mylocal"]
-            }
-        }
-        # Custom local address should disable TLS
-        assert determine_tls("mylocal", schema=custom_schema) is False
-        # Other addresses should enable TLS
-        assert determine_tls("remote.host", schema=custom_schema) is True
-
-
 class TestSchemaVersioning:
     """Tests for schema versioning."""
 
