@@ -1598,11 +1598,11 @@ class Validators:
             errors.append("Username cannot be empty")
         elif len(user) > 32:
             errors.append(f"Username too long ({len(user)} chars, max 32)")
-        elif not re.match(r"^[a-zA-Z0-9_@.-]+$", user):
+        elif not re.match(r"^[a-zA-Z0-9_@.]+$", user):
             # MySQL usernames allow alphanumeric, underscore, @, dot, hyphen
             errors.append(
                 f"Username '{user}' contains invalid characters.\n"
-                "  Valid: letters, numbers, underscore, @, dot, hyphen"
+                "  Valid: letters, numbers, underscore, @, dot"
             )
 
         # Validate password (basic checks only - actual auth is server-side)
