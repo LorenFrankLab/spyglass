@@ -490,14 +490,21 @@ class TestIntervalIdxWarning:
 
         # Create results without interval_labels
         mock_results = xr.Dataset(
-            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            {
+                "acausal_posterior": (
+                    ["time", "state_bins"],
+                    np.random.rand(10, 5),
+                )
+            },
             coords={"time": np.arange(10), "state_bins": np.arange(5)},
         )
 
         from spyglass.decoding.decoding_merge import DecodingOutput
 
         with (
-            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            patch.object(
+                DecodingOutput, "fetch_results", return_value=mock_results
+            ),
             caplog.at_level(logging.WARNING),
         ):
             try:
@@ -515,7 +522,12 @@ class TestIntervalIdxWarning:
 
         # Create results WITH interval_labels
         mock_results = xr.Dataset(
-            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            {
+                "acausal_posterior": (
+                    ["time", "state_bins"],
+                    np.random.rand(10, 5),
+                )
+            },
             coords={
                 "time": np.arange(10),
                 "state_bins": np.arange(5),
@@ -526,7 +538,9 @@ class TestIntervalIdxWarning:
         from spyglass.decoding.decoding_merge import DecodingOutput
 
         with (
-            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            patch.object(
+                DecodingOutput, "fetch_results", return_value=mock_results
+            ),
             caplog.at_level(logging.WARNING),
         ):
             try:
@@ -543,14 +557,21 @@ class TestIntervalIdxWarning:
 
         # Create results without interval_labels
         mock_results = xr.Dataset(
-            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            {
+                "acausal_posterior": (
+                    ["time", "state_bins"],
+                    np.random.rand(10, 5),
+                )
+            },
             coords={"time": np.arange(10), "state_bins": np.arange(5)},
         )
 
         from spyglass.decoding.decoding_merge import DecodingOutput
 
         with (
-            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            patch.object(
+                DecodingOutput, "fetch_results", return_value=mock_results
+            ),
             caplog.at_level(logging.WARNING),
         ):
             try:
