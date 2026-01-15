@@ -2795,8 +2795,6 @@ def setup_database(args: argparse.Namespace) -> None:
         handle_database_setup_cli(args.env_name, "docker")
         return
     if args.remote:
-        import os
-
         db_password = args.db_password or os.environ.get("SPYGLASS_DB_PASSWORD")
         handle_database_setup_cli(
             args.env_name,
