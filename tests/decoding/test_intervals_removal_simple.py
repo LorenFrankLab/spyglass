@@ -486,29 +486,24 @@ class TestIntervalIdxWarning:
 
     def test_interval_idx_warning_when_no_labels(self, caplog):
         """Should warn when interval_idx specified but no interval_labels."""
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
-        # Create mock results without interval_labels
-        mock_results = MagicMock()
-        mock_results.coords = {}  # No interval_labels
+        # Create results without interval_labels
+        mock_results = xr.Dataset(
+            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            coords={"time": np.arange(10), "state_bins": np.arange(5)},
+        )
 
-        # Import the module to access logger
-        from spyglass.decoding import decoding_merge
+        from spyglass.decoding.decoding_merge import DecodingOutput
 
-        # Directly test the warning logic
-        logger = decoding_merge.logger
-        interval_idx = 0
-
-        with caplog.at_level(logging.WARNING):
-            # Simulate the check from create_decoding_view
-            if interval_idx is not None:
-                if "interval_labels" in mock_results.coords:
-                    pass  # Would filter results
-                else:
-                    logger.warning(
-                        f"interval_idx={interval_idx} specified but results do not "
-                        "have 'interval_labels' coordinate. Ignoring interval_idx."
-                    )
+        with (
+            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            caplog.at_level(logging.WARNING),
+        ):
+            try:
+                DecodingOutput.create_decoding_view({}, interval_idx=0)
+            except Exception:
+                pass  # We only care about the warning, not visualization errors
 
         assert "interval_idx=0 specified but results do not" in caplog.text
         assert "interval_labels" in caplog.text
@@ -516,52 +511,52 @@ class TestIntervalIdxWarning:
 
     def test_no_warning_when_interval_labels_present(self, caplog):
         """Should not warn when results have interval_labels."""
-        from unittest.mock import MagicMock
+        from unittest.mock import patch
 
-        from spyglass.decoding import decoding_merge
+        # Create results WITH interval_labels
+        mock_results = xr.Dataset(
+            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            coords={
+                "time": np.arange(10),
+                "state_bins": np.arange(5),
+                "interval_labels": ("time", np.array([0] * 5 + [1] * 5)),
+            },
+        )
 
-        # Create mock results WITH interval_labels
-        mock_results = MagicMock()
-        mock_results.coords = {"interval_labels": [0, 0, 1, 1]}
+        from spyglass.decoding.decoding_merge import DecodingOutput
 
-        logger = decoding_merge.logger
-        interval_idx = 0
+        with (
+            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            caplog.at_level(logging.WARNING),
+        ):
+            try:
+                DecodingOutput.create_decoding_view({}, interval_idx=0)
+            except Exception:
+                pass  # We only care about the warning, not visualization errors
 
-        with caplog.at_level(logging.WARNING):
-            # Simulate the check from create_decoding_view
-            if interval_idx is not None:
-                if "interval_labels" in mock_results.coords:
-                    pass  # Would filter results - no warning
-                else:
-                    logger.warning(
-                        f"interval_idx={interval_idx} specified but results do not "
-                        "have 'interval_labels' coordinate. Ignoring interval_idx."
-                    )
-
-        # No warning should be issued
+        # No warning about interval_idx should be issued
         assert "interval_idx" not in caplog.text
 
     def test_no_warning_when_interval_idx_is_none(self, caplog):
         """Should not warn when interval_idx is None."""
-        from unittest.mock import MagicMock
+        from unittest.mock import patch
 
-        from spyglass.decoding import decoding_merge
+        # Create results without interval_labels
+        mock_results = xr.Dataset(
+            {"acausal_posterior": (["time", "state_bins"], np.random.rand(10, 5))},
+            coords={"time": np.arange(10), "state_bins": np.arange(5)},
+        )
 
-        mock_results = MagicMock()
-        mock_results.coords = {}  # No interval_labels
+        from spyglass.decoding.decoding_merge import DecodingOutput
 
-        logger = decoding_merge.logger
-        interval_idx = None
-
-        with caplog.at_level(logging.WARNING):
-            if interval_idx is not None:
-                if "interval_labels" in mock_results.coords:
-                    pass
-                else:
-                    logger.warning(
-                        f"interval_idx={interval_idx} specified but results do not "
-                        "have 'interval_labels' coordinate. Ignoring interval_idx."
-                    )
+        with (
+            patch.object(DecodingOutput, "fetch_results", return_value=mock_results),
+            caplog.at_level(logging.WARNING),
+        ):
+            try:
+                DecodingOutput.create_decoding_view({}, interval_idx=None)
+            except Exception:
+                pass  # We only care about the warning, not visualization errors
 
         # No warning should be issued when interval_idx is None
-        assert caplog.text == ""
+        assert "interval_idx" not in caplog.text
