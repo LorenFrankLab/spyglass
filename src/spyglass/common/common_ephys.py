@@ -1,4 +1,5 @@
 import warnings
+from collections import defaultdict
 
 import datajoint as dj
 import ndx_franklab_novela
@@ -14,7 +15,7 @@ from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 from spyglass.common.common_region import BrainRegion  # noqa: F401
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
     estimate_sampling_rate,
     get_config,
@@ -226,53 +227,57 @@ class Electrode(SpyglassMixin, dj.Imported):
             for electrode_dict in config["Electrode"]
         }
 
+        defaults = dict(
+            x_warped=0,
+            y_warped=0,
+            z_warped=0,
+            contacts="",
+        )
+
+        inserts = []
+        updates = []
         electrodes = nwbf.electrodes.to_dataframe()
         for nwbfile_elect_id, elect_data in electrodes.iterrows():
-            if nwbfile_elect_id in electrode_dicts:
-                # use the information in the electrodes table to start and then
-                # add (or overwrite) values from the config YAML
-
-                key = dict()
-                key["nwb_file_name"] = nwb_file_name
-                key["name"] = str(nwbfile_elect_id)
-                key["electrode_group_name"] = elect_data.group_name
-                key["region_id"] = BrainRegion.fetch_add(
-                    region_name=elect_data.group.location
-                )
-                key["x"] = elect_data.x
-                key["y"] = elect_data.y
-                key["z"] = elect_data.z
-                key["x_warped"] = 0
-                key["y_warped"] = 0
-                key["z_warped"] = 0
-                key["contacts"] = ""
-                key["filtering"] = elect_data.filtering
-                key["impedance"] = elect_data.get("imp")
-                key.update(electrode_dicts[nwbfile_elect_id])
-                query = Electrode & {"electrode_id": nwbfile_elect_id}
-                if len(query):
-                    cls.update1(key)
-                    logger.info(
-                        f"Updated Electrode with ID {nwbfile_elect_id}."
-                    )
-                else:
-                    cls.insert1(
-                        key, skip_duplicates=True, allow_direct_insert=True
-                    )
-                    logger.info(
-                        f"Inserted Electrode with ID {nwbfile_elect_id}."
-                    )
-            else:
+            if nwbfile_elect_id not in electrode_dicts:
                 warnings.warn(
                     f"Electrode ID {nwbfile_elect_id} exists in the NWB file "
                     + "but has no corresponding config YAML entry."
                 )
+                continue
+
+            # use the information in the electrodes table to start and then
+            # add (or overwrite) values from the config YAML
+
+            key = dict(
+                nwb_file_name=nwb_file_name,
+                electrode_id=str(nwbfile_elect_id),
+                electrode_group_name=elect_data.group_name,
+                region_id=BrainRegion.fetch_add(
+                    region_name=elect_data.group.location
+                ),
+                **defaults,
+                filtering=elect_data.filtering,
+                impedance=elect_data.get("imp"),
+                **electrode_dicts[nwbfile_elect_id],
+            )
+
+            query = Electrode & {"electrode_id": nwbfile_elect_id}
+
+            if len(query):
+                updates.append(key)
+                logger.info(f"Updated Electrode with ID {nwbfile_elect_id}.")
+            else:
+                inserts.append(key)
+                logger.info(f"Inserted Electrode with ID {nwbfile_elect_id}.")
+
+        cls.insert(inserts, skip_duplicates=True, allow_direct_insert=True)
+        for update in updates:
+            cls.update1(update)
 
 
 @schema
-class Raw(SpyglassMixin, dj.Imported):
-    definition = """
-    # Raw voltage timeseries data, ElectricalSeries in NWB.
+class Raw(SpyglassIngestion, dj.Imported):
+    definition = """ # Raw voltage timeseries data, ElectricalSeries in NWB.
     -> Session
     ---
     -> IntervalList
@@ -283,86 +288,83 @@ class Raw(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _only_ingest_first = True
+    _source_nwb_object_name = [
+        "e-series",
+        "electricalseries",
+        "ephys",
+        "electrophysiology",
+    ]
+
+    @property
+    def _source_nwb_object_type(self):
+        return pynwb.ecephys.ElectricalSeries
+
+    @property
+    def table_key_to_obj_attr(self):
+        return {
+            "self": {
+                "interval_list_name": lambda *args: "raw data valid times",
+                "raw_object_id": "object_id",
+                "sampling_rate": self._rate_fallback,
+                "comments": "comments",
+                "description": "description",
+                "valid_times": self._valid_times_from_raw,
+            },
+        }
+
+    def _rate_fallback(self, nwb_object):
+        """Return the rate if available, otherwise None."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return rate
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+        return estimate_sampling_rate(
+            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=True
+        )
+
+    def _valid_times_from_raw(self, nwb_object):
+        """Return valid times from the raw data."""
+        rate = getattr(nwb_object, "rate", None)
+        if rate is not None:
+            return np.array([[0, len(nwb_object.data) / rate]])
+
+        timestamps = getattr(nwb_object, "timestamps", None)
+        if timestamps is None:
+            raise ValueError("Neither rate nor timestamps are available.")
+
+        return get_valid_intervals(
+            timestamps=np.asarray(timestamps),
+            sampling_rate=self._rate_fallback(nwb_object),
+            gap_proportion=1.75,
+            min_valid_len=0,
+        )
+
+    def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
+        """Add IntervalList entry to the generated entries."""
+        super_ins = super().generate_entries_from_nwb_object(nwb_obj, base_key)
+        self_key = super_ins[self][0]
+        valid_times = self_key.pop("valid_times")  # remove from self key
+        interval_insert = {
+            k: v for k, v in self_key.items() if k in IntervalList.heading.names
+        }
+        return {
+            IntervalList: [dict(interval_insert, valid_times=valid_times)],
+            **super_ins,
+        }
 
     def make(self, key):
         """Make without transaction
 
         Allows populate_all_common to work within a single transaction."""
-        nwb_file_name = key["nwb_file_name"]
-        nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
-        nwbf = get_nwb_file(nwb_file_abspath)
-        raw_interval_name = "raw data valid times"
+        from spyglass.common.common_usage import ActivityLog
 
-        # get the ElectricalSeries acquisition object
-        eseries_aquisitions = []
-        for obj_name, obj in nwbf.acquisition.items():
-            if isinstance(obj, pynwb.ecephys.ElectricalSeries):
-                eseries_aquisitions.append(obj)
-        if len(eseries_aquisitions) == 0:
-            warnings.warn(
-                f"Unable to get acquisition object in: {nwb_file_abspath}\n\t"
-                + f"Skipping entry in {self.full_table_name}"
-            )
-            return
-        elif len(eseries_aquisitions) > 1:
-            warnings.warn(
-                f"Multiple ElectricalSeries objects found in: {nwb_file_abspath}\n\t"
-                + f"Inserting only first entry in {self.full_table_name}\n\t"
-                + "See issue #396 for more details."
-            )
-        rawdata = eseries_aquisitions[0]
+        ActivityLog.deprecate_log(self, "Raw.make", alt="insert_from_nwbfile")
 
-        if rawdata.rate is not None:
-            key["sampling_rate"] = rawdata.rate
-        else:
-            logger.info("Estimating sampling rate...")
-            # NOTE: Only use first 1e6 timepoints to save time
-            key["sampling_rate"] = estimate_sampling_rate(
-                np.asarray(rawdata.timestamps[: int(1e6)]), 1.5, verbose=True
-            )
-
-        interval_dict = {
-            "nwb_file_name": key["nwb_file_name"],
-            "interval_list_name": raw_interval_name,
-        }
-
-        if rawdata.rate is not None:
-            interval_dict["valid_times"] = np.array(
-                [[0, len(rawdata.data) / rawdata.rate]]
-            )
-        else:
-            # get the list of valid times given the specified sampling rate.
-            interval_dict["valid_times"] = get_valid_intervals(
-                timestamps=np.asarray(rawdata.timestamps),
-                sampling_rate=key["sampling_rate"],
-                gap_proportion=1.75,
-                min_valid_len=0,
-            )
-
-        IntervalList().cautious_insert(interval_dict, update=True)
-
-        # now insert each of the electrodes as an individual row, but with the
-        # same nwb_object_id
-
-        logger.info(
-            f'Importing raw data: Sampling rate:\t{key["sampling_rate"]} Hz\n\t'
-            + f'Number of valid intervals:\t{len(interval_dict["valid_times"])}'
-        )
-
-        key.update(
-            {
-                "raw_object_id": rawdata.object_id,
-                "interval_list_name": raw_interval_name,
-                "comments": rawdata.comments,
-                "description": rawdata.description,
-            }
-        )
-
-        self.insert1(
-            key,
-            skip_duplicates=True,
-            allow_direct_insert=True,
-        )
+        # Call the new SpyglassIngestion method
+        self.insert_from_nwbfile(key["nwb_file_name"])
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""
@@ -464,9 +466,7 @@ class LFP(SpyglassMixin, dj.Imported):
     lfp_sampling_rate: float    # the sampling rate, in HZ
     """
 
-    _use_transaction, _allow_insert = False, True
-
-    def make(self, key):
+    def make_fetch(self, key):
         """Populate the LFP table with data from the NWB file.
 
         1. Fetches the raw data and sampling rate from the Raw table.
@@ -475,15 +475,14 @@ class LFP(SpyglassMixin, dj.Imported):
         4. Applies LFP 0-400 Hz filter from FirFilterParameters table.
         5. Generates a new analysis NWB file with the LFP data.
         """
-        # get the NWB object with the data; FIX: change to fetch with
-        # additional infrastructure
         lfp_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
+        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
 
         rawdata = Raw().nwb_object(key)
         sampling_rate, interval_list_name = (Raw() & key).fetch1(
             "sampling_rate", "interval_list_name"
         )
-        sampling_rate = int(np.round(sampling_rate))
 
         valid_times = (
             IntervalList()
@@ -492,6 +491,48 @@ class LFP(SpyglassMixin, dj.Imported):
                 "interval_list_name": interval_list_name,
             }
         ).fetch_interval()
+
+        # get the LFP filter that matches the raw data
+        # there should only be one
+        filter = (
+            FirFilterParameters()
+            & dict(
+                filter_name="LFP 0-400 Hz", filter_sampling_rate=sampling_rate
+            )
+        ).fetch(as_dict=True)[0]
+
+        return [
+            lfp_file_name,
+            lfp_file_abspath,
+            electrode_keys,
+            rawdata,
+            sampling_rate,
+            interval_list_name,
+            valid_times,
+            filter,
+        ]
+
+    def make_compute(
+        self,
+        key,
+        lfp_file_name,
+        lfp_file_abspath,
+        electrode_keys,
+        rawdata,
+        sampling_rate,
+        interval_list_name,
+        valid_times,
+        filter,
+    ):
+
+        filter_coeff = filter["filter_coeff"]
+        if len(filter_coeff) == 0:
+            logger.error(
+                "Error in LFP: no filter found with data sampling rate of "
+                + f"{sampling_rate}"
+            )
+            return [None] * 2  # Number reflects expected values for make_insert
+
         # keep only the intervals > 1 second long
         orig_len = len(valid_times)
         valid_times = valid_times.by_length(min_length=1.0)
@@ -501,34 +542,13 @@ class LFP(SpyglassMixin, dj.Imported):
         )
 
         # target 1 KHz sampling rate
+        sampling_rate = int(np.round(sampling_rate))
         decimation = sampling_rate // 1000
 
-        # get the LFP filter that matches the raw data
-        filter = (
-            FirFilterParameters()
-            & {"filter_name": "LFP 0-400 Hz"}
-            & {"filter_sampling_rate": sampling_rate}
-        ).fetch(as_dict=True)
-
-        # there should only be one filter that matches, so we take the first of
-        # the dictionaries
-
-        key["filter_name"] = filter[0]["filter_name"]
-        key["filter_sampling_rate"] = filter[0]["filter_sampling_rate"]
-
-        filter_coeff = filter[0]["filter_coeff"]
-        if len(filter_coeff) == 0:
-            logger.error(
-                "Error in LFP: no filter found with data sampling rate of "
-                + f"{sampling_rate}"
-            )
-            return None
         # get the list of selected LFP Channels from LFPElectrode
-        electrode_keys = (LFPSelection.LFPElectrode & key).fetch("KEY")
         electrode_id_list = list(k["electrode_id"] for k in electrode_keys)
         electrode_id_list.sort()
 
-        lfp_file_abspath = AnalysisNwbfile().get_abs_path(lfp_file_name)
         (
             lfp_object_id,
             timestamp_interval,
@@ -541,24 +561,33 @@ class LFP(SpyglassMixin, dj.Imported):
             decimation,
         )
 
-        # now that the LFP is filtered and in the file, add the file to the
-        # AnalysisNwbfile table
-
-        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
-
-        key["analysis_file_name"] = lfp_file_name
-        key["lfp_object_id"] = lfp_object_id
-        key["lfp_sampling_rate"] = sampling_rate // decimation
+        # tri-part make doesn't allow modifying keys
+        added_key = dict(
+            filter_name=filter["filter_name"],
+            filter_sampling_rate=sampling_rate,
+            analysis_file_name=lfp_file_name,
+            lfp_object_id=lfp_object_id,
+            lfp_sampling_rate=sampling_rate // decimation,
+        )
 
         # finally, censor the valid times to account for the downsampling
         lfp_valid_times = valid_times.censor(timestamp_interval)
         lfp_valid_times.set_key(
             nwb=key["nwb_file_name"], name="lfp valid times", pipeline="lfp_v0"
         )
+
+        return [lfp_valid_times, added_key, lfp_file_name]
+
+    def make_insert(self, key, lfp_valid_times, added_key, lfp_file_name):
+        if lfp_valid_times is None and added_key is None:
+            return
+
+        # add the analysis nwb file entry
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
         # add an interval list for the LFP valid times, skipping duplicates
         IntervalList.insert1(lfp_valid_times.as_dict, replace=True)
-        AnalysisNwbfile().log(key, table=self.full_table_name)
-        self.insert1(key)
+        AnalysisNwbfile().add(key["nwb_file_name"], lfp_file_name)
+        self.insert1(dict(key, **added_key))
 
     def nwb_object(self, key):
         """Return the NWB object in the raw NWB file."""

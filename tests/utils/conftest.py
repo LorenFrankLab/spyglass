@@ -2,13 +2,13 @@ import datajoint as dj
 import pytest
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def merge_table(pos_merge_tables):
     """Return the merge table as activated."""
     yield pos_merge_tables[0]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def Nwbfile(pos_merge_tables):
     """Return the Nwbfile table as activated."""
     from spyglass.common import Nwbfile as NwbfileTable
@@ -49,7 +49,7 @@ def no_link_chain(Nwbfile):
     yield TableChain(Nwbfile, InsertError())
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def _Merge():
     """Return the _Merge class."""
     from spyglass.utils import _Merge
@@ -57,7 +57,7 @@ def _Merge():
     yield _Merge
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def SpyglassMixin():
     """Return a mixin class."""
     from spyglass.utils import SpyglassMixin
@@ -65,7 +65,7 @@ def SpyglassMixin():
     yield SpyglassMixin
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")  # Elevated from module scope for performance
 def graph_schema(SpyglassMixin, _Merge):
     """
     NOTE: Must declare tables within fixture to avoid loading config defaults.
@@ -285,3 +285,41 @@ def graph_tables_many_to_one(graph_tables):
     PkSkNode.insert(new_inserts, **insert_kwargs)
 
     yield graph_tables
+
+
+@pytest.fixture(scope="module")
+def add_graph_tables(SpyglassMixin):
+    schema = dj.Schema("test_add_graphs")
+
+    @schema
+    class A(SpyglassMixin, dj.Lookup):
+        definition = """
+        a_id: int
+        ---
+        a_attr: int
+        """
+        contents = [(i, i + 10) for i in range(5)]
+
+    @schema
+    class B1(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 20) for i in range(5)]
+
+    @schema
+    class B2(SpyglassMixin, dj.Lookup):
+        definition = """
+        -> A
+        ---
+        b_attr: int
+        """
+        contents = [(i, i + 30) for i in range(5)]
+
+    return {
+        "A": A(),
+        "B1": B1(),
+        "B2": B2(),
+    }

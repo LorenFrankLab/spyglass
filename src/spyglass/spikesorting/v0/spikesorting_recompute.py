@@ -28,13 +28,13 @@ from tqdm import tqdm
 
 from spyglass.common.common_user import UserEnvironment  # noqa F401
 from spyglass.settings import recording_dir, temp_dir
-from spyglass.spikesorting.v0.spikesorting_recording import (
+from spyglass.spikesorting.v0.spikesorting_recording import (  # noqa F401
     SpikeSortingRecording,
-)  # noqa F401
+)
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
-from spyglass.utils.h5_helper_fn import H5pyComparator, sort_dict
 from spyglass.utils.nwb_hash import DirectoryHasher
+from spyglass.utils.recompute_helper_fn import H5pyComparator, sort_dict
 
 schema = dj.schema("spikesorting_recompute_v0")
 
@@ -513,7 +513,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     ) -> None:
         """If successfully recomputed, delete files for a given restriction."""
         query = self & "matched=1" & restriction
-        file_names = query.fetch("analysis_file_name")
+        file_names = query.fetch("nwb_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
             file_names
@@ -528,8 +528,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         for key in query.proj():
             old, new = self._get_paths(key)
-            new.unlink(missing_ok=True)
-            old.unlink(missing_ok=True)
+            logger.info(f"Deleting old: {old}, new: {new}")
+            shutil_rmtree(old, ignore_errors=True)
+            shutil_rmtree(new, ignore_errors=True)
 
     def delete(self, *args, **kwargs) -> None:
         """Delete recompute attempts when deleting rows."""

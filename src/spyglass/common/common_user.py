@@ -116,14 +116,34 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     def _basic_dep_format(self):
         """Regex patterns for dependency formats.
 
-        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc."""
+        Allowable formats with suffixes: a1, b2, rc3, .post4, dev5, etc.
+        Examples:
+        - package==1.2.3
+        - package==1.2.3a1 (alpha)
+        - package==1.2.3b2 (beta)
+        - package==1.2.3rc3 (release candidate)
+        - package==1.2.3.post4 (post-release)
+        - package==1.2.3.dev5 (developmental release)
+        - package==1.2.3+dfsg (Debian Free Software Guidelines)
+        - package==1.2.3+ds (Debian Source)
+        - package==1.2.3+ubuntu1.2 (Ubuntu-specific)
+        """
         return re.compile(  # allows suffixes like a1, dev, post1, etc.
             r"""^
                 (?P<pkg>[\w\d.-]+)                  # Package
                 ==                                  # `==` separator
                 (?P<ver>                            # Version
                     \d+(?:\.\d+)*                   # Major.Minor.Patch
-                    (?:(?:a|b|rc|\.post)\d+|dev\d*) # Suffixes
+                    (?:                             # Suffixes
+                        (?P<alpha>a\d+)|            # Alpha release (a1, a2, ...)
+                        (?P<beta>b\d+)|             # Beta release (b1, b2, ...)
+                        (?P<rc>rc\d+)|              # Release candidate (rc1, rc2, ...)
+                        (?P<post>\.post\d+)|        # Post-release (.post1, .post2, ...)
+                        (?P<dev>dev\d*)|            # Developmental release (dev, dev1, ...)
+                        (?P<dfsg>\+dfsg)|           # Debian Free Software Guidelines (+dfsg)
+                        (?P<ds>\+ds)|               # Debian Source (+ds)
+                        (?P<ubuntu>\+ubuntu\d+(?:\.\d+)*) # Ubuntu-specific (+ubuntu1.2)
+                    )
                 ?)
             $""",
             re.VERBOSE,

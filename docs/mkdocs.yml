@@ -75,18 +75,22 @@ nav:
     - Overview: Features/index.md
     - FigURL: Features/FigURL.md
     - Merge Tables: Features/Merge.md
+    - Analysis Tables: Features/AnalysisTables.md
     - Export: Features/Export.md
     - Centralized Code: Features/Mixin.md
     - Recompute: Features/Recompute.md
+    - Ingestion: Features/Ingestion.md
   - For Developers:
     - Overview: ForDevelopers/index.md
     - How to Contribute: ForDevelopers/Contribute.md
     - Database Management: ForDevelopers/Management.md
     - Code Reuse: ForDevelopers/Reuse.md
     - Table Types: ForDevelopers/TableTypes.md
+    - Classes: ForDevelopers/Classes.md
     - Understanding a Schema: ForDevelopers/Schema.md
     - Custom Pipelines: ForDevelopers/CustomPipelines.md
     - Using NWB: ForDevelopers/UsingNWB.md
+    - Ingestion Mapping: ForDevelopers/ingestion_mapping.md
   - API Reference: api/ # defer to gen-files + literate-nav
   - Change Log: CHANGELOG.md
   - Copyright: LICENSE.md
@@ -125,6 +129,7 @@ plugins:
   - gen-files:
       scripts:
         - ./src/api/make_pages.py
+        - ./src/api/ingestion_mapping_generate.py
   - mkdocs-jupyter: # Comment this block during dev to reduce build time
       execute: False # Very slow, needs gh-action edit to work/link to db
       include_source: False

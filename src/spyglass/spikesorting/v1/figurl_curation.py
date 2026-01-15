@@ -117,9 +117,7 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
     url: varchar(1000)
     """
 
-    _use_transaction, _allow_insert = False, True
-
-    def make(self, key: dict):
+    def make_fetch(self, key: dict):
         """Generate a FigURL for manual curation of a spike sorting."""
         # FETCH
         query = (
@@ -138,10 +136,41 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         sel_query = FigURLCurationSelection & key
         sel_key = sel_query.fetch1()
         sorting_fpath = AnalysisNwbfile.get_abs_path(sorting_fname)
+        sorting_label, curation_uri = sel_query.fetch1(
+            "sorting_id", "curation_uri"
+        )
+
+        return [
+            object_id,
+            sel_key,
+            sorting_fpath,
+            metrics_figurl,
+            curation_uri,
+            recording_label,
+            sorting_label,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        object_id,
+        sel_key,
+        sorting_fpath,
+        metrics_figurl,
+        curation_uri,
+        recording_label,
+        sorting_label,
+    ):
+        # Can't be hashed by datajoint, needs to be inside make_compute
         recording = CurationV1.get_recording(sel_key)
         sorting = CurationV1.get_sorting(sel_key)
-        sorting_label = sel_query.fetch1("sorting_id")
-        curation_uri = sel_query.fetch1("curation_uri")
+
+        # Some versions of sortingview expect `_file_path` attribute
+        # which may not be present in all recording objects
+        if not hasattr(recording, "_file_path") and hasattr(
+            recording, "file_path"
+        ):
+            recording._file_path = recording.file_path
 
         metric_dict = {}
         with pynwb.NWBHDF5IO(sorting_fpath, "r", load_namespaces=True) as io:
@@ -156,7 +185,7 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
         # TODO: figure out a way to specify the similarity metrics
 
         # Generate the figURL
-        key["url"] = _generate_figurl(
+        url = _generate_figurl(
             R=recording,
             S=sorting,
             initial_curation_uri=curation_uri,
@@ -165,7 +194,10 @@ class FigURLCuration(SpyglassMixin, dj.Computed):
             unit_metrics=unit_metrics,
         )
 
-        # INSERT
+        return [url]
+
+    def make_insert(self, key: dict, url: str):
+        key["url"] = url
         self.insert1(key, skip_duplicates=True)
 
     @classmethod

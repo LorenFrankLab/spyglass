@@ -5,43 +5,41 @@ from contextvars import ContextVar
 from functools import cached_property
 from inspect import stack as inspect_stack
 from os import environ
-from re import match as re_match
+from typing import List
 
 from datajoint.condition import AndList, Top, make_condition
 from datajoint.expression import QueryExpression
 from datajoint.table import Table
 from packaging.version import parse as version_parse
 
-from spyglass.utils.logging import logger
+from spyglass.utils.mixins.fetch import FetchMixin
 from spyglass.utils.sql_helper_fn import bash_escape_sql
 
 EXPORT_ENV_VAR = "SPYGLASS_EXPORT_ID"
 FETCH_LOG_FLAG = ContextVar("FETCH_LOG_FLAG", default=True)
 
 
-class ExportMixin:
+class ExportMixin(FetchMixin):
+    """Mixin for DataJoint tables to support export logging.
+
+    Uses FetchMixin._log_fetch to log fetch calls to an Export table.
+    """
 
     _export_cache = defaultdict(set)
 
     # ------------------------------ Version Info -----------------------------
 
     @cached_property
-    def _spyglass_version(self):
-        """Get Spyglass version."""
-        from spyglass import __version__ as sg_version
+    def _maximum_export_restriction_size(self):
+        """Get maximum restriction size from ExportSelection table definition."""
+        from spyglass.common.common_usage import ExportSelection
 
-        ret = ".".join(sg_version.split(".")[:3])  # Ditch commit info
-
-        if self._test_mode:
-            return ret[:16] if len(ret) > 16 else ret
-
-        if not bool(re_match(r"^\d+\.\d+\.\d+", ret)):  # Major.Minor.Patch
-            raise ValueError(
-                f"Spyglass version issues. Expected #.#.#, Got {ret}."
-                + "Please try running `hatch build` from your spyglass dir."
-            )
-
-        return ret
+        restr_size = int(
+            ExportSelection.Table.definition.split("restriction")[-1]
+            .split("(")[1]
+            .split(")")[0]
+        )
+        return restr_size
 
     def compare_versions(
         self, version: str, other: str = None, msg: str = None
@@ -113,7 +111,9 @@ class ExportMixin:
     def _start_export(self, paper_id, analysis_id):
         """Start export process."""
         if self.export_id:
-            logger.info(f"Export {self.export_id} in progress. Starting new.")
+            self._logger.info(
+                f"Export {self.export_id} in progress. Starting new."
+            )
             self._stop_export(warn=False)
 
         self.export_id = self._export_table.insert1_return_pk(
@@ -127,8 +127,68 @@ class ExportMixin:
     def _stop_export(self, warn=True):
         """End export process."""
         if not self.export_id and warn:
-            logger.warning("Export not in progress.")
+            self._logger.warning("Export not in progress.")
         del self.export_id
+
+    # --------------------------- Utility Functions ---------------------------
+
+    def _is_projected(self):
+        """Check if name projection has occurred in table"""
+        for attr in self.heading.attributes.values():
+            if attr.attribute_expression is not None:
+                return True
+        return False
+
+    def undo_projection(self, table_to_undo=None):
+        """Undo name projection on table
+
+        Parameters
+        ----------
+        table_to_undo : Table, optional
+            Table to undo projection on, by default None (uses self)
+
+        Returns
+        -------
+        Table
+            Table reverted to original column names
+        """
+        if table_to_undo is None:
+            table_to_undo = self
+        assert set(
+            [attr.name for attr in table_to_undo.heading.attributes.values()]
+        ) <= set(
+            [attr.name for attr in self.heading.attributes.values()]
+        ), "table_to_undo must be a projection of table"
+
+        anti_alias_dict = {
+            attr.original_name: attr.name
+            for attr in self.heading.attributes.values()
+            if attr.attribute_expression is not None
+        }
+        if len(anti_alias_dict) == 0:
+            return table_to_undo
+        return table_to_undo.proj(**anti_alias_dict)
+
+    def _get_restricted_entries(self, restricted_table):
+        """Get set of keys for restricted table entries
+
+        Keys apply to original table definition
+
+        Parameters
+        ----------
+        restricted_table : Table
+            Table restricted to the entries to log
+
+        Returns
+        -------
+        List[dict]
+            List of keys for restricted table entries
+        """
+        if not self._is_projected():
+            return restricted_table.fetch("KEY", log_export=False)
+
+        # The restricted, projected table is a FreeTable, log_export keyword not relevant
+        return (self.undo_projection(restricted_table)).fetch("KEY")
 
     # ------------------------------- Log Fetch -------------------------------
 
@@ -168,13 +228,18 @@ class ExportMixin:
         return ret
 
     def _log_fetch(self, restriction=None, *args, **kwargs):
-        """Log fetch for export."""
+        """Logs the fetch for export."""
         if (
             not self.export_id
             or self.database == "common_usage"
             or not FETCH_LOG_FLAG.get()
         ):
             return
+        elif isinstance(restriction, Top):
+            raise RuntimeError(
+                "Cannot log fetch with Top() restriction, as it is not "
+                "deterministic.\nUse a specific restriction, like a dict."
+            )
 
         banned = [
             "head",  # Prevents on Table().head() call
@@ -203,20 +268,94 @@ class ExportMixin:
         if restr_str is True:
             restr_str = "True"  # otherwise stored in table as '1'
 
-        if isinstance(restr_str, str) and "SELECT" in restr_str:
-            raise RuntimeError(
-                "Export cannot handle subquery restrictions. Please submit a "
-                + "bug report on GitHub with the code you ran and this"
-                + f"restriction:\n\t{restr_str}"
+        if not (
+            isinstance(restr_str, str)
+            and (
+                (len(restr_str) > self._maximum_export_restriction_size)
+                or "SELECT" in restr_str
+                or self._is_projected()
+            )
+        ):
+            self._insert_log(restr_str)
+            return
+
+        if "SELECT" in restr_str:
+            self._logger.debug(
+                "Restriction contains subquery. Exporting entry restrictions instead"
             )
 
-        if isinstance(restr_str, str) and len(restr_str) > 2048:
+        else:
+            # handle excessive restrictions caused by long OR list of dicts
+            self._logger.debug(
+                f"Restriction too long ({len(restr_str)} > "
+                + f"{self._maximum_export_restriction_size})."
+                + "Attempting to chunk restriction by subsets of entry keys."
+            )
+        # get list of entry keys
+        restricted_table = (
+            self.restrict(restriction, log_export=False)
+            if restriction
+            else self
+        )
+        if len(restricted_table) == 0:
+            # No export entry needed if no selected entries
+            return
+
+        restricted_entries = self._get_restricted_entries(restricted_table)
+        self._insert_entries_log(restricted_entries)
+        return
+
+    def _insert_entries_log(self, entries):
+        """Inserts table access log given list of entry keys.
+
+        If the restriction string exceeds _maximum_export_restriction_size characters,
+        the entries are chunked into smaller groups to fit within the limit.
+        Parameters
+        ----------
+        entries : List[dict]
+            List of keys for restricted table entries
+        Returns
+        -------
+        None
+        """
+        all_entries_restr_str = make_condition(
+            self.undo_projection(), entries, set()
+        )
+        if len(all_entries_restr_str) <= self._maximum_export_restriction_size:
+            self._insert_log(all_entries_restr_str)
+            return
+
+        if len(entries) == 1:
             raise RuntimeError(
-                "Export cannot handle restrictions > 2048.\n\t"
+                "Single entry restriction exceeds maximum restriction size of "
+                + f"{self._maximum_export_restriction_size} characters.\n\t"
+                + "Cannot proceed with export logging.\n\t"
+                + f"Restriction: {all_entries_restr_str}"
+            )
+        chunk_size = max(
+            int(
+                self._maximum_export_restriction_size
+                // (len(all_entries_restr_str) / len(entries))
+                - 1
+            ),
+            1,
+        )
+        for i in range(len(entries) // chunk_size + 1):
+            chunk_entries = entries[i * chunk_size : (i + 1) * chunk_size]
+            if not chunk_entries:
+                break
+            self._insert_log(chunk_entries)
+
+    def _insert_log(self, restr_str):
+        """Executes insert log entry for export table and restriction."""
+
+        if len(restr_str) > self._maximum_export_restriction_size:
+            raise RuntimeError(
+                "Export cannot handle restrictions > "
+                + f"{self._maximum_export_restriction_size}.\n\t"
                 + "If required, please open an issue on GitHub.\n\t"
                 + f"Restriction: {restr_str}"
             )
-
         if isinstance(restr_str, str):
             restr_str = bash_escape_sql(restr_str, add_newline=False)
 
@@ -234,21 +373,111 @@ class ExportMixin:
         restr_logline = restr_str.replace("AND", "\n\tAND").replace(
             "OR", "\n\tOR"
         )
-        logger.debug(f"\nTable: {self.full_table_name}\nRestr: {restr_logline}")
+        self._logger.debug(
+            f"\nTable: {self.full_table_name}\nRestr: {restr_logline}"
+        )
+
+    @property
+    def _custom_analysis_parent(self):
+        """Check for custom AnalysisNwbfile parent table.
+
+        Returns
+        -------
+        custom_analysis_parent : str or None
+            Custom AnalysisNwbfile parent table if exists, else None.
+        """
+        this_name = self.full_table_name
+
+        custom_parent = [
+            p
+            for p in self.parents()
+            if p.endswith("nwbfile`.`analysis_nwbfile`")
+            and not p.startswith("`common_")
+        ]
+        if not custom_parent:
+            return None
+
+        if len(custom_parent) > 1:
+            raise RuntimeError(
+                f"Multiple AnalysisNwbfile parents found for "
+                f"{this_name}: {custom_parent}"
+            )
+
+        from spyglass.common.common_nwbfile import AnalysisRegistry
+
+        return AnalysisRegistry().get_class(custom_parent[0])()
+
+    def _parent_copy_to_common(self, fnames: List[str] = None):
+        """Copy parent custom AnalysisNwbfile entries to common.
+
+        Also used by `sharing_kachery.py` to ensure common table integrity.
+
+        Parameters
+        ----------
+        fnames : List[str], optional
+            List of analysis_file_name to copy, by default None (fetches all
+            from self, likely restricted).
+        """
+        custom_parent = self._custom_analysis_parent
+        if not custom_parent:
+            return
+
+        if not fnames:
+            fnames = self.fetch("analysis_file_name", log_export=False)
+        f_dict = [{"analysis_file_name": fname} for fname in fnames]
+
+        parent_name = custom_parent.full_table_name
+        self._logger.debug(f"Copying parent {parent_name} entries to common")
+
+        (custom_parent & f_dict)._copy_to_common()
 
     def _log_fetch_nwb(self, table, table_attr):
-        """Log fetch_nwb for export table."""
+        """Log fetch_nwb for export table.
+
+        For custom AnalysisNwbfile tables, copy entries to common table
+        to maintain referential integrity in ExportSelection.File.
+        """
+        from spyglass.common.common_nwbfile import AnalysisNwbfile
+
+        this_name = self.full_table_name
         tbl_pk = "analysis_file_name"
         fnames = self.fetch(tbl_pk, log_export=True)
-        logger.debug(
-            f"Export: fetch_nwb\nTable:{self.full_table_name},\nFiles: {fnames}"
+        self._logger.debug(
+            f"Export: fetch_nwb\nTable:{this_name},\nFiles: {fnames}"
+        )
+
+        # Check if this table is itself a custom AnalysisNwbfile table
+        is_custom_analysis = (
+            this_name.endswith("_nwbfile`.`analysis_nwbfile`")
+            and this_name != AnalysisNwbfile().full_table_name
+        )
+
+        if is_custom_analysis:
+            # Self is custom AnalysisNwbfile, copy to common
+            self._logger.debug(
+                f"Export: detected custom AnalysisNwbfile table {this_name}"
+            )
+            self._copy_to_common()
+        elif custom_parent := self._custom_analysis_parent:
+            self._parent_copy_to_common(fnames=fnames)
+
+        # Insert into ExportSelection.File (FK now guaranteed valid)
+        self._logger.debug(
+            f"Export: inserting {len(fnames)} files from {this_name}"
         )
         self._export_table.File.insert(
             [{"export_id": self.export_id, tbl_pk: fname} for fname in fnames],
             skip_duplicates=True,
         )
-        fnames_str = "('" + "', ".join(fnames) + "')"  # log AnalysisFile table
-        table()._log_fetch(restriction=f"{tbl_pk} in {fnames_str}")
+
+        # Log fetch on common AnalysisNwbfile (entries were copied there)
+        this_restr = None
+        if len(fnames) == 1:
+            this_restr = f"{tbl_pk} = '{fnames[0]}'"
+        elif len(fnames) > 1:
+            this_restr = f"{tbl_pk} IN {tuple(fnames)}"
+        if this_restr:
+            AnalysisNwbfile()._log_fetch(restriction=this_restr)
 
     def _run_join(self, **kwargs):
         """Log join for export.
@@ -262,14 +491,15 @@ class ExportMixin:
         if hasattr(other, "_log_fetch"):  # Check if other has mixin
             table_list.append(other)  # can other._log_fetch
         else:
-            logger.warning(f"Cannot export log join for\n{other}")
+            self._logger.warning(f"Cannot export log join for\n{other}")
 
         joined = self.proj().join(other.proj(), log_export=False)
         for table in table_list:  # log separate for unique pks
             if isinstance(table, type) and issubclass(table, Table):
+                # instancing table if class
                 table = table()  # adapted from dj.declare.compile_foreign_key
-            for r in joined.fetch(*table.primary_key, as_dict=True):
-                table._log_fetch(restriction=r)
+            restr = joined.fetch(*table.primary_key, as_dict=True)
+            table._log_fetch(restriction=restr)
 
     def _run_with_log(self, method, *args, log_export=True, **kwargs):
         """Run method, log fetch, and return result.
@@ -292,12 +522,8 @@ class ExportMixin:
                 self._run_join(**kwargs)
             else:
                 restr = kwargs.get("restriction")
-                if isinstance(restr, QueryExpression) and getattr(
-                    restr, "restriction"  # if table, try to get restriction
-                ):
-                    restr = restr.restriction
                 self._log_fetch(restriction=restr)
-            logger.debug(f"Export: {self._called_funcs()}")
+            self._logger.debug(f"Export: {self._called_funcs()}")
 
         return ret
 
@@ -323,12 +549,13 @@ class ExportMixin:
             super().fetch1, *args, log_export=log_export, **kwargs
         )
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, log_export=True):  # NOTE: added param
         """Log restrict for export."""
-        if not self.export_id:
+        if not self.export_id or log_export is False:
             return super().restrict(restriction)
 
-        log_export = "fetch_nwb" not in self._called_funcs()
+        if log_export is None:
+            log_export = "fetch_nwb" not in self._called_funcs()
         if self.is_restr(restriction) and self.is_restr(self.restriction):
             combined = AndList([restriction, self.restriction])
         else:  # Only combine if both are restricting
