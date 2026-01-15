@@ -544,7 +544,7 @@ class CondaManager:
         env_file_path = REPO_ROOT / env_file
 
         try:
-            process = subprocess.Popen(
+            with subprocess.Popen(
                 [
                     conda_cmd,
                     "env",
@@ -558,17 +558,14 @@ class CondaManager:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
-            )
-
-            for line in process.stdout:
-                if any(
-                    kw in line
-                    for kw in ["Solving", "Downloading", "Extracting"]
-                ):
-                    print(".", end="", flush=True)
-
-            process.wait()
-            print()
+            ) as process:
+                for line in process.stdout:
+                    if any(
+                        kw in line
+                        for kw in ["Solving", "Downloading", "Extracting"]
+                    ):
+                        print(".", end="", flush=True)
+                print()
 
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(
@@ -1407,7 +1404,7 @@ def create_database_config(
         pass
 
     # Atomic move (on same filesystem)
-    shutil.move(str(tmp_path), str(config_file))
+    shutil.move(tmp_path, config_file)
     Console.success(f"Configuration saved to: {config_file}")
     print("  Permissions: Owner read/write only (secure)")
 
