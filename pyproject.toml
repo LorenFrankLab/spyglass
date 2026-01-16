@@ -51,7 +51,7 @@ dependencies = [
   "ipympl",
   "matplotlib",
   "ndx-franklab-novela>=0.1",
-  "ndx-optogenetics==0.2.0",
+  "ndx-optogenetics==0.3.0",
   "ndx-pose",
   "non-local-detector",
   "numpy",
