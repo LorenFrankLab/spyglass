@@ -304,11 +304,13 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
             "self": {
                 "camera_name": "camera_name",
                 "meters_per_pixel": "meters_per_pixel",
-                "manufacturer": "manufacturer",
-                "model": "model",
                 "lens": "lens",
                 "camera_id": self.get_camera_id,
-            }
+            },
+            "model": {
+                "model": "name",
+                "manufacturer": "manufacturer",
+            },
         }
 
     @staticmethod
