@@ -290,6 +290,7 @@ class VirusInjection(SpyglassIngestion, dj.Manual):
     titer: float # titer of the virus (in vG/ml)
     """
 
+    _nwb_table = Nwbfile
     _source_nwb_object_type = ViralVectorInjection
 
     table_key_to_obj_attr = {
