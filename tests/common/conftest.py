@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import ndx_ophys_devices as ndxod
 import ndx_optogenetics as ndxo
 import numpy as np
 import pynwb
@@ -8,6 +9,7 @@ from hdmf.common.table import DynamicTable, VectorData
 from ndx_franklab_novela import CameraDevice, FrankLabOptogeneticEpochsTable
 from pynwb import NWBHDF5IO, TimeSeries
 from pynwb.behavior import BehavioralEvents
+from pynwb.device import DeviceModel
 from pynwb.testing.mock.behavior import mock_TimeSeries
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
@@ -146,7 +148,8 @@ def excitation_source_model_dict():
         name="test_source_model",
         description="Test description",
         manufacturer="Test manufacturer",
-        illumination_type="Test illumination type",
+        source_type="Test illumination type",
+        excitation_mode="test mode",
         wavelength_range_in_nm=(400, 700),
     )
 
@@ -155,7 +158,6 @@ def excitation_source_model_dict():
 def excitation_source_dict():
     return dict(
         name="test_source",
-        wavelength_in_nm=450.0,
         power_in_W=1.0,
         intensity_in_W_per_m2=100.0,
     )
@@ -166,8 +168,7 @@ def fiber_model_dict():
     return dict(
         name="test_fiber_model",
         description="Test fiber model",
-        fiber_name="Test Fiber",
-        fiber_model="Test Model",
+        model_number="Test Model",
         manufacturer="Test Manufacturer",
         numerical_aperture=0.5,
         core_diameter_in_um=200.0,
@@ -178,17 +179,17 @@ def fiber_model_dict():
 
 
 @pytest.fixture(scope="session")  # Elevated from function scope for performance
-def fiber_implant_dict():
+def fiber_insertion_dict():
     return dict(
-        implanted_fiber_description="Test fiber implant",
-        location="CA1",
         hemisphere="left",
-        ap_in_mm=0.5,
-        ml_in_mm=1.0,
-        dv_in_mm=1.5,
-        roll_in_deg=0.0,
-        pitch_in_deg=0.0,
-        yaw_in_deg=0.0,
+        insertion_position_ap_in_mm=0.5,
+        insertion_position_ml_in_mm=1.0,
+        insertion_position_dv_in_mm=1.5,
+        insertion_angle_roll_in_deg=0.0,
+        insertion_angle_pitch_in_deg=0.0,
+        insertion_angle_yaw_in_deg=0.0,
+        depth_in_mm=2.0,
+        position_reference="Bregma",
     )
 
 
@@ -204,6 +205,7 @@ def opto_epoch_dict():
         number_trains=1,
         intertrain_interval_in_ms=100,
         power_in_mW=77,
+        wavelength_in_nm=450,
         epoch_name="epoch_01",
         epoch_number=1,
         convenience_code="test",
@@ -339,7 +341,7 @@ def opto_only_nwb(
     excitation_source_model_dict,
     excitation_source_dict,
     fiber_model_dict,
-    fiber_implant_dict,
+    fiber_insertion_dict,
     data_import,
 ):
     dummy_name = "mock_optogenetics.nwb"
@@ -377,7 +379,14 @@ def opto_only_nwb(
         lens="Test Lens",
         camera_name="camera 1",
     )
-    camera = CameraDevice(**camera_dict)
+
+    camera_model = DeviceModel(
+        name=camera_dict.pop("model"),
+        manufacturer=camera_dict.pop("manufacturer"),
+    )
+
+    camera = CameraDevice(**camera_dict, model=camera_model)
+    nwb.add_device_model(camera_model)
     nwb.add_device(camera)
 
     # task info
@@ -424,52 +433,62 @@ def opto_only_nwb(
     nwb.processing["tasks"].add(task)
 
     # add the optogenetic objects
-    virus = ndxo.OptogeneticVirus(**virus_dict)
-
-    virus_injection = ndxo.OptogeneticVirusInjection(
-        **virus_injection_dict, virus=virus
+    virus = ndxod.ViralVector(**virus_dict)
+    virus_injection = ndxod.ViralVectorInjection(
+        **virus_injection_dict, viral_vector=virus
     )
-
-    optogenetic_viruses = ndxo.OptogeneticViruses(optogenetic_virus=[virus])
+    optogenetic_viruses = ndxo.OptogeneticViruses(viral_vectors=[virus])
     optogenetic_virus_injections = ndxo.OptogeneticVirusInjections(
-        optogenetic_virus_injections=[virus_injection]
+        viral_vector_injections=[virus_injection]
     )
+    effector = ndxod.Effector(
+        name="effector_1",
+        description="Test effector",
+        label="test label",
+        viral_vector_injection=virus_injection,
+    )
+    optogenetic_effectors = ndxo.OptogeneticEffectors(effectors=[effector])
 
-    excitation_source_model = ndxo.ExcitationSourceModel(
+    excitation_source_model = ndxod.ExcitationSourceModel(
         **excitation_source_model_dict
     )
 
-    excitation_source = ndxo.ExcitationSource(
+    excitation_source = ndxod.ExcitationSource(
         **excitation_source_dict, model=excitation_source_model
     )
 
     # make the fiber objects
-    optical_fiber_model = ndxo.OpticalFiberModel(**fiber_model_dict)
-
-    # make the fiber object
-    optical_fiber = ndxo.OpticalFiber(
+    optical_fiber_model = ndxod.OpticalFiberModel(**fiber_model_dict)
+    fiber_insertion = ndxod.FiberInsertion(
+        **fiber_insertion_dict,
+    )
+    optical_fiber = ndxod.OpticalFiber(
         name="test_fiber",
+        description="CA1",
         model=optical_fiber_model,
+        fiber_insertion=fiber_insertion,
     )
 
-    optical_fiber_locations_table = ndxo.OpticalFiberLocationsTable(
-        description="Information about implanted optical fiber locations",
-        reference="bregma",
+    # make the optogenetic sites table
+    optogenetic_sites = ndxo.OptogeneticSitesTable(
+        description="Information about optogenetic stimulation sites"
     )
-    optical_fiber_locations_table.add_row(
-        **fiber_implant_dict,
+    optogenetic_sites.add_row(
         excitation_source=excitation_source,
         optical_fiber=optical_fiber,
+        effector=effector,
     )
 
-    nwb.add_device(excitation_source_model)
+    nwb.add_device_model(excitation_source_model)
     nwb.add_device(excitation_source)
-    nwb.add_device(optical_fiber_model)
+    nwb.add_device_model(optical_fiber_model)
     nwb.add_device(optical_fiber)
+
     optogenetic_experiment_metadata = ndxo.OptogeneticExperimentMetadata(
-        optical_fiber_locations_table=optical_fiber_locations_table,
+        optogenetic_sites_table=optogenetic_sites,
         optogenetic_viruses=optogenetic_viruses,
         optogenetic_virus_injections=optogenetic_virus_injections,
+        optogenetic_effectors=optogenetic_effectors,
         stimulation_software="fsgui",
     )
     nwb.add_lab_meta_data(optogenetic_experiment_metadata)
@@ -478,6 +497,7 @@ def opto_only_nwb(
     opto_epochs_table = FrankLabOptogeneticEpochsTable(
         name="optogenetic_epochs",
         description="Metadata about optogenetic stimulation parameters per epoch",
+        target_tables={"optogenetic_sites": optogenetic_sites},
     )
     opto_epochs_table.add_row(
         **opto_epoch_dict,
@@ -486,6 +506,7 @@ def opto_only_nwb(
             camera_dict["meters_per_pixel"] * 100
         ],
         stimulus_signal=stimulus,
+        optogenetic_sites=[0],
     )
     nwb.add_time_intervals(opto_epochs_table)
 
