@@ -50,7 +50,7 @@ dependencies = [
   "hdmf>=3.4.6",
   "ipympl",
   "matplotlib",
-  "ndx-franklab-novela>=0.1",
+  "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
   "ndx-pose",
   "non-local-detector",
@@ -61,7 +61,7 @@ dependencies = [
   "probeinterface<0.3",            # Bc some probes fail space checks
   "pubnub<6.4",                    # TODO: remove this when sortingview is updated
   "pydotplus",
-  "pynwb>=2.5,<3",
+  "pynwb>=3.1.3",
   "ripple-detection",
   "seaborn",
   "sortingview>=0.11",
