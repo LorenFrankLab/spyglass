@@ -102,6 +102,7 @@ for label, interval_data in results.groupby('interval_labels'):
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
+- Add file issue checks to AnalysisNwbfile cleanup steps #1431
 
 ### Pipelines
 
