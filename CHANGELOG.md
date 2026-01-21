@@ -13,17 +13,58 @@ from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
+```
 
+#### LFPBandV1 Fix
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the following after updating:
+
+```python
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
-LFPBandV1().fix_1481()  # See issue #1481
+LFPBandV1().fix_1481()
 ```
 
 ### Breaking Changes
 
-If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
-2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run the `LFPBandV1().fix_1481()` method after updating.
+#### Decoding Results Structure
+
+The `intervals` dimension has been removed from decoding results. Results from
+multiple decoding intervals are now concatenated along the `time` dimension with
+an `interval_labels` coordinate tracking which interval each time point belongs
+to.
+
+**Why**: Eliminates NaN padding when intervals have different lengths, reducing
+memory usage significantly.
+
+**Migration guide**:
+
+```python
+# OLD (before v0.5.6):
+results.isel(intervals=0)  # Get first interval
+for i in range(results.sizes['intervals']):  # Iterate intervals
+    interval_data = results.isel(intervals=i)
+
+# NEW (v0.5.6+):
+results.where(results.interval_labels == 0, drop=True)  # Get first interval
+for label in np.unique(results.interval_labels.values):  # Iterate intervals
+    if label >= 0:  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+        interval_data = results.where(results.interval_labels == label, drop=True)
+
+# Or use groupby:
+for label, interval_data in results.groupby('interval_labels'):
+    if label >= 0:
+        # process interval_data
+        pass
+```
+
+**interval_labels values**:
+
+- `0, 1, 2, ...` - Sequential interval indices (0-indexed)
+- `-1` - Time points outside any decoding interval (only when
+  `estimate_decoding_params=True`)
 
 ### Documentation
 
@@ -97,6 +138,10 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
     - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
         merge IDs are fetched in non-chronological order #1471
     - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
+    - **BREAKING**: Remove `intervals` dimension from decoding results. Results
+      from multiple intervals are now concatenated along the `time` dimension
+      with an `interval_labels` coordinate to track interval membership. This
+      eliminates NaN padding and reduces memory usage. See migration guide above.
 
 - LFP
 
