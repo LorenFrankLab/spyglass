@@ -35,8 +35,8 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 
 ### Infrastructure
 
-- Add cross-platform installer script with Docker support, input validation,
-    and automated environment setup #1414
+- Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
@@ -61,6 +61,7 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
+- Update to latest `black` and `jupytext` versions #1508
 
 ### Pipelines
 
