@@ -42,7 +42,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "black[jupyter]",
+  "black[jupyter]>26",
   "bottleneck",
   "dask",
   "datajoint>=0.14.5",
@@ -51,7 +51,7 @@ dependencies = [
   "ipympl",
   "matplotlib",
   "ndx-franklab-novela>=0.1",
-  "ndx-optogenetics==0.2.0",
+  "ndx-optogenetics==0.2",
   "ndx-pose",
   "non-local-detector",
   "numpy",
