@@ -39,7 +39,7 @@ jobs:
        shell: bash -l {0}
     env:
       OS: ubuntu-latest
-      PYTHON: '3.9'
+      PYTHON: '3.10'
     services:
       mysql:
         image: datajoint/mysql:8.0

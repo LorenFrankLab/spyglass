@@ -30,12 +30,11 @@ authors = [
   { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
   { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
