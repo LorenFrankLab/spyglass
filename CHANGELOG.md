@@ -106,6 +106,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Implementation of union and intersect methods for restriction graphs #1387
 - Update to latest `black` and `jupytext` versions #1508
 - Update minimum Python version to 3.10 #1508
+- Remove outdated cli scripts #1508
 
 ### Pipelines
 
