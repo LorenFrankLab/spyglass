@@ -2,7 +2,7 @@
 
 [![codecov](https://codecov.io/gh/LorenFrankLab/spyglass/graph/badge.svg?token=QEJIIFN2S8)](https://codecov.io/gh/LorenFrankLab/spyglass)
 
----
+______________________________________________________________________
 
 ## Quick Start
 
@@ -23,7 +23,7 @@ pytest --cov=spyglass --cov-report term-missing
 pytest --no-teardown -v
 ```
 
----
+______________________________________________________________________
 
 ## Test Markers
 
@@ -48,7 +48,7 @@ pytest -m "slow"
 
 - **`slow`**: Tests taking 10-60 seconds
 - **`very_slow`**: Tests taking >60 seconds
-- Unmarked tests: <10 seconds
+- Unmarked tests: \<10 seconds
 
 ### Type Markers
 
@@ -74,10 +74,10 @@ pytest -m dlc
 pytest -m linearization
 ```
 
-**Available module markers**: `dlc`, `trodes`, `linearization`, `ripple`,
-`mua`, `clusterless`, `sorted_spikes`
+**Available module markers**: `dlc`, `trodes`, `linearization`, `ripple`, `mua`,
+`clusterless`, `sorted_spikes`
 
----
+______________________________________________________________________
 
 ## Fixture System
 
@@ -107,7 +107,7 @@ defined in `tests/conftest.py`.
 - `lfp`: spyglass.lfp module
 - `sgl`: spyglass.linearization module
 
----
+______________________________________________________________________
 
 ## Mocking Infrastructure
 
@@ -116,19 +116,23 @@ maintaining coverage.
 
 ### Mocked Operations
 
-**Location**: `tests/decoding/conftest.py` and `tests/spikesorting/*/conftest.py`
+**Location**: `tests/decoding/conftest.py` and
+`tests/spikesorting/*/conftest.py`
 
 1. **Decoder Results I/O** (90% speedup)
-   - Mocks: `ClusterlessDetector.save_results()`,
-     `ClusterlessDetector.load_results()`
-   - Uses: In-memory netCDF4 files instead of disk I/O
+
+    - Mocks: `ClusterlessDetector.save_results()`,
+        `ClusterlessDetector.load_results()`
+    - Uses: In-memory netCDF4 files instead of disk I/O
 
 2. **Spike Sorting External Calls**
-   - Mocks: Spikeinterface operations, detector computations
+
+    - Mocks: Spikeinterface operations, detector computations
 
 ### Using Mocked Fixtures
 
-Mocked fixtures are automatically applied globally via `@pytest.fixture(scope="session", autouse=True)`:
+Mocked fixtures are automatically applied globally via
+`@pytest.fixture(scope="session", autouse=True)`:
 
 ```python
 # In tests/decoding/conftest.py
@@ -138,7 +142,7 @@ def mock_detector_io_globally():
     # Mocking implementation...
 ```
 
----
+______________________________________________________________________
 
 ## CI/CD Pipeline
 
@@ -163,7 +167,7 @@ def mock_detector_io_globally():
 - Via GitHub UI: Actions → test-conda.yml → Run workflow
 - Select: fast or full
 
----
+______________________________________________________________________
 
 ## Environment
 
@@ -174,7 +178,7 @@ To facilitate headless testing of various Qt-based tools as well as Tensorflow,
 - `TF_ENABLE_ONEDNN_OPTS`: Set to `1` to enable Tensorflow optimizations
 - `TF_CPP_MIN_LOG_LEVEL`: Set to `2` to suppress Tensorflow warnings
 
----
+______________________________________________________________________
 
 ## Performance Optimization Tips
 
@@ -219,7 +223,7 @@ pytest tests/common/test_session.py --no-teardown --quiet-spy
 2. **Mock expensive operations**: Mocking saves 9.2 min per run
 3. **Request only needed fixtures**: Don't import fixtures you don't use
 
----
+______________________________________________________________________
 
 ## Command-Line Options
 
@@ -246,16 +250,16 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 
 ```bash
 --base_dir PATH     # Where to store downloaded/created files
-                    # Default: ./tests/_data/
+# Default: ./tests/_data/
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-                    # Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns
 
 --no-docker         # Don't launch Docker, connect to existing container
-                    # Useful for: GitHub Actions, manual Docker management
+# Useful for: GitHub Actions, manual Docker management
 
 --no-dlc            # Skip DeepLabCut tests and downloads
-                    # Useful for: systems without DLC, faster test runs
+# Useful for: systems without DLC, faster test runs
 ```
 
 ### Debugging Options
@@ -268,7 +272,7 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 --ff                # Failed first: run failed tests first, then others
 
 -k PATTERN          # Run tests matching pattern
-                    # Example: pytest -k "test_session or test_nwb"
+# Example: pytest -k "test_session or test_nwb"
 
 tests/path/file.py  # Run specific test file
 ```
@@ -289,7 +293,7 @@ pytest --cov=spyglass --cov-report html --cov-report term-missing
 pytest --lf --pdb -v
 ```
 
----
+______________________________________________________________________
 
 ## Pytest Configuration
 
@@ -299,19 +303,19 @@ Key settings in `pyproject.toml`:
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = [
-    "--cov=spyglass",
-    "--cov-report=term-missing",
-    "--cov-report=xml",
+  "--cov=spyglass",
+  "--cov-report=term-missing",
+  "--cov-report=xml",
 ]
 
 markers = [
-    "slow: marks tests as slow",
-    "very_slow: marks tests as very slow",
-    # ... (see file for full list)
+  "slow: marks tests as slow",
+  "very_slow: marks tests as very slow",
+  # ... (see file for full list)
 ]
 ```
 
----
+______________________________________________________________________
 
 ## Writing Tests
 
@@ -320,15 +324,18 @@ markers = [
 ```python
 import pytest
 
+
 @pytest.mark.slow
 def test_long_running_operation():
     """This test takes 30 seconds."""
     pass
 
+
 @pytest.mark.very_slow
 def test_extremely_long_operation():
     """This test takes 2 minutes."""
     pass
+
 
 @pytest.mark.dlc
 def test_dlc_feature():
@@ -338,7 +345,8 @@ def test_dlc_feature():
 
 ### Using Mocked Fixtures
 
-Mocking is automatic—no changes needed to your tests. The mocked fixtures are globally applied:
+Mocking is automatic—no changes needed to your tests. The mocked fixtures are
+globally applied:
 
 ```python
 # This automatically uses mocked I/O
@@ -347,7 +355,7 @@ def test_decoder_pipeline(sgp, decoder_selection):
     # save_results() and load_results() are mocked automatically
 ```
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -396,12 +404,14 @@ pytest --cov=spyglass --cov-report html
 # Open htmlcov/index.html in browser
 ```
 
----
+______________________________________________________________________
 
 ## Additional Resources
 
 - **CI/CD Workflow**: `.github/workflows/test-conda.yml`
 - **Pytest Configuration**: `pyproject.toml`
 - **Fixture Definitions**: `tests/conftest.py`
-- **Mocking Implementation**: `tests/decoding/conftest.py`, `tests/spikesorting/*/conftest.py`
-- **Coverage Report**: [![codecov](https://codecov.io/gh/LorenFrankLab/spyglass/graph/badge.svg?token=QEJIIFN2S8)](https://codecov.io/gh/LorenFrankLab/spyglass)
+- **Mocking Implementation**: `tests/decoding/conftest.py`,
+    `tests/spikesorting/*/conftest.py`
+- **Coverage Report**:
+    [![codecov](https://codecov.io/gh/LorenFrankLab/spyglass/graph/badge.svg?token=QEJIIFN2S8)](https://codecov.io/gh/LorenFrankLab/spyglass)

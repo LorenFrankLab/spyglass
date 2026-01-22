@@ -2,7 +2,6 @@ import os
 import shutil
 import tempfile
 import time
-import uuid
 from pathlib import Path
 
 import datajoint as dj

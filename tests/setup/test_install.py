@@ -59,10 +59,10 @@ class TestGetRequiredPythonVersion:
         assert len(version) == 2
 
     def test_version_is_reasonable(self):
-        """Returned version is within expected range (3.9-3.13)."""
+        """Returned version is within expected range (3.10-3.13)."""
         major, minor = get_required_python_version()
         assert major == 3
-        assert 9 <= minor <= 13
+        assert 10 <= minor <= 13
 
     def test_reads_from_pyproject_toml(self):
         """Reads version from pyproject.toml, not hardcoded."""

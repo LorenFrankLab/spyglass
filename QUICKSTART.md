@@ -31,7 +31,7 @@ ______________________________________________________________________
 
 ## Prerequisites
 
-- **Python**: Version 3.9 or higher
+- **Python**: Version 3.10 or higher
 - **Disk Space**: ~10GB for installation + data storage
 - **Operating System**: macOS or Linux (Windows experimental)
 - **Package Manager**: [conda](https://docs.conda.io/) (23.10.0+ recommended) or
@@ -98,7 +98,6 @@ jupyter notebook 01_Concepts.ipynb
 
 - **Documentation**:
     [lorenfranklab.github.io/spyglass](https://lorenfranklab.github.io/spyglass/)
-    
 
 - **Discussions**:
     [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)

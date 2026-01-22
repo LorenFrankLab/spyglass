@@ -270,7 +270,6 @@ class MockClassifier:
 
     def fit(self, position_time, position, spike_times, custom_fit_param=None):
         """Mock fit method with specific signature."""
-        pass
 
     def predict(
         self,
@@ -281,7 +280,6 @@ class MockClassifier:
         custom_predict_param=None,
     ):
         """Mock predict method with specific signature."""
-        pass
 
 
 class TestGetValidKwargs:

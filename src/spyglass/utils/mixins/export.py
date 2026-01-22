@@ -458,7 +458,7 @@ class ExportMixin(FetchMixin):
                 f"Export: detected custom AnalysisNwbfile table {this_name}"
             )
             self._copy_to_common()
-        elif custom_parent := self._custom_analysis_parent:
+        elif self._custom_analysis_parent:
             self._parent_copy_to_common(fnames=fnames)
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
@@ -529,7 +529,7 @@ class ExportMixin(FetchMixin):
 
     def is_restr(self, restr) -> bool:
         """Check if a restriction is actually restricting."""
-        return bool(restr) and restr != True and not isinstance(restr, Top)
+        return bool(restr) and not restr and not isinstance(restr, Top)
 
     # -------------------------- Intercept DJ methods --------------------------
 

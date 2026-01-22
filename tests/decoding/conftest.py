@@ -12,7 +12,6 @@ def mock_netcdf_saves():
     by intercepting xarray.Dataset.to_netcdf() calls and using pickle instead.
     """
     import pickle
-    from pathlib import Path
 
     def mock_to_netcdf(
         self,
@@ -596,8 +595,6 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     import xarray as xr
 
     time = np.linspace(0, 10, n_time)
-    position_bins = np.linspace(0, 100, n_position_bins)
-    states = np.arange(n_states)
     state_names = ["Continuous", "Fragmented"][:n_states]
 
     # n_state_bins is the product of position bins and states

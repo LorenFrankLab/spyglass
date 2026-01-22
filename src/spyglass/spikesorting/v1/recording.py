@@ -296,7 +296,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
             recompute_object_id, recompute_electrodes_id = None, None
 
         parent = SpikeSortingRecordingSelection & key
-        (recording_nwb_file_name, recording_object_id, electrodes_id) = (
+        recording_nwb_file_name, recording_object_id, electrodes_id = (
             _write_recording_to_nwb(
                 **cls()._get_preprocessed_recording(key),
                 nwb_file_name=parent.fetch1("nwb_file_name"),

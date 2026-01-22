@@ -10,7 +10,7 @@ from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 
 # typing alias compatible with Python 3.9
-IngestionEntries = Dict["IngestionMixin", List[dict]]
+IngestionEntries = dict["IngestionMixin", list[dict]]
 # How IngestionMixin handles generated entries from NWB objects
 # Dict keys are IngestionMixin table classes, or FreeTable Table objects
 # Values are lists of dicts to insert into those tables

@@ -19,7 +19,6 @@
 
 # +
 import datajoint as dj
-import os
 
 dj.config.load("your_config_file.json")
 dj.conn()

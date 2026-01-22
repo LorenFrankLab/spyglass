@@ -1,5 +1,4 @@
 import warnings
-from os import environ as os_environ
 from typing import Dict, List
 
 import datajoint as dj
