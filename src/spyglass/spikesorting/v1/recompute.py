@@ -16,27 +16,39 @@ RecordingRecompute: Attempt to recompute an analysis file, saving a new file
 """
 
 import atexit
+from datetime import datetime
 from functools import cached_property
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
 import datajoint as dj
 import pynwb
+import spikeinterface.extractors as se
 from datajoint.hash import key_hash
 from h5py import File as h5py_File
 from hdmf.build import TypeMap
 from tqdm import tqdm
 
 from spyglass.common import AnalysisNwbfile
+from spyglass.common.common_device import Probe
+from spyglass.common.common_ephys import Electrode
 from spyglass.common.common_user import UserEnvironment  # noqa: F401
 from spyglass.settings import analysis_dir, temp_dir
-from spyglass.spikesorting.v1.recording import SpikeSortingRecording
+from spyglass.spikesorting.v1.recording import (
+    SpikeSortingRecording,
+    SpikeSortingRecordingSelection,
+)
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 from spyglass.utils.recompute_helper_fn import H5pyComparator, sort_dict
 
 schema = dj.schema("spikesorting_v1_recompute")
+
+
+def check_xfail(*args, **kwargs) -> Tuple[bool, Optional[str]]:
+    """Module-level wrapper for xfail checking."""
+    return RecordingRecomputeSelection()._check_xfail(*args, **kwargs)
 
 
 @schema
@@ -50,10 +62,31 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
     # expected nwb_deps: core, hdmf_common, hdmf_experimental, spyglass
     #                    ndx_franklab_novela, ndx_optogenetics, ndx_pose
 
+    _required_matches = [
+        "core",
+        "hdmf_common",
+        "hdmf_experimental",
+        "ndx_franklab_novela",
+    ]
+
     @cached_property
     def nwb_deps(self):
         """Return a restriction of self for the current environment."""
         return sort_dict(self.namespace_dict(pynwb.get_manager().type_map))
+
+    def _dicts_match(
+        self,
+        dict_a: dict,
+        dict_b: dict,
+        required_keys: list = None,
+    ) -> bool:
+        """Check if two dicts match on required keys."""
+        if required_keys is None:
+            required_keys = self._required_matches
+        for key in required_keys:
+            if dict_a.get(key) != dict_b.get(key):
+                return False
+        return True
 
     @cached_property
     def this_env(self) -> dj.expression.QueryExpression:
@@ -65,9 +98,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         for key in self:
             key_deps = key["nwb_deps"]
             _ = key_deps.pop("spyglass", None)
-            if sort_dict(key_deps) != self.nwb_deps:  # comment out to debug
-                continue
-            restr.append(self.dict_to_pk(key))
+            if self._dicts_match(self.nwb_deps, key_deps):
+                restr.append(self.dict_to_pk(key))
         return self & restr
 
     def _has_key(self, key: dict) -> bool:
@@ -142,6 +174,8 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
             script = f.get("general/source_script")
             if script is not None:  # after `=`, remove quotes
                 script = str(script[()]).split("=")[1].strip().replace("'", "")
+            if " " in script:  # has more of conda env
+                script = script.split(" ")[0]
             nwb_deps["spyglass"] = script
 
         self.insert1(dict(key, nwb_deps=nwb_deps), allow_direct_insert=True)
@@ -159,6 +193,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
     rounding=4: int # rounding for float ElectricalSeries
     ---
     logged_at_creation=0: bool # whether the attempt was logged at creation
+    xfail_reason=NULL   : varchar(127) # reason for expected failure, if any
     """
 
     # --- Insert helpers ---
@@ -173,7 +208,16 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         return UserEnvironment().insert_current_env()
 
     def insert(
-        self, rows, limit=None, at_creation=False, force_attempt=False, **kwargs
+        self,
+        rows,
+        limit=None,
+        at_creation=False,
+        force_attempt=False,
+        skip_xfail: bool = True,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
+        **kwargs,
     ) -> None:
         """Custom insert to ensure dependencies are added to each row.
 
@@ -188,6 +232,14 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         force_attempt : bool, optional
             Whether to force an attempt to insert rows even if the environment
             does not match. Default is False.
+        skip_xfail : bool, optional
+            Skip entries matching known xfail patterns. Default True.
+        skip_probe : bool, optional
+            Skip entries with missing probe metadata. Default True.
+        skip_pynwb_api : bool, optional
+            Skip entries with PyNWB API incompatibilities. Default True.
+        skip_nwb_spec : bool, optional
+            Skip entries with NWB schema/spec incompatibilities. Default True.
         """
 
         if not self.env_dict.get("env_id"):  # likely not using conda
@@ -208,11 +260,34 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
         inserts = []
         for row in rows:
+            no_env = {k: v for k, v in row.items() if k != "env_id"}
+            if bool((RecordingRecompute & "matched = 1") & no_env):
+                continue  # skip already matched
+
             key_pk = self.dict_to_pk(row)
             if not force_attempt and not REC_VER_TBL._has_matching_env(key_pk):
-                continue
+                continue  # skip env mismatch
+
+            # Check xfail patterns if enabled
+            xfail_reason = None
+            if skip_xfail:
+                is_xfail, reason = self._check_xfail(
+                    key_pk,
+                    skip_probe=skip_probe,
+                    skip_pynwb_api=skip_pynwb_api,
+                    skip_nwb_spec=skip_nwb_spec,
+                )
+                if is_xfail:
+                    xfail_reason = reason
+
             full_key = self.dict_to_full_key(row)
-            full_key.update(dict(self.env_dict, logged_at_creation=at_creation))
+            full_key.update(
+                dict(
+                    self.env_dict,
+                    logged_at_creation=at_creation,
+                    xfail_reason=xfail_reason,
+                )
+            )
             inserts.append(full_key)
 
         if not len(inserts):
@@ -261,7 +336,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
                 "rounding": rounding or self.default_rounding,
             }
             for key in source.fetch("KEY", as_dict=True)
-            if len(RecordingRecompute & key) == 0
+            if not bool(RecordingRecompute & key)
         ]
         if not inserts:
             logger.info(f"No rows to insert from:\n\t{source}")
@@ -270,6 +345,94 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
 
         self.insert(inserts, at_creation=False, **kwargs)
+
+    # --- Xfail detection ---
+
+    def _check_xfail(
+        self,
+        key: dict,
+        skip_probe: bool = True,
+        skip_pynwb_api: bool = True,
+        skip_nwb_spec: bool = True,
+    ) -> Tuple[bool, Optional[str]]:
+        """Check if entry matches known xfail (expected failure) patterns.
+
+        Parameters
+        ----------
+        key : dict
+            Recording key with recording_id, etc.
+        skip_probe : bool, optional
+            Check for missing probe metadata. Default True.
+        skip_pynwb_api : bool, optional
+            Check for PyNWB API incompatibilities. Default True.
+        skip_nwb_spec : bool, optional
+            Check for NWB schema/spec incompatibilities. Default True.
+
+        Returns
+        -------
+        is_xfail : bool
+            True if entry matches any enabled xfail pattern
+        reason : str or None
+            Description of xfail pattern matched, or None
+        """
+        file_pk = (SpikeSortingRecording & key).fetch1("KEY")
+        prev_runs = RecordingRecompute & file_pk & "matched=0"
+
+        # Pattern 1: Missing probe information
+        if skip_probe:
+            # First check previous runs (fast check)
+            if bool(prev_runs & 'err_msg LIKE "%probe info%"'):
+                return True, "missing_probe_info"
+
+            # Proactive check: query database for probe metadata
+            try:
+                parent = SpikeSortingRecordingSelection & key
+                if parent:
+                    nwb_file_name = parent.fetch1("nwb_file_name")
+                    probe_query = Electrode * Probe & {
+                        "nwb_file_name": nwb_file_name
+                    }
+                    if len(probe_query) == 0:
+                        return True, "missing_probe_info"
+            except Exception:
+                # If unable to check, don't mark as xfail
+                logger.warning(f"Unable to check probe info for {key}")
+
+        if skip_pynwb_api or skip_nwb_spec:
+            # First check previous runs (fast check)
+            if bool(prev_runs & 'err_msg LIKE "%unexpected keyword%dtype%"'):
+                return (True, "pynwb_api_incompatible")
+
+            if bool(prev_runs & 'err_msg LIKE "%No spec%namespace%"'):
+                return True, "nwb_spec_incompatible"
+
+            # Proactive check: try reading NWB with SpikeInterface
+            try:
+                parent = SpikeSortingRecording & key
+                if not parent:
+                    return False, None
+                analysis_file_name = parent.fetch1("analysis_file_name")
+                nwb_path = AnalysisNwbfile().get_abs_path(analysis_file_name)
+
+                # Attempt to read the NWB file with SpikeInterface
+                # This will raise TypeError if dtype API incompatibility
+                _ = se.read_nwb_recording(nwb_path, load_time_vector=False)
+
+            # Pattern 2: PyNWB API incompatibility (dtype keyword)
+            except TypeError as e:
+                is_api_err = "unexpected" in str(e) and "dtype" in str(e)
+                # Check if it's a dtype keyword incompatibility error
+                if skip_pynwb_api and is_api_err:
+                    return True, "pynwb_api_incompatible"
+
+            # Pattern 3: NWB schema/specification incompatibility
+            except ValueError as e:
+                is_spec_err = "No spec" in str(e) and "namespace" in str(e)
+                # Check if it's a spec incompatibility error
+                if skip_nwb_spec and is_spec_err:
+                    return True, "nwb_spec_incompatible"
+
+        return False, None
 
     # --- Gatekeep recompute attempts ---
 
@@ -282,6 +445,81 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
         """Check current env for matching pynwb and pip versions."""
         return REC_VER_TBL._has_matching_env(key) and bool(self.this_env & key)
 
+    def remove_matched(
+        self,
+        restriction: Optional[Union[str, dict]] = True,
+        dry_run: bool = True,
+    ) -> int:
+        """Remove selection entries for files already successfully matched.
+
+        This method cleans up redundant entries in RecordingRecomputeSelection
+        for files that have already been successfully matched in
+        RecordingRecompute (potentially in a different environment).
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Additional restriction to apply. Default True (all entries).
+        dry_run : bool, optional
+            If True, only show what would be deleted without deleting.
+            Default True.
+
+        Returns
+        -------
+        int
+            Number of entries that were (or would be) deleted.
+
+        Example
+        -------
+        >>> # Remove all redundant selection entries
+        >>> RecordingRecomputeSelection().remove_matched(dry_run=False)
+        """
+        from tqdm import tqdm
+
+        # Get all successfully matched entries
+        matched_entries = RecordingRecompute & "matched=1"
+
+        # Get primary keys excluding env_id
+        pk_fields = [
+            k for k in SpikeSortingRecording.primary_key if k != "env_id"
+        ]
+
+        # Get unique matched file keys
+        matched_keys = (dj.U(*pk_fields) & matched_entries).fetch(
+            "KEY", as_dict=True
+        )
+
+        # Find selection entries that match these files
+        redundant = (self & restriction & matched_keys) - matched_entries.proj()
+        count = len(redundant)
+
+        if count == 0:
+            logger.debug("No redundant matched entries")
+            return 0
+
+        prefix = "DRY RUN: " if dry_run else ""
+        logger.info(
+            f"{prefix}Found {count} selection entries for already-matched files"
+        )
+
+        if dry_run:
+            # Show sample of what would be deleted
+            sample = redundant.fetch("KEY", as_dict=True, limit=10)
+            logger.info(f"{prefix}Sample entries (up to 10):")
+            for i, key in enumerate(sample, 1):
+                analysis_file = key.get("analysis_file_name", "unknown")
+                env_id = key.get("env_id", "unknown")
+                logger.info(f"  {i}. {analysis_file} (env: {env_id})")
+            if count > 10:
+                logger.info(f"  ... and {count - 10} more")
+            return redundant
+
+        # Actually delete the redundant entries
+        redundant.delete_quick()
+        logger.info(f"Deleted {count} redundant entries")
+
+        return count
+
 
 @schema
 class RecordingRecompute(SpyglassMixin, dj.Computed):
@@ -290,6 +528,8 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
     ---
     matched: bool
     err_msg=null: varchar(255)
+    created_at=null : datetime # timestamp when original file was created
+    deleted=0: bool # whether the old file has been deleted after a match
     """
 
     class Name(dj.Part):
@@ -400,6 +640,16 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         )
 
         return (str(old), str(new)) if as_str else (old, new)
+
+    def _get_file_created_at(self, key) -> str:
+        """Get file creation timestamp from filesystem.
+
+        Default to now() if file does not exist.
+        """
+        old, _ = self._get_paths(key)
+        if not old.exists():
+            return datetime.now()
+        return datetime.fromtimestamp(old.stat().st_mtime)
 
     # --- Database checks ---
 
@@ -541,15 +791,33 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
     def make(self, key, force_check=False) -> None:
         """Attempt to recompute an analysis file and compare to the original."""
-        rec_dict = dict(recording_id=key["recording_id"])
-        if self & rec_dict & "matched=1":
+        rec_key = dict(recording_id=key["recording_id"])
+        if not force_check and (self & rec_key & "matched=1"):
+            RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
+            logger.info("Previous match found. Skipping recompute.")
             return
 
         parent = self.get_parent_key(key)
 
+        # Skip recompute for files with xfail reasons
+        created_key = dict(created_at=self._get_file_created_at(key))
+        if parent.get("xfail_reason"):
+            logger.info(f"Skipping xfail entry: {parent.get('xfail_reason')}")
+            self.insert1(
+                dict(
+                    key,
+                    matched=False,
+                    err_msg=f"xfail: {parent['xfail_reason']}",
+                    **created_key,
+                )
+            )
+            return
+
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
-            self.insert1(dict(key, matched=True))
+            logger.info("Skipping entry logged at creation.")
+            self.insert1(dict(key, matched=True, **created_key))
+            return
 
         # Ensure not duplicate work for lesser precision
         if self._is_lower_rounding(key) and not force_check:
@@ -557,14 +825,18 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 f"Match at higher precision. Assuming match for {key}\n\t"
                 + "Run with force_check=True to recompute."
             )
+            RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
+            return
 
         old_hasher, new_hasher = self._hash_both(key)
 
         if new_hasher is None:  # Error occurred during recompute
+            logger.error("V1 Recompute failed")
             return
 
         if new_hasher.hash == old_hasher.hash:
-            self.insert1(dict(key, matched=True))
+            logger.info(f"V1 Recompute match: {new_hasher.path.name}")
+            self.insert1(dict(key, matched=True, **created_key))
             return
 
         names, hashes = [], []
@@ -579,7 +851,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             if old_hash != new_hash:
                 hashes.append(dict(key, name=obj))
 
-        self.insert1(dict(key, matched=False))
+        self.insert1(dict(key, matched=False, **created_key))
         self.Name().insert(names)
         self.Hash().insert(hashes)
 
@@ -594,31 +866,65 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             Restriction for RecordingRecompute. Default is "matched=0".
         """
         restr = restr or "matched=0"
+        query = self & restr & "deleted=0"
         total_size = 0
-        for key in tqdm(self & restr, desc="Calculating disk space"):
+        for key in tqdm(query, desc="Calculating disk space"):
             old, new = self._get_paths(key)
             this = old if which == "old" else new
             if this.exists():
                 total_size += this.stat().st_size
         return f"Total: {bytes_to_human_readable(total_size)}"
 
-    def delete_files(self, restriction=True, dry_run=True) -> None:
-        """If successfully recomputed, delete files for a given restriction."""
-        query = self.with_names & "matched=1" & restriction
+    def delete_files(
+        self, restriction=True, dry_run=True, days_since_creation=7
+    ) -> None:
+        """Delete old files for successfully recomputed entries.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply to matched entries. Default True (all matched).
+        dry_run : bool, optional
+            If True, only show what would be deleted without deleting.
+            Default True.
+        days_since_creation : int, optional
+            Skip files created within this many days. Default 7.
+        """
+        # Apply base restrictions
+        query = self.with_names & "matched=1 AND deleted=0" & restriction
+
+        # Skip recently created files
+        if days_since_creation > 0:
+            date_templ = "created_at < DATE_SUB(CURDATE(), INTERVAL {} DAY)"
+            query = query & date_templ.format(days_since_creation)
+            logger.info(
+                f"Excluding files created within {days_since_creation} days"
+            )
+
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
-            file_names
+            file_names[:10]
         )
+        if len(file_names) > 10:
+            msg += f"\n\t... and {len(file_names) - 10} more"
 
         if dry_run:
+            restr = query.fetch("KEY", as_dict=True)
+            space = self.get_disk_space(which="old", restr=restr)
+            msg += f"\n{space}"
             logger.info(msg)
-            return
+            return space
 
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
             return
 
-        for key in query.proj():
+        for key in query:
+            try:
+                self.update1(dict(key, deleted=1))
+            except Exception as e:
+                logger.error(f"Failed to update deleted flag: {e}")
+                continue  # skip deleting files if db update fails
             old, new = self._get_paths(key)
             new.unlink(missing_ok=True)
             old.unlink(missing_ok=True)
@@ -638,3 +944,31 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 path.unlink(missing_ok=True)
             kwargs["safemode"] = False  # pragma: no cover
             super().delete(*args, **kwargs)
+
+    def update_secondary(self, restriction=True) -> None:
+        """Update secondary attrs for existing entries.
+
+        Parameters
+        ----------
+        restriction : bool, str, dict, optional
+            Restriction to apply. Default True (all entries).
+        """
+        query = self & restriction
+        total = len(query)
+
+        if total == 0:
+            logger.info("No entries to update")
+            return
+
+        logger.info(
+            f"Updating created_at for {total} entries from file timestamps"
+        )
+
+        for key in tqdm(query, total=total):
+            created_at = self._get_file_created_at(key)
+            old, _ = self._get_paths(key)
+            self.update1(
+                dict(key, created_at=created_at, deleted=not old.exists())
+            )
+
+        logger.info("Update complete")

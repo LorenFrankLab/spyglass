@@ -8,26 +8,49 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Alter Decoding v1 table
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
-```
 
-#### LFPBandV1 Fix
+# Alter v0 recompute table
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
 
-If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
-2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run the following after updating:
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
 
-```python
+# Alter v1 recompute table
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+
+# Fix LFPBandV1 issue #1481
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()
 ```
 
 ### Breaking Changes
+
+#### LFPBandV1 Fix
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run `LFPBandV1().fix_1481()` as shown in the release notes.
 
 #### Decoding Results Structure
 
@@ -44,17 +67,19 @@ memory usage significantly.
 ```python
 # OLD (before v0.5.6):
 results.isel(intervals=0)  # Get first interval
-for i in range(results.sizes['intervals']):  # Iterate intervals
+for i in range(results.sizes["intervals"]):  # Iterate intervals
     interval_data = results.isel(intervals=i)
 
 # NEW (v0.5.6+):
 results.where(results.interval_labels == 0, drop=True)  # Get first interval
 for label in np.unique(results.interval_labels.values):  # Iterate intervals
-    if label >= 0:  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+    if (
+        label >= 0
+    ):  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
         interval_data = results.where(results.interval_labels == label, drop=True)
 
 # Or use groupby:
-for label, interval_data in results.groupby('interval_labels'):
+for label, interval_data in results.groupby("interval_labels"):
     if label >= 0:
         # process interval_data
         pass
@@ -64,7 +89,7 @@ for label, interval_data in results.groupby('interval_labels'):
 
 - `0, 1, 2, ...` - Sequential interval indices (0-indexed)
 - `-1` - Time points outside any decoding interval (only when
-  `estimate_decoding_params=True`)
+    `estimate_decoding_params=True`)
 
 ### Documentation
 
@@ -76,8 +101,8 @@ for label, interval_data in results.groupby('interval_labels'):
 
 ### Infrastructure
 
-- Add cross-platform installer script with Docker support, input validation,
-    and automated environment setup #1414
+- Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
@@ -97,12 +122,14 @@ for label, interval_data in results.groupby('interval_labels'):
 - Allow for permissive name selection when identifying objects in ingestion nwb
     #1490
 - Update fixes for accessing files from DANDI #1477
-- Deprecate `populate` transaction workaround with tripart `make` calls #1422,
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
     #1505
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
 - Add file issue checks to AnalysisNwbfile cleanup steps #1431
+- Log expected recompute failures #1470
+- Track file created/deletion status of recomputes #1470
 
 ### Pipelines
 
@@ -139,9 +166,10 @@ for label, interval_data in results.groupby('interval_labels'):
         merge IDs are fetched in non-chronological order #1471
     - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
     - **BREAKING**: Remove `intervals` dimension from decoding results. Results
-      from multiple intervals are now concatenated along the `time` dimension
-      with an `interval_labels` coordinate to track interval membership. This
-      eliminates NaN padding and reduces memory usage. See migration guide above.
+        from multiple intervals are now concatenated along the `time` dimension
+        with an `interval_labels` coordinate to track interval membership. This
+        eliminates NaN padding and reduces memory usage. See migration guide
+        above.
 
 - LFP
 
