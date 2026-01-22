@@ -130,6 +130,7 @@ for label, interval_data in results.groupby('interval_labels'):
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
 
 - Decoding
 
