@@ -333,7 +333,7 @@ class TestStateEnforcement:
 
             # Try to open file after registration
             with pytest.raises(ValueError, match="REGISTERED"):
-                with builder.open_for_write() as io:
+                with builder.open_for_write():
                     pass
 
         # Cleanup

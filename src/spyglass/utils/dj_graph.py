@@ -475,7 +475,6 @@ class AbstractGraph(ABC):
                 result = "partial"
             self._log_truncate(f"Bridge Link: {path}: result {result}")
             logger.debug(ret)
-            pass
 
         return ret
 
