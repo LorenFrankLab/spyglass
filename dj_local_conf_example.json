@@ -12,6 +12,7 @@
   "display.limit": 12,
   "display.width": 14,
   "display.show_tuple_count": true,
+  "add_hidden_timestamp": false,
   "database.use_tls": null,
   "enable_python_native_blobs": true,
   "filepath_checksum_size_limit": 1073741824,
@@ -38,7 +39,8 @@
       "sorting": "/your/base/path/spikesorting",
       "waveforms": "/your/base/path/waveforms",
       "temp": "/your/base/path/tmp",
-      "video": "/your/base/path/video"
+      "video": "/your/base/path/video",
+      "export": "/your/base/path/export"
     },
     "kachery_dirs": {
       "cloud": "/your/base/path/.kachery-cloud",
@@ -54,7 +56,7 @@
     "moseq_dirs": {
       "base": "/your/base/path/moseq",
       "project": "/your/base/path/moseq/projects",
-      "video": "/your/base/path/moseq/video",
+      "video": "/your/base/path/moseq/video"
     },
     "kachery_zone": "franklab.default"
   }

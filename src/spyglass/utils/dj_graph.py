@@ -31,12 +31,8 @@ from tqdm import tqdm
 
 from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import (  # is_nonempty,
-    PERIPHERAL_TABLES,
-    ensure_names,
-    fuzzy_get,
-    unique_dicts,
-)
+from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES  # is_nonempty,
+from spyglass.utils.dj_helper_fn import ensure_names, fuzzy_get, unique_dicts
 
 
 def dj_topo_sort(graph: DiGraph) -> List[str]:
@@ -252,19 +248,22 @@ class AbstractGraph(ABC):
         return self._get_node(ensure_names(table)).get("restr_list", [])
 
     @staticmethod
-    def _coerce_to_condition(ft: FreeTable, r: Any) -> str | QueryExpression:
+    def _coerce_to_condition(
+        ft: FreeTable, r: Any
+    ) -> Union[str, QueryExpression]:
         """Coerce restriction to a valid condition.
 
-        If r is a QueryExpression, project to primary key to keep relational. This saves
-        on database requests while propagating restrictions. Otherwise, returns a
-        valid restriction string or condition.
+        If r is a QueryExpression, project to primary key to keep relational.
+        This saves on database requests while propagating restrictions.
+        Otherwise, returns a valid restriction string or condition.
 
         Parameters
         ----------
         ft : FreeTable
             The FreeTable to apply the restriction to.
         r : Any
-            The restriction to apply. Can be a string, dict, list, or QueryExpression.
+            The restriction to apply. Can be a string, dict, list, or
+            QueryExpression.
 
         Returns
         -------
@@ -282,7 +281,7 @@ class AbstractGraph(ABC):
 
     def _set_restr(
         self, table, restriction, replace=False
-    ) -> str | QueryExpression:
+    ) -> Union[str, QueryExpression]:
         """
         Add restriction to graph node. If one exists, merge with new.
 
@@ -475,7 +474,6 @@ class AbstractGraph(ABC):
                 result = "partial"
             self._log_truncate(f"Bridge Link: {path}: result {result}")
             logger.debug(ret)
-            pass
 
         return ret
 
