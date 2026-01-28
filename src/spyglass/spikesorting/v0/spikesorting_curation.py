@@ -1090,12 +1090,334 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
 
                 if compare(quality_metrics[metric][unit_id], label[1]):
                     if unit_id not in parent_labels:
-                        parent_labels[unit_id] = label[2]
+                        parent_labels[unit_id] = label[2].copy()
                     # check if the label is already there, and if not, add it
-                    elif label[2] not in parent_labels[unit_id]:
-                        parent_labels[unit_id].extend(label[2])
+                    else:
+                        for element in label[2].copy():
+                            if element not in parent_labels[unit_id]:
+                                parent_labels[unit_id].append(element)
 
-            return parent_labels
+        return parent_labels  # Unindent to fix #15XX
+
+    def fix_15XX(self, restriction=True, dry_run=True, verbose=True):
+        """Find and repair entries affected by get_labels bugs.
+
+        PR #1281 (2025-04-22) introduced three bugs in `get_labels`:
+
+        A. **Early return**: `return parent_labels` was indented inside
+           the `for metric` loop, so only the first metric was
+           processed. Affects entries with >1 metric in label_params.
+        B. **List aliasing**: `parent_labels[unit_id] = label[2]`
+           assigned the label list without copying, so units sharing
+           a metric shared the same list object. Mutations on one
+           unit could corrupt others.
+        C. **Duplicate comparison**: `label[2] not in parent_labels`
+           compared a list against a list of strings. This always
+           evaluated True for flat lists, so `.extend()` ran
+           unconditionally, creating duplicate labels.
+
+        Bugs B and C can affect single-metric entries when
+        `parent_labels` has pre-existing entries from a prior
+        curation step.
+
+        For each impacted entry, this method:
+        1. Recomputes labels using the fixed `get_labels` logic.
+        2. Updates `Curation.curation_labels` with corrected labels.
+        3. Updates `CuratedSpikeSorting.Unit.label` on existing rows.
+
+        Steps 2-3 are wrapped in a transaction per entry to prevent
+        partial updates on interruption.
+
+        Note: if a unit's accept/reject status changed, the NWB
+        analysis file still contains the old unit set. A full
+        repopulation of `CuratedSpikeSorting` is needed in those
+        cases. Such entries are flagged in `reject_status_changed`.
+
+        Parameters
+        ----------
+        restriction : str, dict, optional
+            Restrict to a subset of AutomaticCuration entries.
+        dry_run : bool
+            If True, report affected entries without modifying the
+            database. Default True.
+        verbose : bool
+            If True, print progress and details. Default True.
+
+        Returns
+        -------
+        list of dict
+            Each dict has keys: auto_curation_key, curation_key,
+            old_labels, new_labels, changed, has_downstream,
+            reject_status_changed.
+        """
+        restr = (self & restriction) if restriction else self
+        if verbose:
+            logger.info(f"fix_15XX: scanning {len(restr)} entries")
+
+        results = []
+        for key in restr:
+            result = self._fix1_15XX(key, dry_run, verbose)
+            if result is not None:
+                results.append(result)
+
+        if verbose:
+            logger.info(
+                f"fix_15XX: {len(results)} impacted entries"
+                + (" (dry run)" if dry_run else " (applied)")
+            )
+
+        return results
+
+    def _fix1_15XX(self, key, dry_run=True, verbose=True):
+        """Detect and repair a single AutomaticCuration entry.
+
+        Returns a result dict if the entry is impacted, None otherwise.
+        See `fix_15XX` for full documentation.
+        """
+        from copy import deepcopy
+        from datetime import datetime
+
+        bug_date = datetime(2025, 4, 22).timestamp()
+
+        # --- Early return 1: empty label_params ---
+        params = (self & key) * AutomaticCurationParameters
+        label_params = params.fetch1("label_params")
+        if not label_params:
+            return None
+
+        # --- Early return 2: created before bug date ---
+        auto_curation_key = (self & key).fetch1("auto_curation_key")
+        time_created = (Curation & auto_curation_key).fetch1("time_of_creation")
+        if time_created < bug_date:
+            return None
+
+        # --- Load quality metrics ---
+        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
+        try:
+            with open(metrics_path) as f:
+                quality_metrics = json.load(f)
+        except FileNotFoundError:
+            if verbose:
+                logger.warning(
+                    f"fix_15XX: metrics file not found: "
+                    f"{metrics_path}; skipping {key}"
+                )
+            return None
+
+        # --- Recompute labels ---
+        parent_curation = (Curation & key).fetch(as_dict=True)[0]
+        parent_labels = parent_curation["curation_labels"]
+
+        new_labels = self.get_labels(
+            sorting=None,
+            parent_labels=deepcopy(parent_labels),
+            quality_metrics=quality_metrics,
+            label_params=label_params,
+        )
+        stored_labels = (Curation & auto_curation_key).fetch1("curation_labels")
+
+        if new_labels == stored_labels:
+            return None
+
+        # --- Determine downstream impact ---
+        has_downstream = (
+            len(CuratedSpikeSortingSelection & auto_curation_key) > 0
+        )
+
+        reject_changed = []
+        if has_downstream:
+            all_uids = set(stored_labels.keys()) | set(new_labels.keys())
+            for uid in all_uids:
+                old_reject = (
+                    uid in stored_labels and "reject" in stored_labels[uid]
+                )
+                new_reject = uid in new_labels and "reject" in new_labels[uid]
+                if old_reject != new_reject:
+                    reject_changed.append(
+                        {
+                            "unit": uid,
+                            "was_rejected": old_reject,
+                            "should_reject": new_reject,
+                        }
+                    )
+
+        result = {
+            "auto_curation_key": auto_curation_key,
+            "curation_key": {
+                k: auto_curation_key[k]
+                for k in Curation.primary_key
+                if k in auto_curation_key
+            },
+            "old_labels": stored_labels,
+            "new_labels": new_labels,
+            "changed": True,
+            "has_downstream": has_downstream,
+            "reject_status_changed": reject_changed,
+        }
+
+        if verbose:
+            n_diff = sum(
+                1
+                for u in set(stored_labels) | set(new_labels)
+                if stored_labels.get(u) != new_labels.get(u)
+            )
+            logger.info(
+                f"fix_15XX: {auto_curation_key} — "
+                f"{n_diff} unit(s) with label changes"
+                + (
+                    f", {len(reject_changed)} reject " f"status change(s)"
+                    if reject_changed
+                    else ""
+                )
+            )
+
+        if not dry_run:
+            # NWB edit happens before the DB transaction. If the
+            # file edit fails, DB state is unchanged and the entry
+            # can be retried. If the DB commit fails after a
+            # successful file write, the labels in the NWB are
+            # already correct and idempotent reprocessing is safe.
+            with Curation.connection.transaction:
+                Curation.update1(
+                    {
+                        **auto_curation_key,
+                        "curation_labels": new_labels,
+                    }
+                )
+                if has_downstream:
+                    self._fix_15XX_units(auto_curation_key, new_labels, verbose)
+
+        return result
+
+    @staticmethod
+    def _fix_15XX_units(curation_key, new_labels, verbose=True):
+        """Update CuratedSpikeSorting.Unit labels for a curation.
+
+        Updates the label column on existing Unit rows. Does NOT
+        add or remove rows — if accept/reject status changed, a
+        full repopulation of CuratedSpikeSorting is needed.
+
+        Parameters
+        ----------
+        curation_key : dict
+            Primary key to the Curation entry.
+        new_labels : dict
+            Corrected labels dict {unit_id: [label, ...]}.
+        verbose : bool
+            If True, log changes.
+        """
+        unit_rows = (CuratedSpikeSorting.Unit & curation_key).fetch(
+            as_dict=True
+        )
+        for row in unit_rows:
+            uid = row["unit_id"]
+            str_uid = str(uid)
+            old_label = row["label"]
+            if str_uid in new_labels:
+                new_label = ",".join(new_labels[str_uid])
+            elif uid in new_labels:
+                new_label = ",".join(new_labels[uid])
+            else:
+                new_label = ""
+            if old_label != new_label:
+                if verbose:
+                    logger.info(
+                        f"  unit {uid}: " f"'{old_label}' -> '{new_label}'"
+                    )
+                CuratedSpikeSorting.Unit.update1(
+                    {
+                        **{
+                            k: row[k]
+                            for k in CuratedSpikeSorting.Unit.primary_key
+                        },
+                        "label": new_label,
+                    }
+                )
+
+    @staticmethod
+    def _fix_15XX_nwb(curation_key, new_labels, verbose=True):
+        """Update labels in the CuratedSpikeSorting NWB analysis file.
+
+        Edits the ``label`` column in the NWB units table in place
+        and updates the external-table checksum so DataJoint's
+        filepath store stays consistent.
+
+        Does NOT add or remove unit rows. If accept/reject status
+        changed such that units need to be added, a full
+        repopulation of CuratedSpikeSorting is required.
+
+        Parameters
+        ----------
+        curation_key : dict
+            Primary key to the Curation entry (used to look up
+            the CuratedSpikeSorting analysis file).
+        new_labels : dict
+            Corrected labels dict ``{unit_id: [label, ...]}``.
+        verbose : bool
+            If True, log file path and changes.
+        """
+        import pynwb
+
+        css_row = (CuratedSpikeSorting & curation_key).fetch(as_dict=True)
+        if not css_row:
+            return
+        css_row = css_row[0]
+        analysis_file_name = css_row["analysis_file_name"]
+        abs_path = AnalysisNwbfile().get_abs_path(analysis_file_name)
+
+        if verbose:
+            logger.info(f"  NWB: editing {abs_path}")
+
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            if nwbf.units is None or "label" not in nwbf.units:
+                if verbose:
+                    logger.info("  NWB: no units/label column; skip")
+                return
+
+            unit_ids = list(nwbf.units.id.data[:])
+            label_col = nwbf.units["label"]
+            changed = False
+
+            for idx, uid in enumerate(unit_ids):
+                str_uid = str(uid)
+                if str_uid in new_labels:
+                    new_val = ",".join(new_labels[str_uid])
+                elif uid in new_labels:
+                    new_val = ",".join(new_labels[uid])
+                else:
+                    new_val = ""
+
+                old_val = label_col[idx]
+                if old_val != new_val:
+                    label_col.data[idx] = new_val
+                    changed = True
+                    if verbose:
+                        logger.info(
+                            f"  NWB unit {uid}: " f"'{old_val}' -> '{new_val}'"
+                        )
+
+            if changed:
+                io.write(nwbf)
+
+        # Update the external-table checksum to match edited file
+        if changed:
+            abs_path = Path(abs_path)
+            anwb = AnalysisNwbfile()
+            rel_path = abs_path.relative_to(anwb._analysis_dir)
+            ext_tbl = anwb._ext_tbl
+            ext_key = (ext_tbl & f"filepath = '{str(rel_path)}'").fetch1()
+            ext_key.update(
+                {
+                    "contents_hash": dj.hash.uuid_from_file(abs_path),
+                    "size": abs_path.stat().st_size,
+                }
+            )
+            ext_tbl.update1(ext_key)
+            if verbose:
+                logger.info("  NWB: checksum updated")
 
 
 @schema

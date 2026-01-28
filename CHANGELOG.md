@@ -27,6 +27,17 @@ from spyglass.lfp.analysis.v1 import LFPBandV1
 LFPBandV1().fix_1481()
 ```
 
+#### AutomaticCuration Fix
+
+If you were using `v0.AutomaticCuration` after April 2025, you may have stored
+inaccurate labels due to #14XX. To fix these, please run the following after updating:
+
+```python
+from spyglass.spikesorting.v0 import AutomaticCuration
+
+AutomaticCuration().fix_15XX()
+```
+
 ### Breaking Changes
 
 #### Decoding Results Structure
@@ -158,6 +169,7 @@ for label, interval_data in results.groupby('interval_labels'):
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
+    - Implement fix for `AutomaticCuration` incorrect labels #15XY
 
 ## [0.5.5] (Aug 6, 2025)
 
