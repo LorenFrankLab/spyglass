@@ -59,6 +59,8 @@ these, please run the `LFPBandV1().fix_1481()` method after updating.
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
+- Upgrade to pynwb>=3.1 #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
 
 ### Pipelines
 
