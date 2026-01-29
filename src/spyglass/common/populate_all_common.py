@@ -230,7 +230,6 @@ def populate_all_common(
             StateScriptFile,  # Depends on TaskEpoch
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
-            ImportedSpikeSorting,  # Depends on Session
             VirusInjection,  # Depends on Session
             OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch

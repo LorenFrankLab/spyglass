@@ -6,7 +6,7 @@
 # (lines intentionally left blank)
 #
 #
-name: spyglass-moseq-cpu
+name: spyglass-moseq-gpu
 channels:
   - conda-forge
   # - defaults # deprecated
@@ -39,4 +39,4 @@ dependencies:
   - pip:
       - ghostipy # for common_filter
       - mountainsort4
-      - .[moseq-cpu]
+      - ..[moseq-gpu]

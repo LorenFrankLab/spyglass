@@ -1,0 +1,46 @@
+{
+  "_schema_version": "1.0.0",
+  "_comment": "Single source of truth for Spyglass directory structure",
+  "_critical": "This must match src/spyglass/settings.py SpyglassConfig.relative_dirs",
+  "_note": "If you modify this file, update settings.py to match (or vice versa)",
+  "_version_history": {
+    "1.0.0": "Initial DRY architecture - JSON schema replaces hard-coded directory structure"
+  },
+
+  "directory_schema": {
+    "spyglass": {
+      "raw": "raw",
+      "analysis": "analysis",
+      "recording": "recording",
+      "sorting": "spikesorting",
+      "waveforms": "waveforms",
+      "temp": "tmp",
+      "video": "video",
+      "export": "export"
+    },
+    "kachery": {
+      "cloud": ".kachery-cloud",
+      "storage": "kachery_storage",
+      "temp": "tmp"
+    },
+    "dlc": {
+      "project": "projects",
+      "video": "video",
+      "output": "output"
+    },
+    "moseq": {
+      "project": "projects",
+      "video": "video"
+    }
+  },
+
+  "tls": {
+    "_description": "TLS (Transport Layer Security) encrypts database traffic",
+    "auto_enable_for_remote": true,
+    "localhost_addresses": [
+      "localhost",
+      "127.0.0.1",
+      "::1"
+    ]
+  }
+}
