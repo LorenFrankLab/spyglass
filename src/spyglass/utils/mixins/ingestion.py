@@ -8,7 +8,10 @@ from pynwb import NWBFile
 from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
-from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
+from spyglass.utils.nwb_helper_fn import (
+    check_extension_version,
+    is_nwb_obj_type,
+)
 
 # typing alias compatible with Python 3.9
 IngestionEntries = Dict["IngestionMixin", List[dict]]
@@ -47,6 +50,9 @@ class IngestionMixin(BaseMixin):
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
     _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
+    _extension_requirements = (
+        dict()
+    )  # Optional dict of {extension_name: min_version} to check before ingesting
 
     @property
     def table_key_to_obj_attr(
@@ -227,8 +233,17 @@ class IngestionMixin(BaseMixin):
         nwb_file = query.fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
 
-        # compile list of table entries from all objects in this file
+        # fetch relevant NWB objects from file
         fetched_objs = self.get_nwb_objects(nwb_file, nwb_file_name)
+        if len(fetched_objs) == 0:
+            return dict()
+
+        # check extension requirements (if any). Logs warning if objects found and
+        # requirements not met
+        if not self.check_extension_requirements(nwb_file_name):
+            return dict()
+
+        # compile list of table entries from all objects in this file
         entries = (
             self.generate_entries_from_nwb_object(
                 nwb_obj=fetched_objs[0],
@@ -436,3 +451,30 @@ class IngestionMixin(BaseMixin):
         if isinstance(a, str) and isinstance(b, str):
             return a.lower() != b.lower()
         return a != b  # prevent false positive on None != ""
+
+    def check_extension_requirements(self, nwb_file_name: str) -> bool:
+        """Check that the NWB file meets the extension requirements (if any).
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file to check.
+
+        Returns
+        -------
+        bool
+            True if the NWB file meets the extension requirements, False otherwise.
+        """
+        for extension, min_version in self._extension_requirements.items():
+            if not check_extension_version(
+                nwb_file_name, extension, min_version
+            ):
+                logger.warning(
+                    f"NWB file {nwb_file_name} can not be ingested into "
+                    + f"{self.camel_name} due to unmet extension requirement:"
+                    + f"{extension} >= {min_version} \n"
+                    + "Please submit feature request or contact the Spyglass team"
+                    + " for assistance."
+                )
+                return False
+        return True

@@ -326,6 +326,7 @@ class OpticalFiberDevice(SpyglassIngestion, dj.Manual):
 
     _expected_duplicates = True
     _source_nwb_object_type = "OpticalFiberModel"
+    _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
 
     table_key_to_obj_attr = {
         "self": dict(
@@ -379,6 +380,7 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
             location="description",
         ),
     }
+    _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
         self._fiber_index = 0  # reset fiber index for each NWB file
