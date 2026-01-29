@@ -198,8 +198,25 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         # either initialize a new model or load an existing one
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
+            # define maximum latent_dimension based on keypoints
+            data_shape = list(coordinates.values())[0].shape
+            n_keypoints = data_shape[1]
+            keypoint_dim = data_shape[2]
+            max_latent_dim = min(
+                10,  # suggestion from moseq docs
+                (n_keypoints - 1)
+                * keypoint_dim,  # enforced maximum from model structure
+            )
+
             model, model_name = self._initialize_model(
-                data, metadata, project_dir, model_name, config, model_params
+                data=data,
+                metadata=metadata,
+                project_dir=project_dir,
+                model_name=model_name,
+                config=config,
+                model_params=model_params,
+                max_latent_dim=max_latent_dim,
+                target_variance=model_params.get("target_variance", 1.0),
             )
             epochs_trained = model_params["num_ar_iters"]
 
@@ -246,6 +263,8 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         model_name: str,
         config: dict,
         model_params: dict,
+        max_latent_dim: int = 10,
+        target_variance: float = 0.9,
     ):
         """Method to initialize a model. Creates model and runs initial ARHMM fit
 
@@ -272,6 +291,18 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         # fit pca of data
         pca = kpms.fit_pca(**data, **config)
         kpms.save_pca(pca, project_dir)
+
+        # determine latent dimension to explain target variance
+        var_explained = np.cumsum(pca.explained_variance_ratio_)
+        if target_variance >= var_explained[-1]:
+            latent_dim = len(var_explained)
+        else:
+            latent_dim = np.where(var_explained > target_variance)[0][0] + 1
+        latent_dim = min(latent_dim, max_latent_dim)
+
+        # update config with latent dimension
+        kpms.update_config(project_dir, latent_dim=latent_dim)
+        config = kpms.load_config(project_dir)
 
         # create the model
         model = kpms.init_model(data, pca=pca, **config)
