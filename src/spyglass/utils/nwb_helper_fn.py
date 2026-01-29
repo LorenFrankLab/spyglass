@@ -689,7 +689,7 @@ def check_extension_version(
 
     # get the io object for the nwb file
     nwb_path = Nwbfile().get_abs_path(nwb_file_name)
-    if not (nwb_io := __open_nwb_files[nwb_path]):
+    if not (nwb_io := __open_nwb_files.get(nwb_path)):
         get_nwb_file(nwb_path)
         nwb_io = __open_nwb_files[nwb_path]
     nwb_io = nwb_io[0]

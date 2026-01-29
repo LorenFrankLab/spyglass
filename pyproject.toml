@@ -52,6 +52,7 @@ dependencies = [
   "matplotlib",
   "ndx-franklab-novela>=0.2.4",
   "ndx-optogenetics==0.3.0",
+  "ndx-ophys-devices",
   "ndx-pose",
   "non-local-detector",
   "numpy",
