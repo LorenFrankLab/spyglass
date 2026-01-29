@@ -138,6 +138,7 @@ def single_transaction_make(
             if table_name in [
                 "ImportedPose",
                 "ImportedLFP",
+                "OptogeneticProtocol",
                 # "VirusInjection",
                 # "OpticalFiberImplant",
             ]:

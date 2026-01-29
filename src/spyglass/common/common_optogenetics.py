@@ -1,11 +1,5 @@
 import datajoint as dj
 import numpy as np
-from ndx_ophys_devices import (
-    OpticalFiber,
-    OpticalFiberModel,
-    ViralVector,
-    ViralVectorInjection,
-)
 
 from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
@@ -256,7 +250,7 @@ class Virus(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _source_nwb_object_type = ViralVector
+    _source_nwb_object_type = "ViralVector"
 
     table_key_to_obj_attr = {
         "self": dict(
@@ -291,7 +285,7 @@ class VirusInjection(SpyglassIngestion, dj.Manual):
     """
 
     _nwb_table = Nwbfile
-    _source_nwb_object_type = ViralVectorInjection
+    _source_nwb_object_type = "ViralVectorInjection"
 
     table_key_to_obj_attr = {
         "self": dict(
@@ -331,7 +325,7 @@ class OpticalFiberDevice(SpyglassIngestion, dj.Manual):
     """
 
     _expected_duplicates = True
-    _source_nwb_object_type = OpticalFiberModel
+    _source_nwb_object_type = "OpticalFiberModel"
 
     table_key_to_obj_attr = {
         "self": dict(
@@ -367,7 +361,7 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
 
     _fiber_index = 0  # to keep track of multiple fibers in one NWB file
 
-    _source_nwb_object_type = OpticalFiber
+    _source_nwb_object_type = "OpticalFiber"
     table_key_to_obj_attr = {
         "fiber_insertion": dict(
             hemisphere="hemisphere",

@@ -8,6 +8,7 @@ from pynwb import NWBFile
 from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
+from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
 
 # typing alias compatible with Python 3.9
 IngestionEntries = Dict["IngestionMixin", List[dict]]
@@ -159,7 +160,7 @@ class IngestionMixin(BaseMixin):
         matching_objects = [
             obj
             for obj in nwb_file.objects.values()
-            if isinstance(obj, self._source_nwb_object_type)
+            if is_nwb_obj_type(obj, self._source_nwb_object_type)
         ]
 
         if self._source_nwb_object_name:

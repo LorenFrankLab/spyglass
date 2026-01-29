@@ -1,7 +1,13 @@
-from typing import Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
+from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
+
+if TYPE_CHECKING:
+    import ndx_franklab_novela
 
 import datajoint as dj
-import ndx_franklab_novela
 
 from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
@@ -27,7 +33,7 @@ class DataAcquisitionDeviceSystem(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.DataAcqDevice
+        return "DataAcqDevice"
 
 
 @schema
@@ -46,7 +52,7 @@ class DataAcquisitionDeviceAmplifier(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.DataAcqDevice
+        return "DataAcqDevice"
 
 
 @schema
@@ -66,7 +72,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.DataAcqDevice
+        return "DataAcqDevice"
 
     @property
     def table_key_to_obj_attr(self):
@@ -134,7 +140,7 @@ class DataAcquisitionDevice(SpyglassIngestion, dj.Manual):
         ndx_devices = {
             device_obj.name: device_obj
             for device_obj in nwbf.devices.values()
-            if isinstance(device_obj, ndx_franklab_novela.DataAcqDevice)
+            if is_nwb_obj_type(device_obj, "DataAcqDevice")
         }
 
         # make a list of device names that are associated with this NWB file
@@ -296,7 +302,7 @@ class CameraDevice(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.CameraDevice
+        return "CameraDevice"
 
     @property
     def table_key_to_obj_attr(self):
@@ -342,7 +348,7 @@ class ProbeType(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.Probe
+        return "Probe"
 
     @property
     def table_key_to_obj_attr(self):
@@ -389,7 +395,7 @@ class Probe(SpyglassIngestion, dj.Manual):
 
         @property
         def _source_nwb_object_type(self):
-            return ndx_franklab_novela.Shank
+            return "Shank"
 
         @property
         def table_key_to_obj_attr(self):
@@ -433,7 +439,7 @@ class Probe(SpyglassIngestion, dj.Manual):
 
         @property
         def _source_nwb_object_type(self):
-            return ndx_franklab_novela.ShanksElectrode
+            return "ShanksElectrode"
 
         @property
         def table_key_to_obj_attr(self):
@@ -478,7 +484,7 @@ class Probe(SpyglassIngestion, dj.Manual):
 
     @property
     def _source_nwb_object_type(self):
-        return ndx_franklab_novela.Probe
+        return "Probe"
 
     @property
     def table_key_to_obj_attr(self):

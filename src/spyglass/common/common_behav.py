@@ -4,7 +4,6 @@ from functools import reduce
 from typing import Dict, List, Union
 
 import datajoint as dj
-import ndx_franklab_novela
 import numpy as np
 import pandas as pd
 import pynwb
@@ -19,11 +18,12 @@ from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
+    estimate_sampling_rate,
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
-    estimate_sampling_rate,
     get_valid_intervals,
+    is_nwb_obj_type,
 )
 
 schema = dj.schema("common_behav")
@@ -413,9 +413,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
 
         script_inserts = []
         for associated_file_obj in associated_files.data_interfaces.values():
-            if not isinstance(
-                associated_file_obj, ndx_franklab_novela.AssociatedFiles
-            ):
+            if not is_nwb_obj_type(associated_file_obj, "AssociatedFiles"):
                 logger.info(
                     f"Data interface {associated_file_obj.name} within "
                     + '"associated_files" processing module is not '
