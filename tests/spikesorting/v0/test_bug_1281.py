@@ -48,32 +48,32 @@ class TestGetLabelsMultiMetric:
         result = get_labels({}, self.quality_metrics, self.two_metric_params)
         # unit 0: nn_noise_overlap 0.2 > 0.1 -> noise,reject
         #         isi_violation    0.8 > 0.5 -> mua
-        assert "noise" in result["0"]
-        assert "reject" in result["0"]
-        assert "mua" in result["0"]
+        assert "noise" in result[0]
+        assert "reject" in result[0]
+        assert "mua" in result[0]
 
     def test_second_metric_only(self, get_labels):
         """Unit matching only second metric still gets its labels."""
         result = get_labels({}, self.quality_metrics, self.two_metric_params)
         # unit 1: nn_noise_overlap 0.05 <= 0.1 -> no label
         #         isi_violation    0.9  >  0.5 -> mua
-        assert "1" in result
-        assert "mua" in result["1"]
-        assert "noise" not in result.get("1", [])
+        assert 1 in result
+        assert "mua" in result[1]
+        assert "noise" not in result.get(1, [])
 
     def test_no_match_no_label(self, get_labels):
         """Unit matching neither metric gets no labels."""
         result = get_labels({}, self.quality_metrics, self.two_metric_params)
         # unit 2: nn_noise_overlap 0.3 > 0.1 -> noise,reject
         #         isi_violation    0.1 <= 0.5 -> no label
-        assert "noise" in result["2"]
-        assert "reject" in result["2"]
-        assert "mua" not in result["2"]
+        assert "noise" in result[2]
+        assert "reject" in result[2]
+        assert "mua" not in result[2]
 
     def test_all_units_covered(self, get_labels):
         """All units present in quality_metrics are evaluated."""
         result = get_labels({}, self.quality_metrics, self.two_metric_params)
-        assert set(result.keys()) >= {"0", "1"}
+        assert set(result.keys()) >= {0, 1}
 
 
 class TestGetLabelsSingleMetric:
@@ -88,21 +88,21 @@ class TestGetLabelsSingleMetric:
 
     def test_single_metric_labels(self, get_labels):
         result = get_labels({}, self.quality_metrics, self.single_metric_params)
-        assert "noise" in result["0"]
-        assert "reject" in result["0"]
+        assert "noise" in result[0]
+        assert "reject" in result[0]
 
     def test_single_metric_no_match(self, get_labels):
         result = get_labels({}, self.quality_metrics, self.single_metric_params)
-        assert "1" not in result
+        assert 1 not in result
 
 
 class TestGetLabelsEmpty:
     """Empty label_params returns parent_labels unchanged."""
 
     def test_empty_params_returns_parent(self, get_labels):
-        parent = {"0": ["accept"]}
+        parent = {0: ["accept"]}
         result = get_labels(parent, {"metric": {"0": 1.0}}, {})
-        assert result == {"0": ["accept"]}
+        assert result == {0: ["accept"]}
 
     def test_empty_params_empty_parent(self, get_labels):
         result = get_labels({}, {"metric": {"0": 1.0}}, {})
@@ -112,20 +112,21 @@ class TestGetLabelsEmpty:
 class TestGetLabelsParentPreservation:
     """Existing parent labels are preserved and extended."""
 
-    def test_parent_labels_preserved(self, get_labels):
-        parent = {"0": ["accept"]}
+    def test_accept_removed_when_other_labels_added(self, get_labels):
+        """Accept label is removed when metric labels are applied."""
+        parent = {0: ["accept"]}
         params = {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]}
         qm = {"nn_noise_overlap": {"0": 0.2}}
         result = get_labels(parent, qm, params)
-        assert "accept" in result["0"]
-        assert "noise" in result["0"]
+        assert "accept" not in result[0]
+        assert "noise" in result[0]
 
     def test_no_duplicate_labels(self, get_labels):
-        parent = {"0": ["noise"]}
+        parent = {0: ["noise"]}
         params = {"nn_noise_overlap": [">", 0.1, ["noise", "reject"]]}
         qm = {"nn_noise_overlap": {"0": 0.2}}
         result = get_labels(parent, qm, params)
-        assert result["0"].count("noise") == 1
+        assert result[0].count("noise") == 1
 
     def test_parent_labels_extended_by_second_metric(self, get_labels):
         """Parent labels from first metric are extended by second."""
@@ -139,7 +140,7 @@ class TestGetLabelsParentPreservation:
             "isi_violation": {"0": 0.8},
         }
         result = get_labels(parent, qm, params)
-        assert set(result["0"]) == {"noise", "reject", "mua"}
+        assert set(result[0]) == {"noise", "reject", "mua"}
 
 
 class TestGetLabelsMetricSkipping:
@@ -152,8 +153,8 @@ class TestGetLabelsMetricSkipping:
         }
         qm = {"nn_noise_overlap": {"0": 0.2}}
         result = get_labels({}, qm, params)
-        assert "noise" in result["0"]
-        assert "mua" not in result.get("0", [])
+        assert "noise" in result[0]
+        assert "mua" not in result.get(0, [])
 
     def test_only_overlapping_metrics_apply(self, get_labels):
         """With 3 metrics, only 2 present in qm are applied."""
@@ -167,9 +168,9 @@ class TestGetLabelsMetricSkipping:
             "isi_violation": {"0": 0.8},
         }
         result = get_labels({}, qm, params)
-        assert "noise" in result["0"]
-        assert "mua" in result["0"]
-        assert "artifact" not in result.get("0", [])
+        assert "noise" in result[0]
+        assert "mua" in result[0]
+        assert "artifact" not in result.get(0, [])
 
 
 class TestGetLabelsComparisonOperators:
@@ -193,6 +194,6 @@ class TestGetLabelsComparisonOperators:
         qm = {"nn_noise_overlap": {"0": value}}
         result = get_labels({}, qm, params)
         if should_label:
-            assert "0" in result and "reject" in result["0"]
+            assert 0 in result and "reject" in result[0]
         else:
-            assert "0" not in result
+            assert 0 not in result

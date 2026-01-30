@@ -1089,25 +1089,28 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
                 label = label_params[metric]
 
                 if compare(quality_metrics[metric][unit_id], label[1]):
-                    if unit_id not in parent_labels:
-                        parent_labels[unit_id] = label[2].copy()
+                    if int(unit_id) not in parent_labels:
+                        parent_labels[int(unit_id)] = label[2].copy()
                     # check if the label is already there, and if not, add it
                     else:
+                        # remove 'accept' label if it exists
+                        if "accept" in parent_labels[int(unit_id)]:
+                            parent_labels[int(unit_id)].remove("accept")
                         for element in label[2].copy():
-                            if element not in parent_labels[unit_id]:
-                                parent_labels[unit_id].append(element)
+                            if element not in parent_labels[int(unit_id)]:
+                                parent_labels[int(unit_id)].append(element)
 
-        return parent_labels  # Unindent to fix #15XX
+        return parent_labels
 
     @staticmethod
     def _normalize_labels(labels):
-        """Return labels dict with all keys cast to strings.
+        """Return labels dict with all keys cast to int.
 
-        Quality metrics loaded from JSON always have string keys, but
-        DataJoint blob serialization may store them as ints.  Normalize
-        to strings so comparisons are consistent.
+        Quality metrics loaded from JSON have string keys, while
+        the fixed ``get_labels`` uses ``int(unit_id)``.  Normalize
+        to int so comparisons are consistent regardless of source.
         """
-        return {str(k): v for k, v in labels.items()}
+        return {int(k): v for k, v in labels.items()}
 
     def fix_15XX(self, restriction=True, dry_run=True, verbose=True):
         """Find and repair entries affected by get_labels bugs.
@@ -1316,7 +1319,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         curation_key : dict
             Primary key to the Curation entry.
         new_labels : dict
-            Corrected labels dict with string keys
+            Corrected labels dict with int keys
             ``{unit_id: [label, ...]}``.
         verbose : bool
             If True, log changes.
@@ -1325,7 +1328,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
             as_dict=True
         )
         for row in unit_rows:
-            uid = str(row["unit_id"])
+            uid = int(row["unit_id"])
             old_label = row["label"]
             new_label = ",".join(new_labels.get(uid, []))
             if old_label != new_label:
@@ -1391,7 +1394,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
             changed = False
 
             for idx, uid in enumerate(unit_ids):
-                new_val = ",".join(new_labels.get(str(uid), []))
+                new_val = ",".join(new_labels.get(int(uid), []))
 
                 old_val = label_col[idx]
                 if old_val != new_val:
