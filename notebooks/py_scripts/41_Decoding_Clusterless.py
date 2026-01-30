@@ -60,7 +60,6 @@ from spyglass.decoding.v1.waveform_features import (
     UnitWaveformFeatures,
 )
 
-
 nwb_copy_file_name = "mediumnwb20230802_.nwb"
 
 sorter_keys = {
@@ -132,7 +131,6 @@ UnitWaveformFeaturesGroup.UnitFeatures & {
 # +
 from spyglass.position import PositionOutput
 import spyglass.position as sgp
-
 
 sgp.v1.TrodesPosParams.insert1(
     {
@@ -232,7 +230,6 @@ ContFragClusterlessClassifier(
 
 # +
 from spyglass.decoding.v1.core import DecodingParameters
-
 
 DecodingParameters.insert1(
     {
