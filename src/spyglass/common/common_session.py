@@ -53,7 +53,7 @@ class Session(SpyglassIngestion, dj.Imported):
             "subject": {"subject_id": "subject_id"},
         }
 
-    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):
+    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):  # noqa: F811
         definition = """
         # Part table linking Session to multiple DataAcquisitionDevice entries.
         -> Session
