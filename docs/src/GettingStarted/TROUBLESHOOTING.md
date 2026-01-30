@@ -175,7 +175,7 @@ The validator will check:
 
 **Symptoms:**
 
-- "Python 3.9+ required, found 3.8"
+- "Python 3.10+ required, found 3.9"
 - Import errors for newer Python features
 
 **Solutions:**
@@ -408,22 +408,26 @@ The validator will check:
 1. **Install git:**
 
     === "maxOS"
+
         ```bash
         xcode-select --install
         ```
 
     === "Windows"
+
         ```powershell
         choco install git
         ```
 
     === "Linux - Debian/Ubuntu"
+
         ```bash
         sudo apt-get update -y
         sudo apt-get install git -y
         ```
 
     === "Linux - CentOS/RHEL"
+
         ```bash
         sudo yum install git -y
         ```
@@ -437,6 +441,7 @@ The validator will check:
 ## Platform-Specific Issues
 
 === "maxOS"
+
     **Issue: Xcode Command Line Tools missing**
 
     ```bash
@@ -452,6 +457,7 @@ The validator will check:
     ```
 
 === "Linux"
+
     **Issue: Missing system libraries**
 
     ```bash
@@ -471,6 +477,7 @@ The validator will check:
     ```
 
 === "Windows (WSL)"
+
     **Issue: WSL not set up**
 
     ```bash

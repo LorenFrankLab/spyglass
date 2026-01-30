@@ -344,10 +344,10 @@ exclude: (^.github/|^docs/site/|^images/)
 
 repos:
   - repo: https://github.com/ambv/black
-    rev: 24.1.1
+    rev: 26.1.0
     hooks:
       - id: black
-        language_version: python3.9
+        language_version: python3.10
 
   - repo: https://github.com/codespell-project/codespell
     rev: v2.2.6

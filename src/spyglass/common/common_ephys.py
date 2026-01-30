@@ -1,5 +1,4 @@
 import warnings
-from collections import defaultdict
 
 import datajoint as dj
 import ndx_franklab_novela

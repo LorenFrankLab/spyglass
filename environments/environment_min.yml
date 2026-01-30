@@ -14,7 +14,7 @@ channels:
   - edeno
 dependencies:
   # Core Python scientific stack
-  - python>=3.9,<3.13
+  - python>=3.10,<3.13
   - pip
   - numpy
   - matplotlib

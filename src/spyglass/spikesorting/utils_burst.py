@@ -72,7 +72,7 @@ def plot_burst_xcorrel(
     fig, axes = plt.subplots(2, col_num, figsize=(col_num * 3, 4), squeeze=True)
 
     for ind, p in enumerate(pairs):
-        (u1, u2) = p
+        u1, u2 = p
         axes[np.unravel_index(ind, axes.shape)].bar(
             bins[1:], ccgs_e[u1 - 1, u2 - 1, :]
         )
