@@ -360,7 +360,7 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
     yaw: float
     """
 
-    _fiber_index = 0  # to keep track of multiple fibers in one NWB file
+    _fiber_index = dict()  # to keep track of multiple fibers in one NWB file
 
     _source_nwb_object_type = "OpticalFiber"
     table_key_to_obj_attr = {
@@ -390,6 +390,8 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
         entries = super().generate_entries_from_nwb_object(nwb_obj, base_key)
         self_entries = entries[self]
         for entry in self_entries:
+            nwb_file_name = entry["nwb_file_name"]
+            implant_id = self._fiber_index.get(nwb_file_name, 0)
             entry["implant_id"] = self._fiber_index
-            self._fiber_index += 1
+            self._fiber_index[nwb_file_name] = implant_id + 1
         return {self: self_entries}
