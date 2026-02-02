@@ -383,7 +383,9 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
     _extension_requirements = {"ndx-ophys-devices": "0.3.0"}
 
     def insert_from_nwbfile(self, nwb_file_name, config=None, dry_run=False):
-        self._fiber_index = 0  # reset fiber index for each NWB file
+        self._fiber_index[nwb_file_name] = (
+            0  # reset fiber index for each NWB file
+        )
         return super().insert_from_nwbfile(nwb_file_name, config, dry_run)
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
@@ -392,6 +394,6 @@ class OpticalFiberImplant(SpyglassIngestion, dj.Manual):
         for entry in self_entries:
             nwb_file_name = entry["nwb_file_name"]
             implant_id = self._fiber_index.get(nwb_file_name, 0)
-            entry["implant_id"] = self._fiber_index
+            entry["implant_id"] = implant_id
             self._fiber_index[nwb_file_name] = implant_id + 1
         return {self: self_entries}
