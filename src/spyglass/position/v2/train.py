@@ -436,12 +436,61 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             },
             "aliases": {},
         },
+        "SLEAP": {
+            "required": [
+                "model_type",  # single_instance, centroid, etc.
+            ],
+            "skipped": ["training_job_path", "labels_path"],
+            "accepted": {
+                # Model architecture
+                "model_type",
+                "backbone",
+                "max_stride",
+                "output_stride",
+                # Training parameters
+                "max_epochs",
+                "batch_size",
+                "learning_rate",
+                "save_freq",
+                "val_size",
+                # Data augmentation
+                "augmentation_config",
+                "rotation",
+                "scale",
+                "translate",
+                # Optimization
+                "optimizer",
+                "lr_schedule",
+                "early_stopping",
+                # Model-specific
+                "sigma",  # for confidence maps
+                "peak_threshold",
+                "integral_patch_size",
+                # Paths (for reference only)
+                "model_name",
+                "run_name",
+                "initial_config",
+                # SLEAP version info
+                "sleap_version",
+                "training_labels",
+            },
+            "aliases": {
+                "model_type": ["approach"],  # alternate name
+                "backbone": ["backbone_type"],
+            },
+        },
     }
     default_dlc_params = {
         "params": {},
         "shuffle": 1,
         "trainingsetindex": 0,
         "model_prefix": "",
+    }
+    default_sleap_params = {
+        "model_type": "single_instance",
+        "backbone": "unet",
+        "max_epochs": 200,
+        "batch_size": 4,
     }
     contents = [
         (
@@ -450,7 +499,14 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             default_dlc_params,
             None,
             dj.hash.key_hash(default_dlc_params),
-        )
+        ),
+        (
+            "sleap_default",
+            "SLEAP",
+            default_sleap_params,
+            None,
+            dj.hash.key_hash(default_sleap_params),
+        ),
     ]
 
     def get_accepted_params(self, tool):
@@ -460,15 +516,27 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         return self.tool_info[tool]["accepted"]
 
     def _append_aliases(self, tool, params):
-        """Append any parameter aliases to the params dictionary."""
+        """Append any parameter aliases to the params dictionary.
+
+        Handles bidirectional aliasing:
+        - If primary key exists, add aliases
+        - If alias exists, add primary key
+        """
         if tool not in self.tool_info:
             raise ValueError(f"Tool {tool} not supported")
         aliases = self.tool_info[tool].get("aliases", {})
         for primary, alias_list in aliases.items():
+            # If primary exists, add aliases
             if primary in params:
                 for alias in alias_list:
                     if alias not in params:
                         params[alias] = params[primary]
+            # If alias exists, add primary
+            else:
+                for alias in alias_list:
+                    if alias in params and primary not in params:
+                        params[primary] = params[alias]
+                        break
         return params
 
     def insert1(self, key, accept_default=False, **kwargs):
@@ -506,7 +574,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             logger.warning(f"Entry exists with same params: \n{dupe}")
             return dupe.fetch1("KEY")
 
-        model_params_id: str = key.get("model_params_id", "").strip()
+        model_params_id: str = (key.get("model_params_id") or "").strip()
         if not model_params_id:
             model_params_id = default_pk_name(
                 "mp", dict(tool=key["tool"], params=params)
@@ -1002,17 +1070,17 @@ class Model(SpyglassMixin, dj.Computed):
         ...     plotting=True
         ... )
         """
-        if evaluate_network is None:
-            raise ImportError(
-                "DeepLabCut evaluate_network is required for evaluation. "
-                "Install with: pip install deeplabcut>=3.0"
-            )
-
-        # Validate model exists
+        # Validate model exists FIRST (before checking DLC import)
         if not (self & model_key):
             raise ValueError(
                 f"Model not found in database: {model_key}. "
                 "Cannot evaluate non-existent model."
+            )
+
+        if evaluate_network is None:
+            raise ImportError(
+                "DeepLabCut evaluate_network is required for evaluation. "
+                "Install with: pip install deeplabcut>=3.0"
             )
 
         # Fetch model info
@@ -1570,18 +1638,24 @@ class Model(SpyglassMixin, dj.Computed):
                     pose_estimation.dimensions
                 ).tolist()
 
+            # Add default required params for DLC if importing from DLC
+            if tool == "DLC" and "net_type" not in params:
+                params["net_type"] = "unknown"  # Required by ModelParams
+
         # Step 8: Create skeleton config dict for Skeleton.insert1()
         skeleton_config = {
             "bodyparts": bodyparts,
             "skeleton": edges,
         }
+        # Add skeleton_id to config dict if provided
+        if "skeleton_id" in kwargs and kwargs["skeleton_id"] is not None:
+            skeleton_config["skeleton_id"] = kwargs["skeleton_id"]
 
         # Step 9: Create or retrieve Skeleton entry
         skeleton_key = Skeleton().insert1(
             skeleton_config,
             check_duplicates=True,
             skip_duplicates=True,
-            skeleton_id=kwargs.get("skeleton_id"),
         )
         logger.info(f"Skeleton: {skeleton_key['skeleton_id']}")
 
@@ -1630,30 +1704,34 @@ class Model(SpyglassMixin, dj.Computed):
         # Step 13: Create Model entry
         model_id = kwargs.get("model_id")
         if not model_id:
-            # Generate default model_id
-            model_id = f"ndx-pose-{model_name}-{model_path.stem}"
+            # Generate default model_id using helper (max 32 chars)
+            model_id = default_pk_name(
+                "mdl", {"model_name": model_name, "nwb_file": str(model_path)}
+            )
 
-        # Note: We don't create a new NWB file - we reference the source NWB
-        # The analysis_file_name will point to the source NWB file
+        # Note: We don't create a new NWB file for ndx-pose imports
+        # The model_path already points to the source NWB file
+        # TODO: Future enhancement - copy or link to AnalysisNwbfile
         nwb_file_name = kwargs.get("nwb_file_name")
         if nwb_file_name:
-            # Use provided parent NWB file
+            # Use provided NWB file (must exist in AnalysisNwbfile)
             analysis_file_name = nwb_file_name
         else:
-            # Use the source NWB file itself
-            analysis_file_name = model_path.name
+            # No analysis file - use nullable field
+            analysis_file_name = None
             logger.info(
-                f"No nwb_file_name provided. Using source NWB: {analysis_file_name}"
+                "No nwb_file_name provided. Model will not have AnalysisNwbfile link."
             )
 
         model_key = {
             **sel_key,
             "model_id": model_id,
-            "analysis_file_name": analysis_file_name,
             "model_path": str(model_path),
         }
+        if analysis_file_name:
+            model_key["analysis_file_name"] = analysis_file_name
 
-        self.insert1(model_key, skip_duplicates=True)
+        self.insert1(model_key, skip_duplicates=True, allow_direct_insert=True)
         logger.info(f"Model imported: {model_id}")
 
         return model_key
@@ -1781,6 +1859,19 @@ class Model(SpyglassMixin, dj.Computed):
         Union[str, list]
             Output file path(s)
         """
+        # Validate video path(s) FIRST (before checking DLC import)
+        if isinstance(video_path, (list, tuple)):
+            for vp in video_path:
+                if not Path(vp).exists():
+                    raise FileNotFoundError(f"Video not found: {vp}")
+            videos = [str(vp) for vp in video_path]
+        else:
+            video_path = Path(video_path)
+            if not video_path.exists():
+                raise FileNotFoundError(f"Video not found: {video_path}")
+            videos = str(video_path)
+
+        # Check DLC is available
         if create_training_dataset is None or train_network is None:
             raise ImportError(
                 "DeepLabCut is required for inference. "
@@ -1799,22 +1890,10 @@ class Model(SpyglassMixin, dj.Computed):
                 f"DLC model path must be a config.yaml file, got: {model_path}"
             )
 
-        # Validate video path(s)
-        if isinstance(video_path, (list, tuple)):
-            for vp in video_path:
-                if not Path(vp).exists():
-                    raise FileNotFoundError(f"Video not found: {vp}")
-            videos = [str(vp) for vp in video_path]
-        else:
-            video_path = Path(video_path)
-            if not video_path.exists():
-                raise FileNotFoundError(f"Video not found: {video_path}")
-            videos = str(video_path)
-
         # Set up DLC analyze_videos parameters
         analyze_params = {
             "config": str(model_path),
-            "videos": videos,
+            "videos": [videos] if isinstance(videos, str) else videos,
             "save_as_csv": save_as_csv,
             "destfolder": str(destfolder) if destfolder else None,
         }
@@ -1890,6 +1969,242 @@ class Model(SpyglassMixin, dj.Computed):
             )
             logger.info(f"Inference complete. Output: {output_path}")
             return output_path
+
+    def verify(
+        self,
+        model_key: dict,
+        check_inference: bool = False,
+    ) -> dict:
+        """Verify a model is valid and accessible.
+
+        Performs comprehensive validation checks on a model entry including:
+        1. Model exists in database
+        2. Model file/path exists on disk
+        3. Skeleton is valid (has bodyparts and edges)
+        4. ModelParams are valid
+        5. (Optional) Can run basic inference test
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for Model entry (must include 'model_id')
+        check_inference : bool, optional
+            Whether to test that inference can be initialized (doesn't actually
+            run inference, just validates the model can be loaded),
+            by default False
+
+        Returns
+        -------
+        dict
+            Verification results with keys:
+            - valid : bool, overall validation status
+            - checks : dict, individual check results (True/False)
+            - errors : list, error messages for failed checks
+            - warnings : list, warning messages for non-critical issues
+            - model_info : dict, model metadata if validation passed
+
+        Examples
+        --------
+        >>> # Basic verification
+        >>> results = Model().verify({"model_id": "my_dlc_model"})
+        >>> if results['valid']:
+        ...     print("Model is valid!")
+        >>> else:
+        ...     print(f"Errors: {results['errors']}")
+        >>>
+        >>> # Full verification with inference check
+        >>> results = Model().verify(
+        ...     {"model_id": "my_dlc_model"},
+        ...     check_inference=True
+        ... )
+        """
+        errors = []
+        warnings = []
+        checks = {
+            "model_exists": False,
+            "model_path_exists": False,
+            "skeleton_valid": False,
+            "params_valid": False,
+            "inference_ready": False,
+        }
+        model_info = {}
+
+        # Check 1: Model exists in database
+        if not (self & model_key):
+            errors.append(
+                f"Model not found in database: {model_key}. "
+                "Use Model.import_model() to import a model first."
+            )
+            return {
+                "valid": False,
+                "checks": checks,
+                "errors": errors,
+                "warnings": warnings,
+                "model_info": model_info,
+            }
+        checks["model_exists"] = True
+
+        # Fetch model information
+        try:
+            model_entry = (self & model_key).fetch1()
+            model_info = dict(model_entry)
+        except Exception as e:
+            errors.append(f"Error fetching model entry: {e}")
+            return {
+                "valid": False,
+                "checks": checks,
+                "errors": errors,
+                "warnings": warnings,
+                "model_info": model_info,
+            }
+
+        # Check 2: Model path exists
+        model_path = Path(model_entry["model_path"])
+        if not model_path.exists():
+            errors.append(f"Model file not found: {model_path}")
+        else:
+            checks["model_path_exists"] = True
+
+            # For DLC models, verify it's a valid config file
+            if model_entry["tool"] == "DLC":
+                if model_path.suffix not in [".yaml", ".yml"]:
+                    warnings.append(
+                        f"DLC model path should be config.yaml, got: {model_path.name}"
+                    )
+                else:
+                    # Try to read config to verify it's valid YAML
+                    try:
+                        import yaml
+
+                        with open(model_path) as f:
+                            config = yaml.safe_load(f)
+                            if "project_path" not in config:
+                                warnings.append(
+                                    "DLC config missing 'project_path' field"
+                                )
+                    except Exception as e:
+                        warnings.append(f"Could not parse DLC config: {e}")
+
+        # Check 3: Skeleton is valid
+        try:
+            params_key = {
+                "model_params_id": model_entry["model_params_id"],
+                "tool": model_entry["tool"],
+            }
+            params_entry = (ModelParams() & params_key).fetch1()
+            skeleton_id = params_entry["skeleton_id"]
+
+            if skeleton_id and (Skeleton() & {"skeleton_id": skeleton_id}):
+                skeleton_entry = (
+                    Skeleton() & {"skeleton_id": skeleton_id}
+                ).fetch1()
+
+                bodyparts = skeleton_entry["bodyparts"]
+                edges = skeleton_entry["edges"]
+
+                if not bodyparts or len(bodyparts) == 0:
+                    errors.append("Skeleton has no bodyparts")
+                elif len(bodyparts) < 2:
+                    warnings.append(
+                        f"Skeleton has only {len(bodyparts)} bodypart(s)"
+                    )
+                else:
+                    checks["skeleton_valid"] = True
+
+                if edges is None or len(edges) == 0:
+                    warnings.append("Skeleton has no edges defined")
+            else:
+                errors.append(f"Skeleton not found: {skeleton_id}")
+
+        except Exception as e:
+            errors.append(f"Error validating skeleton: {e}")
+
+        # Check 4: ModelParams are valid
+        try:
+            # Verify required params exist for the tool
+            tool = model_entry["tool"]
+            params = params_entry["params"]
+
+            if tool == "DLC":
+                required = ["net_type"]  # Minimal requirement
+                missing = [p for p in required if p not in params]
+                if missing:
+                    errors.append(f"Missing required DLC params: {missing}")
+                else:
+                    checks["params_valid"] = True
+            else:
+                # For non-DLC tools, just check params exist
+                if params and isinstance(params, dict):
+                    checks["params_valid"] = True
+                else:
+                    errors.append(f"Invalid params for tool {tool}: {params}")
+
+        except Exception as e:
+            errors.append(f"Error validating ModelParams: {e}")
+
+        # Check 5: (Optional) Inference readiness
+        if check_inference and checks["model_path_exists"]:
+            tool = model_entry["tool"]
+
+            if tool == "DLC":
+                # Check if DLC is available
+                if create_training_dataset is None or train_network is None:
+                    warnings.append(
+                        "DeepLabCut not installed - cannot verify inference readiness"
+                    )
+                else:
+                    # Verify model directory structure
+                    if model_path.suffix in [".yaml", ".yml"]:
+                        model_dir = model_path.parent
+                        # Look for trained model directories
+                        train_dirs = list(model_dir.rglob("**/train")) + list(
+                            model_dir.rglob("**/dlc-models")
+                        )
+                        if train_dirs:
+                            checks["inference_ready"] = True
+                        else:
+                            warnings.append(
+                                "No trained model directories found - "
+                                "model may not be trained yet"
+                            )
+            elif tool == "ndx-pose":
+                # For ndx-pose models, they're stored in NWB so can't run inference
+                warnings.append(
+                    "ndx-pose models cannot run inference directly - "
+                    "use original DLC/SLEAP project"
+                )
+            else:
+                warnings.append(
+                    f"Inference check not supported for tool: {tool}"
+                )
+
+        # Overall validation status
+        valid = (
+            checks["model_exists"]
+            and checks["model_path_exists"]
+            and checks["skeleton_valid"]
+            and checks["params_valid"]
+            and len(errors) == 0
+        )
+
+        result = {
+            "valid": valid,
+            "checks": checks,
+            "errors": errors,
+            "warnings": warnings,
+            "model_info": model_info,
+        }
+
+        # Log results
+        if valid:
+            logger.info(f"Model verification PASSED: {model_key}")
+            if warnings:
+                logger.warning(f"Warnings: {warnings}")
+        else:
+            logger.error(f"Model verification FAILED: {model_key}")
+            logger.error(f"Errors: {errors}")
+
+        return result
 
     def _get_latest_dlc_model_info(self, config: dict) -> dict:
         """Given a DLC project path, return available model info

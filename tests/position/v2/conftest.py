@@ -342,15 +342,3 @@ def mock_dlc_inference_output(tmp_path):
     df.to_csv(str(csv_path))
 
     return {"h5": h5_path, "csv": csv_path, "dataframe": df}
-
-
-@pytest.fixture
-def skip_if_no_dlc():
-    """Skip test if DeepLabCut is not available."""
-    try:
-        import deeplabcut  # noqa: F401
-
-        return False
-    except ImportError:
-        pytest.skip("DeepLabCut not available")
-        return True

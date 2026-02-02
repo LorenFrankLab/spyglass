@@ -27,7 +27,7 @@ from .data_downloader import DataDownloader
 # ------------------------------- TESTS CONFIG -------------------------------
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_POSE
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -92,11 +92,11 @@ def pytest_addoption(parser):
         help="Do not launch datajoint server in Docker.",
     )
     parser.addoption(
-        "--no-dlc",
+        "--no-pose",
         action="store_true",
-        dest="no_dlc",
+        dest="no_pose",
         default=False,
-        help="Skip downloads for and tests of DLC-dependent features.",
+        help="Skip downloads for and tests of pose estimation (DLC/SLEAP) features.",
     )
     parser.addoption(  # Allows for concurrency with other pytest runs
         "--container-name",
@@ -115,14 +115,14 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_DLC
+    global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS, NO_POSE
 
     TEST_FILE = "minirec20230622.nwb"
     TEARDOWN = not config.option.no_teardown
     VERBOSE = not config.option.quiet_spy
 
-    NO_DLC = config.option.no_dlc
-    pytest.NO_DLC = NO_DLC
+    NO_POSE = config.option.no_pose
+    pytest.NO_POSE = NO_POSE
 
     BASE_DIR = Path(config.option.base_dir).absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
@@ -141,7 +141,7 @@ def pytest_configure(config):
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
         verbose=VERBOSE,
-        download_dlc=not NO_DLC,
+        download_dlc=not NO_POSE,
     )
 
 
@@ -263,13 +263,13 @@ def mini_path(raw_dir):
 
 
 @pytest.fixture(scope="session")
-def no_dlc(request):
-    yield NO_DLC
+def no_pose(request):
+    yield NO_POSE
 
 
-skip_if_no_dlc = pytest.mark.skipif(
-    condition=lambda: getattr(pytest, "NO_DLC", False),
-    reason="Skipping DLC-dependent tests.",
+skip_if_no_pose = pytest.mark.skipif(
+    condition=lambda: getattr(pytest, "NO_POSE", False),
+    reason="Skipping pose estimation (DLC/SLEAP) tests.",
 )
 
 
@@ -937,8 +937,8 @@ def insert_project(
     bodyparts,
     mini_copy_name,
 ):
-    if NO_DLC:
-        pytest.skip("Skipping DLC-dependent tests.")
+    if NO_POSE:
+        pytest.skip("Skipping pose-dependent (e.g., DLC) tests.")
 
     from deeplabcut.utils.auxiliaryfunctions import read_config, write_config
 
