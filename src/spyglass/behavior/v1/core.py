@@ -66,7 +66,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             )
 
     def fetch_pose_datasets(
-        self, key: dict = None, format_for_moseq: bool = False
+        self, key: dict = dict(), format_for_moseq: bool = False
     ):
         """fetch pose information for a group of videos
 
@@ -101,7 +101,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             datasets = format_dataset_for_moseq(datasets, bodyparts)
         return datasets
 
-    def fetch_video_paths(self, key: dict = None):
+    def fetch_video_paths(self, key: dict = dict()):
         """fetch video paths for a group of videos
 
         Parameters
