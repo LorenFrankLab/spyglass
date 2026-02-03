@@ -1221,7 +1221,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        (analysis_file_name, units_object_id) = Curation().save_sorting_nwb(
+        analysis_file_name, units_object_id = Curation().save_sorting_nwb(
             key=key,
             sorting=sorting,
             timestamps=timestamps,

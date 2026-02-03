@@ -108,12 +108,12 @@ MYSQL_IMAGE=datajoint/mysql:8.0.18
 ```
 
 **Important:** If you change port or password, update your DataJoint config
-accordingly. You can either edit this file directly, or run the following in your python environment.
+accordingly. You can either edit this file directly, or run the following in
+your python environment.
 
 ```python
 dj.config.save_global()
 ```
-
 
 #### Management
 
@@ -152,8 +152,8 @@ docker compose ps
 docker compose exec mysql mysql -uroot -p
 ```
 
-This will securely prompt you for a password. For test cases, you can directly append the 
-password (e.g., `-ptutorial`).
+This will securely prompt you for a password. For test cases, you can directly
+append the password (e.g., `-ptutorial`).
 
 **Restart services:**
 
@@ -450,8 +450,8 @@ For shared/production databases:
 5. **Credential management:**
 
     - Never commit config files to git
-    - Use environment variables for CI/CD (e.g., 
-    [GitHub Actions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets))
+    - Use environment variables for CI/CD (e.g.,
+        [GitHub Actions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets))
     - Consider secrets management tools
 
 ### File Permissions
@@ -536,7 +536,8 @@ python -c "import datajoint as dj; dj.conn().ping()"
 ```
 
 ### Permission Denied
-Grant additional privileges to a given user in mysql: 
+
+Grant additional privileges to a given user in mysql:
 
 ```sql
 GRANT ALL PRIVILEGES ON *.* TO 'user'@'host';
@@ -573,7 +574,7 @@ For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
     ```bash
     # Backup
     docker exec spyglass-db mysqldump -uroot -ptutorial --all-databases > backup.sql
-    
+
     # Restore
     docker exec -i spyglass-db mysql -uroot -ptutorial < backup.sql
     ```
@@ -583,11 +584,12 @@ For more troubleshooting help, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
     ```bash
     # Backup
     mysqldump -u USER -p --all-databases > backup.sql
-    
+
     # Restore
     mysql -u USER -p < backup.sql
     ```
-```
+
+````
 
 ### Performance Tuning
 
@@ -600,7 +602,7 @@ docker run -d \
     -e MYSQL_ROOT_PASSWORD=tutorial \
     datajoint/mysql:8.0 \
     --innodb-buffer-pool-size=2G
-```
+````
 
 **Optimize tables:**
 

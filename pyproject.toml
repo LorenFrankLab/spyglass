@@ -30,28 +30,27 @@ authors = [
   { name = "Chris Brozdowski", email = "chris.broz@ucsf.edu" },
   { name = "Samuel Bray", email = "sam.bray@ucsf.edu" },
 ]
-requires-python = ">=3.9,<3.13"
+requires-python = ">=3.10,<3.13"
 classifiers = [
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.9",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
 ]
 dynamic = [ "version" ]
 dependencies = [
-  "black[jupyter]",
+  "black[jupyter]>26",
   "bottleneck",
   "dask",
-  "datajoint>=0.14.5",
+  "datajoint>=0.14.5,<2.0",
   # "ghostipy", # removed from list bc M1 users need to install pyfftw first
   "hdmf>=3.4.6",
   "ipympl",
   "matplotlib",
   "ndx-franklab-novela>=0.1",
-  "ndx-optogenetics==0.2.0",
+  "ndx-optogenetics==0.2",
   "ndx-pose",
   "non-local-detector",
   "numpy",

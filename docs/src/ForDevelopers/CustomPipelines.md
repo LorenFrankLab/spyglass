@@ -213,14 +213,14 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     ...
 
     def make_fetch(self, key):
-        one = SomeUpstreamTable.fetch1(...) # (1)
-        two = AnotherUpstreamTable.fetch1(...) # (2)
+        one = SomeUpstreamTable.fetch1(...)  # (1)
+        two = AnotherUpstreamTable.fetch1(...)  # (2)
 
         return [one, two]
 
     def make_compute(self, key, one, two):
         result = some_analysis_function(one, two)  # (3)
-        self_insert = {'result_field': result}  # (4)
+        self_insert = {"result_field": result}  # (4)
 
         return self_insert
 
@@ -232,7 +232,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
 2. `make_fetch` must be deterministic and idempotent.
     - Deterministic: given the same key, it always returns the same data.
     - Idempotent: calling it multiple times has the same effect as calling it
-      once.
+        once.
 3. `make_compute` runs time-consuming computations.
 4. `make_compute` should not modify the key or the database.
 5. `make_insert` modifies the database.

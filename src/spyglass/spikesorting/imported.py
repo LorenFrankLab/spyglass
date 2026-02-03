@@ -1,5 +1,3 @@
-import copy
-
 import datajoint as dj
 import pandas as pd
 import pynwb

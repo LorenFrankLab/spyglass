@@ -128,6 +128,10 @@ for label, interval_data in results.groupby("interval_labels"):
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
 - Add file issue checks to AnalysisNwbfile cleanup steps #1431
+- Update to latest `black` and `jupytext` versions #1508
+- Update minimum Python version to 3.10 #1508
+- Remove outdated cli scripts #1508
+- Pin datajoint version < 2.0 #1516
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
 
@@ -304,7 +308,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
     - Add coverage of decoding pipeline to pytests #1155
-- Allow python \< 3.13 #1169
+- Allow python < 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181

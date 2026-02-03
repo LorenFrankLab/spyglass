@@ -39,7 +39,7 @@ jobs:
        shell: bash -l {0}
     env:
       OS: ubuntu-latest
-      PYTHON: '3.9'
+      PYTHON: '3.10'
     services:
       mysql:
         image: datajoint/mysql:8.0
@@ -58,7 +58,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON }}
     - name: Set up conda
