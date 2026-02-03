@@ -14,6 +14,7 @@ from spyglass.common.common_behav import (  # noqa: F401
     convert_epoch_interval_name_to_position_interval_name,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
+from spyglass.position.utils_dlc import DLCProjectReader
 from spyglass.position.v1.dlc_utils import (
     file_log,
     find_mp4,
@@ -23,8 +24,6 @@ from spyglass.position.v1.dlc_utils import (
 from spyglass.position.v1.position_dlc_model import DLCModel
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
-
-from . import dlc_reader
 
 schema = dj.schema("position_v1_dlc_pose_estimation")
 
@@ -239,7 +238,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         # Trigger PoseEstimation
         if task_mode == "trigger":
-            dlc_reader.do_pose_estimation(
+            utils_dlc.do_pose_estimation(
                 video_path,
                 dlc_model,
                 project_path,
@@ -247,7 +246,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 **analyze_video_params,
             )
 
-        dlc_result = dlc_reader.PoseEstimation(output_dir)
+        dlc_result = DLCProjectReader(output_dir)
         creation_time = datetime.fromtimestamp(
             dlc_result.creation_time
         ).strftime("%Y-%m-%d %H:%M:%S")

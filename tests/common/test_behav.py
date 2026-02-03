@@ -100,7 +100,7 @@ def test_pos_interval_no_transaction(verbose_context, common, mini_restr):
     """Test no transaction"""
     before = common.PositionIntervalMap().fetch()
     with verbose_context:
-        common.PositionIntervalMap()._no_transaction_make(mini_restr)
+        common.PositionIntervalMap().make(mini_restr)
     after = common.PositionIntervalMap().fetch()
     expected_insertions = 4
     assert len(after) - len(before) == expected_insertions, (

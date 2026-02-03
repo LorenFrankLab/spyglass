@@ -164,7 +164,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        from . import dlc_reader
+        from spyglass.position import utils_dlc
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
@@ -177,7 +177,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         project_path = dlc_config["project_path"]
 
         # ---- Build and save DLC configuration (yaml) file ----
-        dlc_config = dlc_reader.read_yaml(project_path)[1] or read_config(
+        dlc_config = utils_dlc.read_yaml(project_path)[1] or read_config(
             config_path
         )
         dlc_config.update(
@@ -193,7 +193,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         )
 
         # Write dlc config file to base project folder
-        dlc_cfg_filepath = dlc_reader.save_yaml(project_path, dlc_config)
+        dlc_cfg_filepath = utils_dlc.save_yaml(project_path, dlc_config)
         # ---- create training dataset ----
         training_dataset_kwargs = {
             k: v
