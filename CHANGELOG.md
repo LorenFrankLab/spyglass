@@ -108,6 +108,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Update to latest `black` and `jupytext` versions #1508
 - Update minimum Python version to 3.10 #1508
 - Remove outdated cli scripts #1508
+- Pin datajoint version < 2.0 #1516
 
 ### Pipelines
 
