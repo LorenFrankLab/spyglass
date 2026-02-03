@@ -29,7 +29,7 @@ dependencies:
   - pybind11  # req by mountainsort4 -> isosplit5
   - pydotplus
   - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
-  - python>=3.9,<3.13
+  - python>=3.10,<3.13
   - pytorch<1.12.0
   - ripple_detection
   - seaborn
