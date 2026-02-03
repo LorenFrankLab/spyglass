@@ -7,7 +7,7 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.17.0
 #   kernelspec:
-#     display_name: Python 3 (ipykernel)
+#     display_name: pv2
 #     language: python
 #     name: python3
 # ---
@@ -48,47 +48,26 @@
 # - Retrieving and visualizing results
 #
 
-# Here is a schematic showing the V2 pipeline tables:
-#
-# ```
-# ┌──────────┐
-# │BodyPart  │ (admin-only, shared across lab)
-# └────┬─────┘
-#      │
-# ┌────▼─────┐      ┌─────────────┐
-# │Skeleton  │      │VidFileGroup │
-# └────┬─────┘      └──────┬──────┘
-#      │                   │
-# ┌────▼────────┐   ┌──────▼──────┐
-# │ModelParams  │   │  Model      │
-# └────┬────────┘   └──────┬──────┘
-#      │                   │
-#      │          ┌────────▼─────────┐
-#      └──────────►  PoseEstim       │ (run inference)
-#                 └────────┬─────────┘
-#                          │
-#                 ┌────────▼─────────┐
-#                 │  PoseParams      │
-#                 └────────┬─────────┘
-#                          │
-#                 ┌────────▼─────────┐
-#                 │  PoseV2          │ (process & smooth)
-#                 └──────────────────┘
-# ```
-#
+# +
+import datajoint as dj
+
+dj.config.load("../dj_local_conf.json")  # TODO: REMOVE BEFORE MERGE
+
+from spyglass.position.v2 import video, train, estim
+
+dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim)
+# -
 
 # ### Table of Contents<a id='TableOfContents'></a>
 #
-# [`Model`](#Model)<br>
-# [`PoseEstim`](#PoseEstim)<br>
-# [`PoseParams`](#PoseParams)<br>
-# [`PoseV2`](#PoseV2)<br>
-# [`Fetching Data`](#FetchData)<br>
-# [`Visualization`](#Visualization)<br>
-# [`V1 vs V2 Comparison`](#Comparison)<br>
-#
-
-# **You can click on any header to return to the Table of Contents**
+# - [`BodyParts`](#BodyParts)
+# - [`Model`](#Model)
+# - [`PoseEstim`](#PoseEstim)
+# - [`PoseParams`](#PoseParams)
+# - [`PoseV2`](#PoseV2)
+# - [`Fetching Data`](#FetchData)
+# - [`Visualization`](#Visualization)
+# - [`V1 vs V2 Comparison`](#Comparison)
 #
 
 # ### Imports
@@ -98,16 +77,11 @@
 # %autoreload 2
 
 # +
-import os
 from pathlib import Path
 
-import datajoint as dj
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 
-import spyglass.common as sgc
-from spyglass.position import PositionOutput
 from spyglass.position.v2 import (
     BodyPart,
     Model,
@@ -116,11 +90,6 @@ from spyglass.position.v2 import (
     PoseV2,
     Skeleton,
 )
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -136,11 +105,11 @@ warnings.simplefilter("ignore", category=ResourceWarning)
 #
 
 # For most experiments, you'll start with an existing trained model rather than
-# training from scratch. Position V2 supports two import methods:
+# training from scratch. Position V2 supports different import methods:
 #
 # 1. **DLC config.yaml**: Import models trained with DeepLabCut
 # 2. **NWB file**: Import models from any ndx-pose compatible tool
-#
+# 3. **SLEAP config**: `NotYetImplemented`
 
 # Let's start by looking at the Model table:
 #
@@ -149,22 +118,22 @@ Model()
 
 # #### Import from DeepLabCut Project
 #
-
-# If you have a DLC project with a trained model, you can import it directly.
-# For this demo, we'll use the example project from the DLC repository.
-#
-# First, clone the DLC repo and run the test script to create an example project:
+# If you have a DeepLabCut model already trained, you can import it by changing
+# the following to the path to your `config.yaml`. If not, use the following
+# codeblock to download and set up an example project.
 #
 # ```bash
-# cd /your/desired/path
+# # cd /your/desired/path
 # git clone https://github.com/DeepLabCut/DeepLabCut/
 # python ./DeepLabCut/examples/testscript.py
 # ```
-#
 
 # +
 # Point to your DLC project config file
 dlc_path = Path.home() / "DeepLabCut"
+dlc_path = (
+    Path.home() / "wrk" / "alt" / "DeepLabCut"
+)  # TODO: REMOVE BEFORE MERGE
 config_path = dlc_path / "examples" / "TEST-Alex-2025-09-08" / "config.yaml"
 
 # Import the model
@@ -345,7 +314,6 @@ params_key = {"pose_params": "default"}
 # For custom tracking scenarios:
 #
 
-# +
 PoseParams.insert_custom(
     params_name="tutorial_custom",
     orient={
@@ -374,7 +342,6 @@ PoseParams.insert_custom(
     },
     skip_duplicates=True,
 )
-# -
 
 # Inspect the parameters:
 #

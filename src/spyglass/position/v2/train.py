@@ -151,25 +151,27 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     definition = """
     skeleton_id: varchar(32)
     ---
-    bodyparts : blob # list of bodypart names
     edges=NULL: blob # list of edge pairs, List[Tuple[str, str]]
     hash=NULL : varchar(32) # hash of graph for duplicate detection
     """
 
-    # TODO: Should BodyPart be a part table to foreign key reference?
+    class BodyPart(dj.Part):
+        definition = """
+        -> Skeleton
+        -> BodyPart
+        """
+
     # Edges are optional to allow unconnected body parts
 
     contents = [
-        ["1LED", ["whiteLED"], "", "1042f79ba7ecbe933e43d9e23b8bb3e2"],
+        ["1LED", "", "1042f79ba7ecbe933e43d9e23b8bb3e2"],
         [
             "2LED",
-            ["greenLED", "redLED_C"],
             [("greenLED", "redLED_C")],
             "3bac2dea32a574e9d97917dc8ea8480a",
         ],
         [
             "4LED",
-            ["greenLED", "redLED_C", "redLED_L", "redLED_R"],
             [
                 ("greenLED", "redLED_C"),
                 ("greenLED", "redLED_L"),
@@ -178,6 +180,44 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             "cfe386902f8c79d228e8ae628079945e",
         ],
     ]
+
+    # Bodyparts for default skeletons (populated via _populate_default_bodyparts)
+    _default_bodyparts = {
+        "1LED": ["whiteLED"],
+        "2LED": ["greenLED", "redLED_C"],
+        "4LED": ["greenLED", "redLED_C", "redLED_L", "redLED_R"],
+    }
+
+    @classmethod
+    def _populate_default_bodyparts(cls):
+        """Populate BodyPart part table for default skeleton contents."""
+        for skeleton_id, bodyparts in cls._default_bodyparts.items():
+            if not (cls & {"skeleton_id": skeleton_id}):
+                continue  # Skip if skeleton doesn't exist yet
+            for bp in bodyparts:
+                cls.BodyPart.insert1(
+                    {"skeleton_id": skeleton_id, "bodypart": bp},
+                    skip_duplicates=True,
+                )
+
+    def get_bodyparts(self, skeleton_id: str = None) -> List[str]:
+        """Fetch bodyparts for a skeleton from the BodyPart part table.
+
+        Parameters
+        ----------
+        skeleton_id : str, optional
+            Skeleton ID to fetch bodyparts for. If None, uses current restriction.
+
+        Returns
+        -------
+        List[str]
+            List of bodypart names for this skeleton.
+        """
+        if skeleton_id:
+            query = self.BodyPart & {"skeleton_id": skeleton_id}
+        else:
+            query = self.BodyPart & self.restriction
+        return list(query.fetch("bodypart"))
 
     # ----------------- static helpers -----------------
     @staticmethod
@@ -350,7 +390,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         # Check for graph matches
         for row in checks:
-            G_old = self._build_labeled_graph(row["bodyparts"], row["edges"])
+            row_bodyparts = self.get_bodyparts(row["skeleton_id"])
+            G_old = self._build_labeled_graph(row_bodyparts, row["edges"])
 
             def node_match(a, b):
                 return self._fuzzy_equal(
@@ -374,12 +415,17 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         super().insert1(
             dict(
                 insert_pk,
-                bodyparts=bodyparts,
                 edges=edges,
                 hash=shape_hash,
             ),
             **kwargs,
         )
+
+        # Insert bodyparts into part table
+        bodypart_entries = [
+            {"skeleton_id": skeleton_id, "bodypart": bp} for bp in bodyparts
+        ]
+        self.BodyPart.insert(bodypart_entries, skip_duplicates=True)
 
         return insert_pk
 
@@ -2095,11 +2141,10 @@ class Model(SpyglassMixin, dj.Computed):
             skeleton_id = params_entry["skeleton_id"]
 
             if skeleton_id and (Skeleton() & {"skeleton_id": skeleton_id}):
-                skeleton_entry = (
-                    Skeleton() & {"skeleton_id": skeleton_id}
-                ).fetch1()
+                skeleton_tbl = Skeleton() & {"skeleton_id": skeleton_id}
+                skeleton_entry = skeleton_tbl.fetch1()
 
-                bodyparts = skeleton_entry["bodyparts"]
+                bodyparts = skeleton_tbl.get_bodyparts(skeleton_id)
                 edges = skeleton_entry["edges"]
 
                 if not bodyparts or len(bodyparts) == 0:
