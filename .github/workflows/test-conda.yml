@@ -10,8 +10,17 @@ on:
   schedule:  # once a day at midnight UTC
     - cron: '0 0 * * *'
   pull_request: # requires approval for first-time contributors
-    types: [synchronize, opened, reopened, labeled]
+    types: [synchronize, opened, reopened, labeled, closed]
   workflow_dispatch: # Manually trigger with 'Run workflow' button
+    inputs:
+      test_mode:
+        description: 'Test mode (fast or full)'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - fast
+          - full
 
 concurrency: # Replace Cancel Workflow Action
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,45 +28,69 @@ concurrency: # Replace Cancel Workflow Action
 
 jobs:
   run-tests:
+    # Skip if PR is closed but not merged
+    if: |-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     defaults:
      run:
        shell: bash -l {0}
     env:
       OS: ubuntu-latest
-      PYTHON: '3.9'
+      PYTHON: '3.10'
     services:
       mysql:
         image: datajoint/mysql:8.0
-        env: # args: mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial -e "CMD;"
+        # args: mysql -h 127.0.0.1 -P 3308 -uroot -ptutorial -e "CMD;"
+        env:
           MYSQL_DATABASE: localhost
           MYSQL_ROOT_PASSWORD: tutorial
         ports:
           - 3308:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
     steps:
     - name: Checkout
       uses: actions/checkout@v4
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ env.PYTHON }}
     - name: Set up conda
       uses: conda-incubator/setup-miniconda@v3
       with:
         activate-environment: spyglass
-        environment-file: environment.yml
+        environment-file: environments/environment.yml
         miniforge-version: latest
         use-mamba: true
     - name: Install apt dependencies
       run: |
         sudo apt-get update # First mysql options
-        sudo apt-get install mysql-client libmysqlclient-dev libgirepository1.0-dev -y
-        sudo apt-get install ffmpeg libsm6 libxext6 -y # non-dlc position deps
+        # non-dlc position deps
+        sudo apt-get install \
+          mysql-client libmysqlclient-dev libgirepository1.0-dev -y
+        sudo apt-get install ffmpeg libsm6 libxext6 -y
     - name: Run pip install for test deps
       run: |
         pip install --quiet .[test]
+    - name: Cache test data
+      id: cache-test-data
+      uses: actions/cache@v4
+      with:
+        path: |
+          tests/_data/raw/
+          tests/_data/video/
+        key: |-
+          test-data-${{ hashFiles('.github/workflows/test-conda.yml') }}-v1
+        restore-keys: |
+          test-data-
     - name: Download data
+      if: steps.cache-test-data.outputs.cache-hit != 'true'
       env:
         BASEURL: https://ucsf.box.com/shared/static/
         NWB_URL: k3sgql6z475oia848q1rgms4zdh4rkjn.nwb
@@ -78,12 +111,51 @@ jobs:
         curl_opts $VID_DIR $VID_TWO $VID2URL
     - name: Move actions coveragerc
       run: mv tests/.coveragerc .coveragerc
-    - name: Run tests
+    - name: Determine test mode
+      id: test_mode
+      run: |
+        # Determine which tests to run based on trigger
+        if [[ "${{ github.event_name }}" == "push" ]]; then
+          # Fast tests on push
+          echo "mode=fast" >> $GITHUB_OUTPUT
+          echo "marker_args=-m 'not slow and not very_slow'" \
+            >> $GITHUB_OUTPUT
+          echo "description=Fast tests" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "pull_request" ]] \
+          && [[ "${{ github.event.action }}" == "closed" ]] \
+          && [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+          # Full suite on PR merge
+          echo "mode=full" >> $GITHUB_OUTPUT
+          echo "marker_args=" >> $GITHUB_OUTPUT
+          echo "description=Full test suite" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          # Manual trigger - use input
+          if [[ "${{ github.event.inputs.test_mode }}" == "fast" ]]; then
+            echo "mode=fast" >> $GITHUB_OUTPUT
+            echo "marker_args=-m 'not slow and not very_slow'" \
+              >> $GITHUB_OUTPUT
+            echo "description=Fast tests (manual)" >> $GITHUB_OUTPUT
+          else
+            echo "mode=full" >> $GITHUB_OUTPUT
+            echo "marker_args=" >> $GITHUB_OUTPUT
+            echo "description=Full suite (manual)" >> $GITHUB_OUTPUT
+          fi
+        else
+          # Full suite for schedule and other PR events
+          # (synchronize, opened, etc.)
+          echo "mode=full" >> $GITHUB_OUTPUT
+          echo "marker_args=" >> $GITHUB_OUTPUT
+          echo "description=Full test suite" >> $GITHUB_OUTPUT
+        fi
+    - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
         pytest --no-docker --no-dlc \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
+          ${{ steps.test_mode.outputs.marker_args }} \
           tests/
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
+        flags: ${{ steps.test_mode.outputs.mode }}-tests
+        name: ${{ steps.test_mode.outputs.description }}

@@ -1,0 +1,42 @@
+# 1. INSTALL CORRECT DRIVER for your GPU-equipped machine.
+#    see https://stackoverflow.com/questions/30820513/what-is-the-correct-version-of-cuda-for-my-nvidia-driver/30820690
+# 2. install: mamba env create -f environment_dlc.yml
+#    update existing install:  mamba env update -f environment_dlc.yml
+# 2. After installing...
+#    run: conda activate spyglass-dlc
+#    run: mamba env config vars set LD_LIBRARY_PATH=~/path/to/<anaconda3 or mambaforge>/envs/spyglass-position/lib/
+#    run: mamba install -c conda-forge wxpython
+name: spyglass-dlc
+channels:
+  - conda-forge
+  # - defaults # deprecated
+  - franklab
+  - edeno
+  - pytorch   # dlc-only
+  - anaconda  # dlc-only, for cudatoolkit
+dependencies:
+  - bottleneck
+  - cudatoolkit=11.3   # dlc-only
+  - ffmpeg   # dlc-only
+  - ipympl
+  - jupyterlab>=3.*
+  - libgcc   # dlc-only
+  - matplotlib
+  - non_local_detector
+  - numpy
+  - pip>=20.2.*
+  - position_tools
+  - pybind11  # req by mountainsort4 -> isosplit5
+  - pydotplus>=2.0.*
+  - pyfftw<=0.12.0  # ghostipy req. install from conda-forge for Mac ARM
+  - python>=3.10,<3.13
+  - pytorch<1.12.0
+  - ripple_detection
+  - seaborn
+  - torchaudio  # dlc-only
+  - torchvision  # dlc-only
+  - track_linearization>=2.3
+  - pip:
+      - ghostipy # for common_filter
+      - mountainsort4
+      - ..[dlc]

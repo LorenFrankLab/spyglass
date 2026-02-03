@@ -13,7 +13,66 @@ from spyglass.common.common_behav import VideoFile
 
 VideoFile().alter()
 VideoFile.update_entries()
+
+from spyglass.common.common_filter import FirFilterParameters
+from spyglass.decoding.v1.core import DecodingParameters
+
+FirFilterParameters().alter()
+DecodingParameters().alter()
 ```
+
+#### LFPBandV1 Fix
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run the following after updating:
+
+```python
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()
+```
+
+### Breaking Changes
+
+#### Decoding Results Structure
+
+The `intervals` dimension has been removed from decoding results. Results from
+multiple decoding intervals are now concatenated along the `time` dimension with
+an `interval_labels` coordinate tracking which interval each time point belongs
+to.
+
+**Why**: Eliminates NaN padding when intervals have different lengths, reducing
+memory usage significantly.
+
+**Migration guide**:
+
+```python
+# OLD (before v0.5.6):
+results.isel(intervals=0)  # Get first interval
+for i in range(results.sizes["intervals"]):  # Iterate intervals
+    interval_data = results.isel(intervals=i)
+
+# NEW (v0.5.6+):
+results.where(results.interval_labels == 0, drop=True)  # Get first interval
+for label in np.unique(results.interval_labels.values):  # Iterate intervals
+    if (
+        label >= 0
+    ):  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+        interval_data = results.where(results.interval_labels == label, drop=True)
+
+# Or use groupby:
+for label, interval_data in results.groupby("interval_labels"):
+    if label >= 0:
+        # process interval_data
+        pass
+```
+
+**interval_labels values**:
+
+- `0, 1, 2, ...` - Sequential interval indices (0-indexed)
+- `-1` - Time points outside any decoding interval (only when
+    `estimate_decoding_params=True`)
 
 ### Documentation
 
@@ -21,14 +80,16 @@ VideoFile.update_entries()
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
+- Add support for bandstop filter type #1464
 
 ### Infrastructure
 
+- Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
-- Fix error from unlinked object in `AnalysisNwbfile.create` #1396
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
 - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
@@ -36,16 +97,32 @@ VideoFile.update_entries()
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
 - Allow rechecking of recomputes #1380, #1413
-- Set default codecov threshold for test fail, disable patch check #1370, #1372
-- Simplify PR template #1370
-- Add `SpyglassIngestion` class to centralize functionality #1377, #1423
+- Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
+    #1484, #1489, #1507
 - Pin `ndx-optogenetics` to 0.2.0 #1458
+- Cleanup bug when fetching raw files from DANDI #1469
+- Refactor pytests for speed, run fast tests on push #1440
+- Allow for permissive name selection when identifying objects in ingestion nwb
+    #1490
+- Update fixes for accessing files from DANDI #1477
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422,
+    #1505
+- Improve export process for speed and generalization #1387
+- Additional methods for updating files for DANDI standards #1387
+- Implementation of union and intersect methods for restriction graphs #1387
+- Add file issue checks to AnalysisNwbfile cleanup steps #1431
+- Update to latest `black` and `jupytext` versions #1508
+- Update minimum Python version to 3.10 #1508
+- Remove outdated cli scripts #1508
 
 ### Pipelines
 
 - Behavior
+
     - Add methods for calling moseq visualization functions #1374
+
 - Common
+
     - Add tables for storing optogenetic experiment information #1312
     - Remove wildcard matching in `Nwbfile().get_abs_path` #1382
     - Change `IntervalList.insert` to `cautious_insert` #1423
@@ -56,19 +133,45 @@ VideoFile.update_entries()
     - Fix typo in VideoFile.make #1427
     - Fix bug in TaskEpoch.make so that it correctly handles multi-row task tables
         from NWB #1433
-    - Add custom/dynamic `AnalysisNwbfile` creation #1435
+    - Add custom/dynamic `AnalysisNwbfile` creation #1435, #1496, #1498
     - Allow nullable `DataAcquisitionDevice` foreign keys #1455
+    - Remove pre-existing `Units` from created analysis nwb files #1453
+    - Allow multiple VideoFile entries during ingestion #1462
+    - Handle epoch formats with varying zero-padding #1459, #1492
+    - Reduce lock conflicts between users during ingestion #1483
+    - Add the table `RawCompassDirection` for importing orientation data from NWB
+        files #1466
     - Improve error transparency on duplicate `Electrode` ids #1454
     - Add position v2 #1317
+
 - Decoding
+
     - Ensure results directory is created if it doesn't exist #1362
+    - Change BLOB fields to LONGBLOB in DecodingParameters #1463
+    - Fix `PositionGroup.fetch_position_info()` returning empty DataFrame when
+        merge IDs are fetched in non-chronological order #1471
+    - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
+    - **BREAKING**: Remove `intervals` dimension from decoding results. Results
+        from multiple intervals are now concatenated along the `time` dimension
+        with an `interval_labels` coordinate to track interval membership. This
+        eliminates NaN padding and reduces memory usage. See migration guide
+        above.
+
+- LFP
+
+    - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
+
 - Position
+
     - Ensure video files are properly added to `DLCProject` # 1367
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+
 - Spikesorting
+
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
+    - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -187,7 +290,7 @@ VideoFile.update_entries()
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
     - Add coverage of decoding pipeline to pytests #1155
-- Allow python \< 3.13 #1169
+- Allow python < 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181

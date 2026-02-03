@@ -1,5 +1,6 @@
 import datajoint as dj
 import numpy as np
+import pynwb
 import pytest
 
 from tests.conftest import skip_if_no_pose
@@ -24,8 +25,8 @@ def test_dlc_video_populate(populate_dlc_video):
     assert populate_dlc_video, "DLCPosVideo table not populated correctly"
 
 
+@pytest.mark.slow
 def test_null_position(common, sgp, mini_dict):
-    import pynwb
 
     pos_tbl = sgp.v1.position_dlc_selection.DLCPosV1()
     fname = pos_tbl.make_null_position_nwb(mini_dict)["analysis_file_name"]

@@ -10,7 +10,7 @@ from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
 
 # typing alias compatible with Python 3.9
-IngestionEntries = Dict["IngestionMixin", List[dict]]
+IngestionEntries = dict["IngestionMixin", list[dict]]
 # How IngestionMixin handles generated entries from NWB objects
 # Dict keys are IngestionMixin table classes, or FreeTable Table objects
 # Values are lists of dicts to insert into those tables
@@ -41,10 +41,11 @@ class IngestionMixin(BaseMixin):
 
     """
 
-    _expected_duplicates = False
+    _expected_duplicates = False  # If True, entries in this table are valid to be shared across sessions
     _prompt_insert = False
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
+    _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
 
     @property
     def table_key_to_obj_attr(
@@ -110,7 +111,10 @@ class IngestionMixin(BaseMixin):
         base_key = base_key.copy()  # avoid modifying original
 
         # For table objects, generate entry(s) for each row
-        if hasattr(nwb_obj, "to_dataframe"):
+        if (
+            hasattr(nwb_obj, "to_dataframe")
+            and not self._single_entry_per_table
+        ):
             obj_df = nwb_obj.to_dataframe()
             entries = sum(
                 [
@@ -159,13 +163,24 @@ class IngestionMixin(BaseMixin):
         ]
 
         if self._source_nwb_object_name:
+            if isinstance(self._source_nwb_object_name, str):
+                self._source_nwb_object_name = [self._source_nwb_object_name]
             matching_objects = [
                 obj
                 for obj in matching_objects
-                if getattr(obj, "name", None) == self._source_nwb_object_name
+                if self.sanitize_nwb_object_name(getattr(obj, "name", None))
+                in [
+                    self.sanitize_nwb_object_name(name)
+                    for name in self._source_nwb_object_name
+                ]
             ]
 
         return matching_objects
+
+    @staticmethod
+    def sanitize_nwb_object_name(name: Optional[str]) -> Optional[str]:
+        """Sanitize NWB object name for case-insensitive and space-insensitive matching."""
+        return name.lower().replace(" ", "") if name else None
 
     def _insert_logline(self, nwb_file_name=None, n_entries=0, table=None):
         """Log line for insert_from_nwbfile."""
@@ -249,11 +264,15 @@ class IngestionMixin(BaseMixin):
 
         # validate that new entries are consistent with existing entries
         if self._expected_duplicates:
-            self.validate_duplicates(entries)
+            entries_to_insert = self.validate_duplicates(entries)
+        else:
+            entries_to_insert = entries
 
         # run insertions
         if not dry_run:
-            self._run_nwbfile_insert(entries, nwb_file_name=nwb_file_name)
+            self._run_nwbfile_insert(
+                entries_to_insert, nwb_file_name=nwb_file_name
+            )
 
         return entries
 
@@ -261,21 +280,12 @@ class IngestionMixin(BaseMixin):
         self, entries: IngestionEntries, nwb_file_name: str = None
     ) -> None:
         """Run insert on compiled Dict[TableObject, inserts]."""
-
-        def expect_dupes(tbl):
-            """Allow table to override self._expected_duplicates."""
-            # Implemented to default to self for FreeTable instances
-            return (
-                getattr(table, "_expected_duplicates", None)
-                or self._expected_duplicates
-            )
-
         # An integrity here probably means a parallel insert was dropped
         # check debug_backup in parent func for entries that were dropped
         for table, table_entries in entries.items():
             table.insert(
                 table_entries,
-                skip_duplicates=expect_dupes(table),
+                skip_duplicates=False,
                 allow_direct_insert=True,
             )
             self._insert_logline(nwb_file_name, len(table_entries), table)
@@ -286,6 +296,9 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
+                logger.info(
+                    f"Key {key} missing required attribute {attr.name}."
+                )
                 return False
         return True
 
@@ -344,13 +357,27 @@ class IngestionMixin(BaseMixin):
         entry_dict : dict or Dict[dj.Table, List[dict]]
             The new entry or dict of table entries to validate against existing
             entries in the database.
+
+        Returns
+        -------
+        dict or Dict[dj.Table, List[dict]]
+            The new entries to insert after validation. Avoids need to flag
+            skip_duplicates
         """
+        entries_to_insert = dict()
         for table, table_entries in entry_dict.items():
-            for entry in self._adjust_keys_for_entry(table_entries):
-                self.validate1_duplicate(table, entry)
+            if isinstance(table, type):
+                table = table()  # instantiate table object if class provided
+
+            entries_to_insert[table] = []
+            for table_entry in table_entries:
+                if entry := self.validate1_duplicate(table, table_entry):
+                    entries_to_insert[table].append(entry)
+
+        return entries_to_insert
 
     def validate1_duplicate(self, tbl, new_key):
-        """If matching primary key, check for consistency in secondary keys.
+        """Validate a single new entry against existing entries in the database.
 
         If divergence, prompt user whether to accept existing value
 
@@ -360,22 +387,34 @@ class IngestionMixin(BaseMixin):
             The table to validate against.
         new_key : dict
             The new key to validate against existing entries in the database.
+
+        Returns
+        -------
+        dict or None
+            The new entry to insert after validation, or None if the entry
+            already exists and is consistent.
         """
         # NOTE: switching from `self` to `tbl` to allow validation from
         # FreeTable instances captured with `parts(as_objects=True)`
+        adjusted_entries = tbl._adjust_keys_for_entry([new_key])
+        if not adjusted_entries:
+            return  # entry filtered out by adjustment
 
-        # If novel entry, nothing to validate
-        if not (query := tbl & new_key):
-            return
+        adj_new_key = adjusted_entries[0]
+        primary_key = {
+            k: v for k, v in adj_new_key.items() if k in tbl.primary_key
+        }
+        if not (query := (tbl & primary_key)):
+            return new_key  # If novel primary key, nothing to validate
 
         existing = query.fetch1()
 
-        for key in set(new_key).union(existing):
-            if not self._unequal_vals(key, new_key, existing):
+        for key in set(adj_new_key).union(existing):
+            if not self._unequal_vals(key, adj_new_key, existing):
                 continue  # skip if values are equal
             if not accept_divergence(
                 key,
-                new_key.get(key),
+                adj_new_key.get(key),
                 existing.get(key),
                 self._test_mode,
                 to_camel_case(tbl.full_table_name.split(".")[-1]).strip("`"),
@@ -385,8 +424,10 @@ class IngestionMixin(BaseMixin):
                 raise dj.errors.DuplicateError(
                     f"Attempted entry in {self.camel_name} already exists "
                     + f"with different values for {key}: "
-                    + f"{new_key.get(key)} != {existing.get(key)}"
+                    + f"{adj_new_key.get(key)} != {existing.get(key)}"
                 )
+
+        return  # validated existing entry, nothing to insert
 
     @staticmethod
     def _unequal_vals(key, a, b):

@@ -18,7 +18,7 @@
 # ## Intro
 #
 
-# Welcome to [Spyglass](https://lorenfranklab.github.io/spyglass/0.4/),
+# Welcome to [Spyglass](https://lorenfranklab.github.io/spyglass/),
 # a [DataJoint](https://github.com/datajoint/datajoint-python/)
 # pipeline maintained by the [Frank Lab](https://franklab.ucsf.edu/) at UCSF.
 #
@@ -30,6 +30,18 @@
 # 1. Set up your local environment
 # 2. Connect to a database
 #
+# **Quick Start:** For most users, we recommend using our automated installer:
+#
+# ```bash
+# git clone https://github.com/LorenFrankLab/spyglass.git
+# cd spyglass
+# python scripts/install.py
+# ```
+#
+# The installer handles environment creation, database setup, and configuration.
+# See [QUICKSTART.md](../QUICKSTART.md) for details. The sections below provide
+# manual installation instructions for advanced users or troubleshooting.
+#
 
 # ## Local environment
 #
@@ -37,7 +49,8 @@
 # Skip this step if you're ...
 #
 # 1. Running the tutorials on [JupyterHub](https://spyglass.hhmi.2i2c.cloud/)
-# 2. A member of the Frank Lab members. Instead, ssh to a shared machine.
+# 2. A member of the Frank Lab. Instead, ssh to a shared machine and run `scripts/setup_franklab.sh`
+# 3. Using the automated installer (`python scripts/install.py`) - it handles this for you
 #
 
 # ### Tools
@@ -187,24 +200,44 @@
 #
 # ### Installation
 #
-# In a terminal, ...
+# #### Recommended: Automated Installer
+#
+# The easiest way to install Spyglass is with our automated installer:
+#
+# ```bash
+# git clone https://github.com/LorenFrankLab/spyglass.git
+# cd spyglass
+# python scripts/install.py
+# ```
+#
+# The installer will:
+# - Check prerequisites (Python version, conda/mamba)
+# - Create a conda environment with all dependencies
+# - Optionally set up a local database with Docker Compose
+# - Configure Spyglass directories and settings
+# - Validate the installation
+#
+# See [QUICKSTART.md](../QUICKSTART.md) for full details and options.
+#
+# #### Manual Installation
+#
+# For manual installation, in a terminal:
 #
 # 1. Navigate to your project directory.
 # 2. Use `git` to download the Spyglass repository.
 # 3. Navigate to the newly downloaded directory.
-# 4. Create a `mamba` environment with either the standard `environment.yml` or
-#    the `environment_position.yml`, if you intend to use the full position
-#    pipeline. The latter will take longer to install.
+# 4. Create a `mamba` environment with either `environments/environment.yml` (full) or
+#    `environments/environment_min.yml` (minimal, faster install).
 # 5. Open this notebook with VSCode
 #
-# Commands for the steps above ...
+# Commands for the steps above:
 #
 # ```bash
-# # cd /your/project/directory/ # 1
-# git clone https://github.com/LorenFrankLab/spyglass/ # 2
-# # cd spyglass # 3
-# mamba env create -f environment.yml # 4
-# code notebooks/00_Setup.ipynb # 5
+# cd /your/project/directory/             # 1
+# git clone https://github.com/LorenFrankLab/spyglass/  # 2
+# cd spyglass                             # 3
+# mamba env create -f environments/environment_min.yml # 4 (or environments/environment.yml for full)
+# code notebooks/00_Setup.ipynb           # 5
 # ```
 #
 # Next, within VSCode,
@@ -282,7 +315,7 @@
 #
 # ```bash
 # # cd /path/to/spyglass # 1
-# mamba env create -f environment_dlc.yml # 2
+# mamba env create -f environments/environment_dlc.yml # 2
 # mamba activate spyglass-dlc # 3
 # ```
 #
@@ -301,7 +334,7 @@
 #
 # ```bash
 # # cd /path/to/spyglass # 1
-# mamba env create -f environment_moseq_cpu.yml # 2
+# mamba env create -f environments/environment_moseq_cpu.yml # 2
 # mamba activate spyglass-moseq-cpu # 3
 # ```
 #
@@ -319,31 +352,20 @@
 
 # You have a few options for databases.
 #
-# 1. Connect to an existing database.
-# 2. Run your own database with [Docker](#running-your-own-database)
-# 3. JupyterHub (database pre-configured, skip this step)
+# 1. **Automated setup** (recommended): Use `python scripts/install.py --docker` or `--remote`
+# 2. Connect to an existing database manually
+# 3. Run your own database with [Docker Compose](#running-your-own-database)
+# 4. JupyterHub (database pre-configured, skip this step)
 #
 # Your choice above should result in a set of credentials, including host name,
 # host port, user name, and password. Note these for the next step.
 #
+# For detailed database setup instructions, see the [Database Setup Guide](https://lorenfranklab.github.io/spyglass/latest/DATABASE/).
+#
 # <details><summary>Note for MySQL 8 users, including Frank Lab members</summary>
 #
 # Using a MySQL 8 server, like the server hosted by the Frank Lab, will
-# require DataJoint >= 0.14.2. To keep up to data with the latest DataJoint
-# features, install from GitHub
-#
-# ```bash
-# # cd /location/for/datajoint/source/files/
-# git clone https://github.com/datajoint/datajoint-python
-# pip install ./datajoint-python
-# ```
-#
-# You can then periodically fetch updates with the following commands...
-#
-# ```bash
-# # cd /location/for/datajoint/source/files/datajoint-python
-# git pull origin master
-# ```
+# require DataJoint >= 0.14.2.
 #
 # </details>
 #
@@ -359,70 +381,66 @@
 # [database management](https://lorenfranklab.github.io/spyglass/latest/ForDevelopers/Management).
 #
 
-# ### Running your own database with Docker
+# ### Running your own database with Docker Compose
 #
 
-# - First, [install Docker](https://docs.docker.com/engine/install/).
-# - Add yourself to the
-#   [`docker` group](https://docs.docker.com/engine/install/linux-postinstall/) so
-#   that you don't have to be sudo to run docker.
-# - Download the docker image for `datajoint/mysql:8.0`.
+# The easiest way to run a local database is with Docker Compose:
 #
-#   ```bash
-#   docker pull datajoint/mysql:8.0
-#   ```
+# ```bash
+# # From the spyglass repository root
+# docker compose up -d
+# ```
 #
-# - When run, this is referred to as a 'Docker container'
-# - Next start the container with a couple additional pieces of info...
+# This uses the included `docker-compose.yml` file to create a properly configured
+# MySQL container with persistent storage. To customize settings (port, password),
+# copy `example.env` to `.env` and edit as needed.
 #
-#   - Root password. We use `tutorial`.
-#   - Database name. Here, we use `spyglass-db`.
-#   - Port mapping. Here, we map 3306 across the local machine and container.
+# **Or use the installer:**
+# ```bash
+# python scripts/install.py --docker
+# ```
 #
-#   ```bash
-#   docker run --name spyglass-db -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql:8.0
-#   ```
-#
-# - For data to persist after terminating the container,
-#   [attach a volume](https://docs.docker.com/storage/volumes/) when running:
-#
-#   ```bash
-#   docker volume create dj-vol
-#   docker run --name spyglass-db -v dj-vol:/var/lib/mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=tutorial datajoint/mysql
-#   ```
-#
-# Docker credentials are as follows:
+# Docker credentials (default):
 #
 # - Host: `localhost`
 # - User: `root`
 # - Password: `tutorial`
 # - Port: `3306`
 #
+# **Management commands:**
+# ```bash
+# docker compose up -d      # Start
+# docker compose stop       # Stop (keeps data)
+# docker compose down       # Stop and remove container (keeps data)
+# docker compose down -v    # Stop and delete all data
+# docker compose logs mysql # View logs
+# ```
+#
+# For more details, see the [Database Setup Guide](https://lorenfranklab.github.io/spyglass/latest/DATABASE/).
+#
 
 # ### Config
 #
 
-# Spyglass will load settings the 'custom' section of your DataJoint config file.
-# The code below will generate a config
-# file, but we first need to decide a 'base path'. This is generally the parent
-# directory where the data will be stored, with subdirectories for `raw`,
-# `analysis`, and other data folders. If they don't exist already, they will be
-# created relative to the base path specified with their default names.
+# **Note:** If you used `python scripts/install.py`, configuration is handled
+# automatically. The section below is for manual configuration or troubleshooting.
+#
+# Spyglass will load settings from the 'custom' section of your DataJoint config file.
+# The code below will generate a config file, but we first need to decide a 'base path'.
+# This is generally the parent directory where the data will be stored, with
+# subdirectories for `raw`, `analysis`, and other data folders. If they don't exist
+# already, they will be created relative to the base path specified.
 #
 # A temporary directory is one such subfolder (default `base-dir/tmp`) to speed
 # up spike sorting. Ideally, this folder should have ~500GB free.
 #
-# The function below will create a config file (`~/.datajoint.config` if global,
+# The function below will create a config file (`~/.datajoint_config.json` if global,
 # `./dj_local_conf.json` if local).
 # See also [DataJoint docs](https://datajoint.com/docs/core/datajoint-python/0.14/quick-start/#connection).
-# Local is recommended for the notebooks, as
-# each will start by loading this file. Custom json configs can be saved elsewhere, but will need to be loaded in startup with
-# `dj.config.load('your-path')`.
+# Local is recommended for the notebooks, as each will start by loading this file.
 #
 # To point Spyglass to a folder elsewhere (e.g., an external drive for waveform
-# data), simply edit the resulting json file. Note that the `raw` and `analysis` paths
-# appear under both `stores` and `custom`. Spyglass will check that these match
-# on startup and log a warning if not.
+# data), simply edit the resulting json file.
 #
 
 # +
@@ -520,8 +538,19 @@ Nwbfile()
 # ```
 #
 
+# ## Troubleshooting
+#
+
+# If you encounter issues during setup:
+#
+# 1. **Run the validation script:** `python scripts/validate.py`
+# 2. **Check the troubleshooting guide:** [Troubleshooting](https://lorenfranklab.github.io/spyglass/latest/TROUBLESHOOTING/)
+# 3. **Database issues:** See the [Database Setup Guide](https://lorenfranklab.github.io/spyglass/latest/DATABASE/)
+# 4. **Ask for help:** [GitHub Discussions](https://github.com/LorenFrankLab/spyglass/discussions)
+#
+
 # # Up Next
 #
 
-# Next, we'll try [introduce some concepts](./01_Concepts.ipynb)
+# Next, we'll [introduce some concepts](./01_Concepts.ipynb)
 #

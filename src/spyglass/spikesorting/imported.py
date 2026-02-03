@@ -1,5 +1,3 @@
-import copy
-
 import datajoint as dj
 import pandas as pd
 import pynwb
@@ -20,6 +18,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _single_entry_per_table = True
 
     class Annotations(SpyglassMixin, dj.Part):
         definition = """

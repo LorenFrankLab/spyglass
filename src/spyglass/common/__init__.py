@@ -3,6 +3,7 @@ from spyglass.utils.dj_mixin import SpyglassMixin  # isort:skip
 from spyglass.common.common_behav import (
     PositionIntervalMap,
     PositionSource,
+    RawCompassDirection,
     RawPosition,
     StateScriptFile,
     VideoFile,
@@ -41,7 +42,12 @@ from spyglass.common.common_interval import (
     intervals_by_length,
 )
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
-from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
+from spyglass.common.common_nwbfile import (
+    AnalysisNwbfile,
+    Nwbfile,
+    AnalysisRegistry,
+)
+from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_optogenetics import (
     OpticalFiberDevice,
     OpticalFiberImplant,
@@ -79,6 +85,8 @@ from spyglass.utils.nwb_helper_fn import (
 )
 
 __all__ = [
+    "AnalysisFileIssues",
+    "AnalysisRegistry",
     "LabTeam",
     "LinearizationParameters",
     "Nwbfile",
@@ -94,6 +102,7 @@ __all__ = [
     "Probe",
     "ProbeType",
     "Raw",
+    "RawCompassDirection",
     "RawPosition",
     "SampleCount",
     "SensorData",

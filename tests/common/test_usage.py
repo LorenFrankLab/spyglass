@@ -11,6 +11,22 @@ def export_tbls(common):
 
 
 @pytest.fixture(scope="session")
+def intersect_export_selection(trodes_pos_v1, export_tbls, teardown):
+    ExportSelection, _ = export_tbls
+    trodes_pos_v1.fetch_nwb()
+
+    ExportSelection.start_export(paper_id="intersect_selection", analysis_id=1)
+    _ = trodes_pos_v1 & "interval_list_name = 'pos 0 valid times'"
+    ExportSelection.stop_export()
+
+    yield dict(paper_id="intersect_selection")
+
+    if teardown:
+        ExportSelection.stop_export()
+        ExportSelection.super_delete(warn=False, safemode=False)
+
+
+@pytest.fixture(scope="session")
 def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
     """Create a custom AnalysisNwbfile table and file for testing."""
     import datajoint as dj
@@ -36,6 +52,7 @@ def custom_analysis_file(mini_copy_name, dj_conn, common, teardown):
         class CustomDownstream(SpyglassMixin, dj.Manual):
             definition = """
             foreign_id: int auto_increment
+            ---
             -> AnalysisNwbfile
             """
 
@@ -83,6 +100,7 @@ def gen_export_selection(
     common,
     upsample_position,
     custom_analysis_file,
+    teardown,
 ):
     ExportSelection, _ = export_tbls
     pos_merge, lin_merge = pos_merge_tables
@@ -94,23 +112,39 @@ def gen_export_selection(
     ExportSelection.start_export(paper_id=1, analysis_id=1)
     lfp.v1.LFPV1().fetch_nwb()
     trodes_pos_v1.fetch()
+
     ExportSelection.start_export(paper_id=1, analysis_id=2)
     track_graph.fetch()
-    ExportSelection.start_export(paper_id=1, analysis_id=3)
 
+    ExportSelection.start_export(paper_id=1, analysis_id=3)
     _ = pop_common_electrode_group & "electrode_group_name = 1"
-    _ = common.IntervalPositionInfoSelection * (
-        common.IntervalList & "interval_list_name = 'pos 1 valid times'"
-    )
+    _ = trodes_pos_v1 * (
+        common.IntervalList & "interval_list_name = 'pos 0 valid times'"
+    )  # Note for PR: table and restriction change because join no longer logs empty results
 
     ExportSelection.start_export(paper_id=1, analysis_id=4)
-
     merge_key = (
         pos_merge.TrodesPosV1 & "trodes_pos_params_name LIKE '%ups%'"
     ).fetch1("KEY")
     (pos_merge & merge_key).fetch_nwb()
 
     ExportSelection.start_export(paper_id=1, analysis_id=5)
+    trodes_pos_v1._export_cache.clear()  # Clear cache to ensure proj table is captured
+    projected_table = trodes_pos_v1.proj(
+        proj_interval_list_name="interval_list_name"
+    )
+    proj_restr = (
+        projected_table & "proj_interval_list_name = 'pos 0 valid times'"
+    )
+    assert len(proj_restr) > 0, "No entries found for projected table"
+
+    ExportSelection.start_export(paper_id=1, analysis_id=6)
+    trodes_pos_v1._export_cache.clear()  # Clear cache to ensure proj table is captured
+    _ = trodes_pos_v1 & (
+        common.IntervalList & "interval_list_name = 'pos 0 valid times'"
+    )
+
+    ExportSelection.start_export(paper_id=1, analysis_id=7)
 
     # NEW: Test fetch_nwb on downstream table with custom AnalysisNwbfile parent
     # This should trigger _copy_to_master and insert into ExportSelection.File
@@ -125,10 +159,12 @@ def gen_export_selection(
         custom_file=custom_file,
     )
 
-    ExportSelection.stop_export()
-    ExportSelection.super_delete(warn=False, safemode=False)
+    if teardown:
+        ExportSelection.stop_export()
+        ExportSelection.super_delete(warn=False, safemode=False)
 
 
+@pytest.mark.very_slow
 def test_export_selection_files(gen_export_selection, export_tbls):
     ExportSelection, _ = export_tbls
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
@@ -150,7 +186,9 @@ def test_export_selection_tables(gen_export_selection, export_tbls):
     assert len_tbl_2 == 1, "Selection tables not captured correctly"
 
 
-def test_export_selection_joins(gen_export_selection, export_tbls, common):
+def test_export_selection_joins(
+    gen_export_selection, export_tbls, common, trodes_pos_v1
+):
     ExportSelection, _ = export_tbls
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
 
@@ -166,11 +204,9 @@ def test_export_selection_joins(gen_export_selection, export_tbls, common):
         "restriction"
     ), "Export restriction not captured correctly"
 
-    int_pos_tbl = common.IntervalPositionInfoSelection.full_table_name
-    restr_int_pos = restr & dict(table_name=int_pos_tbl)
-    assert "pos 1 valid times" in restr_int_pos.fetch1(
-        "restriction"
-    ), "Export join not captured correctly"
+    assert "pos 0 valid times" in (
+        restr & {"table_name": trodes_pos_v1.full_table_name}
+    ).fetch1("restriction"), "Export join not captured correctly"
 
 
 def test_export_selection_merge_fetch(
@@ -187,6 +223,49 @@ def test_export_selection_merge_fetch(
     ), "Export merge not captured correctly"
 
 
+def test_export_selection_proj(
+    gen_export_selection, export_tbls, trodes_pos_v1
+):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    paper = ExportSelection * ExportSelection.Table & paper_key
+    restr = paper & dict(analysis_id=5)
+
+    assert trodes_pos_v1.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export projection not captured correctly"
+
+    assert "proj_interval_list_name" not in restr.fetch1(
+        "restriction"
+    ), "Export projection restriction not remapped correctly"
+
+
+def test_export_selection_compound(
+    gen_export_selection, export_tbls, trodes_pos_v1, common
+):
+    ExportSelection, _ = export_tbls
+    paper_key = gen_export_selection
+
+    paper = ExportSelection * ExportSelection.Table & paper_key
+    restr = paper & dict(analysis_id=6)
+
+    assert trodes_pos_v1.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export compound did not capture outer table correctly"
+
+    assert common.IntervalList.full_table_name in restr.fetch(
+        "table_name"
+    ), "Export compound did not capture inner table correctly"
+
+    trodes_restriction = (
+        restr & dict(table_name=trodes_pos_v1.full_table_name)
+    ).fetch1("restriction")
+    assert (
+        len(trodes_pos_v1 & trodes_restriction) == 2
+    ), "Export compound did not capture outer restriction correctly"
+
+
 def tests_export_selection_max_id(gen_export_selection, export_tbls):
     ExportSelection, _ = export_tbls
     _ = gen_export_selection
@@ -197,7 +276,7 @@ def tests_export_selection_max_id(gen_export_selection, export_tbls):
 
 
 @pytest.fixture(scope="session")
-def populate_export(export_tbls, gen_export_selection):
+def populate_export(export_tbls, gen_export_selection, teardown):
     _, Export = export_tbls
     paper_key = {"paper_id": gen_export_selection["paper_id"]}
     Export.populate_paper(**paper_key)
@@ -205,14 +284,44 @@ def populate_export(export_tbls, gen_export_selection):
 
     yield (Export.Table & key), (Export.File & key)
 
-    Export.super_delete(warn=False, safemode=False)
+    if teardown:
+        Export.super_delete(warn=False, safemode=False)
 
 
+@pytest.fixture(scope="session")
+def populate_intersect_export(
+    intersect_export_selection, export_tbls, teardown
+):
+    _, Export = export_tbls
+    included_nwb_files = ["null_.nwb"]
+    Export.populate_paper(
+        **intersect_export_selection,
+        included_nwb_files=included_nwb_files,
+        n_processes=4,
+    )
+    key = (Export & intersect_export_selection).fetch("export_id", as_dict=True)
+
+    yield (Export.Table & key), (Export.File & key)
+
+    if teardown:
+        Export.super_delete(warn=False, safemode=False)
+
+
+@pytest.mark.slow
 def test_export_populate(populate_export, custom_analysis_file):
     table, file = populate_export
 
     assert len(file) == 5, "Export files not captured correctly"
-    assert len(table) == 41, "Export tables not captured correctly"
+    assert len(table) == 39, "Export tables not captured correctly"
+
+
+def test_intersect_export_populate(populate_intersect_export, common):
+    table, file = populate_intersect_export
+
+    assert len(file) == 0, "Intersection failed to censor files"
+    assert (
+        len(table & {"table_name": common.Nwbfile.full_table_name}) == 0
+    ), "Intersection failed to censor entries"
 
 
 def test_invalid_export_id(export_tbls):

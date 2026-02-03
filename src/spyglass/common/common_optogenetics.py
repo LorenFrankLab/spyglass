@@ -1,5 +1,3 @@
-import string
-
 import datajoint as dj
 import numpy as np
 from ndx_optogenetics import (

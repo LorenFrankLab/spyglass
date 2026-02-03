@@ -11,7 +11,8 @@ regularly as cron jobs.
     - If the lab follows instructions in release notes, this is unnecessary.
 - `cleanup.py`
     - This script performs various cleanup operations on the database, including
-        removing orphans, unreferenced files, and old temp files.
+        removing orphans, unreferenced files, and old temp files. It also
+        maintains an inventory of all analysis files and checks for issues.
     - The function for cleaning up temp files requires that this directory be
         called either `temp` or `tmp`.
     - This script also fetches the latest version information from PyPI to update
