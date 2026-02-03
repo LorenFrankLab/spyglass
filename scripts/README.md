@@ -128,7 +128,7 @@ python scripts/validate.py
 
 **Checks:**
 
-1. Python version ≥3.9
+1. Python version ≥3.10
 2. Conda/mamba available
 3. Spyglass can be imported
 4. SpyglassConfig loads correctly
@@ -161,7 +161,7 @@ Note: DeepLabCut, Moseq, and Decoding require separate installation.
 
 **System Requirements:**
 
-- Python 3.9 or later
+- Python 3.10 or later
 - conda or mamba package manager
 - Git (recommended)
 - Docker (optional, for local database)
