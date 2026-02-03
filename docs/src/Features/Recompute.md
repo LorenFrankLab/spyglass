@@ -64,6 +64,7 @@ dependencies and the code that generated them in `UserEnvironment` and
 are modifying the existing table structure to include the new fields.
 
 === "v0"
+
     ```python
     from spyglass.spikesorting.v0 import spikesorting_recording as v0_recording
 
@@ -73,6 +74,7 @@ are modifying the existing table structure to include the new fields.
     ```
 
 === "v1"
+
     ```python
     from spyglass.spikesorting.v1 import recording as v1_recording
 
@@ -103,6 +105,7 @@ the environments used to attempt recompute. These attempts are run using the
 `Recompute` table `populate` method.
 
 === "v0"
+
     ```python
     from spyglass.spikesorting.v0 import spikesorting_recording as v0_recording
     from spyglass.spikesorting.v0 import spikesorting_recompute as v0_recompute
@@ -115,6 +118,7 @@ the environments used to attempt recompute. These attempts are run using the
     ```
 
 === "v1"
+
     ```python
     from spyglass.spikesorting.v1 import recording as v1_recording
     from spyglass.spikesorting.v1 import recompute as v1_recompute
@@ -156,6 +160,7 @@ Recompute tables are set up to have `Name` and `Hash` part tables that track...
     between the original and recompute attempt.
 
 === "v0"
+
     ```python
     from spyglass.spikesorting.v0.spikesorting_recompute import RecordingRecompute
 
@@ -165,6 +170,7 @@ Recompute tables are set up to have `Name` and `Hash` part tables that track...
     ```
 
 === "v1"
+
     ```python
     from spyglass.spikesorting.v1.recompute import RecordingRecompute
 
@@ -203,6 +209,7 @@ recompute attempt, this method will delete both the original and the recomputed
 files.
 
 === "v0"
+
     ```python
     from spyglass.spikesorting.v0.spikesorting_recompute import RecordingRecompute
 
@@ -212,6 +219,7 @@ files.
     ```
 
 === "v1"
+
     ```python
     from spyglass.spikesorting.v1.recompute import RecordingRecompute
 

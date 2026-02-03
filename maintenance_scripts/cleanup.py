@@ -81,6 +81,8 @@ def main():
     cleanup_external_files()
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
+    print("Checking for AnalysisFile Issues...")
+    AnalysisNwbfile().check_all_files()
 
 
 if __name__ == "__main__":

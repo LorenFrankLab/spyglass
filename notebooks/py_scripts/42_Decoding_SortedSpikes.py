@@ -75,6 +75,8 @@ sorter_keys = {
 # Finding the merge id's corresponding to an interpretable restriction such as `merge_id` or `interval_list` can require several join steps with upstream tables.  To simplify this process we can use the included helper function `SpikeSortingOutput().get_restricted_merge_ids()` to perform the necessary joins and return the matching merge id's
 
 # +
+from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
+
 # get the merge_ids for the selected sorting
 spikesorting_merge_ids = SpikeSortingOutput().get_restricted_merge_ids(
     sorter_keys, restrict_by_artifact=False
@@ -112,7 +114,6 @@ SortedSpikesGroup.Units & {
 # +
 from spyglass.decoding.v1.core import DecodingParameters
 from non_local_detector.models import ContFragSortedSpikesClassifier
-
 
 DecodingParameters.insert1(
     {

@@ -38,7 +38,7 @@
 # - processing the pose estimation output to extract a centroid and orientation
 # - inserting the resulting information into the `PositionOutput` table
 #
-# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environment_dlc.yml)**
+# **Note 2: Make sure you are running this within the spyglass-dlc Conda environment (instructions for install are in the environments/environment_dlc.yml)**
 
 # Here is a schematic showing the tables used in this pipeline.
 #
@@ -418,7 +418,7 @@ matching_rows
 # ```
 #
 
-# This loop will generate posiiton data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see \*\*\*)
+# This loop will generate posititon data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see \*\*\*)
 # <br>The output should print Pose Estimation and Centroid plots for each epoch.
 #
 # - It defines `col1val` as each `nwb_file_name` entry in the table, one at a time.
@@ -434,9 +434,9 @@ for row in matching_rows:
 
         ##insert pose estimation task
         key = {
-            "nwb_file_name": nwb_file_name,
-            "epoch": epoch,
-            "video_file_num": video_file_num,
+            "nwb_file_name": col1val,
+            "epoch": col2val,
+            "video_file_num": col3val,
             **model_key,
         }
 

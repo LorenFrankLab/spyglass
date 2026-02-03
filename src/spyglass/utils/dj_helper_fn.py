@@ -547,7 +547,7 @@ def make_file_obj_id_unique(nwb_path: str):
     try:
         with h5py.File(nwb_path, "a") as f:
             f.attrs["object_id"] = new_id
-    except (BlockingIOError, OSError) as e:
+    except (BlockingIOError, OSError):
         ExportErrorLog().insert1(
             {
                 "file": nwb_path,
