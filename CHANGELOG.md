@@ -8,26 +8,49 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Alter Decoding v1 table
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
-```
 
-#### LFPBandV1 Fix
+# Alter v0 recompute table
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
 
-If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
-2025, you may have stored inaccurate interval list times due to #1481. To fix
-these, please run the following after updating:
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
 
-```python
+# Alter v1 recompute table
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+
+# Fix LFPBandV1 issue #1481
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()
 ```
 
 ### Breaking Changes
+
+#### LFPBandV1 Fix
+
+If you were using a pre-release version of Spyglass 0.5.6 LFPBandV1 after April
+2025, you may have stored inaccurate interval list times due to #1481. To fix
+these, please run `LFPBandV1().fix_1481()` as shown in the release notes.
 
 #### Decoding Results Structure
 
@@ -99,7 +122,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Allow for permissive name selection when identifying objects in ingestion nwb
     #1490
 - Update fixes for accessing files from DANDI #1477
-- Deprecate `populate` transaction workaround with tripart `make` calls #1422,
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
     #1505
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
@@ -108,6 +131,9 @@ for label, interval_data in results.groupby("interval_labels"):
 - Update to latest `black` and `jupytext` versions #1508
 - Update minimum Python version to 3.10 #1508
 - Remove outdated cli scripts #1508
+- Pin datajoint version < 2.0 #1516
+- Log expected recompute failures #1470
+- Track file created/deletion status of recomputes #1470
 
 ### Pipelines
 
