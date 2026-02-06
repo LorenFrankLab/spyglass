@@ -127,7 +127,9 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if len(interval_lists_df["nwb_file_name"].unique()) > 1:
             raise ValueError(
-                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+                ">1 nwb_file_name found in IntervalList. "
+                + "the intended use of plot_intervals is to compare intervals "
+                + "within a single nwb_file_name."
             )
 
         interval_list_names = interval_lists_df["interval_list_name"].values
@@ -136,7 +138,8 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if n_compare > 100:
             warnings.warn(
-                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                f"plot_intervals is plotting {n_compare} intervals. "
+                + "if this is unintended, please pass in a smaller IntervalList.",
                 UserWarning,
             )
 
@@ -467,6 +470,14 @@ class Interval:
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
+        """Extract interval_list from a given object and validate."""
+        extracted = self._extract_only(interval_list, from_inds=from_inds)
+        self._validate_intervals(extracted, from_inds=from_inds)
+        return extracted
+
+    def _extract_only(
+        self, interval_list: IntervalLike, from_inds: bool = False
+    ) -> np.ndarray:
         """Extract interval_list from a given object."""
         if from_inds:
             return self.from_inds(interval_list)
@@ -484,6 +495,22 @@ class Interval:
             raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
+
+    def _validate_intervals(
+        self, interval_list: IntervalLike, from_inds: bool = False
+    ):
+        """Validate that intervals are in the form [start, stop] with start <= stop."""
+        if not isinstance(interval_list, (np.ndarray, list)):
+            times = self._extract_only(interval_list, from_inds=from_inds)
+        else:
+            times = interval_list
+        if not len(times):
+            return
+        if np.all(np.diff(times, axis=0) >= 0):
+            return
+        raise ValueError(
+            "All intervals must be in the form [start, stop] with start <= stop."
+        )
 
     @staticmethod
     def from_inds(list_frames) -> List[List[int]]:
