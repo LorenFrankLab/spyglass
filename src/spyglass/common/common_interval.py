@@ -778,13 +778,41 @@ class Interval:
         ss = np.concatenate((il1_start_end, il2_start_end))
         sort_ind = np.argsort(combined_intervals)
         combined_intervals = combined_intervals[sort_ind]
+        ss_cumsum = np.cumsum(ss[sort_ind])
+        if any(ss_cumsum < 0):
+            raise ValueError(
+                "Negative cumulative sum found in union. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
 
-        # a cumulative sum of 1 indicates the beginning of a joint interval; a
-        # cumulative sum of 0 indicates the end
+        # a switch of cumulative sum from zero to 1 indicates the beginning of a
+        # joint interval; a cumulative sum of 0 indicates the end
         union_starts = np.ravel(
-            np.array(np.where(np.cumsum(ss[sort_ind]) == 1))
+            np.array(
+                np.where(
+                    np.logical_and(
+                        ss_cumsum[1:] == 1,
+                        ss_cumsum[:-1] == 0,
+                    )
+                )[0]
+                + 1
+            )
+        )
+        union_starts = (
+            np.insert(union_starts, 0, 0)
+            if ss[sort_ind][0] == 1
+            else union_starts
         )
         union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+        if union_starts.size != union_stops.size:
+            raise ValueError(
+                "Mismatched number of union starts and stops. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
         union = [
             [combined_intervals[start], combined_intervals[stop]]
             for start, stop in zip(union_starts, union_stops)
