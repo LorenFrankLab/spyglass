@@ -7,6 +7,8 @@ import scipy.stats as stats
 import spikeinterface as si
 
 from spyglass.common.common_ephys import Electrode
+from spyglass.common import Nwbfile
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 from spyglass.utils import logger
 
 
@@ -135,6 +137,129 @@ def get_group_by_shank(
                 ]
             )
             sort_group += 1
+    return sg_keys, sge_keys
+
+
+def get_group_by_electrode_table_column(
+    nwb_file_name: str,
+    column: str,
+    groups: list[list],
+    sort_group_ids: list[int] = None,
+    remove_bad_channels: bool = True,
+    omit_unitrode: bool = True,
+):
+    """Divides electrodes into groups based on a column in the nwbfile's electrode table.
+
+    Optionally use the electrode_id (index) directly by passing column = "index" or "electrode_id".
+
+    Parameters
+    ----------
+    nwb_file_name : str
+        Name of the NWB file.
+    column : str
+        Column in the electrode table to group by (e.g., "intan_channel_number" for Berke Lab).
+    groups : list[list]
+        Each sublist specifies values in 'column' to include in one SortGroup.
+    sort_group_ids : list[int]
+        Optional. Custom sort group ids for each entry in 'groups'. Must be the same length as groups.
+        If none specified, sort group ids are automatically assigned starting from 0.
+    remove_bad_channels : bool
+        Optional. If True, electrodes with bad_channel != 0 are removed. Default True
+    omit_unitrode : bool
+        Optional. If True, groups with only one electrode are skipped. Default True
+
+    Returns
+    -------
+    sg_keys : list[dict]
+        One dict per sort group (contains nwb_file_name, sort_group_id, sort_reference_electrode_id)
+    sge_keys : list[dict]
+        One dict per electrode assignment to a sort group
+    """
+
+    # Get electrode table from nwbfile
+    nwb_file_abspath = Nwbfile.get_abs_path(nwb_file_name)
+    nwbf = get_nwb_file(nwb_file_abspath)
+    electrodes_df = nwbf.electrodes.to_dataframe()
+
+    # Verify the column exists in the nwbfile's electrode table
+    if column not in electrodes_df.columns and column not in (
+        "index",
+        "id",
+        "idx",
+        "electrode_id",
+    ):
+        valid_cols = list(electrodes_df.columns)
+        raise ValueError(
+            f"Invalid column '{column}'. \n Must be one of: {valid_cols} "
+            "or one of ('index', 'id', 'idx', 'electrode_id') to use electrode indices.\n"
+        )
+
+    sg_keys, sge_keys = [], []
+
+    # Determine if we're grouping by index
+    use_index = column in ("index", "id", "idx", "electrode_id")
+
+    # Handle custom sort_group_ids
+    if sort_group_ids is None:
+        sort_group_ids = list(range(len(groups)))
+    elif len(sort_group_ids) != len(groups):
+        raise ValueError("sort_group_ids must be the same length as groups")
+
+    # Iterate through groups
+    for group_id, group_vals in zip(sort_group_ids, groups):
+        if use_index:
+            # Match directly against the df index (electrode_id)
+            subset = electrodes_df.loc[electrodes_df.index.isin(group_vals)]
+        else:
+            # Match against a column in the electrode table
+            subset = electrodes_df[electrodes_df[column].isin(group_vals)]
+
+        # Optionally remove bad channels
+        if remove_bad_channels:
+            bad_subset = subset[subset["bad_channel"] == 1]
+            if not bad_subset.empty:
+                logger.info(
+                    f"Removing bad channels from group {group_id}: "
+                    f"{bad_subset.index.tolist() if use_index else bad_subset[column].tolist()}"
+                )
+            subset = subset[subset["bad_channel"] == 0]
+
+        if subset.empty:
+            logger.warning(
+                f"Omitting group {group_id} (all bad channels or no matches)."
+            )
+            continue
+
+        # Optionally skip unitrodes
+        if omit_unitrode and len(subset) == 1:
+            logger.warning(f"Omitting group {group_id} (unitrode).")
+            continue
+
+        # Log which electrodes are in this sort group
+        logger.info(
+            f"Adding group {group_id}: electrode_ids={subset.index.tolist()}"
+            + ("" if use_index else f", {column}={subset[column].tolist()}")
+        )
+
+        # Build sort group key
+        sg_key = dict(
+            nwb_file_name=nwb_file_name,
+            sort_group_id=group_id,
+            sort_reference_electrode_id=-1,  # TODO make this general? Berke Lab is always -1 for reference electrode
+        )
+        sg_keys.append(sg_key)
+
+        # Build electrode entries using electrode df index as electrode_id
+        for eid, row in subset.iterrows():
+            sge_keys.append(
+                dict(
+                    nwb_file_name=nwb_file_name,
+                    sort_group_id=group_id,
+                    electrode_id=eid,
+                    electrode_group_name=row["group_name"],
+                )
+            )
+
     return sg_keys, sge_keys
 
 
