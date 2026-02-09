@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import ndx_ophys_devices as ndxod
-import ndx_optogenetics as ndxo
+import ndx_ophys_devices
+import ndx_optogenetics
 import numpy as np
 import pynwb
 import pytest
@@ -433,36 +433,42 @@ def opto_only_nwb(
     nwb.processing["tasks"].add(task)
 
     # add the optogenetic objects
-    virus = ndxod.ViralVector(**virus_dict)
-    virus_injection = ndxod.ViralVectorInjection(
+    virus = ndx_ophys_devices.ViralVector(**virus_dict)
+    virus_injection = ndx_ophys_devices.ViralVectorInjection(
         **virus_injection_dict, viral_vector=virus
     )
-    optogenetic_viruses = ndxo.OptogeneticViruses(viral_vectors=[virus])
-    optogenetic_virus_injections = ndxo.OptogeneticVirusInjections(
+    optogenetic_viruses = ndx_optogenetics.OptogeneticViruses(
+        viral_vectors=[virus]
+    )
+    optogenetic_virus_injections = ndx_optogenetics.OptogeneticVirusInjections(
         viral_vector_injections=[virus_injection]
     )
-    effector = ndxod.Effector(
+    effector = ndx_ophys_devices.Effector(
         name="effector_1",
         description="Test effector",
         label="test label",
         viral_vector_injection=virus_injection,
     )
-    optogenetic_effectors = ndxo.OptogeneticEffectors(effectors=[effector])
+    optogenetic_effectors = ndx_optogenetics.OptogeneticEffectors(
+        effectors=[effector]
+    )
 
-    excitation_source_model = ndxod.ExcitationSourceModel(
+    excitation_source_model = ndx_ophys_devices.ExcitationSourceModel(
         **excitation_source_model_dict
     )
 
-    excitation_source = ndxod.ExcitationSource(
+    excitation_source = ndx_ophys_devices.ExcitationSource(
         **excitation_source_dict, model=excitation_source_model
     )
 
     # make the fiber objects
-    optical_fiber_model = ndxod.OpticalFiberModel(**fiber_model_dict)
-    fiber_insertion = ndxod.FiberInsertion(
+    optical_fiber_model = ndx_ophys_devices.OpticalFiberModel(
+        **fiber_model_dict
+    )
+    fiber_insertion = ndx_ophys_devices.FiberInsertion(
         **fiber_insertion_dict,
     )
-    optical_fiber = ndxod.OpticalFiber(
+    optical_fiber = ndx_ophys_devices.OpticalFiber(
         name="test_fiber",
         description="CA1",
         model=optical_fiber_model,
@@ -470,7 +476,7 @@ def opto_only_nwb(
     )
 
     # make the optogenetic sites table
-    optogenetic_sites = ndxo.OptogeneticSitesTable(
+    optogenetic_sites = ndx_optogenetics.OptogeneticSitesTable(
         description="Information about optogenetic stimulation sites"
     )
     optogenetic_sites.add_row(
@@ -484,12 +490,14 @@ def opto_only_nwb(
     nwb.add_device_model(optical_fiber_model)
     nwb.add_device(optical_fiber)
 
-    optogenetic_experiment_metadata = ndxo.OptogeneticExperimentMetadata(
-        optogenetic_sites_table=optogenetic_sites,
-        optogenetic_viruses=optogenetic_viruses,
-        optogenetic_virus_injections=optogenetic_virus_injections,
-        optogenetic_effectors=optogenetic_effectors,
-        stimulation_software="fsgui",
+    optogenetic_experiment_metadata = (
+        ndx_optogenetics.OptogeneticExperimentMetadata(
+            optogenetic_sites_table=optogenetic_sites,
+            optogenetic_viruses=optogenetic_viruses,
+            optogenetic_virus_injections=optogenetic_virus_injections,
+            optogenetic_effectors=optogenetic_effectors,
+            stimulation_software="fsgui",
+        )
     )
     nwb.add_lab_meta_data(optogenetic_experiment_metadata)
 

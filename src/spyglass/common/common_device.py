@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
 
 if TYPE_CHECKING:
+    # Avoid adding extension to global pynwb typemap (see #1509)
     import ndx_franklab_novela
 
 import datajoint as dj
