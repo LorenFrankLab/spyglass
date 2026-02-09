@@ -3,15 +3,14 @@ from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
 from datajoint.utils import to_camel_case
+from packaging.version import Version
 from pynwb import NWBFile
 
 from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
-from spyglass.utils.nwb_helper_fn import (
-    check_extension_version,
-    is_nwb_obj_type,
-)
+from spyglass.utils.nwb_hash import get_file_namespaces
+from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
 
 # typing alias compatible with Python 3.9
 IngestionEntries = dict["IngestionMixin", list[dict]]
@@ -465,9 +464,18 @@ class IngestionMixin(BaseMixin):
         bool
             True if the NWB file meets the extension requirements, False otherwise.
         """
+        # early exit if no extension requirements specified
+        if not self._extension_requirements:
+            return True
+
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        nwb_file_path = Nwbfile().get_abs_path(nwb_file_name)
+        file_namespaces = get_file_namespaces(nwb_file_path)
+
         for extension, min_version in self._extension_requirements.items():
-            if not check_extension_version(
-                nwb_file_name, extension, min_version
+            if (extension not in file_namespaces) or (
+                Version(file_namespaces.get(extension)) < Version(min_version)
             ):
                 logger.warning(
                     f"NWB file {nwb_file_name} can not be ingested into "

@@ -9,7 +9,6 @@ from typing import List, Union
 import numpy as np
 import pynwb
 import yaml
-from packaging.version import Version
 
 from spyglass.utils.logging import logger
 
@@ -664,41 +663,3 @@ def is_nwb_obj_type(
         return isinstance(nwb_object, target_type)
 
     return nwb_object.__class__.__name__ == target_type
-
-
-def check_extension_version(
-    nwb_file_name: str,
-    extension: str,
-    min_version: str,
-) -> bool:
-    """Check if an NWB file has at least the specified version of an extension.
-
-    Parameters
-    ----------
-    nwb_file_name : str
-        The name of the NWB file.
-    extension : str
-        The name of the NWB extension to check.
-    min_version : str
-        The minimum required version of the extension.
-
-    Returns
-    -------
-    bool
-        True if the NWB file has at least the specified version of the extension,
-        False otherwise.
-    """
-    from spyglass.common import Nwbfile
-
-    # get the io object for the nwb file
-    nwb_path = Nwbfile().get_abs_path(nwb_file_name)
-    if not (nwb_io := __open_nwb_files.get(nwb_path)):
-        get_nwb_file(nwb_path)
-        nwb_io = __open_nwb_files[nwb_path]
-    nwb_io = nwb_io[0]
-    # parse the version from the namespace catalog
-    namespace_catalog = nwb_io.manager.type_map.namespace_catalog
-    if extension not in namespace_catalog.namespaces:
-        return False
-    file_version = namespace_catalog.get_namespace(extension).get("version")
-    return Version(file_version) >= Version(min_version)
