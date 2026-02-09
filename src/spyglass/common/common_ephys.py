@@ -53,14 +53,14 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
             key["region_id"] = BrainRegion.fetch_add(
                 region_name=electrode_group.location
             )
-            if is_nwb_obj_type(electrode_group.device, "Probe"):
-                key["probe_id"] = electrode_group.device.probe_type
+            if probe_type := getattr(
+                electrode_group.device, "probe_type", None
+            ):
+                key["probe_id"] = probe_type
             key["description"] = electrode_group.description
-            if is_nwb_obj_type(electrode_group, "NwbElectrodeGroup"):
+            if targeted_x := getattr(electrode_group, "targeted_x", None):
                 # Define target_hemisphere based on targeted x coordinate
-                if (
-                    electrode_group.targeted_x >= 0
-                ):  # if positive or zero x coordinate
+                if targeted_x >= 0:  # if positive or zero x coordinate
                     # define target location as right hemisphere
                     key["target_hemisphere"] = "Right"
                 else:  # if negative x coordinate
