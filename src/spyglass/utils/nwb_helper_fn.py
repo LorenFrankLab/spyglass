@@ -644,6 +644,9 @@ def is_nwb_obj_type(
 ) -> bool:
     """Check if an NWB object is of a specified type.
 
+    Note: This function will be moved to a method of the IngestionMixin class
+    pending completed migration of ingestion tables (see #1326)
+
     Parameters
     ----------
     nwb_object : pynwb.NWBContainer
