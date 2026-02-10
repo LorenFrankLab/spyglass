@@ -134,6 +134,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Pin datajoint version < 2.0 #1516
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
+- Improve get_recording efficiency #1522
 
 ### Pipelines
 
