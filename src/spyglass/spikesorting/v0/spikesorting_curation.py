@@ -1282,7 +1282,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """Returns the recording related to this curation. Useful for operations downstream of merge table"""
         # expand the key
         recording_key = (cls & key).fetch1("KEY")
-        return SpikeSortingRecording()._get_filtered_recording(recording_key)
+        return SpikeSortingRecording().load_recording(recording_key)
 
     @classmethod
     def get_sorting(cls, key):
