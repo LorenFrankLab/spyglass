@@ -162,6 +162,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+    - Allow ingestion of nwb files without behavior module #1441
 
 - Decoding
 
