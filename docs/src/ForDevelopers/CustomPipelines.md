@@ -181,7 +181,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         interval = (IntervalList & key).fetch_interval()
         interval = interval.intersect(params["valid_times"])
         interval.name = my_new_name
-        analysis_file_name = AnalysisNwbfile.create(key, data)
+        analysis_file_name = self.analysis_table.create(key, data)
         # 3. Insert results
         IntervalList.insert1(interval.as_dict)
         self.insert1(
