@@ -27,6 +27,10 @@ class MoseqModelParams(SpyglassMixin, dj.Lookup):
     - num_epochs: number of epochs to train the model
     - anterior_bodyparts: used to define orientation
     - posterior_bodyparts: used to define orientation
+    - target_variance: if supplied, determines the number of principal components to
+    keep based on the cumulative variance explained. If not supplied, keeps all
+    principal components up to the maximum defined by max_latent_dim(default 10 or
+    number of keypoints - 1, whichever is smaller)
     """
 
     definition = """
@@ -200,8 +204,11 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         if initial_model_key is None:
             # define maximum latent_dimension based on keypoints
             data_shape = list(coordinates.values())[0].shape
-            n_keypoints = data_shape[1]
-            keypoint_dim = data_shape[2]
+            n_keypoints, keypoint_dim = data_shape
+            if n_keypoints < 2:
+                raise ValueError(
+                    f"Need at least 2 keypoints to train a moseq model, found {n_keypoints}"
+                )
             max_latent_dim = min(
                 10,  # suggestion from moseq docs
                 (n_keypoints - 1)
@@ -264,7 +271,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         config: dict,
         model_params: dict,
         max_latent_dim: int = 10,
-        target_variance: float = 0.9,
+        target_variance: float = 1.0,
     ):
         """Method to initialize a model. Creates model and runs initial ARHMM fit
 
@@ -297,7 +304,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         if target_variance >= var_explained[-1]:
             latent_dim = len(var_explained)
         else:
-            latent_dim = np.where(var_explained > target_variance)[0][0] + 1
+            latent_dim = np.where(var_explained >= target_variance)[0][0] + 1
         latent_dim = min(latent_dim, max_latent_dim)
 
         # update config with latent dimension
