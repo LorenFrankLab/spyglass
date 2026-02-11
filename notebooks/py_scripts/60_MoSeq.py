@@ -137,7 +137,7 @@ params["num_epochs"] = 50
 # anteror and posterior bodyparts are used to define the orientation of the animal
 params["anterior_bodyparts"] = ["nose"]
 params["posterior_bodyparts"] = ["tailBase"]
-# Optional: set number of PCs to use; based on number needed to explain target_variance_variance in data
+# Optional: set number of PCs to use; based on number needed to explain target_variance in data
 params["target_variance"] = 0.9
 
 MoseqModelParams().insert1(
