@@ -52,6 +52,7 @@ CREATE → POPULATE → REGISTER lifecycle automatically.
 
 ```python
 from spyglass.common import AnalysisNwbfile
+from spyglass.utils import SpyglassMixin
 import datajoint as dj
 import pandas as pd
 
@@ -59,7 +60,7 @@ schema = dj.schema("my_schema")
 
 
 @schema
-class MyAnalysis(dj.Computed):
+class MyAnalysis(SpyglassMixin, dj.Computed):
     definition = """
     -> SomeOtherTable
     ---
