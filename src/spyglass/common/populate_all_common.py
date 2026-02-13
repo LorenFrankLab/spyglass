@@ -31,8 +31,10 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_optogenetics import (
+    OpticalFiberDevice,
     OpticalFiberImplant,
     OptogeneticProtocol,
+    Virus,
     VirusInjection,
 )
 from spyglass.common.common_sensors import SensorData
@@ -136,8 +138,7 @@ def single_transaction_make(
             if table_name in [
                 "ImportedPose",
                 "ImportedLFP",
-                "VirusInjection",
-                "OpticalFiberImplant",
+                "OptogeneticProtocol",
             ]:
                 key_source = Nwbfile()
 
@@ -199,6 +200,8 @@ def populate_all_common(
             DataAcquisitionDeviceAmplifier,  # Parent node
             DataAcquisitionDeviceSystem,  # Parent node
             DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
+            OpticalFiberDevice,  # Parent node
+            Virus,  # Parent node
         ],
         [
             Probe,  # Depends on ProbeType, DataAcquisitionDevice
@@ -226,7 +229,7 @@ def populate_all_common(
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
             VirusInjection,  # Depends on Session
-            OpticalFiberImplant,  # Depends on Session
+            OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
         ],
         [

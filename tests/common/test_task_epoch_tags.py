@@ -6,6 +6,7 @@ import pytest
 from ndx_franklab_novela import CameraDevice
 from pynwb import NWBHDF5IO
 from pynwb.core import DynamicTable
+from pynwb.device import DeviceModel
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
 
@@ -50,13 +51,17 @@ def create_nwb_with_epoch_tags(identifier, epoch_tags):
 
     # Add camera device (required for TaskEpoch)
     # Note: name must be "camera_device <number>" format for Spyglass
+    camera_model = DeviceModel(
+        name="test_model", manufacturer="test_manufacturer"
+    )
     camera_device = CameraDevice(
         name="camera_device 1",
         meters_per_pixel=1.0,
-        model="test_model",
+        model=camera_model,
         lens="test_lens",
         camera_name="test_camera_name",
     )
+    nwbfile.add_device_model(camera_model)
     nwbfile.add_device(camera_device)
 
     # Create tasks module with task tables

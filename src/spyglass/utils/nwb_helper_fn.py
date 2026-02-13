@@ -4,7 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pynwb
@@ -636,3 +636,30 @@ def change_group_permissions(
         os.system(f"chgrp -R {set_group_name} {target_content}")
         # Give read, write, execute permissions to group
         os.system(f"chmod -R g+rwx {target_content}")
+
+
+def is_nwb_obj_type(
+    nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
+) -> bool:
+    """Check if an NWB object is of a specified type.
+
+    Note: This function will be moved to a method of the IngestionMixin class
+    pending completed migration of ingestion tables (see #1326)
+
+    Parameters
+    ----------
+    nwb_object : pynwb.NWBContainer
+        The NWB object to check.
+    target_type : type or str
+        The target type to check against. Can be a class type or a string
+        representing the class name.
+
+    Returns
+    -------
+    bool
+        True if the NWB object is of the target type, False otherwise.
+    """
+    if isinstance(target_type, type):
+        return isinstance(nwb_object, target_type)
+
+    return nwb_object.__class__.__name__ == target_type

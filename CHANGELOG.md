@@ -136,6 +136,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Pin datajoint version < 2.0 #1516
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
+- Upgrade to pynwb>=3.1 #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
 
 ### Pipelines
 
