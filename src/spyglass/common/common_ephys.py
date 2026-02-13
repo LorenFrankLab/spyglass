@@ -358,7 +358,7 @@ class Raw(SpyglassIngestion, dj.Imported):
         Allows populate_all_common to work within a single transaction."""
         from spyglass.common.common_usage import ActivityLog
 
-        ActivityLog.deprecate_log(self, "Raw.make", alt="insert_from_nwbfile")
+        ActivityLog().deprecate_log(name="Raw.make", alt="insert_from_nwbfile")
 
         # Call the new SpyglassIngestion method
         self.insert_from_nwbfile(key["nwb_file_name"])

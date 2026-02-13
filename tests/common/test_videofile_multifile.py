@@ -54,7 +54,7 @@ def multifile_video_nwb(raw_dir, common, data_import, teardown):
         meters_per_pixel=0.001,
         lens="test_lens",
         model=camera_model,
-        camera_name="test_camera",
+        camera_name="test_multifile_video_camera",
     )
     nwbfile.add_device_model(camera_model)
     nwbfile.add_device(camera_device)
@@ -193,7 +193,8 @@ def test_multifile_video_inserts(common, multifile_video_nwb):
     ), "Expected all VideoFile entries to reference the same object ID"
 
     camera_names = [vf["camera_name"] for vf in video_files]
-    assert all(name == "test_camera" for name in camera_names), (
-        f"Expected all VideoFile entries to have camera_name='test_camera', "
-        f"but found: {set(camera_names)}"
+    expected_name = "test_multifile_video_camera"
+    assert all(name == expected_name for name in camera_names), (
+        f"Expected all VideoFile entries to have camera_name='{expected_name}',"
+        f" but found: {set(camera_names)}"
     )

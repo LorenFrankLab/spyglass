@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spyglass
 #     language: python
@@ -444,30 +444,48 @@
 #
 
 # +
-import os
 import datajoint as dj
 from spyglass.settings import SpyglassConfig
+from pathlib import Path
 
-# change to the root directory of the project
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
+username = "your username"  # replace with username made for you in the spyglass database
+initial_password = (
+    "your initial password"  # replace with the initial password given to you
+)
+new_password = (
+    "your new password"  # replace with the new password you want to set
+)
+spyglass_base_dir = "/path/like/stelmo/nwb/"  # replace with a path on your system where spyglass can store NWB files
+database_host = "address like: 'localhost' or 'lmf-db.cin.ucsf.edu'"
 
-# connect to the database
-dj.conn()
 
-# change your password
-dj.admin.set_password()
+dj.config.update(
+    {
+        "database.host": database_host,
+        "database.user": username,
+        "database.password": initial_password,
+        "database.port": 3306,
+    }
+)
+
+dj.conn()  # connect to the database
+
+# change your password from the initial password
+dj.admin.set_password(new_password, update_config=True)
 
 # save the configuration
 SpyglassConfig().save_dj_config(
-    save_method="local",  # global or local
-    base_dir="/path/like/stelmo/nwb/",
-    database_user="your username",
-    database_password="your password",  # remove this line for shared machines
-    database_host="localhost or lmf-db.cin.ucsf.edu",  # only list one
+    base_dir=spyglass_base_dir,
+    database_user=username,
+    database_password=new_password,
+    database_host=database_host,  # only list one
     database_port=3306,
     set_password=False,
 )
+
+# ensure the configuration is saved for future use
+your_config = Path.home() / ".datajoint_config.json"
+print(f"Config exists: {your_config.exists()}")
 # -
 
 # <details><summary>Legacy config</summary>

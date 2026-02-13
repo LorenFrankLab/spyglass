@@ -265,7 +265,7 @@ def get_position_obj(nwbfile):
     pynwb.behavior.Position object
     """
     ret = []
-    for obj in nwbfile.processing["behavior"].data_interfaces.values():
+    for obj in nwbfile.objects.values():
         if isinstance(obj, pynwb.behavior.Position):
             ret.append(obj)
     if len(ret) > 1:
