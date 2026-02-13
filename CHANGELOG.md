@@ -113,6 +113,8 @@ for label, interval_data in results.groupby("interval_labels"):
     from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507
@@ -162,6 +164,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
 
 - Decoding
 
