@@ -164,6 +164,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
 
 - Decoding
 

@@ -1,5 +1,6 @@
 import pathlib
 import re
+from collections import defaultdict
 from functools import reduce
 from typing import Dict, List, Union
 
@@ -19,10 +20,10 @@ from spyglass.common.common_task import TaskEpoch
 from spyglass.settings import test_mode, video_dir
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
 from spyglass.utils.nwb_helper_fn import (
+    estimate_sampling_rate,
     get_all_spatial_series,
     get_data_interface,
     get_nwb_file,
-    estimate_sampling_rate,
     get_valid_intervals,
 )
 
@@ -449,14 +450,17 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
 
 @schema
 class VideoFile(SpyglassMixin, dj.Imported):
-    """
+    """Video file metadata from NWB ImageSeries.
 
     Notes
     -----
     The video timestamps come from: videoTimeStamps.cameraHWSync if PTP is
     used. If PTP is not used, the video timestamps come from
-    videoTimeStamps.cameraHWFrameCount .
+    videoTimeStamps.cameraHWFrameCount.
 
+    **Issue #1444 Note:** VideoFile requires TaskEpoch entries to import videos.
+    If your NWB file contains ImageSeries (video data) without task metadata,
+    a warning will be issued.
     """
 
     definition = """
@@ -468,8 +472,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
     """
 
     _nwb_table = Nwbfile
+    _timestamp_overlap_threshold = 0.9  # Min fraction of timestamps in epoch
 
-    def _prepare_video_entry(self, key, video_obj, cam_device_str):
+    def _prepare_video_entry(
+        self, key, video_obj, cam_device_regex: str = r"camera_device (\d+)"
+    ):
         """Prepare a VideoFile entry dict for a given video object.
 
         Parameters
@@ -478,9 +485,9 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The primary key for the VideoFile entry
         video_obj : pynwb.image.ImageSeries
             The video object from the NWB file
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
+        cam_device_regex : str, optional
+            Regular expression pattern to extract camera device number.
+            Default: r"camera_device (\d+)"
 
         Returns
         -------
@@ -493,27 +500,33 @@ class VideoFile(SpyglassMixin, dj.Imported):
             If camera_name is not found in CameraDevice table
         """
         nwb_cam_device = video_obj.device.name
-        key["video_file_num"] = int(re.match(cam_device_str, nwb_cam_device)[1])
-
         camera_name = video_obj.device.camera_name
+
         if not (CameraDevice & {"camera_name": camera_name}):
             raise KeyError(
                 f"No camera with camera_name: {camera_name} found "
                 "in CameraDevice table."
             )
 
-        key["camera_name"] = camera_name
-        key["video_file_object_id"] = video_obj.object_id
-        return key
+        match = re.match(cam_device_regex, nwb_cam_device)
+        if not match:
+            raise ValueError(
+                f"Camera device name '{nwb_cam_device}' does not match "
+                f"expected pattern '{cam_device_regex}'"
+            )
 
-    def _process_video_timestamps(
-        self, video_obj, valid_times, key, cam_device_str
-    ):
-        """Process video timestamps and collect VideoFile entries.
+        return dict(
+            key,
+            video_file_num=int(match[1]),
+            camera_name=camera_name,
+            video_file_object_id=video_obj.object_id,
+        )
 
-        Handles both single-file and multi-file ImageSeries. For multi-file
-        ImageSeries (indicated by starting_frame attribute), segments
-        timestamps per file and validates each segment separately.
+    def _validate_video_timestamps(self, video_obj, valid_times, key):
+        """Validate video timestamps and return entries or failure reason.
+
+        Handles both single-file and multi-file ImageSeries. Validates that
+        timestamps meet the overlap threshold with epoch intervals.
 
         Parameters
         ----------
@@ -523,47 +536,51 @@ class VideoFile(SpyglassMixin, dj.Imported):
             Valid time intervals for the current epoch
         key : dict
             The primary key for the VideoFile entry
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
-        list
-            List of entry dicts ready for insertion (may be empty)
+        tuple
+            (entries_list, failure_reason_or_None)
+            - If validation passes: ([entry_dicts], None)
+            - If validation fails: ([], "failure reason string")
         """
         timestamps = video_obj.timestamps
         starting_frame = getattr(video_obj, "starting_frame", None)
 
-        # Check for multi-file ImageSeries
+        # Multi-file ImageSeries
         if starting_frame is not None and len(starting_frame) > 1:
-            return self._process_multifile_video(
-                video_obj,
-                timestamps,
-                starting_frame,
-                valid_times,
-                key,
-                cam_device_str,
+            entries = self._validate_multifile_timestamps(
+                video_obj, timestamps, starting_frame, valid_times, key
+            )
+            if not entries:
+                threshold_pct = self._timestamp_overlap_threshold * 100
+                return [], (
+                    f"No file segments have ≥{threshold_pct:.0f}% "
+                    "timestamp overlap with epoch"
+                )
+            return entries, None
+
+        # Single-file ImageSeries
+        these_times = valid_times.contains(timestamps)
+        overlap_pct = len(these_times) / len(timestamps)
+        if overlap_pct < self._timestamp_overlap_threshold:
+            threshold_pct = self._timestamp_overlap_threshold * 100
+            return [], (
+                f"Only {overlap_pct:.1%} of timestamps overlap with epoch "
+                f"(need ≥{threshold_pct:.0f}%)"
             )
 
-        # Single-file ImageSeries: original logic for backward compatibility
-        these_times = valid_times.contains(timestamps)
-        if len(these_times) <= (0.9 * len(timestamps)):
-            return []
+        return [self._prepare_video_entry(key, video_obj)], None
 
-        entry = self._prepare_video_entry(key, video_obj, cam_device_str)
-        return [entry]
-
-    def _process_multifile_video(
+    def _validate_multifile_timestamps(
         self,
         video_obj,
         timestamps,
         starting_frame,
         valid_times,
         key,
-        cam_device_str,
     ):
-        """Process multi-file ImageSeries with starting_frame parameter.
+        """Validate each segment of multi-file ImageSeries timestamps.
 
         Parameters
         ----------
@@ -577,14 +594,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
             Valid time intervals for the current epoch
         key : dict
             The primary key for the VideoFile entry
-        cam_device_str : str
-            Regular expression pattern to extract camera device number
-            (e.g., r"camera_device (\d+)") as an integer.
 
         Returns
         -------
         list
-            List of entry dicts ready for insertion (may be empty)
+            List of entry dicts for segments with valid timestamps. May be empty
         """
         entries = []
 
@@ -600,15 +614,15 @@ class VideoFile(SpyglassMixin, dj.Imported):
             # Extract timestamps for this specific file
             file_timestamps = timestamps[start_idx:end_idx]
 
-            # Check if 90% of this file's timestamps overlap with epoch
+            # Check if threshold % of this file's timestamps overlap with epoch
             these_times = valid_times.contains(file_timestamps)
-            if len(these_times) <= (0.9 * len(file_timestamps)):
+            if len(these_times) < (
+                self._timestamp_overlap_threshold * len(file_timestamps)
+            ):
                 continue
 
             # This file segment matches the epoch - prepare VideoFile entry
-            entry = self._prepare_video_entry(
-                key.copy(), video_obj, cam_device_str
-            )
+            entry = self._prepare_video_entry(key.copy(), video_obj)
             entries.append(entry)
 
         return entries
@@ -618,6 +632,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if not self.connection.in_transaction:
             self.populate(key)
             return
+
         if test_mode:
             skip_duplicates = True
 
@@ -647,33 +662,116 @@ class VideoFile(SpyglassMixin, dj.Imported):
             }
         ).fetch_interval()
 
-        cam_device_str = r"camera_device (\d+)"
+        # Track import status explicitly for diagnostics
         video_inserts = []
+        failed_videos = defaultdict(list)
 
-        for video in videos.values():
+        # Process each video and track its fate
+        for video_name, video in videos.items():
             video_list = (
                 [video] if isinstance(video, pynwb.image.ImageSeries) else video
             )
             for video_obj in video_list:
-                entries = self._process_video_timestamps(
-                    video_obj,
-                    valid_times,
-                    key.copy(),
-                    cam_device_str,
-                )
-                video_inserts.extend(entries)
+                try:
+                    entries, failure_reason = self._validate_video_timestamps(
+                        video_obj, valid_times, key.copy()
+                    )
+                    if failure_reason:
+                        failed_videos["timestamp_mismatch"].append(
+                            {"name": video_name, "reason": failure_reason}
+                        )
+                    else:
+                        video_inserts.extend(entries)
 
+                except KeyError as e:
+                    # Camera device not found
+                    camera_name = getattr(
+                        video_obj.device, "camera_name", "unknown"
+                    )
+                    failed_videos["missing_camera"].append(
+                        {
+                            "name": video_name,
+                            "camera": camera_name,
+                            "error": str(e),
+                        }
+                    )
+                except Exception as e:
+                    # Other unexpected errors
+                    failed_videos["other"].append(
+                        {
+                            "name": video_name,
+                            "error": f"{type(e).__name__}: {str(e)}",
+                        }
+                    )
+
+        # Insert successful imports
         if video_inserts:
             self.insert(
                 video_inserts,
                 skip_duplicates=skip_duplicates,
                 allow_direct_insert=True,
             )
-        elif verbose:
+
+        # Report import status with specifics (Issue #1444)
+        total_videos = len(videos)
+        imported_count = len(video_inserts)
+
+        if total_videos > imported_count:
+            self._report_partial_import(
+                nwb_file_name, failed_videos, total_videos, imported_count
+            )
+
+        elif imported_count == 0 and verbose:
             logger.info(
                 f"No video found corresponding to file {nwb_file_name}, "
                 f"epoch {interval_list_name}"
             )
+
+    @staticmethod
+    def _report_partial_import(
+        nwb_file_name, failed_videos, total_videos, imported_count
+    ):
+        """Report specific reasons for partial video import.
+
+        Issue #1444: Provide detailed diagnostics for each video that wasn't
+        imported, categorized by failure reason with specific details.
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            Name of the NWB file
+        failed_videos : dict
+            Dictionary with keys 'timestamp_mismatch', 'missing_camera',
+            'other', each containing list of failure details
+        total_videos : int
+            Total number of ImageSeries found
+        imported_count : int
+            Number of ImageSeries successfully imported
+        """
+        msg_parts = [
+            f"{nwb_file_name}: VideoFile Partial Import",
+            f"Imported {imported_count}/{total_videos} ImageSeries",
+        ]
+
+        if failed_videos["timestamp_mismatch"]:
+            msg_parts.append("\nTimestamp mismatches:")
+            for item in failed_videos["timestamp_mismatch"]:
+                msg_parts.append(f"  - {item['name']}: {item['reason']}")
+
+        if failed_videos["missing_camera"]:
+            msg_parts.append("\nMissing camera devices:")
+            for item in failed_videos["missing_camera"]:
+                msg_parts.append(
+                    f"  - {item['name']}: camera '{item['camera']}' "
+                    "not in CameraDevice table"
+                )
+
+        if failed_videos["other"]:
+            msg_parts.append("\nOther errors:")
+            for item in failed_videos["other"]:
+                msg_parts.append(f"  - {item['name']}: {item['error']}")
+
+        logger.warning("\n".join(msg_parts))
 
     @classmethod
     def update_entries(cls, restrict=True):
