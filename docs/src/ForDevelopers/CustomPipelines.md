@@ -193,7 +193,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
             {
                 **key,
                 **interval.primary_key
-                "analysis_file_name": builder.name,
+                "analysis_file_name": builder.analysis_file_name,
                 "data_object_id": data_id
             }
         )
