@@ -475,7 +475,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
     _timestamp_overlap_threshold = 0.9  # Min fraction of timestamps in epoch
 
     def _prepare_video_entry(
-        self, key, video_obj, cam_device_str: str = r"camera_device (\d+)"
+        self, key, video_obj, cam_device_regex: str = r"camera_device (\d+)"
     ):
         """Prepare a VideoFile entry dict for a given video object.
 
@@ -485,7 +485,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The primary key for the VideoFile entry
         video_obj : pynwb.image.ImageSeries
             The video object from the NWB file
-        cam_device_str : str, optional
+        cam_device_regex : str, optional
             Regular expression pattern to extract camera device number.
             Default: r"camera_device (\d+)"
 
@@ -508,11 +508,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 "in CameraDevice table."
             )
 
-        match = re.match(cam_device_str, nwb_cam_device)
+        match = re.match(cam_device_regex, nwb_cam_device)
         if not match:
             raise ValueError(
                 f"Camera device name '{nwb_cam_device}' does not match "
-                f"expected pattern '{cam_device_str}'"
+                f"expected pattern '{cam_device_regex}'"
             )
 
         return dict(
