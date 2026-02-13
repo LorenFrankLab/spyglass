@@ -179,7 +179,7 @@ def test_test_mode_property_uses_settings(schema_test, Mixin):
     """Test that _test_mode property uses spyglass.settings.config.
     
     Verifies fix for issue #1528 where string "false" was incorrectly 
-    evaluated as True. The property should now use SpyglassConfig.test_mode
+    evaluated as True. The property should now use spyglass.settings.config.test_mode
     which properly converts strings to booleans via str_to_bool().
     """
     schema_test(Mixin)
