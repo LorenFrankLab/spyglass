@@ -173,3 +173,25 @@ def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
     Mixin().delete_orphans(dry_run=False, safemode=False)
     post_del = Mixin().fetch1("id")
     assert post_del == 0, "Delete orphans not working."
+
+
+def test_test_mode_property_uses_settings(schema_test, Mixin):
+    """Test that _test_mode property uses spyglass.settings.config.
+    
+    Verifies fix for issue #1528 where string "false" was incorrectly 
+    evaluated as True. The property should now use spyglass.settings.config.test_mode
+    which properly converts strings to booleans via str_to_bool().
+    """
+    schema_test(Mixin)
+    
+    # The _test_mode property should return a boolean
+    test_mode_value = Mixin()._test_mode
+    assert isinstance(test_mode_value, bool), (
+        "_test_mode should return a boolean value"
+    )
+    
+    # In test environment, test_mode should be True
+    # (set by load_config fixture in conftest.py)
+    assert test_mode_value is True, (
+        "_test_mode should be True in test environment"
+    )

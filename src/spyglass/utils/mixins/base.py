@@ -43,17 +43,15 @@ class BaseMixin:
         Avoids circular import. Prevents prompt on delete.
 
         Note: Using @property instead of @cached_property so we always get
-        current value from dj.config, even if test_mode changes after first access.
+        current value from settings, even if test_mode changes after first access.
 
         Used by ...
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        import datajoint as dj
+        from spyglass.settings import config as sg_config
 
-        # Check dj.config directly instead of importing module-level variable
-        # which gets stale if load_config() is called after initial import
-        return dj.config.get("custom", {}).get("test_mode", False)
+        return sg_config.test_mode
 
     @cached_property
     def _spyglass_version(self):
