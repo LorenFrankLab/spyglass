@@ -203,8 +203,7 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         initial_model_key = model_params.get("initial_model", None)
         if initial_model_key is None:
             # define maximum latent_dimension based on keypoints
-            data_shape = list(coordinates.values())[0].shape
-            n_keypoints, keypoint_dim = data_shape
+            _, n_keypoints, keypoint_dim = list(coordinates.values())[0].shape
             if n_keypoints < 2:
                 raise ValueError(
                     f"Need at least 2 keypoints to train a moseq model, found {n_keypoints}"
@@ -289,6 +288,12 @@ class MoseqModel(SpyglassMixin, dj.Computed):
             keypoint moseq config
         model_params : dict
             params dictionary fetched from spyglass parameter table entry
+        max_latent_dim : int, optional
+            maximum latent dimension to keep, by default 10 (seggested by moseq docs)
+        target_variance : float, optional
+            if supplied, determines the number of principal components to keep based
+            on the cumulative variance explained. If not supplied, keeps all principal
+            components up to the maximum defined by max_latent_dim
 
         Returns
         -------
