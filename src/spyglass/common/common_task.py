@@ -1,5 +1,4 @@
 import datajoint as dj
-import ndx_franklab_novela
 import pynwb
 
 from spyglass.common.common_device import CameraDevice  # noqa: F401
@@ -8,7 +7,11 @@ from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
-from spyglass.utils.nwb_helper_fn import get_config, get_nwb_file
+from spyglass.utils.nwb_helper_fn import (
+    get_config,
+    get_nwb_file,
+    is_nwb_obj_type,
+)
 
 schema = dj.schema("common_task")
 
@@ -214,7 +217,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         # map camera ID (in camera name) to camera_name
 
         for device in nwbf.devices.values():
-            if isinstance(device, ndx_franklab_novela.CameraDevice):
+            if is_nwb_obj_type(device, "CameraDevice"):
                 # get the camera ID
                 camera_id = int(str.split(device.name)[1])
                 camera_names[camera_id] = device.camera_name
@@ -240,6 +243,8 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             logger.warning(
                 f"No tasks processing module found in {nwbf} or config\n"
             )
+            # Issue #1444: Check for orphaned ImageSeries
+            self._check_videos_without_task(nwbf, nwb_file_name)
             return
 
         sess_intervals = (IntervalList & nwb_dict).fetch("interval_list_name")
@@ -377,6 +382,38 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
             f"Available intervals: {session_intervals}"
         )
         return None
+
+    @staticmethod
+    def _check_videos_without_task(nwbf, nwb_file_name):
+        """Check for ImageSeries when no TaskEpoch entries exist.
+
+        Issue #1444: VideoFile requires TaskEpoch entries.
+
+        Parameters
+        ----------
+        nwbf : pynwb.NWBFile
+            Already-open NWB file object
+        nwb_file_name : str
+            Name of the NWB file for error messages
+        """
+        video_names = [
+            getattr(obj, "name", None)
+            for obj in nwbf.objects.values()
+            if isinstance(obj, pynwb.image.ImageSeries)
+        ]
+
+        if not video_names:  # No videos in NWB, nothing to warn about
+            return
+
+        logger.warning(
+            f"{nwb_file_name} TaskEpoch Import Warning (Issue #1444)\n"
+            f"Found {len(video_names)} ImageSeries without TaskEpochs:"
+            f" {video_names}\n"
+            f"VideoFile requires TaskEpoch associations to import videos.\n"
+            f"To resolve this:\n"
+            f"1. Add task information to your NWB file's processing['tasks']\n"
+            f"2. Re-run populate_all_common() after adding task data\n\n"
+        )
 
     @classmethod
     def update_entries(cls, restrict=True):

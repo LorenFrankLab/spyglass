@@ -113,6 +113,8 @@ for label, interval_data in results.groupby("interval_labels"):
     from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507
@@ -134,7 +136,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Pin datajoint version < 2.0 #1516
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
-- Improve get_recording efficiency #1522
+- Upgrade to pynwb>=3.1 #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
 
 ### Pipelines
 
@@ -163,6 +166,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
 
 - Decoding
 
@@ -192,6 +196,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
+    - Improve get_recording efficiency #1522
 
 ## [0.5.5] (Aug 6, 2025)
 
