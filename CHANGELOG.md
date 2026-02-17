@@ -145,6 +145,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Behavior
 
     - Add methods for calling moseq visualization functions #1374
+    - Ensure latent moseq dimension is compatible with dataset #1511
 
 - Common
 
@@ -197,6 +198,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
+    - Improve get_recording efficiency #1522
 
 ## [0.5.5] (Aug 6, 2025)
 
