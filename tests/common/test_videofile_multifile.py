@@ -16,6 +16,7 @@ import pytest
 from hdmf.common.table import DynamicTable, VectorData
 from ndx_franklab_novela import CameraDevice
 from pynwb import NWBHDF5IO
+from pynwb.device import DeviceModel
 from pynwb.image import ImageSeries
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
@@ -45,13 +46,17 @@ def multifile_video_nwb(raw_dir, common, data_import, teardown):
 
     # Create camera device
     # Use minimal parameters to avoid API compatibility issues
+    camera_model = DeviceModel(
+        name="Test Camera Model", manufacturer="Test Camera Manufacturer"
+    )
     camera_device = CameraDevice(
         name="camera_device 1",
         meters_per_pixel=0.001,
         lens="test_lens",
-        model="Test Camera Model",
+        model=camera_model,
         camera_name="test_multifile_video_camera",
     )
+    nwbfile.add_device_model(camera_model)
     nwbfile.add_device(camera_device)
 
     # Create behavior processing module (required for some Spyglass imports)

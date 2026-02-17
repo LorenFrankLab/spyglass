@@ -1,5 +1,4 @@
 import datajoint as dj
-import ndx_franklab_novela
 import pynwb
 
 from spyglass.common.common_device import DataAcquisitionDevice
@@ -63,7 +62,7 @@ class Session(SpyglassIngestion, dj.Imported):
 
         @property
         def _source_nwb_object_type(self):
-            return ndx_franklab_novela.DataAcqDevice
+            return "DataAcqDevice"
 
         @property
         def table_key_to_obj_attr(self):

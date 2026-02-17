@@ -1,7 +1,6 @@
 import warnings
 
 import datajoint as dj
-import ndx_franklab_novela
 import numpy as np
 import pandas as pd
 import pynwb
@@ -22,6 +21,7 @@ from spyglass.utils.nwb_helper_fn import (
     get_electrode_indices,
     get_nwb_file,
     get_valid_intervals,
+    is_nwb_obj_type,
 )
 
 schema = dj.schema("common_ephys")
@@ -53,16 +53,14 @@ class ElectrodeGroup(SpyglassMixin, dj.Imported):
             key["region_id"] = BrainRegion.fetch_add(
                 region_name=electrode_group.location
             )
-            if isinstance(electrode_group.device, ndx_franklab_novela.Probe):
-                key["probe_id"] = electrode_group.device.probe_type
-            key["description"] = electrode_group.description
-            if isinstance(
-                electrode_group, ndx_franklab_novela.NwbElectrodeGroup
+            if probe_type := getattr(
+                electrode_group.device, "probe_type", None
             ):
+                key["probe_id"] = probe_type
+            key["description"] = electrode_group.description
+            if targeted_x := getattr(electrode_group, "targeted_x", None):
                 # Define target_hemisphere based on targeted x coordinate
-                if (
-                    electrode_group.targeted_x >= 0
-                ):  # if positive or zero x coordinate
+                if targeted_x >= 0:  # if positive or zero x coordinate
                     # define target location as right hemisphere
                     key["target_hemisphere"] = "Right"
                 else:  # if negative x coordinate
@@ -162,9 +160,9 @@ class Electrode(SpyglassMixin, dj.Imported):
                 "bad_channel",
                 "ref_elect_id",
             ]
-            if isinstance(
-                elect_data.group.device, ndx_franklab_novela.Probe
-            ) and all(col in elect_data for col in extra_cols):
+            if is_nwb_obj_type(elect_data.group.device, "Probe") and all(
+                col in elect_data for col in extra_cols
+            ):
                 key.update(
                     {
                         "probe_id": elect_data.group.device.probe_type,
@@ -178,7 +176,7 @@ class Electrode(SpyglassMixin, dj.Imported):
                 )
             else:
                 logger.warning(
-                    "Electrode did not match extected novela format.\nPlease "
+                    "Electrode did not match expected novela format.\nPlease "
                     + f"ensure the following in YAML config: {extra_cols}."
                 )
 

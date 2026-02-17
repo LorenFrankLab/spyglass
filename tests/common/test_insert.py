@@ -187,15 +187,22 @@ def test_insert_camera(mini_insert, mini_devices, common):
 
     attrs = [
         ("camera_name", "camera_name"),
-        ("manufacturer", "manufacturer"),
-        ("model", "model"),
         ("lens", "lens"),
         ("meters_per_pixel", "meters_per_pixel"),
+    ]
+    model_attrs = [
+        ("model", "name"),
+        ("manufacturer", "manufacturer"),
     ]
     for camera_attr, meta_attr in attrs:
         assert camera_data[camera_attr] == getattr(
             camera_raw, meta_attr
         ), f"Camera table {camera_attr} not match raw data {meta_attr}"
+
+    for model_attr, meta_attr in model_attrs:
+        assert camera_data[model_attr] == getattr(
+            camera_raw.model, meta_attr
+        ), f"Camera table {model_attr} not match raw data {meta_attr}"
 
 
 def test_insert_probe(mini_insert, mini_devices, common):
