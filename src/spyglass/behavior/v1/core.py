@@ -82,6 +82,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         dict
             dictionary of video name to pose dataset
         """
+        key = key or dict()
         self.ensure_single_entry(key)
         query = self & key
         bodyparts = query.fetch1("bodyparts")
@@ -101,7 +102,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             datasets = format_dataset_for_moseq(datasets, bodyparts)
         return datasets
 
-    def fetch_video_paths(self, key: dict = None):
+    def fetch_video_paths(self, key: dict = None) -> List[Path]:
         """fetch video paths for a group of videos
 
         Parameters
@@ -114,6 +115,7 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         List[Path]
             list of video paths
         """
+        key = key or dict()
         self.ensure_single_entry(key)
         key = (self & key).fetch1("KEY")
         return [
