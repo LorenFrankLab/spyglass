@@ -78,8 +78,16 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
                 curation_key["object_id"]
             ].to_dataframe()
             unit_ids = list(nwb_sorting.index)
-            labels = list(nwb_sorting["curation_label"])
-            merge_groups = list(nwb_sorting["merge_groups"])
+            labels = list(nwb_sorting.get("curation_label", []))
+            merge_groups = list(nwb_sorting.get("merge_groups", []))
+
+        if not labels or not merge_groups:
+            raise ValueError(
+                "Sorting object must have both 'curation_label' and "
+                "'merge_groups' columns in order to generate curation URI. "
+                "Please add label(s) during 'CurationV1.insert_curation'.\n\n"
+                "If you need a URI without labels, please reopen issue #1530"
+            )
 
         unit_ids = [str(unit_id) for unit_id in unit_ids]
 
