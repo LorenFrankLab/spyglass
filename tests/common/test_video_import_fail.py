@@ -25,11 +25,11 @@ def nwb_with_video_no_task(raw_dir, common):
         experimenter=["Test Experimenter"],
     )
     nwbfile.subject = mock_Subject()
+
     camera_device = CameraDevice(
         name="camera_device 0",
         meters_per_pixel=0.001,
         manufacturer="Test Camera Co",
-        model="TestCam 3000",
         lens="50mm",
         camera_name="test_camera",
     )

@@ -1423,7 +1423,10 @@ def pop_rec(spike_v1, mini_dict, team_name):
     ssr_pk = (
         (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
     )
-    spike_v1.SpikeSortingRecording.populate(ssr_pk)
+    spike_v1.SpikeSortingRecording.populate()
+
+    if not spike_v1.SpikeSortingRecording() & ssr_pk:
+        raise ValueError("SpikeSortingRecording failed to populate.")
 
     yield ssr_pk
 
