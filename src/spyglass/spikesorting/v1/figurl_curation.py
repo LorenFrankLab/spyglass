@@ -81,10 +81,10 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
             labels = list(nwb_sorting.get("curation_label", []))
             merge_groups = list(nwb_sorting.get("merge_groups", []))
 
-        if not labels or not merge_groups:
+        if not labels:
             raise ValueError(
-                "Sorting object must have both 'curation_label' and "
-                "'merge_groups' columns in order to generate curation URI. "
+                "Sorting object must have a 'curation_label' column with at "
+                "least one label in order to generate a curation URI. "
                 "Please add label(s) during 'CurationV1.insert_curation'.\n\n"
                 "If you need a URI without labels, please reopen issue #1530"
             )
