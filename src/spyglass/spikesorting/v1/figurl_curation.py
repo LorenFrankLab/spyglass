@@ -86,9 +86,9 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
 
         if not has_labels:
             raise ValueError(
-                "Sorting object must have a 'curation_label' column with at "
-                "least one label in order to generate a curation URI. "
-                "Please add label(s) during 'CurationV1.insert_curation'.\n\n"
+                "Sorting object must have a 'curation_label' column in order to"
+                " generate a curation URI. Please add label(s) during "
+                "'CurationV1.insert_curation'.\n\n"
                 "If you need a URI without labels, please reopen issue #1530"
             )
 
