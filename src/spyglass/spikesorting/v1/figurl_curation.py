@@ -70,6 +70,8 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             curation_key["analysis_file_name"]
         )
+        has_labels = False
+
         with pynwb.NWBHDF5IO(
             analysis_file_abs_path, "r", load_namespaces=True
         ) as io:
@@ -78,10 +80,11 @@ class FigURLCurationSelection(SpyglassMixin, dj.Manual):
                 curation_key["object_id"]
             ].to_dataframe()
             unit_ids = list(nwb_sorting.index)
+            has_labels = "curation_label" in nwb_sorting.columns
             labels = list(nwb_sorting.get("curation_label", []))
             merge_groups = list(nwb_sorting.get("merge_groups", []))
 
-        if not labels:
+        if not has_labels:
             raise ValueError(
                 "Sorting object must have a 'curation_label' column with at "
                 "least one label in order to generate a curation URI. "
