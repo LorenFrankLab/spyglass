@@ -219,26 +219,36 @@ def worker_id(request):
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server, worker_id, verbose, teardown):
-    """Fixture for datajoint connection with pytest-xdist support.
+def dj_config(verbose):
+    """Fixture for branch-specific config name"""
+    SERVER.wait()  # ensure MySQL is ready before any test uses these credentials
 
-    For parallel execution, each worker gets its own database schema prefix
-    to avoid race conditions and ensure test isolation.
-    """
     # Worker-specific config file to avoid conflicts
     config_file = "dj_local_conf.json"
-    if branch_name := server.branch_name:
+    if branch_name := SERVER.branch_name:
         config_file = f"dj_local_conf_{branch_name}.json"
 
     if Path(config_file).exists():
         os.remove(config_file)
 
     # Set worker-specific schema prefix for database isolation
-    dj.config.update(server.credentials)
+    dj.config.update(SERVER.credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["database.prefix"] = "pytests"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
+
+    return config_file
+
+
+@pytest.fixture(scope="session")
+def dj_conn(dj_config):
+    """Fixture for datajoint connection with pytest-xdist support.
+
+    For parallel execution, each worker gets its own database schema prefix
+    to avoid race conditions and ensure test isolation.
+    """
+    dj.config.load(dj_config)
 
     try:
         dj.conn().ping()
@@ -344,7 +354,7 @@ def mini_insert(
 
     dj_logger.info("Inserting test data.")
 
-    if not server.connected:
+    if not SERVER.connected:
         raise ConnectionError("No server connection.")
 
     if len(Nwbfile & mini_dict) != 0:
