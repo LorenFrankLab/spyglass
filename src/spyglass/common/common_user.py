@@ -157,10 +157,15 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         )
 
     def _warn_if_custom_or_conflict(self):
+        # NOTE: allowed editable items...
+        # spyglass - this package is often installed as editable for fetching
+        #            updates without reinstalling.
+        # jsonschema - this package is often installed as editable in a tmp dir
+
         pip_custom_no_spy = {
             k: "".join(v)
             for k, v in self._pip_custom.items()
-            if "spyglass" not in k
+            if "spyglass" not in k and "jsonschema" not in k
         }
         if pip_custom_no_spy:
             logger.warning(

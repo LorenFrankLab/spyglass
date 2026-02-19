@@ -90,7 +90,7 @@ class SortedSpikesGroup(SpyglassMixin, dj.Manual):
             if test_mode:
                 return
             raise ValueError(
-                f"Group {nwb_file_name}: {group_name} already exists",
+                f"Group {nwb_file_name}: {group_name} already exists ",
                 "please delete the group before creating a new one",
             )
 

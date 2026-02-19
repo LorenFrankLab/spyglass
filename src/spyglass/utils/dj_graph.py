@@ -1232,6 +1232,19 @@ class RestrGraph(AbstractGraph):
         self.cascade(warn=False)
         return {t: self._get_node(t).get("files", []) for t in self.restr_ft}
 
+    def _stored_files(self, as_dict=False) -> Dict[str, str] | Set[str]:
+        """Return dictionary of table names and files."""
+        # Added for debugging
+        self.cascade(warn=False)
+
+        files = {
+            table: file
+            for table in self.included_tables
+            for file in self._get_node(table).get("files", [])
+        }
+
+        return files if as_dict else set(files.values())
+
     @property
     def file_paths(self) -> List[str]:
         """Return list of unique analysis files from all visited nodes.
@@ -1239,15 +1252,12 @@ class RestrGraph(AbstractGraph):
         This covers intermediate analysis files that may not have been fetched
         directly by the user.
         """
-        self.cascade()
+        self.cascade(warn=False)
 
-        files = {
-            file
-            for table in self.included_tables
-            for file in self._get_node(table).get("files", [])
-        }
-
-        return [self.analysis_file_tbl.get_abs_path(file) for file in files]
+        return [
+            self.analysis_file_tbl.get_abs_path(file)
+            for file in self._stored_files()
+        ]
 
 
 class TableChain(RestrGraph):

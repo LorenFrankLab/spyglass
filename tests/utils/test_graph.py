@@ -145,8 +145,21 @@ def test_rg_restr_ft(restr_graph):
 
 
 def test_rg_file_paths(restr_graph):
-    """Test collection of upstream file paths."""
-    assert len(restr_graph.file_paths) == 3, "Unexpected number of file paths."
+    """Test collection of upstream file paths.
+
+    NOTE: This test previously tested how many files were collected, which may
+    differ if only subset of tests are run. Instead, we now check which tables
+    store collected files. See #1440, #1534 for context.
+    """
+    expected_tbls = [
+        "`position_linearization_v1`.`__linearized_position_v1`",
+        "`position_v1_trodes_position`.`__trodes_pos_v1`",
+    ]
+    stored_files = restr_graph._stored_files(as_dict=True)
+    for tbl in expected_tbls:
+        assert tbl in stored_files, f"Expected table {tbl} did not show file."
+
+    assert len(restr_graph.file_paths) > 1, "Unexpected file paths collected."
 
 
 def test_rg_invalid_table(restr_graph):

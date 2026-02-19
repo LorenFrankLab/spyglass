@@ -36,7 +36,7 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    @property
+    @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
@@ -49,11 +49,9 @@ class BaseMixin:
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        import datajoint as dj
+        from spyglass.settings import config as sg_config
 
-        # Check dj.config directly instead of importing module-level variable
-        # which gets stale if load_config() is called after initial import
-        return dj.config.get("custom", {}).get("test_mode", False)
+        return sg_config.get("test_mode", False)
 
     @cached_property
     def _spyglass_version(self):
