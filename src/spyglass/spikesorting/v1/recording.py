@@ -340,7 +340,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         if not parent_file_name:
             parent = SpikeSortingRecordingSelection & key
-            parent.fetch1("nwb_file_name")
+            parent_file_name = parent.fetch1("nwb_file_name")
 
         recording_nwb_file_name, recording_object_id, electrodes_id = (
             _write_recording_to_nwb(
