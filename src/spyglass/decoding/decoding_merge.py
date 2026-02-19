@@ -1,4 +1,3 @@
-from itertools import chain
 from pathlib import Path
 
 import datajoint as dj
@@ -38,22 +37,23 @@ class DecodingOutput(_Merge, SpyglassMixin):
         -> SortedSpikesDecodingV1
         """
 
+    def _fetch_registered_paths(self, attr):
+        """Fetch a filepath attribute from all part parents, skipping missing."""
+        paths = []
+        for tbl in self.merge_get_parent(multi_source=True):
+            try:
+                paths.extend(tbl.fetch(attr).tolist())
+            except FileNotFoundError:
+                pass
+        return paths
+
     def cleanup(self, dry_run=False):
         """Remove any decoding outputs that are not in the merge table"""
         if dry_run:
             logger.info("Dry run, not removing any files")
         else:
             logger.info("Cleaning up decoding outputs")
-        table_results_paths = list(
-            chain(
-                *[
-                    part_parent_table.fetch("results_path").tolist()
-                    for part_parent_table in self.merge_get_parent(
-                        multi_source=True
-                    )
-                ]
-            )
-        )
+        table_results_paths = self._fetch_registered_paths("results_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.nc"):
             if str(path) not in table_results_paths:
                 logger.info(f"Removing {path}")
@@ -63,16 +63,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
                     except PermissionError:
                         logger.warning(f"Unable to remove {path}, skipping")
 
-        table_model_paths = list(
-            chain(
-                *[
-                    part_parent_table.fetch("classifier_path").tolist()
-                    for part_parent_table in self.merge_get_parent(
-                        multi_source=True
-                    )
-                ]
-            )
-        )
+        table_model_paths = self._fetch_registered_paths("classifier_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
             if str(path) not in table_model_paths:
                 logger.info(f"Removing {path}")
