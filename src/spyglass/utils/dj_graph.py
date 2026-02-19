@@ -1237,13 +1237,12 @@ class RestrGraph(AbstractGraph):
         # Added for debugging
         self.cascade(warn=False)
 
-        files = {
-            table: file
+        pairs = [
+            (table, file)
             for table in self.included_tables
             for file in self._get_node(table).get("files", [])
-        }
-
-        return files if as_dict else set(files.values())
+        ]
+        return dict(pairs) if as_dict else {file for _, file in pairs}
 
     @property
     def file_paths(self) -> List[str]:

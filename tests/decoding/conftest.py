@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -30,10 +31,18 @@ def mock_netcdf_saves():
             # Return bytes if no path given (original behavior for some use cases)
             return None
 
+        # Ensure parent directory exists
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
         # Keep the .nc extension to match expectations, but write pickle format
         # This avoids netCDF4/HDF5 errors while maintaining file path compatibility
-        with open(path, "wb") as f:
-            pickle.dump(self, f)
+        try:
+            with open(path, "wb") as f:
+                pickle.dump(self, f)
+        except (FileNotFoundError, PermissionError, OSError):
+            # Copilot suggested that this is where a file might throw error
+            # during teatdown, attempted automatic cleanup.
+            pass
 
         return None
 
