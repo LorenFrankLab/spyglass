@@ -138,6 +138,7 @@ def single_transaction_make(
                 "ImportedLFP",
                 "VirusInjection",
                 "OpticalFiberImplant",
+                "OptogeneticProtocol",
             ]:
                 key_source = Nwbfile()
 
