@@ -47,6 +47,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
     _pip_custom = dict()  # Custom pip installs from the environment
     _freeze_comments = dict()  # Comments from pip freeze
     _conda_conflicts = dict()  # Conda and pip conflicts in the environment
+    _env_warned = False  # Suppress repeated warnings per process
 
     def _get_conda_export(self) -> Tuple[dict, dict]:
         """Fetch the current Conda environment export.
@@ -162,6 +163,10 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
         #            updates without reinstalling.
         # jsonschema - this package is often installed as editable in a tmp dir
 
+        if UserEnvironment._env_warned:
+            return
+        UserEnvironment._env_warned = True
+
         pip_custom_no_spy = {
             k: "".join(v)
             for k, v in self._pip_custom.items()
@@ -247,7 +252,7 @@ class UserEnvironment(SpyglassMixin, dj.Manual):
                 return True  # successfully parsed basic dependency
 
             # --- if conflicting versions, log conflict, overwrite with pip ---
-            logger.info(f"Conda/pip conflict: {line}")
+            logger.debug(f"Conda/pip conflict: {line}")
             self._conda_conflicts[package] = [pip_version, conda_version]
             self._conda_pip_dict[package] = line
             return True  # successfully parsed basic dependency conflict

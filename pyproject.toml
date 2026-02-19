@@ -172,6 +172,8 @@ filterwarnings = [
   "ignore::ResourceWarning:.*",
   "ignore::DeprecationWarning:.*",
   "ignore::UserWarning:.*",
+  "ignore::FutureWarning:.*",
+  "ignore::PerformanceWarning:.*",
   "ignore::MissingRequiredBuildWarning:.*",
 ]
 markers = [

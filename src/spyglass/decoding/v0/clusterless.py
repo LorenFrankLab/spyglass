@@ -45,7 +45,7 @@ except (ImportError, ModuleNotFoundError) as e:
         DiagonalDiscrete,
         UniformInitialConditions,
     ) = [None] * 5
-    logger.warning(e)
+    logger.debug(e)
 
 from tqdm.auto import tqdm
 

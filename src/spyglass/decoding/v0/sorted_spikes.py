@@ -34,7 +34,7 @@ except (ImportError, ModuleNotFoundError) as e:
         DiagonalDiscrete,
         UniformInitialConditions,
     ) = [None] * 5
-    logger.warning(e)
+    logger.debug(e)
 
 from spyglass.common.common_behav import (
     convert_epoch_interval_name_to_position_interval_name,

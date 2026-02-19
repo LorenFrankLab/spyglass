@@ -77,7 +77,7 @@ def generate_led_df(leds, inc_vals=False):
     def process_value(x):
         return increment_count() if x == 1 else x
 
-    return df.applymap(process_value)
+    return df.map(process_value)
 
 
 @pytest.fixture(scope="session")

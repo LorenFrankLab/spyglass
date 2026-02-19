@@ -41,7 +41,7 @@ except (ImportError, ModuleNotFoundError) as e:
         UniformOneEnvironmentInitialConditions,
         ObservationModel,
     ) = [None] * 13
-    logger.warning(e)
+    logger.debug(e)
 from track_linearization import make_track_graph
 
 

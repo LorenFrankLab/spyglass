@@ -339,7 +339,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             if not bool(RecordingRecompute & key)
         ]
         if not inserts:
-            logger.info(f"No rows to insert from:\n\t{source}")
+            logger.debug(f"No rows to insert from:\n\t{source}")
             return
 
         logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
@@ -903,6 +903,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
+        if not len(file_names):
+            logger.debug(f"{prefix}Delete 0 files. Nothing to do.")
+            return
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
             file_names[:10]
         )

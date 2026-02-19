@@ -832,7 +832,7 @@ class AnalysisMixin(BaseMixin):
                 # to ensure that things go in the right order
 
                 metric_values = metric_values[np.argsort(unit_ids)]
-                self._logger.info(f"Adding metric {metric} : {metric_values}")
+                self._logger.debug(f"Adding metric {metric} : {metric_values}")
                 nwbf.add_unit_column(
                     name=metric,
                     description=f"{metric} metric",
@@ -917,7 +917,7 @@ class AnalysisMixin(BaseMixin):
             # If metrics were specified, add one column per metric
             if metrics is not None:
                 for metric_name, metric_dict in metrics.items():
-                    self._logger.info(
+                    self._logger.debug(
                         f"Adding metric {metric_name} : {metric_dict}"
                     )
                     metric_data = metric_dict.values().to_list()
@@ -963,7 +963,7 @@ class AnalysisMixin(BaseMixin):
                 nwbf.add_unit(id=id)
 
             for metric_name, metric_dict in metrics.items():
-                self._logger.info(
+                self._logger.debug(
                     f"Adding metric {metric_name} : {metric_dict}"
                 )
                 metric_data = list(metric_dict.values())

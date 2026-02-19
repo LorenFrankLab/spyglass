@@ -65,7 +65,7 @@ class UnitWaveformFeaturesGroup(SpyglassMixin, dj.Manual):
             "waveform_features_group_name": group_name,
         }
         if self & group_key:
-            logger.error(  # No error on duplicate helps with pytests
+            logger.warning(  # No error on duplicate helps with pytests
                 f"Group {nwb_file_name}: {group_name} already exists"
                 + "please delete the group before creating a new one",
             )

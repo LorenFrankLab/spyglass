@@ -1000,7 +1000,7 @@ class RestrGraph(AbstractGraph):
                     cascade=True,
                 )
                 cascaded_leaves.append(leaf_graph)
-            logger.info("adding cascaded leaves")
+            logger.debug("adding cascaded leaves")
             self = self + cascaded_leaves
 
         self.cascaded = True  # Mark here so next step can use `restr_ft`
