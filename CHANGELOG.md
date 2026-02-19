@@ -139,6 +139,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Upgrade to pynwb>=3.1 #1506
 - Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
 - Add `analysis_table` property to mixin for custom pipelines #1525
+- Fix update bug in `_resolve_external_tables` #1536
 
 ### Pipelines
 
