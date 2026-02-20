@@ -93,9 +93,13 @@ def test_cautious_del_dry_run(Nwbfile, frequent_imports):
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_empty_cautious_del(caplog, schema_test, Mixin):
     schema_test(Mixin)
-    Mixin().cautious_delete(safemode=False)
-    Mixin().cautious_delete(safemode=False)
+    mixin = Mixin()
+    prev_level = mixin._logger.level
+    mixin._logger.setLevel("INFO")
+    mixin.cautious_delete(safemode=False)
+    mixin.cautious_delete(safemode=False)
     assert "empty" in caplog.text, "No warning issued."
+    mixin._logger.setLevel(prev_level)
 
 
 def test_super_delete(schema_test, Mixin, common):

@@ -10,7 +10,7 @@ def leaf(lin_merge):
 
 
 @pytest.fixture(scope="session")
-def restr_graph(leaf, verbose, lin_merge_key):
+def restr_graph(leaf, lin_merge_key):
     from spyglass.utils.dj_graph import RestrGraph
 
     _ = lin_merge_key  # linearization merge table populated
@@ -20,7 +20,7 @@ def restr_graph(leaf, verbose, lin_merge_key):
         leaves={leaf.full_table_name: True},
         include_files=True,
         cascade=True,
-        verbose=verbose,
+        verbose=False,
     )
 
 
@@ -44,6 +44,7 @@ def add_graph_rgs(add_graph_tables):
         leaves={tables["B1"].full_table_name: restr_1},
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_1.cascade()
 
@@ -51,6 +52,7 @@ def add_graph_rgs(add_graph_tables):
         seed_table=add_graph_tables["B2"],
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_2.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_2)
     rg_2.cascade()
@@ -59,6 +61,7 @@ def add_graph_rgs(add_graph_tables):
         seed_table=add_graph_tables["B2"],
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_3.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_3)
     rg_3.cascade()
@@ -183,11 +186,10 @@ def test_rg_restr_subset(restr_graph, leaf):
     assert len(prev_ft) == len(new_ft), "Subset sestriction changed length."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_rg_no_restr(caplog, restr_graph, common):
     restr_graph._set_restr(common.LabTeam, restriction=False)
-    restr_graph._get_ft(common.LabTeam.full_table_name, with_restr=True)
-    assert "No restr" in caplog.text, "No warning logged on no restriction."
+    ret = restr_graph._get_ft(common.LabTeam.full_table_name, with_restr=True)
+    assert not ret, "Expected empty restricted table when no restriction."
 
 
 def test_rg_invalid_direction(restr_graph, leaf):
@@ -298,8 +300,9 @@ def test_null_restrict_by(graph_tables):
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_restrict_by_this_table(caplog, graph_tables):
     PkNode = graph_tables["PkNode"]()
-    PkNode >> "pk_id > 4"
-    assert "valid for" in caplog.text, "No warning logged without search."
+    dist = (PkNode >> "pk_id > 4").restriction
+    plain = (PkNode & "pk_id > 4").restriction
+    assert dist == plain, "Restricting by own table did not use existing restr."
 
 
 def test_invalid_restr_direction(graph_tables):

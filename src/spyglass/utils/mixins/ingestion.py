@@ -311,7 +311,7 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
-                logger.info(
+                self._info_msg(
                     f"Key {key} missing required attribute {attr.name}."
                 )
                 return False

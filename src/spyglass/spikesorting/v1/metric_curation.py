@@ -306,11 +306,11 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 for unit_id, value in metrics["nn_isolation"].items()
             }
 
-        logger.info("Applying curation...")
+        self._info_msg("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
-        logger.info("Saving to NWB...")
+        self._info_msg("Saving to NWB...")
         analysis_file_name, object_id = _write_metric_curation_to_nwb(
             nwb_file_name, waveforms, metrics, labels, merge_groups
         )

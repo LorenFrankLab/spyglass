@@ -11,6 +11,7 @@ import pandas as pd
 import pynwb
 
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 
@@ -334,7 +335,7 @@ class Interval:
         from_inds=False,
         no_overlap=False,
         no_duplicates=True,
-        warn=True,
+        warn=not test_mode,  # warn by default, unless running pytests
         **kwargs,
     ) -> None:
         """Initialize the Intervals class with a list of intervals.
@@ -358,6 +359,7 @@ class Interval:
             Additional keyword arguments to pass to the class, including
             "valid_times" and "interval_list_name" for times and name.
         """
+
         self.kwargs = dict(  # Returned objects will set this behavior
             kwargs,
             no_overlap=no_overlap,

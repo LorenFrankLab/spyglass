@@ -240,7 +240,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
         tasks_mod = nwbf.processing.get("tasks")
         config_tasks = config.get("Tasks", [])
         if tasks_mod is None and (not config_tasks):
-            logger.warning(
+            self._warn_msg(
                 f"No tasks processing module found in {nwbf} or config\n"
             )
             # Issue #1444: Check for orphaned ImageSeries
@@ -377,7 +377,7 @@ class TaskEpoch(SpyglassMixin, dj.Imported):
 
         warn = "Multiple" if len(possible_targets) > 1 else "No"
 
-        logger.warning(
+        cls()._warn_msg(
             f"{warn} interval(s) found for epoch {epoch}. "
             f"Available intervals: {session_intervals}"
         )

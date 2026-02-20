@@ -8,7 +8,7 @@ import pynwb
 
 from spyglass.common import Nwbfile, get_raw_eseries, populate_all_common
 from spyglass.common.common_nwbfile import schema as nwbfile_schema
-from spyglass.settings import debug_mode, raw_dir
+from spyglass.settings import debug_mode, raw_dir, test_mode
 from spyglass.utils import logger
 from spyglass.utils.nwb_helper_fn import get_nwb_copy_filename
 
@@ -113,10 +113,11 @@ def copy_nwb_link_raw_ephys(
     str
         The absolute path of the new NWB file.
     """
-    logger.info(
-        f"Creating a copy of NWB file {nwb_file_name} "
-        + f"with link to raw ephys data: {out_nwb_file_name}"
-    )
+    if not test_mode:
+        logger.info(
+            f"Creating a copy of NWB file {nwb_file_name} "
+            + f"with link to raw ephys data: {out_nwb_file_name}"
+        )
 
     nwb_file_abs_path = Nwbfile.get_abs_path(nwb_file_name, new_file=True)
 
@@ -130,9 +131,10 @@ def copy_nwb_link_raw_ephys(
     if os.path.exists(out_nwb_file_abs_path):
         if debug_mode or keep_existing:
             return out_nwb_file_abs_path
-        logger.warning(
-            f"Output file exists, will be overwritten: {out_nwb_file_abs_path}"
-        )
+        if not test_mode:
+            logger.warning(
+                f"Output file exists, will be overwritten: {out_nwb_file_abs_path}"
+            )
 
     with pynwb.NWBHDF5IO(
         path=nwb_file_abs_path, mode="r", load_namespaces=True

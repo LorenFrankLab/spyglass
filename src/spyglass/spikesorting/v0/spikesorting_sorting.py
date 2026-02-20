@@ -315,6 +315,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     def cleanup(self, dry_run=False, verbose=True):
         """Clean up spike sorting directories that are not in the table."""
+        if self._test_mode:
+            verbose = False
+
         sort_dir = Path(sorting_dir)
         tracked = set(self.fetch("sorting_path"))
         all_dirs = {str(f) for f in sort_dir.iterdir() if f.is_dir()}

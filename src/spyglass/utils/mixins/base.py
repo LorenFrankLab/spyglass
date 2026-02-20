@@ -36,7 +36,7 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    def _info_msg(self, msg: str) -> str:
+    def _info_msg(self, msg: str) -> None:
         """Log info message, but debug if in test mode.
 
         Quiets logs during testing, but preserves user experience during use.
@@ -46,6 +46,14 @@ class BaseMixin:
         - IngestionMixin._insert_logline
         """
         log = self._logger.debug if self._test_mode else self._logger.info
+        log(msg)
+
+    def _warn_msg(self, msg: str) -> None:
+        """Log warning message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.warning
         log(msg)
 
     @cached_property

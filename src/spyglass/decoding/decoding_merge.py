@@ -50,13 +50,13 @@ class DecodingOutput(_Merge, SpyglassMixin):
     def cleanup(self, dry_run=False):
         """Remove any decoding outputs that are not in the merge table"""
         if dry_run:
-            logger.info("Dry run, not removing any files")
+            self._info_msg("Dry run, not removing any files")
         else:
-            logger.info("Cleaning up decoding outputs")
+            self._info_msg("Cleaning up decoding outputs")
         table_results_paths = self._fetch_registered_paths("results_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.nc"):
             if str(path) not in table_results_paths:
-                logger.info(f"Removing {path}")
+                self._info_msg(f"Removing {path}")
                 if not dry_run:
                     try:
                         path.unlink(missing_ok=True)  # Ignore FileNotFoundError
@@ -66,7 +66,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
         table_model_paths = self._fetch_registered_paths("classifier_path")
         for path in Path(config["SPYGLASS_ANALYSIS_DIR"]).glob("**/*.pkl"):
             if str(path) not in table_model_paths:
-                logger.info(f"Removing {path}")
+                self._info_msg(f"Removing {path}")
                 if not dry_run:
                     try:
                         path.unlink()

@@ -567,7 +567,11 @@ class Export(SpyglassMixin, dj.Computed):
 
         unlinked_files = set()
         if self._n_file_link_processes == 1:
-            for file in tqdm(file_paths, desc="Checking linked nwb files"):
+            for file in tqdm(
+                file_paths,
+                desc="Checking linked nwb files",
+                disable=not test_mode,
+            ):
                 unlinked_files.update(get_unlinked_files(file))
         else:
             with Pool(processes=self._n_file_link_processes) as pool:

@@ -45,7 +45,7 @@ class ImportedSpikeSorting(SpyglassIngestion, dj.Imported):
     def get_nwb_objects(self, nwb_file, nwb_file_name=None):
         """Override to get units from nwb_file.units."""
         if not getattr(nwb_file, "units", None):
-            logger.warn("No units found in NWB file")
+            self._warn_msg("No units found in NWB file")
             return []
         return [nwb_file.units]
 

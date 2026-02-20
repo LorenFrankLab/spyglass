@@ -14,6 +14,7 @@ SHARED_MODULES = [
     "behavior",
     "common",
     "decoding",
+    "figurl",
     "lfp",
     "linearization",
     "mua",

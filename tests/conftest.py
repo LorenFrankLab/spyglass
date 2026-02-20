@@ -382,8 +382,6 @@ def mini_insert(
         ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
-    dj_logger.info("Inserting test data.")
-
     if not SERVER.connected:
         raise ConnectionError("No server connection.")
 
@@ -667,9 +665,9 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 @pytest.fixture(scope="session")
 def pos_merge_tables(dj_conn):
     """Return the merge tables as activated."""
-    from spyglass.common.common_position import TrackGraph
     from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v0.main import TrackGraph
     from spyglass.position.position_merge import PositionOutput
 
     # must import common_position before LinOutput to avoid circular import

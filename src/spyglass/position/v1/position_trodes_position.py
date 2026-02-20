@@ -313,7 +313,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         """
         M_TO_CM = 100
 
-        logger.info("Loading position data...")
+        self._info_msg("Loading position data...")
         raw_df = (
             RawPosition.PosObject
             & {
@@ -323,7 +323,7 @@ class TrodesPosVideo(SpyglassMixin, dj.Computed):
         ).fetch1_dataframe()
         pos_df = (TrodesPosV1() & key).fetch1_dataframe()
 
-        logger.info("Loading video data...")
+        self._info_msg("Loading video data...")
         epoch = get_position_interval_epoch(
             key["nwb_file_name"], key["interval_list_name"]
         )

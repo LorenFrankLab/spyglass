@@ -115,6 +115,7 @@ class VideoMaker:
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         prev_backend = matplotlib.get_backend()
+        plt.close("all")  # Required before backend switch (matplotlib >= 3.8)
         matplotlib.use("Agg")  # Use non-interactive backend
 
         _ = self._set_frame_info()

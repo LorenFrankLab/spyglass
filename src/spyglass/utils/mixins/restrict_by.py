@@ -77,9 +77,7 @@ class RestrictByMixin(BaseMixin):
             if len(ret) < len(self):
                 # If it actually restricts, if not it might by a dict that
                 # is not a valid restriction, returned as True
-                self._logger.warning(
-                    "Restriction valid for this table. Using as is."
-                )
+                self._warn_msg("Restriction valid for this table. Using as is.")
                 return ret
         except DataJointError:  # need assert_join_compatible return bool
             self._logger.debug("Restriction not valid. Attempting to cascade.")

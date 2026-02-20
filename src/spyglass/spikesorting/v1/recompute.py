@@ -163,7 +163,7 @@ class RecordingRecomputeVersions(SpyglassMixin, dj.Computed):
         try:
             path = AnalysisNwbfile().get_abs_path(parent["analysis_file_name"])
         except (FileNotFoundError, dj.DataJointError) as e:
-            logger.warning(  # pragma: no cover
+            self._warn_msg(  # pragma: no cover
                 f"Issue w/{parent['analysis_file_name']}. Skipping.\n{e}"
             )
             return  # pragma: no cover

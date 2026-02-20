@@ -230,10 +230,11 @@ class DockerMySQLManager:
             self.start()
 
         print("")
-        for i in range(timeout // wait):
+        self.logger.info(f"Container {self.container_name} starting...")
+        for _ in range(timeout // wait):
             if self.container.health == "healthy":
                 break
-            self.logger.info(f"Container {self.container_name} starting... {i}")
+            print(".", end="")
             time.sleep(wait)
         self.logger.info(
             f"Container {self.container_name}, {self.container.health}."

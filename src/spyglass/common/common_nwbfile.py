@@ -740,7 +740,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         unused = analysis_tbl.cleanup_external(
             dry_run=dry_run, delete_external_files=True
         )
-        logger.info(
+        self._info_msg(
             f"  [{table_num}/{num_tables}] {prefix}: {n_orphans} orphans, "
             + f"{len(unused)} unused externals"
         )
@@ -792,7 +792,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         """
         heading = "============== Analysis Cleanup "
         suffix = "(Dry Run) ==============" if dry_run else "=============="
-        logger.info(heading + suffix)
+        self._info_msg(heading + suffix)
 
         registry = AnalysisRegistry()
 
@@ -822,7 +822,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 dry_run=dry_run, delete_external_files=False
             )
 
-            logger.info(
+            self._info_msg(
                 f"  [{num_tables}/{num_tables}] common: {n_orphans} "
                 f"orphans, {len(unused)} unused externals"
             )
@@ -859,7 +859,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         """
         from spyglass.common.common_file_tracking import AnalysisFileIssues
 
-        logger.info("Checking analysis files across all tables")
+        self._info_msg("Checking analysis files across all tables")
         registry = AnalysisRegistry()
 
         # Include common table + all custom tables
@@ -871,7 +871,7 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         for i, analysis_tbl in enumerate(analysis_tables, start=1):
             tbl_name = analysis_tbl.full_table_name
-            logger.info(f"  [{i}/{num_tables}] Checking {tbl_name} files")
+            self._info_msg(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
             issue_count = file_checker.check_files(analysis_tbl)
             results[tbl_name] = issue_count
