@@ -373,7 +373,9 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)
-        if overwrite or not Path(waveforms_dir).exists():
+        dir_empty = not any(Path(waveforms_dir).iterdir())
+
+        if overwrite or dir_empty:
             waveforms = si.extract_waveforms(
                 recording=recording,
                 sorting=sorting,

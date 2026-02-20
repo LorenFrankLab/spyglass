@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from ndx_franklab_novela import CameraDevice
 from pynwb import NWBHDF5IO
+from pynwb.device import DeviceModel
 from pynwb.image import ImageSeries
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
@@ -26,13 +27,18 @@ def nwb_with_video_no_task(raw_dir, common):
     )
     nwbfile.subject = mock_Subject()
 
+    camera_model = DeviceModel(
+        name="TestCam 3000",
+        manufacturer="Test Camera Co",
+    )
     camera_device = CameraDevice(
         name="camera_device 0",
         meters_per_pixel=0.001,
-        manufacturer="Test Camera Co",
+        model=camera_model,
         lens="50mm",
         camera_name="test_camera",
     )
+    nwbfile.add_device_model(camera_model)
     nwbfile.add_device(camera_device)
 
     # Create ImageSeries (video data) with timestamps

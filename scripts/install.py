@@ -620,7 +620,7 @@ class CondaManager:
                         kw in line
                         for kw in ["Solving", "Downloading", "Extracting"]
                     ):
-                        Console.print(".", end="", flush=True)
+                        print(".", end="", flush=True)
                 Console.print()
 
             if process.returncode != 0:
