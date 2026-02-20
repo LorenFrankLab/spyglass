@@ -570,7 +570,7 @@ class Export(SpyglassMixin, dj.Computed):
             for file in tqdm(
                 file_paths,
                 desc="Checking linked nwb files",
-                disable=not test_mode,
+                disable=test_mode,
             ):
                 unlinked_files.update(get_unlinked_files(file))
         else:

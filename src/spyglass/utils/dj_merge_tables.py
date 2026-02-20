@@ -889,7 +889,7 @@ class Merge(ExportMixin, dj.Manual):
         Added to support MRO of SpyglassMixin
         """
         if warn:
-            logger._warn_msg("!! Bypassing cautious_delete !!")
+            self._warn_msg("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 

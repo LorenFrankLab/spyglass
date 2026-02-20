@@ -41,7 +41,7 @@ def mock_netcdf_saves():
                 pickle.dump(self, f)
         except (FileNotFoundError, PermissionError, OSError):
             # Copilot suggested that this is where a file might throw error
-            # during teatdown, attempted automatic cleanup.
+            # during teardown, attempted automatic cleanup.
             pass
 
         return None
