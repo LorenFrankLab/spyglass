@@ -36,22 +36,19 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    @property
+    @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
 
-        Note: Using @property instead of @cached_property so we always get
-        current value from settings, even if test_mode changes after first access.
-
         Used by ...
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        from spyglass.settings import config as sg_config
+        from spyglass.settings import test_mode
 
-        return sg_config.test_mode
+        return test_mode
 
     @cached_property
     def _spyglass_version(self):
