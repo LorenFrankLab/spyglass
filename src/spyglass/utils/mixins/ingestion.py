@@ -201,7 +201,7 @@ class IngestionMixin(BaseMixin):
         this_tbl, self_tbl = _camel(table), _camel(self)
 
         suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
-        logger.info(
+        self._info_msg(
             f"{nwb_file_name} inserts {n_entries} into {this_tbl}{suffix}"
         )
 

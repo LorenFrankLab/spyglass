@@ -175,6 +175,8 @@ filterwarnings = [
   "ignore::FutureWarning:.*",
   "ignore::PerformanceWarning:.*",
   "ignore::MissingRequiredBuildWarning:.*",
+  # DLC training ends by cancelling a TF enqueue thread; expected, not a bug
+  "ignore::pytest.PytestUnhandledThreadExceptionWarning",
 ]
 markers = [
   # Speed-based markers (based on total time: setup + call + teardown)

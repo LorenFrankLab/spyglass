@@ -6,6 +6,36 @@ tests in that subdirectory.
 """
 
 import os
+
+# ---------------------------------------------------------------------------
+# Environment variables — set before any package imports so that TensorFlow,
+# CUDA, and Qt pick them up at their first import.
+# ---------------------------------------------------------------------------
+
+# Suppress TensorFlow C++ logging (0=DEBUG … 3=FATAL-only).
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# Disable oneDNN fused-ops to avoid the "numerical results may differ" banner.
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
+# Qt requires a display; offscreen keeps headless CI from crashing.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("DISPLAY", ":0")
+
+# Disable all tqdm progress bars; they pollute test output.
+os.environ.setdefault("TQDM_DISABLE", "1")
+
+# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
+# warnings don't bleed through even during GC finalisation.
+_existing = os.environ.get("PYTHONWARNINGS", "")
+_rw_filter = "ignore::ResourceWarning"
+if _rw_filter not in _existing:
+    os.environ["PYTHONWARNINGS"] = (
+        f"{_existing},{_rw_filter}" if _existing else _rw_filter
+    )
+
+# ---------------------------------------------------------------------------
+
 import sys
 import warnings
 from contextlib import nullcontext

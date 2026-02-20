@@ -36,6 +36,18 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
+    def _info_msg(self, msg: str) -> str:
+        """Log info message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+
+        Used by ...
+        - AnalysisMixin.copy and .create
+        - IngestionMixin._insert_logline
+        """
+        log = self._logger.debug if self._test_mode else self._logger.info
+        log(msg)
+
     @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.

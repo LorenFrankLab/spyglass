@@ -52,6 +52,7 @@ SYMBOLS = (
     else {"success": "[OK]", "error": "[X]", "warning": "[!]", "step": "->"}
 )
 
+
 # System constants
 BYTES_PER_GB = 1024**3
 LOCALHOST_ADDRESSES = frozenset(["localhost", "127.0.0.1", "::1"])
@@ -125,26 +126,37 @@ class Console:
     For standalone status messages, use success/warning/error directly.
     """
 
+    # Suppress non-essential output when running under pytest
+    _quiet: bool = os.getenv("SPYGLASS_INSTALL_QUIET", "0") not in ("", "0")
+
     @staticmethod
     def step(msg: str) -> None:
         """Print step message without newline, waiting for done/fail."""
+        if Console._quiet:
+            return
         print(f"{msg}... ", end="", flush=True)
 
     @staticmethod
     def done(msg: str = "") -> None:
         """Complete a step with success checkmark."""
+        if Console._quiet:
+            return
         suffix = f" {msg}" if msg else ""
         print(f"{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']}{suffix}")
 
     @staticmethod
     def fail(msg: str = "") -> None:
         """Complete a step with failure mark."""
+        if Console._quiet:
+            return
         suffix = f" {msg}" if msg else ""
         print(f"{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']}{suffix}")
 
     @staticmethod
     def success(msg: str, indent: bool = False) -> None:
         """Print standalone success message (with newline)."""
+        if Console._quiet:
+            return
         prefix = "  " if indent else ""
         print(
             f"{prefix}{COLORS['green']}{SYMBOLS['success']}{COLORS['reset']} {msg}"
@@ -153,6 +165,8 @@ class Console:
     @staticmethod
     def warning(msg: str, indent: bool = False) -> None:
         """Print warning message."""
+        if Console._quiet:
+            return
         prefix = "  " if indent else ""
         print(
             f"{prefix}{COLORS['yellow']}{SYMBOLS['warning']}{COLORS['reset']} {msg}"
@@ -161,6 +175,8 @@ class Console:
     @staticmethod
     def error(msg: str, indent: bool = False) -> None:
         """Print error message."""
+        if Console._quiet:
+            return
         prefix = "  " if indent else ""
         print(
             f"{prefix}{COLORS['red']}{SYMBOLS['error']}{COLORS['reset']} {msg}"
@@ -169,8 +185,37 @@ class Console:
     @staticmethod
     def info(msg: str, indent: bool = False) -> None:
         """Print info message (blue color)."""
+        if Console._quiet:
+            return
         prefix = "  " if indent else ""
         print(f"{prefix}{COLORS['blue']}{msg}{COLORS['reset']}")
+
+    @staticmethod
+    def print(msg: str, color: Optional[str] = None, indent: int = 0) -> None:
+        """Print message with optional color and indentation.
+
+        Parameters
+        ----------
+        msg : str
+            Message to print
+        color : str, optional
+            Color name: "blue", "green", "yellow", "red" (default: no color)
+        indent : int
+            Indentation level (number of 2-space indents, default: 0)
+        """
+        if Console._quiet:
+            return
+        prefix = "  " * indent
+        c = COLORS.get(color, COLORS["reset"])
+        r = COLORS["reset"]
+        print(f"{prefix}{c}{msg}{r}")
+
+    def multi(
+        self, msgs: List[str], color: Optional[str] = None, indent: int = 0
+    ) -> None:
+        """Print multiple messages with optional color and indentation."""
+        for msg in msgs:
+            self.print(msg, color=color, indent=indent)
 
     @staticmethod
     def banner(msg: str, color: str = "blue", width: int = 60) -> None:
@@ -185,6 +230,8 @@ class Console:
         width : int
             Width of the separator line
         """
+        if Console._quiet:
+            return
         separator = "=" * width
         c = COLORS.get(color, COLORS["reset"])
         r = COLORS["reset"]
@@ -198,6 +245,8 @@ class Console:
     @staticmethod
     def manual_password_instructions(env_name: str) -> None:
         """Print instructions for manual password change."""
+        if Console._quiet:
+            return
         print("\nYou can change it manually later:")
         print(f"  conda activate {env_name}")
         print("  python -c 'import datajoint as dj; dj.set_password()'")
@@ -230,6 +279,8 @@ class Console:
 
         Unlike step(), this prints on its own line with details below.
         """
+        if Console._quiet:
+            return
         print(f"{operation}...")
         print(f"  Estimated time: ~{estimated_minutes} minute(s)")
         print("  This may take a while - please be patient...")
@@ -349,7 +400,7 @@ def check_prerequisites(
     --------
     >>> check_prerequisites("minimal", Path("/tmp/spyglass_data"))
     """
-    print("Checking prerequisites...")
+    Console.print("Checking prerequisites...")
 
     # Get Python version requirement from pyproject.toml
     min_version = get_required_python_version()
@@ -398,26 +449,27 @@ def check_prerequisites(
         return
 
     needed_to_free = required_gb - available_gb
+    min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
+
     Console.error(
         "Insufficient disk space - installation cannot continue",
         indent=True,
     )
-    print(f"    Checking: {base_dir}")
-    print(f"    Available: {available_gb} GB")
-    print(
-        f"    Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)"
+    Console().multi(
+        [
+            f"Checking: {base_dir}",
+            f"Available: {available_gb} GB",
+            f"Required:  {required_gb} GB ({install_type}: ~{packages_gb} GB packages + ~{buffer_gb} GB buffer)",
+            f"Need to free: {needed_to_free} GB",
+            "",
+            "To fix:",
+            f"  1. Free at least {needed_to_free} GB in this location",
+            "  2. Choose different directory: python scripts/install.py --base-dir /other/path",
+            f"  3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal",
+        ],
+        indent=2,
     )
-    print(f"    Need to free: {needed_to_free} GB")
-    print()
-    print("    To fix:")
-    print(f"      1. Free at least {needed_to_free} GB in this location")
-    print(
-        "      2. Choose different directory: python scripts/install.py --base-dir /other/path"
-    )
-    min_total = DISK_SPACE_REQUIREMENTS["minimal"]["total"]
-    print(
-        f"      3. Use minimal install (needs {min_total} GB): python scripts/install.py --minimal"
-    )
+
     raise RuntimeError("Insufficient disk space")
 
 
@@ -530,17 +582,20 @@ class CondaManager:
                     Console.success(
                         f"Using existing environment '{self.env_name}'"
                     )
-                    print(
-                        "  Package installation will continue (updates if needed)"
-                    )
-                    print(
-                        "  To use a different name, run with: --env-name <name>"
+                    Console().multi(
+                        [
+                            "Package installation will continue (updates if needed)",
+                            "To use a different name, run with: --env-name <name>",
+                        ],
+                        indent=1,
                     )
                     return
             self.remove()
 
         conda_cmd = self.get_command()
-        print("  Installing packages... (this will take several minutes)")
+        Console.print(
+            "  Installing packages... (this will take several minutes)"
+        )
 
         env_file_path = REPO_ROOT / env_file
 
@@ -565,8 +620,8 @@ class CondaManager:
                         kw in line
                         for kw in ["Solving", "Downloading", "Extracting"]
                     ):
-                        print(".", end="", flush=True)
-                print()
+                        Console.print(".", end="", flush=True)
+                Console.print()
 
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(
@@ -731,14 +786,17 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
         return validated_path
 
     # 3. Interactive prompt
-    print("\nWhere should Spyglass store data?")
-    print("  This will store raw NWB files, analysis results, and video data.")
-    print("  Typical usage: 10-100+ GB depending on your experiments.")
-    print()
     default = Path.home() / "spyglass_data"
-    print(f"  Default: {default}")
-    print(
-        "  Tip: Set SPYGLASS_BASE_DIR environment variable to skip this prompt"
+    Console.print("\nWhere should Spyglass store data?")
+    Console().multi(
+        [
+            "This will store raw NWB files, analysis results, and video data.",
+            "Typical usage: 10-100+ GB depending on your experiments.",
+            "",
+            f"Default: {default}",
+            "Tip: Set SPYGLASS_BASE_DIR environment variable to skip this prompt",
+        ],
+        indent=1,
     )
 
     while True:
@@ -761,7 +819,7 @@ def get_base_directory(cli_arg: Optional[str] = None) -> Path:
                 Console.error(
                     f"Parent directory does not exist: {base_path.parent}"
                 )
-                print(
+                Console.print(
                     "  Please create parent directory first or choose another location"
                 )
                 continue
@@ -814,9 +872,7 @@ def prompt_install_type() -> Tuple[str, str]:
     >>> env_file, install_type = prompt_install_type()
     >>> print(f"Using {env_file} for {install_type} installation")
     """
-    print("\n" + "=" * 60)
-    print("Installation Type")
-    print("=" * 60)
+    Console.banner("Installation Type")
 
     # Get disk space values from constants for consistency
     min_pkg = DISK_SPACE_REQUIREMENTS["minimal"]["packages"]
@@ -824,32 +880,36 @@ def prompt_install_type() -> Tuple[str, str]:
     full_pkg = DISK_SPACE_REQUIREMENTS["full"]["packages"]
     full_total = DISK_SPACE_REQUIREMENTS["full"]["total"]
 
-    print("\n1. Minimal (Recommended for getting started)")
-    print(f"   ├─ Install time: ~{ENV_CREATION_TIME_MINIMAL} minutes")
-    print(
-        f"   ├─ Disk space: ~{min_pkg} GB packages ({min_total} GB total with buffer)"
+    Console.print("\n1. Minimal (Recommended for getting started)")
+    Console().multi(
+        [
+            f"├─ Install time: ~{ENV_CREATION_TIME_MINIMAL} minutes",
+            f"├─ Disk space: ~{min_pkg} GB packages ({min_total} GB total with buffer)",
+            "├─ Includes:",
+            "│  • Core Spyglass functionality",
+            "│  • Common data tables",
+            "│  • Position tracking",
+            "│  • LFP analysis",
+            "│  • Basic spike sorting",
+            "└─ Good for: Learning, basic workflows",
+        ],
+        indent=2,
     )
-    print("   ├─ Includes:")
-    print("   │  • Core Spyglass functionality")
-    print("   │  • Common data tables")
-    print("   │  • Position tracking")
-    print("   │  • LFP analysis")
-    print("   │  • Basic spike sorting")
-    print("   └─ Good for: Learning, basic workflows")
-
-    print("\n2. Full (For advanced analysis)")
-    print(f"   ├─ Install time: ~{ENV_CREATION_TIME_FULL} minutes")
-    print(
-        f"   ├─ Disk space: ~{full_pkg} GB packages ({full_total} GB total with buffer)"
+    Console.print("\n2. Full (For advanced analysis)")
+    Console().multi(
+        [
+            f"├─ Install time: ~{ENV_CREATION_TIME_FULL} minutes",
+            f"├─ Disk space: ~{full_pkg} GB packages ({full_total} GB total with buffer)",
+            "├─ Includes: Everything in Minimal, plus:",
+            "│  • Advanced spike sorting (Kilosort, etc.)",
+            "│  • Ripple detection",
+            "│  • Track linearization",
+            "└─ Good for: Production work, all features",
+        ],
+        indent=2,
     )
-    print("   ├─ Includes: Everything in Minimal, plus:")
-    print("   │  • Advanced spike sorting (Kilosort, etc.)")
-    print("   │  • Ripple detection")
-    print("   │  • Track linearization")
-    print("   └─ Good for: Production work, all features")
-
-    print("\nNote: DeepLabCut, Moseq, and some decoding features")
-    print("      require separate installation (see docs)")
+    Console.print("\nNote: DeepLabCut, Moseq, and some decoding features")
+    Console.print("      require separate installation (see docs)")
 
     # Map choices to (env_file, install_type)
     choice_map = {
@@ -1016,7 +1076,7 @@ class DockerManager:
                 cwd=REPO_ROOT,
             )
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            print("Failed to clean up Docker Compose setup")
+            Console.warning("Failed to clean up Docker Compose setup")
 
 
 # ============================================================================
@@ -1155,8 +1215,8 @@ def build_directory_structure(
     directories = {}
 
     if verbose and create:
-        print(f"Creating Spyglass directory structure in {base_dir}")
-        print("  Creating:")
+        Console.print(f"Creating Spyglass directory structure in {base_dir}")
+        Console.print("Creating:", indent=1)
 
     for prefix, dir_map in schema.items():
         for key, rel_path in dir_map.items():
@@ -1166,10 +1226,10 @@ def build_directory_structure(
             if create:
                 full_path.mkdir(parents=True, exist_ok=True)
                 if verbose:
-                    print(f"    • {rel_path}")
+                    Console.print(f"    • {rel_path}")
 
     if verbose and create:
-        print(f"  ✓ Created {len(directories)} directories")
+        Console.success(f"Created {len(directories)} directories", indent=True)
 
     return directories
 
@@ -1196,13 +1256,19 @@ def determine_tls(host: str) -> bool:
     # User-friendly messaging (plain language instead of technical terms)
     if not use_tls:  # localhost
         Console.info(f"✓ Connecting to local database at {host}")
-        print("  Security: Using unencrypted connection (safe for localhost)")
+        Console.print(
+            "Security: Using unencrypted connection (safe for localhost)",
+            indent=1,
+        )
     else:
         Console.info(f"✓ Connecting to remote database at {host}")
-        print(
-            "  Security: Using encrypted connection (TLS) to protect your data"
+        Console.print(
+            "Security: Using encrypted connection (TLS) to protect your data",
+            indent=1,
         )
-        print("  This is required when connecting over a network")
+        Console.print(
+            "This is required when connecting over a network", indent=1
+        )
 
     return use_tls
 
@@ -1334,24 +1400,28 @@ def create_database_config(
     # Handle existing config file with better UX
     if config_file.exists():
         Console.warning(f"Configuration file already exists: {config_file}")
-        print("\nExisting database settings:")
+        Console.print("\nExisting database settings:")
         try:
             with config_file.open() as f:
                 existing = json.load(f)
                 existing_host = existing.get("database.host", "unknown")
                 existing_port = existing.get("database.port", "unknown")
                 existing_user = existing.get("database.user", "unknown")
-                print(f"  Database: {existing_host}:{existing_port}")
-                print(f"  User: {existing_user}")
+                Console.print(
+                    f"Database: {existing_host}:{existing_port}", indent=1
+                )
+                Console.print(f"User: {existing_user}", indent=1)
         except (OSError, IOError, json.JSONDecodeError, KeyError) as e:
-            print(f"  (Unable to read existing config: {e})")
+            Console.print(f"(Unable to read existing config: {e})", indent=1)
 
-        print("\nOptions:")
-        print(
-            "  [b] Backup and create new (saves to .datajoint_config.json.backup)"
+        Console().multi(
+            [
+                "\nOptions:",
+                "  [b] Backup and create new (saves to .datajoint_config.json.backup)",
+                "  [o] Overwrite with new settings",
+                "  [k] Keep existing (cancel installation)",
+            ]
         )
-        print("  [o] Overwrite with new settings")
-        print("  [k] Keep existing (cancel installation)")
 
         choice = input("\nChoice [B/o/k]: ").strip().lower() or "b"
 
@@ -1359,11 +1429,13 @@ def create_database_config(
             Console.warning(
                 "Keeping existing configuration. Installation cancelled."
             )
-            print("\nTo install with different settings:")
-            print(
-                "  1. Backup your config: cp ~/.datajoint_config.json ~/.datajoint_config.json.backup"
+            Console().multi(
+                [
+                    "\nTo install with different settings:",
+                    "  1. Backup your config: cp ~/.datajoint_config.json ~/.datajoint_config.json.backup",
+                    "  2. Run installer again",
+                ]
             )
-            print("  2. Run installer again")
             return
         elif choice in ["b", "backup"]:
             backup_file = config_file.with_suffix(".json.backup")
@@ -1406,31 +1478,38 @@ def create_database_config(
 
     # Atomic move (on same filesystem)
     shutil.move(tmp_path, config_file)
-    Console.success(f"Configuration saved to: {config_file}")
-    print("  Permissions: Owner read/write only (secure)")
-
-    # Enhanced success message with next steps
-    print()
-    Console.success("✓ Spyglass configuration complete!")
-    print()
-    print("Database connection:")
-    print(f"  • Server: {host}:{port}")
-    print(f"  • User: {user}")
     tls_status = "Yes" if use_tls else "No (localhost)"
-    print(f"  • Encrypted: {tls_status}")
-    print()
-    print("Data directories:")
-    print(f"  • Base: {base_dir}")
-    print(f"  • Raw data: {config['custom']['spyglass_dirs']['raw']}")
-    print(f"  • Analysis: {config['custom']['spyglass_dirs']['analysis']}")
-    print(f"  • ({len(dirs)} directories total)")
-    print()
-    print("Next steps:")
-    print("  1. Activate environment: conda activate spyglass")
-    print("  2. Test your installation: python scripts/validate.py")
-    print("  3. Start using Spyglass: python -c 'import spyglass'")
-    print()
-    print("Need help? See: https://lorenfranklab.github.io/spyglass/")
+
+    Console.success(f"Configuration saved to: {config_file}")
+    Console().multi(
+        [
+            "  Permissions: Owner read/write only (secure)",
+            "",
+        ]
+    )
+    Console.success("✓ Spyglass configuration complete!")
+    Console().multi(
+        [
+            "",
+            "Database connection:",
+            f"  • Server: {host}:{port}",
+            f"  • User: {user}",
+            f"  • Encrypted: {tls_status}",
+            "",
+            "Data directories:",
+            f"  • Base: {base_dir}",
+            f"  • Raw data: {config['custom']['spyglass_dirs']['raw']}",
+            f"  • Analysis: {config['custom']['spyglass_dirs']['analysis']}",
+            f"  • ({len(dirs)} directories total)",
+            "",
+            "Next steps:",
+            "  1. Activate environment: conda activate spyglass",
+            "  2. Test your installation: python scripts/validate.py",
+            "  3. Start using Spyglass: python -c 'import spyglass'",
+            "",
+            "Need help? See: https://lorenfranklab.github.io/spyglass/",
+        ]
+    )
 
 
 # =============================================================================
@@ -1746,10 +1825,14 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
     >>> if config:
     ...     print(f"Connecting to {config['host']}:{config['port']}")
     """
-    print("\nRemote database configuration:")
-    print("  Your lab admin should have provided these credentials.")
-    print("  Check your welcome email or contact your admin if unsure.")
-    print("  (Press Ctrl+C to cancel)")
+    Console().multi(
+        [
+            "\nRemote database configuration:",
+            "  Your lab admin should have provided these credentials.",
+            "  Check your welcome email or contact your admin if unsure.",
+            "  (Press Ctrl+C to cancel)",
+        ]
+    )
 
     try:
         host = input("  Host (e.g., db.lab.edu): ").strip()
@@ -1757,7 +1840,9 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         # Require explicit host for remote database
         if not host:
             Console.error("Host is required for remote database connection")
-            print("  Ask your lab admin for the database hostname")
+            Console.print(
+                "Ask your lab admin for the database hostname", indent=1
+            )
             return None
 
         port_str = input("  Port [3306]: ").strip() or "3306"
@@ -1783,7 +1868,7 @@ def prompt_remote_database_config() -> Optional[Dict[str, Any]]:
         }
 
     except KeyboardInterrupt:
-        print("\n")
+        Console.print("")
         Console.warning("Database configuration cancelled")
         return None
 
@@ -1881,13 +1966,12 @@ def prompt_database_setup() -> str:
     >>> if choice == "compose":
     ...     setup_database_compose()
     """
-    print("\n" + "=" * 60)
-    print("Database Setup")
-    print("=" * 60)
+    Console.print("")
+    Console.banner("Database Setup")
 
     options, compose_available = get_database_options()
 
-    print("\nOptions:")
+    Console.print("\nOptions:")
     for opt in options:
         # Color status based on availability (check for success/error symbols)
         if SYMBOLS["error"] in opt.status:
@@ -1896,22 +1980,24 @@ def prompt_database_setup() -> str:
             status_color = COLORS["green"]
         else:
             status_color = COLORS["reset"]
-        print(
+        Console.print(
             f"  {opt.number}. {opt.name:20} {status_color}{opt.status}{COLORS['reset']}"
         )
-        print(f"      {opt.description}")
+        Console.print(f"      {opt.description}")
 
     # If Docker not available, guide user
     if not compose_available:
-        print()
+        Console.print("")
         Console.warning("Docker is not available")
-        print("  To enable Docker setup:")
-        print(
-            "    1. Install Docker Desktop: https://docs.docker.com/get-docker/"
+        Console().multi(
+            [
+                "  To enable Docker setup:",
+                "    1. Install Docker Desktop: https://docs.docker.com/get-docker/",
+                "    2. Start Docker Desktop",
+                "    3. Verify: docker compose version",
+                "    4. Re-run installer",
+            ]
         )
-        print("    2. Start Docker Desktop")
-        print("    3. Verify: docker compose version")
-        print("    4. Re-run installer")
 
     # Map choices to actions (updated order: Remote first, then Docker)
     choice_map = {
@@ -1998,50 +2084,67 @@ def setup_database_compose() -> Tuple[bool, str]:
         port_available, port_msg = is_port_available("localhost", actual_port)
         if not port_available:
             Console.error(port_msg)
-            print(f"\n  Port {actual_port} is already in use. Solutions:")
+            Console.print(
+                f"\n  Port {actual_port} is already in use. Solutions:"
+            )
 
             # Platform-specific guidance
             if sys.platform == "darwin":  # macOS
-                print("    1. Stop existing MySQL (if installed):")
-                print("       brew services stop mysql")
-                print(
-                    "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist"
+                Console().multi(
+                    [
+                        "    1. Stop existing MySQL (if installed):",
+                        "       brew services stop mysql",
+                        "       # or: sudo launchctl unload -w /Library/LaunchDaemons/com.mysql.mysql.plist",
+                        "    2. Find what's using the port:",
+                        f"       lsof -i :{actual_port}",
+                    ]
                 )
-                print("    2. Find what's using the port:")
-                print(f"       lsof -i :{actual_port}")
             elif sys.platform.startswith("linux"):  # Linux
-                print("    1. Stop existing MySQL service:")
-                print("       sudo systemctl stop mysql")
-                print("       # or: sudo service mysql stop")
-                print("    2. Find what's using the port:")
-                print(f"       sudo lsof -i :{actual_port}")
-                print(f"       # or: sudo netstat -tulpn | grep {actual_port}")
+                Console().multi(
+                    [
+                        "    1. Stop existing MySQL service:",
+                        "       sudo systemctl stop mysql",
+                        "       # or: sudo service mysql stop",
+                        "    2. Find what's using the port:",
+                        f"       sudo lsof -i :{actual_port}",
+                        f"       # or: sudo netstat -tulpn | grep {actual_port}",
+                    ]
+                )
             elif sys.platform == "win32":  # Windows
-                print("    1. Stop existing MySQL service:")
-                print("       net stop MySQL")
-                print("       # or use Services app (services.msc)")
-                print("    2. Find what's using the port:")
-                print(f"       netstat -ano | findstr :{actual_port}")
+                Console().multi(
+                    [
+                        "    1. Stop existing MySQL service:",
+                        "       net stop MySQL",
+                        "       # or use Services app (services.msc)",
+                        "    2. Find what's using the port:",
+                        f"       netstat -ano | findstr :{actual_port}",
+                    ]
+                )
 
-            print("    Alternative: Use a different port:")
+            Console.print("    Alternative: Use a different port:")
             if env_path.exists():
-                print(f"       Edit {env_path} and set MYSQL_PORT=3307")
+                Console.print(f"       Edit {env_path} and set MYSQL_PORT=3307")
             else:
-                print("       Create .env file with: MYSQL_PORT=3307")
-            print("       (and update DataJoint config to match)")
+                Console.print("       Create .env file with: MYSQL_PORT=3307")
+            Console.print("       (and update DataJoint config to match)")
             return False, "port_in_use"
 
         # Show what will happen
-        print("\n" + "=" * 60)
-        print("Docker Database Setup")
-        print("=" * 60)
-        print("\nThis will:")
-        print("  • Download MySQL 8.0 Docker image (~500 MB)")
-        print("  • Create a container named 'spyglass-db'")
-        print(f"  • Start MySQL on localhost:{actual_port}")
-        print("  • Save credentials to ~/.datajoint_config.json")
-        print("\nEstimated time: 2-3 minutes")
-        print("=" * 60)
+        Console.print("")
+        Console.banner("Docker Database Setup")
+        Console().multi(
+            [
+                "",
+                "This will:",
+                "  • Download MySQL 8.0 Docker image (~500 MB)",
+                "  • Create a container named 'spyglass-db'",
+                f"  • Start MySQL on localhost:{actual_port}",
+                "  • Save credentials to ~/.datajoint_config.json",
+                "",
+                "Estimated time: 2-3 minutes",
+            ]
+        )
+        Console.banner("")
 
         # Get compose command
         compose_cmd = DockerManager.get_compose_command()
@@ -2061,20 +2164,28 @@ def setup_database_compose() -> Tuple[bool, str]:
 
             # Prioritize causes by likelihood (network issues most common)
             if "no space" in error_lower or "disk" in error_lower:
-                print("\n  Most likely cause: Insufficient disk space")
-                print("  Fix: Free up space with: docker system prune -a")
+                Console.print("\n  Most likely cause: Insufficient disk space")
+                Console.print(
+                    "  Fix: Free up space with: docker system prune -a"
+                )
             elif "timeout" in error_lower or "connection" in error_lower:
-                print("\n  Most likely cause: Network connection issue")
-                print("  Fix: Check internet connection and retry")
+                Console.print("\n  Most likely cause: Network connection issue")
+                Console.print("  Fix: Check internet connection and retry")
             else:
-                print("\n  Most likely cause: Network or Docker Hub issue")
-                print("  Fix: Wait a moment and retry")
+                Console.print(
+                    "\n  Most likely cause: Network or Docker Hub issue"
+                )
+                Console.print("  Fix: Wait a moment and retry")
 
-            print("\n  Other steps to try:")
-            print("    1. Check internet connection")
-            print("    2. Check disk space: docker system df")
-            print("    3. Retry: docker compose pull")
-            print("    4. If persistent, try: docker system prune")
+            Console().multi(
+                [
+                    "\n  Other steps to try:",
+                    "    1. Check internet connection",
+                    "    2. Check disk space: docker system df",
+                    "    3. Retry: docker compose pull",
+                    "    4. If persistent, try: docker system prune",
+                ]
+            )
             return False, "pull_failed"
 
         # Start services
@@ -2137,7 +2248,8 @@ def setup_database_compose() -> Tuple[bool, str]:
                 pass
 
             if attempt < MYSQL_HEALTH_CHECK_ATTEMPTS - 1:
-                print(".", end="", flush=True)
+                if not Console._quiet:
+                    print(".", end="", flush=True)
                 time.sleep(MYSQL_HEALTH_CHECK_INTERVAL)
         else:
             # Timeout - provide debug info
@@ -2145,8 +2257,8 @@ def setup_database_compose() -> Tuple[bool, str]:
             Console.error(
                 f"MySQL did not become ready within {MYSQL_HEALTH_CHECK_TIMEOUT} seconds"
             )
-            print("\n  Check logs:")
-            print("    docker compose logs mysql")
+            Console.print("\n  Check logs:")
+            Console.print("    docker compose logs mysql")
             DockerManager.cleanup()
             return False, "timeout"
 
@@ -2227,7 +2339,7 @@ def test_database_connection(
     except ImportError:
         # pymysql not available yet (before pip install)
         Console.warning("Cannot test connection (pymysql not available)")
-        print("  Connection will be tested during validation")
+        Console.print("Connection will be tested during validation", indent=1)
         return True, None  # Allow to proceed
 
     try:
@@ -2304,19 +2416,23 @@ def handle_database_setup_interactive(env_name: str) -> None:
             else:
                 Console.error("Docker setup failed")
                 if reason == "compose_unavailable":
-                    print("\nDocker is not available.")
-                    print("  Option 1: Install Docker Desktop and restart")
-                    print("  Option 2: Choose remote database")
-                    print("  Option 3: Skip for now")
+                    Console().multi(
+                        [
+                            "\nDocker is not available.",
+                            "  Option 1: Install Docker Desktop and restart",
+                            "  Option 2: Choose remote database",
+                            "  Option 3: Skip for now",
+                        ]
+                    )
                 else:
-                    print(f"  Error: {reason}")
+                    Console.print(f"  Error: {reason}")
 
                 if not Console.prompt_yes_no(
                     "\nTry different option?", default_yes=True
                 ):
                     Console.warning("Skipping database setup")
-                    print("  Configure later: docker compose up -d")
-                    print("  Or manually: see docs/DATABASE.md")
+                    Console.print("  Configure later: docker compose up -d")
+                    Console.print("  Or manually: see docs/DATABASE.md")
                     break
                 # Loop continues to show menu again
 
@@ -2328,8 +2444,8 @@ def handle_database_setup_interactive(env_name: str) -> None:
 
         else:  # skip
             Console.warning("Skipping database setup")
-            print("  Configure later: docker compose up -d")
-            print("  Or manually: see docs/DATABASE.md")
+            Console.print("  Configure later: docker compose up -d")
+            Console.print("  Or manually: see docs/DATABASE.md")
             break
 
 
@@ -2372,10 +2488,12 @@ def handle_database_setup_cli(
             Console.error("Docker setup failed")
             if reason == "compose_unavailable":
                 Console.warning("Docker not available")
-                print("  Install from: https://docs.docker.com/get-docker/")
+                Console.print(
+                    "  Install from: https://docs.docker.com/get-docker/"
+                )
             else:
                 Console.error(f"Error: {reason}")
-            print("  You can configure manually later")
+            Console.print("  You can configure manually later")
     elif db_type == "remote":
         success = setup_database_remote(
             env_name=env_name,
@@ -2386,7 +2504,7 @@ def handle_database_setup_cli(
         )
         if not success:
             Console.warning("Remote database setup cancelled")
-            print("  You can configure manually later")
+            Console.print("  You can configure manually later")
 
 
 def change_database_password(
@@ -2432,12 +2550,16 @@ def change_database_password(
     """
     import getpass
 
-    print("\n" + "=" * 60)
-    print("Password Change (Recommended for lab members)")
-    print("=" * 60)
-    print("\nIf you received temporary credentials from your lab admin,")
-    print("you should change your password now for security.")
-    print()
+    Console.print("")
+    Console.banner("Password Change (Recommended for lab members)")
+    Console().multi(
+        [
+            "",
+            "If you received temporary credentials from your lab admin,",
+            "you should change your password now for security.",
+            "",
+        ]
+    )
 
     if not Console.prompt_yes_no("Change password?", default_yes=True):
         Console.warning("Keeping current password")
@@ -2445,7 +2567,7 @@ def change_database_password(
 
     # Prompt for new password with confirmation
     while True:
-        print()
+        Console.print("")
         new_password = getpass.getpass("  New password: ")
         if not new_password:
             Console.error("Password cannot be empty")
@@ -2569,7 +2691,7 @@ def setup_database_remote(
     >>> if setup_database_remote(host="db.example.com", user="myuser"):
     ...     print("Non-interactive setup succeeded")
     """
-    print("Setting up remote database connection...")
+    Console.print("Setting up remote database connection...")
 
     # Get config either from prompt or from provided parameters
     if host is None or user is None or password is None:
@@ -2598,56 +2720,62 @@ def setup_database_remote(
     if not valid:
         Console.error("Invalid database configuration:")
         for err in errors:
-            print(f"  - {err}")
+            Console.print(f"- {err}", indent=1)
         return False
 
     # Check if port is reachable (for remote hosts only)
     if Validators.should_use_tls(host):
-        print(f"  Testing connection to {host}:{port}...")
+        Console.print(f"  Testing connection to {host}:{port}...")
         port_reachable, port_msg = is_port_available(host, port)
         if not port_reachable:
             Console.warning(port_msg)
-            print("\n  Possible causes:")
-            print("    • Wrong port number (MySQL usually uses 3306)")
-            print("    • Firewall blocking connections")
-            print("    • Database server not running")
-            print("    • Wrong hostname")
+            Console().multi(
+                [
+                    "\n  Possible causes:",
+                    "    • Wrong port number (MySQL usually uses 3306)",
+                    "    • Firewall blocking connections",
+                    "    • Database server not running",
+                    "    • Wrong hostname",
+                ]
+            )
 
             if not Console.prompt_yes_no(
                 "\n  Continue anyway?", default_yes=False
             ):
                 return False
         else:
-            print("  ✓ Port is reachable")
+            Console.print("  ✓ Port is reachable")
 
     # Determine TLS based on host (use TLS for non-localhost)
     use_tls = Validators.should_use_tls(host)
     config["use_tls"] = use_tls
 
-    print(f"  Connecting to {host}:{port} as {user}")
+    Console.print(f"  Connecting to {host}:{port} as {user}")
     if use_tls:
-        print("  TLS: enabled")
+        Console.print("  TLS: enabled")
 
     # Test connection before saving
     success, _error = test_database_connection(**config)
 
     if not success:
         Console.error(f"Cannot connect to database: {_error}")
-        print()
-        print("Most common causes (in order):")
-        print("  1. Wrong password - Double check credentials")
-        print("  2. Firewall blocking connection")
-        print("  3. Database not running")
-        print("  4. TLS mismatch")
-        print()
-        print("Diagnostic steps:")
-        print(f"  Test port:  nc -zv {host} {port}")
-        print(f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p")
-        print()
-        print(
-            "Need help? See: docs/TROUBLESHOOTING.md#database-connection-fails"
+        Console().multi(
+            [
+                "",
+                "Most common causes (in order):",
+                "  1. Wrong password - Double check credentials",
+                "  2. Firewall blocking connection",
+                "  3. Database not running",
+                "  4. TLS mismatch",
+                "",
+                "Diagnostic steps:",
+                f"  Test port:  nc -zv {host} {port}",
+                f"  Test MySQL: mysql -h {host} -P {port} -u {user} -p",
+                "",
+                "Need help? See: docs/TROUBLESHOOTING.md#database-connection-fails",
+                "",
+            ]
         )
-        print()
 
         if Console.prompt_yes_no(
             "Retry with different settings?", default_yes=False
@@ -2710,25 +2838,27 @@ def validate_installation(env_name: str) -> bool:
     except subprocess.CalledProcessError:
         Console.fail()
         Console.warning("Some optional validation checks did not pass")
-        print(
-            "\n  Core installation succeeded, but some features may need attention."
+        Console().multi(
+            [
+                "\n  Core installation succeeded, but some features may need attention.",
+                "  Many warnings are not critical for getting started.",
+                "\n  Common non-critical warnings:",
+                "    - Database connection: Configure later if needed",
+                "    - Optional packages: Install when you need them",
+                "\n  To investigate:",
+                f"    1. Activate environment: conda activate {env_name}",
+                "    2. Run detailed validation: python scripts/validate.py -v",
+                "    3. See docs/TROUBLESHOOTING.md for specific issues",
+            ]
         )
-        print("  Many warnings are not critical for getting started.")
-        print("\n  Common non-critical warnings:")
-        print("    - Database connection: Configure later if needed")
-        print("    - Optional packages: Install when you need them")
-        print("\n  To investigate:")
-        print(f"    1. Activate environment: conda activate {env_name}")
-        print("    2. Run detailed validation: python scripts/validate.py -v")
-        print("    3. See docs/TROUBLESHOOTING.md for specific issues")
         return False
 
 
 def print_installation_header() -> None:
     """Print installation header banner."""
-    print()
+    Console.print("")
     Console.banner("  Spyglass Installation", color="blue")
-    print()
+    Console.print("")
 
 
 def determine_installation_type(args: argparse.Namespace) -> Tuple[str, str]:
@@ -2813,21 +2943,27 @@ def print_completion_message(env_name: str, validation_passed: bool) -> None:
     validation_passed : bool
         Whether validation checks passed
     """
-    print()
+    Console.print("")
     if validation_passed:
         Console.banner("Installation complete!", color="green")
-        print()
+        Console.print("")
     else:
         Console.banner("Installation complete with warnings", color="yellow")
-        print()
-        print("Core installation succeeded but some features may not work.")
-        print("Review warnings above and see: docs/TROUBLESHOOTING.md\n")
+        Console().multi(
+            [
+                "",
+                "Core installation succeeded but some features may not work.",
+                "Review warnings above and see: docs/TROUBLESHOOTING.md\n",
+            ]
+        )
 
-    print("Next steps:")
-    print(f"  1. Activate environment: conda activate {env_name}")
-    print("  2. Start tutorial:       jupyter notebook notebooks/")
-    print(
-        "  3. View documentation:   https://lorenfranklab.github.io/spyglass/"
+    Console().multi(
+        [
+            "Next steps:",
+            f"  1. Activate environment: conda activate {env_name}",
+            "  2. Start tutorial:       jupyter notebook notebooks/",
+            "  3. View documentation:   https://lorenfranklab.github.io/spyglass/",
+        ]
     )
 
 
@@ -2839,9 +2975,9 @@ def run_dry_run(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments
     """
-    print("\n" + "=" * 60)
-    print("DRY RUN MODE - No changes will be made")
-    print("=" * 60 + "\n")
+    Console.print("")
+    Console.banner("DRY RUN MODE - No changes will be made")
+    Console.print("")
 
     # Determine installation type
     if args.minimal:
@@ -2875,48 +3011,51 @@ def run_dry_run(args: argparse.Namespace) -> None:
         install_type.split()[0], DISK_SPACE_REQUIREMENTS["minimal"]
     )
 
-    print("Would perform the following steps:\n")
+    Console.print("Would perform the following steps:\n")
 
-    print(f"1. {SYMBOLS['step']} Check prerequisites")
-    print(
-        f"     Python version: {sys.version_info.major}.{sys.version_info.minor}"
+    Console().multi(
+        [
+            f"1. {SYMBOLS['step']} Check prerequisites",
+            f"     Python version: {sys.version_info.major}.{sys.version_info.minor}",
+            f"     Required disk space: {space_req['total']} GB",
+            "",
+            f"2. {SYMBOLS['step']} Create conda environment",
+            f"     Environment name: {args.env_name}",
+            f"     Environment file: {env_file}",
+            f"     Install type: {install_type}",
+            "",
+            f"3. {SYMBOLS['step']} Install spyglass package",
+            "     Command: pip install -e .",
+            "",
+            f"4. {SYMBOLS['step']} Create directory structure",
+            f"     Base directory: {base_dir}",
+            "     Subdirectories: raw, analysis, recording, sorting, waveforms, etc.",
+            "",
+            f"5. {SYMBOLS['step']} Setup database",
+            f"     Method: {db_setup}",
+            "",
+            f"6. {SYMBOLS['step']} Create configuration file",
+            f"     Location: {Path.home() / '.datajoint_config.json'}",
+            "",
+        ]
     )
-    print(f"     Required disk space: {space_req['total']} GB")
-    print()
-
-    print(f"2. {SYMBOLS['step']} Create conda environment")
-    print(f"     Environment name: {args.env_name}")
-    print(f"     Environment file: {env_file}")
-    print(f"     Install type: {install_type}")
-    print()
-
-    print(f"3. {SYMBOLS['step']} Install spyglass package")
-    print("     Command: pip install -e .")
-    print()
-
-    print(f"4. {SYMBOLS['step']} Create directory structure")
-    print(f"     Base directory: {base_dir}")
-    print(
-        "     Subdirectories: raw, analysis, recording, sorting, waveforms, etc."
-    )
-    print()
-
-    print(f"5. {SYMBOLS['step']} Setup database")
-    print(f"     Method: {db_setup}")
-    print()
-
-    print(f"6. {SYMBOLS['step']} Create configuration file")
-    print(f"     Location: {Path.home() / '.datajoint_config.json'}")
-    print()
 
     if not args.skip_validation:
-        print(f"7. {SYMBOLS['step']} Validate installation")
-        print("     Run: python scripts/validate.py")
-        print()
+        Console().multi(
+            [
+                f"7. {SYMBOLS['step']} Validate installation",
+                "     Run: python scripts/validate.py",
+                "",
+            ]
+        )
 
-    print("=" * 60)
-    print("To perform installation, run without --dry-run flag")
-    print("=" * 60)
+    Console().multi(
+        [
+            "=" * 60,
+            "To perform installation, run without --dry-run flag",
+            "=" * 60,
+        ]
+    )
 
 
 def run_config_only(args: argparse.Namespace) -> None:
@@ -2932,9 +3071,9 @@ def run_config_only(args: argparse.Namespace) -> None:
     args : argparse.Namespace
         Parsed command-line arguments containing database and path options
     """
-    print("\n" + "=" * 60)
-    print("CONFIG-ONLY MODE - Generating configuration file")
-    print("=" * 60 + "\n")
+    Console.print("")
+    Console.banner("CONFIG-ONLY MODE - Generating configuration file")
+    Console.print("")
 
     # Get base directory
     base_dir = get_base_directory(args.base_dir)
@@ -2966,9 +3105,13 @@ def run_config_only(args: argparse.Namespace) -> None:
                 raise ValueError("Database password is required")
     else:
         # Interactive mode
-        print("Database configuration:")
-        print("  1. Local Docker database (localhost)")
-        print("  2. Remote database (e.g., lmf-db.cin.ucsf.edu)")
+        Console().multi(
+            [
+                "Database configuration:",
+                "  1. Local Docker database (localhost)",
+                "  2. Remote database (e.g., lmf-db.cin.ucsf.edu)",
+            ]
+        )
         choice = input("\nChoice [1/2]: ").strip() or "1"
 
         if choice == "1":
@@ -3006,19 +3149,23 @@ def run_config_only(args: argparse.Namespace) -> None:
     Console.done()
 
     config_file = Path.home() / ".datajoint_config.json"
-    print()
-    print("=" * 60)
+    Console.print("")
+    Console.banner("")
     Console.success(f"Configuration created: {config_file}")
-    print("=" * 60)
-    print()
-    print("Configuration summary:")
-    print(f"  Database: {host}:{port}")
-    print(f"  User: {user}")
-    print(f"  Base directory: {base_dir}")
-    print(f"  TLS: {'enabled' if determine_tls(host) else 'disabled'}")
-    print()
-    print("To test your configuration:")
-    print('  python -c "import datajoint as dj; dj.conn()"')
+    Console.banner("")
+    Console().multi(
+        [
+            "",
+            "Configuration summary:",
+            f"  Database: {host}:{port}",
+            f"  User: {user}",
+            f"  Base directory: {base_dir}",
+            f"  TLS: {'enabled' if determine_tls(host) else 'disabled'}",
+            "",
+            "To test your configuration:",
+            '  python -c "import datajoint as dj; dj.conn()"',
+        ]
+    )
 
 
 def run_installation(args: argparse.Namespace) -> None:
@@ -3159,7 +3306,7 @@ Environment Variables:
     try:
         run_installation(args)
     except KeyboardInterrupt:
-        print("\n\nInstallation cancelled by user.")
+        Console.print("\n\nInstallation cancelled by user.")
         sys.exit(1)
     except RuntimeError as e:
         # Expected errors from our code (prerequisites, validation, etc.)
@@ -3168,12 +3315,12 @@ Environment Variables:
     except subprocess.CalledProcessError as e:
         # Process execution failures
         Console.error(f"Command failed: {e}")
-        print("  Check the output above for details")
+        Console.print("Check the output above for details", indent=1)
         sys.exit(1)
     except (OSError, IOError) as e:
         # File system errors
         Console.error(f"File system error: {e}")
-        print("  Check disk space and permissions")
+        Console.print("Check disk space and permissions", indent=1)
         sys.exit(1)
     except ValueError as e:
         # Configuration/validation errors

@@ -264,7 +264,7 @@ class AnalysisMixin(BaseMixin):
 
             # write the new file
             if not recompute_file_name:
-                self._logger.info(f"Writing new NWB file {analysis_file_name}")
+                self._info_msg(f"Writing new NWB file {analysis_file_name}")
 
             analysis_file_abs_path = self.get_abs_path(
                 analysis_file_name, from_schema=bool(recompute_file_name)
@@ -413,7 +413,7 @@ class AnalysisMixin(BaseMixin):
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
-            cls()._logger.info(f"Writing new NWB file {analysis_file_name}...")
+            cls()._info_msg(f"Writing new NWB file {analysis_file_name}...")
             analysis_file_abs_path = cls().get_abs_path(analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(

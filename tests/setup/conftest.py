@@ -5,7 +5,23 @@ session-scoped fixtures from the parent conftest.py to avoid triggering
 spyglass imports that connect to MySQL.
 """
 
+import sys
+from pathlib import Path
+
 import pytest
+
+# Suppress non-essential install.py console output in-process without
+# propagating to subprocess test runs (env vars propagate; class patch does not).
+try:
+    _sp = str(Path(__file__).parent.parent.parent / "scripts")
+    if _sp not in sys.path:
+        sys.path.insert(0, _sp)
+    import install as _install
+
+    _install.Console._quiet = True
+    del _sp, _install
+except Exception:
+    pass
 
 # Override ALL session-scoped fixtures that might trigger database connections
 # or spyglass imports during collection
