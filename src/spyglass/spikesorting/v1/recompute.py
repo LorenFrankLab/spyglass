@@ -897,7 +897,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         if days_since_creation > 0:
             date_templ = "created_at < DATE_SUB(CURDATE(), INTERVAL {} DAY)"
             query = query & date_templ.format(days_since_creation)
-            logger.info(
+            self._info_msg(
                 f"Excluding files created within {days_since_creation} days"
             )
 
