@@ -184,7 +184,7 @@ class AnalysisFileIssues(dj.Manual):
             Downstream tables that reference files with issues
         """
         entries = (self & "can_read=0" & restriction).fetch("KEY", as_dict=True)
-        if not entries and not test_mode:
+        if not entries:
             logger.info("No issues found.")
             return []
 
