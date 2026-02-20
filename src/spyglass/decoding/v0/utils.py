@@ -25,7 +25,7 @@ except (ImportError, ModuleNotFoundError) as e:
         DiagonalDiscrete,
         UniformInitialConditions,
     ) = [None] * 6
-    logger.debug(e)
+    logger.warning(e)
 
 
 def get_time_bins_from_interval(interval_times: np.array, sampling_rate: int):

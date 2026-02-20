@@ -14,7 +14,7 @@ try:
     )
 except (ImportError, ModuleNotFoundError) as e:
     RandomWalk, Uniform, Environment, ObservationModel = None, None, None, None
-    logger.debug(e)
+    logger.warning(e)
 
 from spyglass.common.common_behav import PositionIntervalMap, RawPosition
 from spyglass.common.common_interval import IntervalList
