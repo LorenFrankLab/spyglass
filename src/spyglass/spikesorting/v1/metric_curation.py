@@ -380,7 +380,7 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 recording=recording,
                 sorting=sorting,
                 folder=waveforms_dir,
-                overwrite=True,
+                overwrite=overwrite,
                 **waveform_params,
             )
         else:
