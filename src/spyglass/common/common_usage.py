@@ -141,7 +141,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         if query := (Export & export_key):
             safemode = False if test_mode else None  # No prompt in tests
             query.super_delete(warn=False, safemode=safemode)
-        logger.info(f"{status} {export_key}")
+        self._info_msg(f"{status} {export_key}")
         return export_id
 
     def start_export(self, paper_id, analysis_id) -> None:

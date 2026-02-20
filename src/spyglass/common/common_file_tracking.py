@@ -184,7 +184,7 @@ class AnalysisFileIssues(dj.Manual):
         """
         entries = (self & "can_read=0" & restriction).fetch("KEY", as_dict=True)
         if not entries:
-            logger.info("No issues found.")
+            self._info_msg("No issues found.")
             return []
 
         # Get unique analysis tables from entries
@@ -206,6 +206,6 @@ class AnalysisFileIssues(dj.Manual):
                     ret.append(child & entries)
 
         if not ret:
-            logger.info("No issues found.")
+            self._info_msg("No issues found.")
 
         return ret or []

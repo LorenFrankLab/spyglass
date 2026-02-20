@@ -43,8 +43,11 @@ from pathlib import Path
 from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
+import datajoint.hash as _dj_hash
 import numpy as np
 import pynwb
+import pynwb.device as _pynwb_device
+import pynwb.io.device as _pynwb_io_device
 import pytest
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
@@ -55,6 +58,69 @@ from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
+
+
+# ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
+# Patch uuid_from_file to properly close file handles (upstream opens without
+# `with`, triggering ResourceWarning on GC). This is safe: the function reads
+# the whole file before returning, so closing after uuid_from_stream is fine.
+def _uuid_from_file_safe(filepath, *, init_string=""):
+    with Path(filepath).open("rb") as f:
+        return _dj_hash.uuid_from_stream(f, init_string=init_string)
+
+
+_dj_hash.uuid_from_file = _uuid_from_file_safe
+
+# ----------- Prevent NWB-2.9 migration warnings from test NWB file -----------
+# Patch pynwb Device NWB-2.9 migration warnings triggered by the test NWB file,
+# which was written before NWB 2.9 (Device.model stored as string, manufacturer
+# as a field).  pynwb uses stacklevel= values that attribute these warnings to
+# hdmf internals (hdmf.build.objectmapper / hdmf.utils) rather than to pynwb,
+# so they bypass any module-specific filter and can defeat category-only filters
+# once an hdmf module's __warningregistry__ pre-dates the filter installation.
+#
+# Two distinct call sites require two different strategies:
+#
+#   (a) pynwb/io/device.py uses `from warnings import warn` — the `warn` name
+#       lives in pynwb.io.device's namespace, so it is directly patchable.
+#
+#   (b) pynwb/device.py uses `import warnings; warnings.warn(...)` — we cannot
+#       replace an attribute on the warnings module itself without side-effects,
+#       so we wrap Device.__init__ instead.
+
+_orig_io_device_warn = _pynwb_io_device.warn
+
+
+def _io_device_warn_filtered(message, *args, **kwargs):
+    if "Device.model was detected as a string" not in str(message):
+        _orig_io_device_warn(message, *args, **kwargs)
+
+
+_pynwb_io_device.warn = _io_device_warn_filtered
+
+_orig_device_init = _pynwb_device.Device.__init__
+
+
+def _device_init_no_field_deprecations(*args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The '(?:manufacturer|model_number|model_name)' field is deprecated",
+            category=DeprecationWarning,
+        )
+        return _orig_device_init(*args, **kwargs)
+
+
+# hdmf's objectmapper calls get_docval(cls.__init__) to discover constructor
+# arguments.  get_docval reads the __docval__ / __docval_idx__ attributes that
+# the @docval decorator stores in func.__dict__.  Copy the original function's
+# __dict__ to the wrapper so that Device subclasses which inherit __init__
+# (e.g. ndx-franklab-novela's CameraDevice) still work correctly.
+_device_init_no_field_deprecations.__dict__.update(_orig_device_init.__dict__)
+_device_init_no_field_deprecations.__name__ = _orig_device_init.__name__
+_device_init_no_field_deprecations.__module__ = _orig_device_init.__module__
+
+_pynwb_device.Device.__init__ = _device_init_no_field_deprecations
 
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
@@ -392,10 +458,10 @@ def mini_insert(
         # Useful try/except for avoiding a full run on insert failure
         # Should be commented out in favor of vanilla insert for debugging
         # the insert_sessions function itself.
-        try:
-            insert_sessions(mini_path.name, raise_err=True)
-        except Exception as e:  # If can't insert session, exit all tests
-            pytest.exit(f"Failed to insert sessions: {e}")
+        # try:
+        insert_sessions(mini_path.name, raise_err=True)
+        # except Exception as e:  # If can't insert session, exit all tests
+        #     pytest.exit(f"Failed to insert sessions: {e}")
 
     if len(Session()) == 0:
         raise ValueError("No sessions inserted.")

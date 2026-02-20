@@ -276,7 +276,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
         # video_frame_ind from RawPosition, which also has timestamps
 
         # Insert entry into DLCPoseEstimation
-        logger.info(
+        self._info_msg(
             "Inserting %s, epoch %02d into DLCPoseEsimation",
             key["nwb_file_name"],
             key["epoch"],
