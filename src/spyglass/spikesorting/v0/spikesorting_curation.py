@@ -1112,39 +1112,10 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         """
         return {int(k): v for k, v in labels.items()}
 
-    def fix_15XX(self, restriction=True, dry_run=True, verbose=True):
+    def fix_1513(self, restriction=True, dry_run=True, verbose=True):
         """Find and repair entries affected by get_labels bugs.
 
-        PR #1281 (2025-04-22) introduced three bugs in `get_labels`:
-
-        A. **Early return**: `return parent_labels` was indented inside
-           the `for metric` loop, so only the first metric was
-           processed. Affects entries with >1 metric in label_params.
-        B. **List aliasing**: `parent_labels[unit_id] = label[2]`
-           assigned the label list without copying, so units sharing
-           a metric shared the same list object. Mutations on one
-           unit could corrupt others.
-        C. **Duplicate comparison**: `label[2] not in parent_labels`
-           compared a list against a list of strings. This always
-           evaluated True for flat lists, so `.extend()` ran
-           unconditionally, creating duplicate labels.
-
-        Bugs B and C can affect single-metric entries when
-        `parent_labels` has pre-existing entries from a prior
-        curation step.
-
-        For each impacted entry, this method:
-        1. Recomputes labels using the fixed `get_labels` logic.
-        2. Updates `Curation.curation_labels` with corrected labels.
-        3. Updates `CuratedSpikeSorting.Unit.label` on existing rows.
-
-        Steps 2-3 are wrapped in a transaction per entry to prevent
-        partial updates on interruption.
-
-        Note: if a unit's accept/reject status changed, the NWB
-        analysis file still contains the old unit set. A full
-        repopulation of `CuratedSpikeSorting` is needed in those
-        cases. Such entries are flagged in `reject_status_changed`.
+        For more information, see issue #1513.
 
         Parameters
         ----------
@@ -1163,29 +1134,31 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
             old_labels, new_labels, changed, has_downstream,
             reject_status_changed.
         """
+        raise NotImplementedError("fix_1513 is not yet fully implemented")
+
         restr = (self & restriction) if restriction else self
         if verbose:
-            logger.info(f"fix_15XX: scanning {len(restr)} entries")
+            logger.info(f"fix_1513: scanning {len(restr)} entries")
 
         results = []
         for key in restr:
-            result = self._fix1_15XX(key, dry_run, verbose)
+            result = self._fix1_1513(key, dry_run, verbose)
             if result is not None:
                 results.append(result)
 
         if verbose:
             logger.info(
-                f"fix_15XX: {len(results)} impacted entries"
+                f"fix_1513: {len(results)} impacted entries"
                 + (" (dry run)" if dry_run else " (applied)")
             )
 
         return results
 
-    def _fix1_15XX(self, key, dry_run=True, verbose=True):
+    def _fix1_1513(self, key, dry_run=True, verbose=True):
         """Detect and repair a single AutomaticCuration entry.
 
         Returns a result dict if the entry is impacted, None otherwise.
-        See `fix_15XX` for full documentation.
+        See `fix_1513` for full documentation.
         """
         from copy import deepcopy
         from datetime import datetime
@@ -1212,7 +1185,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         except FileNotFoundError:
             if verbose:
                 logger.warning(
-                    f"fix_15XX: metrics file not found: "
+                    f"fix_1513: metrics file not found: "
                     f"{metrics_path}; skipping {key}"
                 )
             return None
@@ -1279,7 +1252,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
                 if stored_labels.get(u) != new_labels.get(u)
             )
             logger.info(
-                f"fix_15XX: {auto_curation_key} — "
+                f"fix_1513: {auto_curation_key} — "
                 f"{n_diff} unit(s) with label changes"
                 + (
                     f", {len(reject_changed)} reject " f"status change(s)"
@@ -1302,12 +1275,12 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
                     }
                 )
                 if has_downstream:
-                    self._fix_15XX_units(auto_curation_key, new_labels, verbose)
+                    self._fix_1513_units(auto_curation_key, new_labels, verbose)
 
         return result
 
     @staticmethod
-    def _fix_15XX_units(curation_key, new_labels, verbose=True):
+    def _fix_1513_units(curation_key, new_labels, verbose=True):
         """Update CuratedSpikeSorting.Unit labels for a curation.
 
         Updates the label column on existing Unit rows. Does NOT
@@ -1347,7 +1320,7 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
                 )
 
     @staticmethod
-    def _fix_15XX_nwb(curation_key, new_labels, verbose=True):
+    def _fix_1513_nwb(curation_key, new_labels, verbose=True):
         """Update labels in the CuratedSpikeSorting NWB analysis file.
 
         Edits the ``label`` column in the NWB units table in place
@@ -1549,7 +1522,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        (analysis_file_name, units_object_id) = Curation().save_sorting_nwb(
+        analysis_file_name, units_object_id = Curation().save_sorting_nwb(
             key=key,
             sorting=sorting,
             timestamps=timestamps,

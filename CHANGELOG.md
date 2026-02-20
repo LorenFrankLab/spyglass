@@ -30,12 +30,13 @@ LFPBandV1().fix_1481()
 #### AutomaticCuration Fix
 
 If you were using `v0.AutomaticCuration` after April 2025, you may have stored
-inaccurate labels due to #14XX. To fix these, please run the following after updating:
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:
 
 ```python
 from spyglass.spikesorting.v0 import AutomaticCuration
 
-AutomaticCuration().fix_15XX()
+AutomaticCuration().fix_1513()
 ```
 
 ### Breaking Changes
@@ -55,17 +56,19 @@ memory usage significantly.
 ```python
 # OLD (before v0.5.6):
 results.isel(intervals=0)  # Get first interval
-for i in range(results.sizes['intervals']):  # Iterate intervals
+for i in range(results.sizes["intervals"]):  # Iterate intervals
     interval_data = results.isel(intervals=i)
 
 # NEW (v0.5.6+):
 results.where(results.interval_labels == 0, drop=True)  # Get first interval
 for label in np.unique(results.interval_labels.values):  # Iterate intervals
-    if label >= 0:  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+    if (
+        label >= 0
+    ):  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
         interval_data = results.where(results.interval_labels == label, drop=True)
 
 # Or use groupby:
-for label, interval_data in results.groupby('interval_labels'):
+for label, interval_data in results.groupby("interval_labels"):
     if label >= 0:
         # process interval_data
         pass
@@ -75,7 +78,7 @@ for label, interval_data in results.groupby('interval_labels'):
 
 - `0, 1, 2, ...` - Sequential interval indices (0-indexed)
 - `-1` - Time points outside any decoding interval (only when
-  `estimate_decoding_params=True`)
+    `estimate_decoding_params=True`)
 
 ### Documentation
 
@@ -87,8 +90,8 @@ for label, interval_data in results.groupby('interval_labels'):
 
 ### Infrastructure
 
-- Add cross-platform installer script with Docker support, input validation,
-    and automated environment setup #1414
+- Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
 - Allow email send on space check success, clean up maintenance logging #1381
@@ -150,9 +153,10 @@ for label, interval_data in results.groupby('interval_labels'):
         merge IDs are fetched in non-chronological order #1471
     - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
     - **BREAKING**: Remove `intervals` dimension from decoding results. Results
-      from multiple intervals are now concatenated along the `time` dimension
-      with an `interval_labels` coordinate to track interval membership. This
-      eliminates NaN padding and reduces memory usage. See migration guide above.
+        from multiple intervals are now concatenated along the `time` dimension
+        with an `interval_labels` coordinate to track interval membership. This
+        eliminates NaN padding and reduces memory usage. See migration guide
+        above.
 
 - LFP
 
@@ -169,7 +173,7 @@ for label, interval_data in results.groupby('interval_labels'):
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
-    - Implement fix for `AutomaticCuration` incorrect labels #15XY
+    - Implement fix for `AutomaticCuration` incorrect labels #1513
 
 ## [0.5.5] (Aug 6, 2025)
 
