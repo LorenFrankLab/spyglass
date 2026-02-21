@@ -149,7 +149,7 @@ class SQLDumpHelper:
         self._remove_encoding(dump_script)
         self._write_version_file()
 
-        self._logger(f"Export script written to {dump_script}")
+        self._logger.info(f"Export script written to {dump_script}")
 
         self._export_conda_env()
 
