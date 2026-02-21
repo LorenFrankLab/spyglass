@@ -43,12 +43,15 @@ from pathlib import Path
 from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
+import datajoint.external as _dj_external
 import datajoint.hash as _dj_hash
+import hdmf.build.objectmapper as _hdmf_objectmapper
 import numpy as np
 import pynwb
 import pynwb.device as _pynwb_device
 import pynwb.io.device as _pynwb_io_device
 import pytest
+import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
@@ -70,6 +73,10 @@ def _uuid_from_file_safe(filepath, *, init_string=""):
 
 
 _dj_hash.uuid_from_file = _uuid_from_file_safe
+# datajoint.external uses `from .hash import uuid_from_file` at import time,
+# creating a local binding that bypasses the patch above.  Patch the external
+# module's namespace directly so both paths use the safe version.
+_dj_external.uuid_from_file = _uuid_from_file_safe
 
 # ----------- Prevent NWB-2.9 migration warnings from test NWB file -----------
 # Patch pynwb Device NWB-2.9 migration warnings triggered by the test NWB file,
@@ -122,6 +129,78 @@ _device_init_no_field_deprecations.__module__ = _orig_device_init.__module__
 
 _pynwb_device.Device.__init__ = _device_init_no_field_deprecations
 
+# ------ Suppress warnings that bypass Python-level filters at call-time ------
+#
+# Two remaining warnings survive even broad `filterwarnings("ignore", ...)`
+# calls because they fire inside contexts where `warnings.filters` has been
+# cleared or overridden:
+#
+#   (1) MissingRequiredBuildWarning — hdmf.build.objectmapper.__check_quantity
+#       warns when an NWB container is missing a required attribute.  The test
+#       NWB file predates NWB 2.9 and lacks 'source_script_file_name'.
+#
+#   (2) sklearn UserWarning — sklearn.utils.parallel._FuncWrapper.__call__
+#       warns when sklearn.delayed is used with non-sklearn Parallel.  Worse,
+#       that same __call__ executes ``warnings.filters = []`` inside a
+#       catch_warnings block, which clears ALL Python-level filters for the
+#       duration of every wrapped parallel task — causing (1) to escape even
+#       when our "ignore" filters are present.
+#
+# Both modules use ``import warnings; warnings.warn(...)`` style, so we cannot
+# patch the `warn` name directly in their namespace the way we did for
+# pynwb.io.device.  Instead we replace each module's `warnings` attribute with
+# a thin proxy object that:
+#   • Intercepts warn() and suppresses the specific message/category.
+#   • Stores attribute *writes* (e.g. proxy.filters = []) locally so they never
+#     propagate to the real warnings module — preventing _FuncWrapper from
+#     clearing the real warnings.filters state.
+#   • Delegates all other attribute *reads* to the real warnings module.
+
+
+class _ModuleWarningsProxy:
+    """Proxy for a module-level `warnings` reference.
+
+    Suppresses specific warn() calls before they reach the real warnings
+    module.  Attribute writes are stored locally (preventing callers like
+    sklearn._FuncWrapper from zeroing out the real warnings.filters list).
+    Attribute reads fall through to the real warnings module.
+    """
+
+    def __init__(self, suppress_fn):
+        # Use object.__setattr__ to avoid triggering our own __setattr__ logic.
+        object.__setattr__(self, "_suppress_fn", suppress_fn)
+
+    def warn(self, message, *args, **kwargs):
+        if not object.__getattribute__(self, "_suppress_fn")(
+            message, *args, **kwargs
+        ):
+            # stacklevel=2 so the warning is attributed to the caller of the
+            # module's warnings.warn(), not to this proxy line.
+            kwargs.setdefault("stacklevel", 2)
+            warnings.warn(message, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(warnings, name)
+
+
+# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+_hdmf_objectmapper.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        a
+        and isinstance(a[0], type)
+        and issubclass(a[0], MissingRequiredBuildWarning)
+    )
+)
+
+# (2) Suppress sklearn cross-library delayed/Parallel mismatch warning AND
+#     prevent _FuncWrapper from clearing the real warnings.filters.
+_sklearn_parallel.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        "sklearn.utils.parallel.delayed" in str(msg)
+        and "sklearn.utils.parallel.Parallel" in str(msg)
+    )
+)
+
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
 
@@ -136,6 +215,34 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
+# RuntimeWarning: os.fork() was called after os.forkserver() or JAX import.
+# JAX disables fork after parallelism starts; these are harmless in tests.
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*fork.*")
+warnings.filterwarnings(
+    "ignore", category=RuntimeWarning, message=".*os\\.fork.*"
+)
+
+# spikeinterface leaves mmap'd file handles open (traces_cached_seg*.raw).
+# These show up as ResourceWarning during GC; suppress by module path.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*traces_cached_seg.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    module="spikeinterface",
+)
+
+# TemporaryDirectory objects may be GC'd before __exit__ is called in some
+# test teardown scenarios; suppress the resulting ResourceWarning.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*TemporaryDirectory.*",
+)
 
 
 def pytest_addoption(parser):

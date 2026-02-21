@@ -204,7 +204,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
 
     @cached_property
     def env_dict(self):
-        logger.info("Initializing UserEnvironment")
+        self._info_msg("Initializing UserEnvironment")
         return UserEnvironment().insert_current_env()
 
     def insert(
@@ -247,7 +247,7 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             return
 
         if not rows:
-            logger.info("No rows to insert.")
+            self._info_msg("No rows to insert.")
             return
         if not isinstance(rows, (list, tuple)):
             rows = [rows]
@@ -339,10 +339,12 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             if not bool(RecordingRecompute & key)
         ]
         if not inserts:
-            logger.info(f"No rows to insert from:\n\t{source}")
+            self._info_msg(f"No rows to insert from:\n\t{source}")
             return
 
-        logger.info(f"Inserting recompute attempts for {len(inserts)} files.")
+        self._info_msg(
+            f"Inserting recompute attempts for {len(inserts)} files."
+        )
 
         self.insert(inserts, at_creation=False, **kwargs)
 
@@ -498,25 +500,25 @@ class RecordingRecomputeSelection(SpyglassMixin, dj.Manual):
             return 0
 
         prefix = "DRY RUN: " if dry_run else ""
-        logger.info(
+        self._info_msg(
             f"{prefix}Found {count} selection entries for already-matched files"
         )
 
         if dry_run:
             # Show sample of what would be deleted
             sample = redundant.fetch("KEY", as_dict=True, limit=10)
-            logger.info(f"{prefix}Sample entries (up to 10):")
+            self._info_msg(f"{prefix}Sample entries (up to 10):")
             for i, key in enumerate(sample, 1):
                 analysis_file = key.get("analysis_file_name", "unknown")
                 env_id = key.get("env_id", "unknown")
-                logger.info(f"  {i}. {analysis_file} (env: {env_id})")
+                self._info_msg(f"  {i}. {analysis_file} (env: {env_id})")
             if count > 10:
-                logger.info(f"  ... and {count - 10} more")
+                self._info_msg(f"  ... and {count - 10} more")
             return redundant
 
         # Actually delete the redundant entries
         redundant.delete_quick()
-        logger.info(f"Deleted {count} redundant entries")
+        self._info_msg(f"Deleted {count} redundant entries")
 
         return count
 
@@ -794,7 +796,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         rec_key = dict(recording_id=key["recording_id"])
         if not force_check and (self & rec_key & "matched=1"):
             RecordingRecomputeSelection().remove_matched(rec_key, dry_run=False)
-            logger.info("Previous match found. Skipping recompute.")
+            self._info_msg("Previous match found. Skipping recompute.")
             return
 
         parent = self.get_parent_key(key)
@@ -802,7 +804,9 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         # Skip recompute for files with xfail reasons
         created_key = dict(created_at=self._get_file_created_at(key))
         if parent.get("xfail_reason"):
-            logger.info(f"Skipping xfail entry: {parent.get('xfail_reason')}")
+            self._info_msg(
+                f"Skipping xfail entry: {parent.get('xfail_reason')}"
+            )
             self.insert1(
                 dict(
                     key,
@@ -815,7 +819,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
 
         # Skip recompute for files logged at creation
         if parent["logged_at_creation"]:
-            logger.info("Skipping entry logged at creation.")
+            self._info_msg("Skipping entry logged at creation.")
             self.insert1(dict(key, matched=True, **created_key))
             return
 
@@ -835,7 +839,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             return
 
         if new_hasher.hash == old_hasher.hash:
-            logger.info(f"V1 Recompute match: {new_hasher.path.name}")
+            self._info_msg(f"V1 Recompute match: {new_hasher.path.name}")
             self.insert1(dict(key, matched=True, **created_key))
             return
 
@@ -904,7 +908,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         file_names = query.fetch("analysis_file_name")
         prefix = "DRY RUN: " if dry_run else ""
         if not len(file_names):
-            logger.info(f"{prefix}Delete 0 files. Nothing to do.")
+            self._info_msg(f"{prefix}Delete 0 files. Nothing to do.")
             return
         msg = f"{prefix}Delete {len(file_names)} files?\n\t" + "\n\t".join(
             file_names[:10]
@@ -916,7 +920,7 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
             restr = query.fetch("KEY", as_dict=True)
             space = self.get_disk_space(which="old", restr=restr)
             msg += f"\n{space}"
-            logger.info(msg)
+            self._info_msg(msg)
             return space
 
         if dj.utils.user_choice(msg).lower() not in ["yes", "y"]:
@@ -960,10 +964,10 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
         total = len(query)
 
         if total == 0:
-            logger.info("No entries to update")
+            self._info_msg("No entries to update")
             return
 
-        logger.info(
+        self._info_msg(
             f"Updating created_at for {total} entries from file timestamps"
         )
 
@@ -974,4 +978,4 @@ class RecordingRecompute(SpyglassMixin, dj.Computed):
                 dict(key, created_at=created_at, deleted=not old.exists())
             )
 
-        logger.info("Update complete")
+        self._info_msg("Update complete")

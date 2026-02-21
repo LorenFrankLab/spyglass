@@ -199,7 +199,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
         3. Generate AnalysisNwbfile and insert the key into the table.
         4. Insert the key into the PositionOutput Merge table.
         """
-        logger.info(f"Computing position for: {key}")
+        self._info_msg(f"Computing position for: {key}")
         orig_key = copy.deepcopy(key)
 
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])

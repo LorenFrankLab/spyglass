@@ -113,7 +113,7 @@ class IntervalPositionInfo(SpyglassMixin, dj.Computed):
 
     def make(self, key):
         """Insert smoothed head position, orientation and velocity."""
-        logger.info(f"Computing position for: {key}")
+        self._info_msg(f"Computing position for: {key}")
 
         analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
 

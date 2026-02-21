@@ -114,7 +114,7 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         self._insert_est_with_log(
             key, task_mode, params, check_crop, skip_duplicates, output_dir
         )
-        logger.info("inserted entry into Pose Estimation Selection")
+        self._info_msg("inserted entry into Pose Estimation Selection")
         return {**key, "task_mode": task_mode}
 
     @file_log(logger, console=False)
@@ -124,8 +124,8 @@ class DLCPoseEstimationSelection(SpyglassMixin, dj.Manual):
         v_path, v_fname, _, _ = get_video_info(key)
         if not v_path:
             raise FileNotFoundError(f"Video file not found for {key}")
-        logger.info("Pose Estimation Selection")
-        logger.info(f"video_dir: {v_path}")
+        self._info_msg("Pose Estimation Selection")
+        self._info_msg(f"video_dir: {v_path}")
         v_path = find_mp4(video_path=Path(v_path), video_filename=v_fname)
         if check_crop:
             params["cropping"] = self.get_video_crop(
@@ -220,8 +220,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
     def _logged_make(self, key):
         METERS_PER_CM = 0.01
 
-        logger.info("----------------------")
-        logger.info("Pose Estimation")
+        self._info_msg("----------------------")
+        self._info_msg("Pose Estimation")
         # ID model and directories
         dlc_model = (DLCModel & key).fetch1()
         bodyparts = (DLCModel.BodyPart & key).fetch("bodypart")
@@ -252,7 +252,7 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
             dlc_result.creation_time
         ).strftime("%Y-%m-%d %H:%M:%S")
 
-        logger.info("getting raw position")
+        self._info_msg("getting raw position")
         interval_list_name = (
             convert_epoch_interval_name_to_position_interval_name(
                 {
@@ -277,9 +277,8 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
 
         # Insert entry into DLCPoseEstimation
         self._info_msg(
-            "Inserting %s, epoch %02d into DLCPoseEsimation",
-            key["nwb_file_name"],
-            key["epoch"],
+            f"Inserting {key['nwb_file_name']}, epoch {key['epoch']:02}"
+            + " into DLCPoseEsimation"
         )
         self.insert1({**key, "pose_estimation_time": creation_time})
 
@@ -298,9 +297,9 @@ class DLCPoseEstimation(SpyglassMixin, dj.Computed):
                 )
         idx = pd.IndexSlice
         for body_part, part_df in body_parts_df.items():
-            logger.info("converting to cm")
+            self._info_msg("converting to cm")
             part_df = convert_to_cm(part_df, meters_per_pixel)
-            logger.info("adding timestamps to DataFrame")
+            self._info_msg("adding timestamps to DataFrame")
             part_df = add_timestamps(
                 part_df,
                 pos_time=getattr(spatial_series, "timestamps", video_time),

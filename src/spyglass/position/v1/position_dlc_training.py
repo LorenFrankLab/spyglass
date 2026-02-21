@@ -200,7 +200,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             for k, v in dlc_config.items()
             if k in get_param_names(create_training_dataset)
         }
-        logger.info("creating training dataset")
+        self._info_msg("creating training dataset")
 
         # NOTE: if DLC > 3, this will raise engine error
         create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
@@ -220,7 +220,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             with suppress_print_from_package():
                 train_network(dlc_cfg_filepath, **train_network_kwargs)
         except KeyboardInterrupt:  # pragma: no cover
-            logger.info("DLC training stopped via Keyboard Interrupt")
+            self._info_msg("DLC training stopped via Keyboard Interrupt")
         except Exception as e:
             msg = str(e)
             hit_end_of_train = ("CancelledError" in msg) and (

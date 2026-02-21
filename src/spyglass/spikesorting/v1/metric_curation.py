@@ -290,11 +290,11 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         # cannot handle these objects.
         # TODO: refactor upstream to allow for passing of keys to avoid fetch,
         # only fetching data from disk here.
-        logger.info("Extracting waveforms...")
+        self._info_msg("Extracting waveforms...")
         waveforms = self.get_waveforms(key)
 
         # compute metrics
-        logger.info("Computing metrics...")
+        self._info_msg("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
@@ -373,7 +373,9 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)
-        dir_empty = not any(Path(waveforms_dir).iterdir())
+        dir_empty = not Path(waveforms_dir).exists() or not any(
+            Path(waveforms_dir).iterdir()
+        )
 
         if overwrite or dir_empty:
             waveforms = si.extract_waveforms(
