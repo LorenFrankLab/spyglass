@@ -26,7 +26,7 @@ class RestrictByMixin(BaseMixin):
 
     def see_banned_tables(self):
         """Print banned tables."""
-        self._logger.info(f"Banned tables: {self._banned_search_tables}")
+        self._info_msg(f"Banned tables: {self._banned_search_tables}")
 
     def restrict_by(
         self,

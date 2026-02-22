@@ -1,8 +1,6 @@
 import pytest
 from datajoint.utils import to_camel_case
 
-from tests.conftest import VERBOSE
-
 
 @pytest.fixture(scope="session")
 def leaf(lin_merge):
@@ -275,18 +273,16 @@ def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
     assert len(graph_tables[table]() << restr) == expect_n, msg
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_ban_node(caplog, graph_tables):
+def test_ban_node(graph_tables):
     search_restr = "sk_attr > 17"
     ParentNode = graph_tables["ParentNode"]()
     SkNode = graph_tables["SkNode"]()
 
     ParentNode.ban_search_table(SkNode)
-    ParentNode >> search_restr
-    assert "could not be applied" in caplog.text, "Found banned table."
-
-    ParentNode.see_banned_tables()
-    assert "Banned tables" in caplog.text, "Banned tables not logged."
+    assert (ParentNode >> search_restr) is None, "Banned table still reachable."
+    assert (
+        SkNode.full_table_name in ParentNode._banned_search_tables
+    ), "Banned table not in set."
 
     ParentNode.unban_search_table(SkNode)
     assert len(ParentNode >> search_restr) == 3, "Unban failed."
@@ -297,8 +293,7 @@ def test_null_restrict_by(graph_tables):
     assert (PkNode >> True) == PkNode, "Null restriction failed."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_restrict_by_this_table(caplog, graph_tables):
+def test_restrict_by_this_table(graph_tables):
     PkNode = graph_tables["PkNode"]()
     dist = (PkNode >> "pk_id > 4").restriction
     plain = (PkNode & "pk_id > 4").restriction
@@ -342,12 +337,9 @@ def test_restr_invalid_err(graph_tables):
         len(PkNode << set(["parent_attr > 15", "parent_attr < 20"]))
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_restr_invalid(caplog, graph_tables):
-    graph_tables["PkNode"]() << "invalid_restr=1"
-    assert (
-        "could not be applied" in caplog.text
-    ), "No warning logged on invalid restr."
+def test_restr_invalid(graph_tables):
+    result = graph_tables["PkNode"]() << "invalid_restr=1"
+    assert result is None, "Invalid restriction should return None."
 
 
 @pytest.fixture(scope="session")

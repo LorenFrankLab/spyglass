@@ -16,6 +16,7 @@ class BaseMixin:
         - RestrictByMixin
         - ExportMixin
         - AnalysisMixin
+        - Merge
         """
 
         from spyglass.utils import logger
@@ -44,6 +45,7 @@ class BaseMixin:
         Used by ...
         - AnalysisMixin.copy and .create
         - IngestionMixin._insert_logline
+        - Merge._merge_repr
         """
         log = self._logger.debug if self._test_mode else self._logger.info
         log(msg)

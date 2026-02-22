@@ -215,7 +215,7 @@ class CautiousDeleteMixin(BaseMixin):
             Passed to datajoint.table.Table.delete.
         """
         if len(self) == 0:
-            self._logger.warning("Table is empty. Nothing to delete.")
+            self._warn_msg("Table is empty. Nothing to delete.")
             return
 
         if self._has_updated_dj_version and not isinstance(self, dj.Part):

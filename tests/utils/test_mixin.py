@@ -50,18 +50,17 @@ def test_null_file_like(schema_test, Mixin):
     assert len(ret) == len(Mixin()), "Null file_like not working."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_bad_file_like(caplog, schema_test, Mixin):
+def test_bad_file_like(schema_test, Mixin):
     schema_test(Mixin)
-    Mixin().file_like("BadName")
-    assert "No file_like field" in caplog.text, "No warning issued."
+    assert (
+        Mixin().file_like("BadName") is None
+    ), "Expected None for missing field."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_insert_fail(caplog, common, mini_dict):
+def test_insert_fail(common, mini_dict):
     this_key = dict(mini_dict, interval_list_name="BadName")
-    common.PositionSource().find_insert_fail(this_key)
-    assert "IntervalList: MISSING" in caplog.text, "No warning issued."
+    result = common.PositionSource().find_insert_fail(this_key)
+    assert "MISSING" in result, "Expected MISSING parent in result."
 
 
 def test_exp_summary(Nwbfile):
@@ -90,16 +89,12 @@ def test_cautious_del_dry_run(Nwbfile, frequent_imports):
     ), "Dry run delete not working."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_empty_cautious_del(caplog, schema_test, Mixin):
+def test_empty_cautious_del(schema_test, Mixin):
     schema_test(Mixin)
     mixin = Mixin()
-    prev_level = mixin._logger.level
-    mixin._logger.setLevel("INFO")
     mixin.cautious_delete(safemode=False)
-    mixin.cautious_delete(safemode=False)
-    assert "empty" in caplog.text, "No warning issued."
-    mixin._logger.setLevel(prev_level)
+    assert len(mixin) == 0, "Table should be empty after delete."
+    mixin.cautious_delete(safemode=False)  # Should not raise on empty table
 
 
 def test_super_delete(schema_test, Mixin, common):

@@ -51,9 +51,7 @@ class HelperMixin(BaseMixin):
                 attr = field
                 break
         if not attr:
-            self._logger.error(
-                f"No file_like field found in {self.full_table_name}"
-            )
+            self._err_msg(f"No file_like field found in {self.full_table_name}")
             return
         return self & f"{attr} LIKE '%{name}%'"
 
@@ -79,7 +77,9 @@ class HelperMixin(BaseMixin):
                 rets.append(f"{parent_name}:\n{query}")
             else:
                 rets.append(f"{parent_name}: MISSING")
-        self._logger.info("\n".join(rets))
+        result = "\n".join(rets)
+        self._info_msg(result)
+        return result
 
     @classmethod
     def _safe_context(cls):

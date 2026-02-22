@@ -67,14 +67,14 @@ class Merge(ExportMixin, dj.Manual):
         self._reserved_sk = RESERVED_SECONDARY_KEY
         if not self.is_declared:
             if not is_merge_table(self):  # Check definition
-                logger.warning(
+                self._warn_msg(
                     "Merge table with non-default definition\n"
                     + f"Expected:\n{MERGE_DEFINITION.strip()}\n"
                     + f"Actual  :\n{self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    logger.warning(  # PK is only 'merge_id' in parts, no others
+                    self._warn_msg(  # PK is only 'merge_id' in parts, no others
                         f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
@@ -101,7 +101,7 @@ class Merge(ExportMixin, dj.Manual):
         self._ensure_dependencies_loaded()
 
         if camel_case and kwargs.get("as_objects"):
-            logger.warning(
+            self._warn_msg(
                 "Overriding as_objects=True to return CamelCase part names."
             )
             kwargs["as_objects"] = False

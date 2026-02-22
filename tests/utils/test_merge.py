@@ -2,8 +2,6 @@ import datajoint as dj
 import pytest
 from datajoint.logging import logger as dj_logger
 
-from tests.conftest import VERBOSE
-
 
 @pytest.fixture(scope="function")
 def BadMerge():
@@ -32,11 +30,13 @@ def BadMerge():
     dj_logger.setLevel(prev_level)
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_nwb_table_missing(BadMerge, caplog, schema_test):
+def test_nwb_table_missing(BadMerge, schema_test):
+    from spyglass.utils.dj_merge_tables import is_merge_table
+
     schema_test(BadMerge)
-    txt = caplog.text
-    assert "non-default definition" in txt, "Warning not caught."
+    assert not is_merge_table(
+        BadMerge()
+    ), "BadMerge should fail merge-table check."
 
 
 @pytest.fixture(scope="function")
@@ -63,11 +63,11 @@ def test_part_camel(merge_table):
     assert "_" not in example_part, "Camel case not applied."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_override_warning(caplog, merge_table):
-    _ = merge_table.parts(camel_case=True, as_objects=True)[0]
-    txt = caplog.text
-    assert "Overriding" in txt, "Warning not caught."
+def test_override_warning(merge_table):
+    parts = merge_table.parts(camel_case=True, as_objects=True)
+    assert all(
+        isinstance(p, str) for p in parts
+    ), "as_objects=True should be overridden to return CamelCase strings."
 
 
 def test_merge_view(pos_merge):
