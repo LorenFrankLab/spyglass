@@ -141,7 +141,7 @@ class AnalysisFileBuilder:
             self.register()
         except Exception as e:
             self._exception_occurred = True
-            self._exception_log = {self.analysis_file_name: e.__name__}
+            self._exception_log = {self.analysis_file_name: type(e)}
             if not test_mode:
                 logger.error(
                     f"Failed to register analysis file "
