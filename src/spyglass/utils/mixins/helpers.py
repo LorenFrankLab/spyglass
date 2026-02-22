@@ -77,9 +77,7 @@ class HelperMixin(BaseMixin):
                 rets.append(f"{parent_name}:\n{query}")
             else:
                 rets.append(f"{parent_name}: MISSING")
-        result = "\n".join(rets)
-        self._info_msg(result)
-        return result
+        return "\n".join(rets)
 
     @classmethod
     def _safe_context(cls):
