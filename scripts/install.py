@@ -630,7 +630,7 @@ class CondaManager:
                         for kw in ["Solving", "Downloading", "Extracting"]
                     ):
                         print(".", end="", flush=True)
-                Console.print()
+                Console.print("")
 
             if process.returncode != 0:
                 raise subprocess.CalledProcessError(
