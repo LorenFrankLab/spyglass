@@ -226,7 +226,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     def make_compute(
         self, key, nwb_file_name, sort_interval_valid_times
-    ) -> dict:
+    ) -> list:
         """Compute/save SpikeSortingRecording
 
         Returns
@@ -248,7 +248,7 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         nwb_file_name: str,
         file_dict: dict,
         sort_interval_valid_times: IntervalLike,
-    ) -> dict:
+    ) -> None:
         insert_key = dict(key, **file_dict)
 
         # INSERT:

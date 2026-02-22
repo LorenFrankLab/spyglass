@@ -1233,8 +1233,11 @@ class RestrGraph(AbstractGraph):
         return {t: self._get_node(t).get("files", []) for t in self.restr_ft}
 
     def _stored_files(self, as_dict=False) -> Dict[str, str] | Set[str]:
-        """Return dictionary of table names and files."""
-        # Added for debugging
+        """Return dictionary of table names and files.
+
+        Dictionary format is used for debugging and testing. Set format is used
+        for hashing and typical use.
+        """
         self.cascade(warn=False)
 
         pairs = [
