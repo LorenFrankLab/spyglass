@@ -10,6 +10,8 @@ from pynwb.device import DeviceModel
 from pynwb.image import ImageSeries
 from pynwb.testing.mock.file import mock_NWBFile, mock_Subject
 
+from tests.conftest import VERBOSE
+
 
 @pytest.fixture(scope="function")
 def nwb_with_video_no_task(raw_dir, common):
@@ -72,6 +74,7 @@ def nwb_with_video_no_task(raw_dir, common):
         nwbfile_path.unlink()
 
 
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
 def test_video_import_without_task_silent_failure(
     nwb_with_video_no_task, common, caplog
 ):

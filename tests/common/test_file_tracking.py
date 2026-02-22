@@ -44,6 +44,7 @@ def analysis_file_issues(file_tracking_module, teardown):
 @pytest.fixture(scope="module")
 def custom_analysis_with_files(custom_config, dj_conn, common_nwbfile):
     """Create custom analysis table with test files."""
+    from spyglass.common import Nwbfile  # noqa: F401
     from spyglass.utils.dj_mixin import SpyglassAnalysis
 
     prefix = custom_config
@@ -152,15 +153,14 @@ def test_get_tbl_method_exists(analysis_file_issues):
     assert callable(analysis_file_issues.get_tbl)
 
 
-def test_show_downstream_no_issues(analysis_file_issues, caplog):
+def test_show_downstream_no_issues(analysis_file_issues):
     """Test show_downstream() with no issues."""
     # Call with restriction that matches nothing
     result = analysis_file_issues.show_downstream(
         restriction={"analysis_file_name": "definitely_nonexistent_file.nwb"}
     )
 
-    assert "No issues found" in caplog.text
-    assert not result  # Should return empty list
+    assert isinstance(result, list) and not result, "Should be an empty list"
 
 
 def test_integration_check_all_files_method_exists(common_nwbfile):

@@ -880,6 +880,6 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
                 logger.warning(f"    Found {issue_count} file issues")
 
         total_issues = sum(results.values())
-        logger.info(f"File check complete: {total_issues} issues found")
+        self._info_msg(f"File check complete: {total_issues} issues found")
 
         return results

@@ -311,15 +311,15 @@ def test_invalid_restr_direction(graph_tables):
         PkNode.restrict_by("bad_attr > 0", direction="invalid_direction")
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_warn_nonrestrict(caplog, graph_tables):
+def test_warn_nonrestrict(graph_tables):
     ParentNode = graph_tables["ParentNode"]()
     restr_parent = ParentNode & "parent_id > 4 AND parent_id < 9"
 
-    restr_parent >> "sk_id > 0"
-    assert "Same length" in caplog.text, "No warning logged on non-restrict."
-    restr_parent >> "sk_id > 99"
-    assert "No entries" in caplog.text, "No warning logged on non-restrict."
+    ret = restr_parent >> "sk_id > 0"
+    assert len(ret) == len(restr_parent), "Restriction should have no effect."
+
+    ret = restr_parent >> "sk_id > 99"
+    assert len(ret) == 0, "Return should be empty."
 
 
 def test_restr_many_to_one(graph_tables_many_to_one):

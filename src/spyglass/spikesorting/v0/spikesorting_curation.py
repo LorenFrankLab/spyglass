@@ -1140,7 +1140,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             "quality_metrics", "curation_labels"
         )
         if metrics == {}:
-            logger.warning(
+            self._warn_msg(
                 f"Metrics for Curation {key} should normally be calculated "
                 + "before insertion here"
             )

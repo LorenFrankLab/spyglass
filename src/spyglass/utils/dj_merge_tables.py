@@ -13,6 +13,7 @@ from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.mixins.export import ExportMixin
 
 RESERVED_PRIMARY_KEY = "merge_id"
@@ -270,7 +271,7 @@ class Merge(ExportMixin, dj.Manual):
             )
         ]
         if not parts:
-            logger.warning("No parts found. Try adjusting restriction.")
+            cls()._warn_msg("No parts found. Try adjusting restriction.")
             return
 
         attr_dict = {  # NULL for non-numeric, 0 for numeric

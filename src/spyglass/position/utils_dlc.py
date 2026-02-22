@@ -11,6 +11,7 @@ except ImportError:  # pragma: no cover
     evaluate_network, get_evaluation_folder = None, None  # pragma: no cover
 
 from spyglass.position.utils import get_most_recent_file
+from spyglass.settings import test_mode
 
 
 @contextlib.contextmanager
@@ -57,6 +58,11 @@ def suppress_print_from_package(package: str = "deeplabcut"):
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr
+
+
+test_mode_suppress = (
+    suppress_print_from_package if test_mode else contextlib.nullcontext
+)
 
 
 def get_dlc_model_eval(

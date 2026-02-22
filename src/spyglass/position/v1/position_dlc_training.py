@@ -4,7 +4,10 @@ from pathlib import Path
 import datajoint as dj
 
 from spyglass.position.utils import get_param_names
-from spyglass.position.utils_dlc import suppress_print_from_package
+from spyglass.position.utils_dlc import (
+    suppress_print_from_package,
+    test_mode_suppress,
+)
 from spyglass.position.v1.dlc_utils import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
@@ -203,7 +206,9 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         self._info_msg("creating training dataset")
 
         # NOTE: if DLC > 3, this will raise engine error
-        create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
+        with test_mode_suppress():
+            create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
+
         # ---- Trigger DLC model training job ----
         train_network_kwargs = {
             k: v

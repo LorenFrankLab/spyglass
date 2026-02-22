@@ -112,9 +112,9 @@ class RestrictByMixin(BaseMixin):
             + "See `help(YourTable.restrict_by)`"
         )
         if len(ret) == len(self):
-            self._logger.warning("Same length" + warn_text)
+            self._warn_msg("Same length" + warn_text)
         elif len(ret) == 0:
-            self._logger.warning("No entries" + warn_text)
+            self._warn_msg("No entries" + warn_text)
 
         return ret
 

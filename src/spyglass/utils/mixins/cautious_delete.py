@@ -215,7 +215,7 @@ class CautiousDeleteMixin(BaseMixin):
             Passed to datajoint.table.Table.delete.
         """
         if len(self) == 0:
-            self._logger.warning(f"Table is empty. No need to delete.\n{self}")
+            self._logger.warning("Table is empty. Nothing to delete.")
             return
 
         if self._has_updated_dj_version and not isinstance(self, dj.Part):
@@ -249,6 +249,6 @@ class CautiousDeleteMixin(BaseMixin):
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete."""
         if warn:
-            self._logger.warning("!! Bypassing cautious_delete !!")
+            self._warn_msg("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)

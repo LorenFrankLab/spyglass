@@ -400,7 +400,9 @@ class VideoMaker:
     def process_frames(self):
         """Process video frames in batches and generate matplotlib frames."""
 
-        progress_bar = tqdm(leave=True, position=0, disable=self.debug)
+        disable = False if test_mode else self.debug
+
+        progress_bar = tqdm(leave=True, position=0, disable=disable)
         progress_bar.reset(total=self.n_frames)
 
         for start_frame in range(0, self.n_frames, self.batch_size):

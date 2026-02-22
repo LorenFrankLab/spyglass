@@ -244,6 +244,22 @@ warnings.filterwarnings(
     message=".*TemporaryDirectory.*",
 )
 
+# numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
+# `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
+# This fires a DeprecationWarning at process exit.  We could filter it, but
+# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
+# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
+# our filters and they are not restored before atexit fires.
+# Unregistering the atexit handler is cleaner: blosc._init() has already run,
+# and skipping _destroy() in the test process is harmless.
+try:
+    import atexit as _atexit
+    import numcodecs.blosc as _numcodecs_blosc
+
+    _atexit.unregister(_numcodecs_blosc.destroy)
+except Exception:
+    pass  # numcodecs not installed — nothing to unregister
+
 
 def pytest_addoption(parser):
     """Permit constants when calling pytest at command line

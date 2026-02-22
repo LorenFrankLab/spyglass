@@ -185,7 +185,8 @@ class AnalysisFileIssues(dj.Manual):
         """
         entries = (self & "can_read=0" & restriction).fetch("KEY", as_dict=True)
         if not entries:
-            logger.info("No issues found.")
+            if not test_mode:
+                logger.info("No issues found.")
             return []
 
         # Get unique analysis tables from entries

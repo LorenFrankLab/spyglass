@@ -56,14 +56,22 @@ class BaseMixin:
         log = self._logger.debug if self._test_mode else self._logger.warning
         log(msg)
 
+    def _err_msg(self, msg: str) -> None:
+        """Log error message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.error
+        log(msg)
+
     @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
 
-        Note: Using @property instead of @cached_property so we always get
-        current value from dj.config, even if test_mode changes after first access.
+        Note: Using cached property b/c we don't expect test_mode to change
+        during runtime, and it avoids repeated lookups.
 
         Used by ...
         - BaseMixin._spyglass_version

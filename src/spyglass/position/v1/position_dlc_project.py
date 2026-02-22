@@ -10,6 +10,7 @@ from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
 from spyglass.position.utils import sanitize_filename
+from spyglass.position.utils_dlc import test_mode_suppress
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
@@ -399,7 +400,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
             ]
         }
 
-        cfg = read_config(config_path)
+        with test_mode_suppress():
+            cfg = read_config(config_path)
+
         video_names = list(cfg["video_sets"])
         label_dir = Path(cfg["project_path"]) / "labeled-data"
         training_files = []
@@ -423,7 +426,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         )
 
         if len(training_files) == 0:
-            logger.warning("No training files to add")
+            cls()._warn_msg("No training files to add")
             return
 
         training_file_inserts = []
@@ -451,7 +454,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         config_path = (cls & key).fetch1("config_path")
         from deeplabcut import extract_frames
 
-        extract_frames(config_path, **kwargs)
+        with test_mode_suppress():
+            extract_frames(config_path, **kwargs)
 
     @classmethod
     def run_label_frames(cls, key):  # pragma: no cover
@@ -466,7 +470,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
             logger.error("DLC loaded in light mode, cannot label frames")
             return
 
-        label_frames(config_path)  # pragma: no cover
+        with test_mode_suppress():
+            label_frames(config_path)  # pragma: no cover
 
     @classmethod
     def check_labels(cls, key, **kwargs):  # pragma: no cover
@@ -476,7 +481,8 @@ class DLCProject(SpyglassMixin, dj.Manual):
         config_path = (cls & key).fetch1("config_path")
         from deeplabcut import check_labels
 
-        check_labels(config_path, **kwargs)
+        with test_mode_suppress():
+            check_labels(config_path, **kwargs)
 
     @classmethod
     def import_labeled_frames(

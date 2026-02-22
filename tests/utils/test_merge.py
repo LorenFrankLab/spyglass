@@ -1,5 +1,6 @@
 import datajoint as dj
 import pytest
+from datajoint.logging import logger as dj_logger
 
 from tests.conftest import VERBOSE
 
@@ -24,8 +25,11 @@ def BadMerge():
 
     yield BadMerge
 
+    prev_level = dj_logger.level
+    dj_logger.setLevel("ERROR")
     BadMerge.BadChild().drop_quick()
     BadMerge().drop_quick()
+    dj_logger.setLevel(prev_level)
 
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
@@ -72,11 +76,9 @@ def test_merge_view(pos_merge):
     assert len(view.heading.names) > 14, "Repr not showing all columns."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_merge_view_warning(caplog, merge_table):
-    _ = merge_table.merge_restrict(restriction='source="bad"')
-    txt = caplog.text
-    assert "No parts" in txt, "Warning not caught."
+def test_merge_view_null(merge_table):
+    ret = merge_table.merge_restrict(restriction='source="bad"')
+    assert ret is None, "Restriction should return None for no matches."
 
 
 def test_merge_get_class(merge_table):
@@ -85,8 +87,7 @@ def test_merge_get_class(merge_table):
     assert parent_cls.__name__ == part_name, "Class not found."
 
 
-@pytest.mark.skip(reason="Pending populated merge table.")
-def test_merge_get_class_invalid(caplog, merge_table):
-    _ = merge_table.merge_get_parent_class("bad")
-    txt = caplog.text
-    assert "No source" in txt, "Warning not caught."
+# @pytest.mark.skip(reason="Pending populated merge table.")
+def test_merge_get_class_invalid(spike_merge, pop_spike_merge):
+    ret = spike_merge.merge_get_parent_class("bad")
+    assert ret is None, "Should return None for invalid part name."

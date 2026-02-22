@@ -9,6 +9,7 @@ from typing import Optional, Tuple
 
 import pynwb
 
+from spyglass.settings import test_mode
 from spyglass.utils.logging import logger
 
 
@@ -81,6 +82,7 @@ class AnalysisFileBuilder:
         self.analysis_file_name = None
         self._state = "INIT"
         self._exception_occurred = False
+        self._exception_log = dict()
 
     def __enter__(self):
         """Create analysis file (CREATE phase).
@@ -124,22 +126,27 @@ class AnalysisFileBuilder:
 
         if self._exception_occurred:
             # Log failed file for cleanup
-            logger.warning(
-                f"Analysis file '{self.analysis_file_name}' created but not "
-                f"registered due to exception: {exc_type.__name__}. "
-                f"File will be detected and cleaned up by "
-                f"AnalysisNwbfile.cleanup()"
-            )
+            self._exception_log = {self.analysis_file_name: exc_type}
+            if not test_mode:
+                logger.error(
+                    f"Analysis file '{self.analysis_file_name}' created but "
+                    f"not registered due to exception: {exc_type.__name__}. "
+                    f"File will be detected and cleaned up by "
+                    f"AnalysisNwbfile.cleanup()"
+                )
             return False  # Don't suppress exception
 
         # Always auto-register on successful exit
         try:
             self.register()
         except Exception as e:
-            logger.error(
-                f"Failed to register analysis file "
-                f"'{self.analysis_file_name}': {e}"
-            )
+            self._exception_occurred = True
+            self._exception_log = {self.analysis_file_name: e.__name__}
+            if not test_mode:
+                logger.error(
+                    f"Failed to register analysis file "
+                    f"'{self.analysis_file_name}': {e}"
+                )
             raise  # Re-raise registration error
 
         return False  # Never suppress exceptions

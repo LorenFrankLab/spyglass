@@ -228,6 +228,8 @@ class DockerMySQLManager:
             return None
         if not self.container_status or self.container_status == "exited":
             self.start()
+        if self.container.health == "healthy":
+            return
 
         print("")
         self.logger.info(f"Container {self.container_name} starting...")
@@ -310,8 +312,10 @@ class DockerMySQLManager:
 
         container_name = self.container_name
         self.container.stop()  # Logger I/O operations close during teardown
-        print(f"Container {container_name} stopped.")
+        logline = f"Container {container_name} stopped"
 
         if remove:
             self.container.remove()
-            print(f"Container {container_name} removed.")
+            logline += " and removed"
+
+        print(f"{logline}.")

@@ -63,18 +63,34 @@ def test_recompute_env(recomp_tbl):
     assert ret, "Recompute failed"
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_selection_attempt(caplog, recomp_selection):
-    """Test that the selection attempt works."""
+    """Test that the selection reattempt does not add new entries."""
     _ = recomp_selection.attempt_all()
-    assert "No rows" in caplog.text, "Selection attempt failed null log"
+    prev_len = len(recomp_selection)
+    ret = recomp_selection.attempt_all()
+    post_len = len(recomp_selection)
+    assert ret is None, "Selection attempt failed"
+    assert prev_len == post_len, "Selection attempt should not add new entries"
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
-def test_delete_dry_run(caplog, recomp_tbl):
+def test_delete_dry_run(recomp_tbl):
     """Test dry run delete."""
+    prev_len = len(recomp_tbl)
     _ = recomp_tbl.delete_files(dry_run=True)
-    assert "DRY" in caplog.text, "Dry run delete failed to log"
+    post_len = len(recomp_tbl)
+    assert prev_len == post_len, "Dry run delete should not remove entries"
+
+
+def test_recompute_disk_check(recomp_tbl):
+    """Test that the disk check works."""
+    from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+
+    key = recomp_tbl.fetch("KEY")[0]
+    path, _ = recomp_tbl._get_paths(key)
+    size = Path(path).stat().st_size if Path(path).exists() else 0
+    expected = bytes_to_human_readable(size)
+    result = recomp_tbl.get_disk_space(which="old", restr=key)
+    assert expected in result, "Disk check failed"
 
 
 @pytest.mark.slow

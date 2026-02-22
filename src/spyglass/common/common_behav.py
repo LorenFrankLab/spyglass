@@ -862,7 +862,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            logger.error(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
+            self._err_msg(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
             self.insert1(null_key, **insert_opts)
             return
 
@@ -899,7 +899,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            logger.warning(
+            self._warn_msg(
                 f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos "
                 + f"intervals for\n\t{key}\n\t"
                 + f"Matching intervals: {matching_pos_intervals}"

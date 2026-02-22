@@ -249,7 +249,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorting=sorting,
             timestamps=timestamps,
             artifact_removed_intervals=artifact_removed_intervals,
-            nwb_file_name=(SpikeSortingSelection & key).fetch1("nwb_file_name"),
+            nwb_file_name=nwb_file_name,
         )
 
         return [nwb_file_name, time_of_sort, analysis_file_name, object_id]
