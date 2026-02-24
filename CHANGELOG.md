@@ -137,7 +137,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
 - Upgrade to pynwb>=3.1 #1506
-- Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io
+    #1506
 - Add `analysis_table` property to mixin for custom pipelines #1525
 
 ### Pipelines
@@ -199,6 +200,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
     - Improve get_recording efficiency #1522
+    - Raise error if `FigURLCurationSelection` finds no curation label #1531
 
 ## [0.5.5] (Aug 6, 2025)
 
