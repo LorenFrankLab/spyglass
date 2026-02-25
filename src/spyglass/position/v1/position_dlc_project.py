@@ -70,7 +70,6 @@ class DLCProject(SpyglassMixin, dj.Manual):
     """
 
     # NOTE: #1534, config~path: varchar(120) -> varchar(255)
-    #       to accommodate longer paths for nested projects.
 
     class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""

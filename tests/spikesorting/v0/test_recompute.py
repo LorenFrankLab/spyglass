@@ -73,10 +73,13 @@ def test_recompute_env(recomp_repop):
     assert ret, "Recompute failed"
 
 
-def test_selection_restr(recomp_repop, user_env_tbl, recomp_selection):
+def test_selection_restr(recomp_repop, recomp_selection):
     """Test that the selection env restriction works."""
     _ = recomp_repop  # Ensure recompute repop is used to load the recording
-    env_dict = user_env_tbl.this_env
+    # Use recomp_selection.env_dict (same source as this_env) for consistency.
+    # user_env_tbl.this_env is a cached_property that can become stale in full
+    # suite runs due to class-level _pip_custom dict contamination across tests.
+    env_dict = recomp_selection.env_dict
     manual_restr = recomp_selection & env_dict
     assert len(recomp_selection.this_env) == len(
         manual_restr

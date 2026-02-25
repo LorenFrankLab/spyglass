@@ -755,22 +755,36 @@ def mock_detector_io_globally(mock_results_storage):
             return xr.open_dataset(filename_str, engine="netcdf4")
         except (FileNotFoundError, OSError) as e:
             # OSError with "Unknown file format" means old pickle file exists
-            # FileNotFoundError means file doesn't exist at all
+            # (from a prior --no-teardown run where mock_netcdf_saves wrote
+            # pickle format). Fall back to pickle to keep reruns working.
             if "Unknown file format" in str(e):
-                raise FileNotFoundError(
-                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
-                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
-                )
+                import pickle
+
+                try:
+                    with open(filename_str, "rb") as f:
+                        return pickle.load(f)
+                except Exception:
+                    raise FileNotFoundError(
+                        f"Mock result has invalid format: {filename_str}. "
+                        "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                    )
             raise FileNotFoundError(f"Mock result not found: {filename_str}")
 
     def _mock_load_model(filename):
-        """Load classifier from in-memory storage."""
+        """Load classifier from in-memory storage or disk."""
         filename_str = str(filename)
         if filename_str in mock_results_storage["classifiers"]:
             return mock_results_storage["classifiers"][filename_str]
-        raise FileNotFoundError(
-            f"Mock classifier not found in memory: {filename_str}"
-        )
+        # Fall back to disk for --no-teardown reruns where in-memory is empty
+        import pickle
+
+        try:
+            with open(filename_str, "rb") as f:
+                return pickle.load(f)
+        except (FileNotFoundError, OSError):
+            raise FileNotFoundError(
+                f"Mock classifier not found in memory or on disk: {filename_str}"
+            )
 
     # Patch the detector base classes' load methods globally
     with (

@@ -45,6 +45,11 @@ def recomp_tbl(recomp_module, recomp_selection, spike_v1, pop_rec):
     """Fixture to ensure recompute table is loaded."""
     _ = spike_v1, pop_rec  # Ensure pop_rec is used to load the recording
 
+    # Re-populate selection if empty. After a prior --no-teardown run,
+    # make() calls remove_matched() to clean up entries post-recompute.
+    if not len(recomp_selection):
+        recomp_selection.attempt_all()
+
     key = recomp_selection.fetch("KEY")[0]
     key["logged_at_creation"] = False  # Prevent skip of recompute
     recomp_selection.update1(key)
