@@ -491,7 +491,7 @@ def _resolve_external_table(
     file_restr = f"filepath LIKE '%{file_name}'"
 
     to_updates = []
-    table_to_update = []
+    tables_to_update = []
     if location == "analysis":  # Update for each custom Analysis external
         for external in AnalysisRegistry().get_externals():
             restr_external = external & file_restr
@@ -503,12 +503,22 @@ def _resolve_external_table(
                     + f"{file_name}, cannot resolve."
                 )
             to_updates.append(restr_external)
-            table_to_update.append(external)
+            tables_to_update.append(external)
 
     elif location == "raw":
         restr_external = common_schema.external["raw"] & file_restr
+        if not bool(restr_external):
+            logger.warning(
+                f"No entries found in common_schema.external['raw'] for file: {file_name}"
+            )
+            return
+        if len(restr_external) > 1:
+            raise ValueError(
+                "Multiple entries found in common_schema.external['raw'] for file: "
+                + f"{file_name}, cannot resolve."
+            )
         to_updates.append(restr_external)
-        table_to_update.append(common_schema.external["raw"])
+        tables_to_update.append(common_schema.external["raw"])
 
     if not to_updates:
         logger.warning(
@@ -520,7 +530,7 @@ def _resolve_external_table(
         size=Path(filepath).stat().st_size,
         contents_hash=dj.hash.uuid_from_file(filepath),
     )
-    for to_update, table in zip(to_updates, table_to_update):
+    for to_update, table in zip(to_updates, tables_to_update):
         key = to_update.fetch1()
         key.update(update_vals)
         table.update1(key)
