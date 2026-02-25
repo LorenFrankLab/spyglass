@@ -14,7 +14,6 @@ import h5py
 import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
-
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -105,9 +104,9 @@ def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
     return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
@@ -492,6 +491,7 @@ def _resolve_external_table(
     file_restr = f"filepath LIKE '%{file_name}'"
 
     to_updates = []
+    tables_to_update = []
     if location == "analysis":  # Update for each custom Analysis external
         for external in AnalysisRegistry().get_externals():
             restr_external = external & file_restr
@@ -503,10 +503,22 @@ def _resolve_external_table(
                     + f"{file_name}, cannot resolve."
                 )
             to_updates.append(restr_external)
+            tables_to_update.append(external)
 
     elif location == "raw":
         restr_external = common_schema.external["raw"] & file_restr
+        if not bool(restr_external):
+            logger.warning(
+                f"No entries found in common_schema.external['raw'] for file: {file_name}"
+            )
+            return
+        if len(restr_external) > 1:
+            raise ValueError(
+                "Multiple entries found in common_schema.external['raw'] for file: "
+                + f"{file_name}, cannot resolve."
+            )
         to_updates.append(restr_external)
+        tables_to_update.append(common_schema.external["raw"])
 
     if not to_updates:
         logger.warning(
@@ -518,10 +530,10 @@ def _resolve_external_table(
         size=Path(filepath).stat().st_size,
         contents_hash=dj.hash.uuid_from_file(filepath),
     )
-    for to_update in to_updates:
+    for to_update, table in zip(to_updates, tables_to_update):
         key = to_update.fetch1()
         key.update(update_vals)
-        to_update.update1(key)
+        table.update1(key)
 
 
 def make_file_obj_id_unique(nwb_path: str):
