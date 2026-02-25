@@ -693,7 +693,7 @@ class SortedSpikesDecodingV1(SpyglassMixin, dj.Computed):
 
             return analysis.get_ahead_behind_distance(track_graph, *traj_data)
         else:
-            position_info = self.fetch_position_info(self.fetch1("KEY")).loc[
+            position_info = self.fetch_position_info(self.fetch1("KEY"))[0].loc[
                 time_slice
             ]
             map_position = analysis.maximum_a_posteriori_estimate(posterior)
