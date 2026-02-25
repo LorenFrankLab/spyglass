@@ -358,9 +358,14 @@ def test_union_adjacent_index(interval_obj, one, two, expected_result):
             np.array([[0, 4]]),
         ),
         (
-            np.array([[0, -1]]),
+            np.array([[0, 1]]),
             np.array([[2, 4]]),
-            np.array([[2, 0]]),
+            np.array([[0, 1], [2, 4]]),
+        ),
+        (
+            np.array([[1, 3], [9, 10]]),
+            np.array([[0, 2]]),
+            np.array([[0, 3], [9, 10]]),
         ),
         (
             np.array([[0, 1]]),

@@ -170,6 +170,7 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
 
