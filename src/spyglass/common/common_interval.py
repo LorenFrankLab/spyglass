@@ -506,7 +506,7 @@ class Interval:
             times = interval_list
         if not len(times):
             return
-        if np.all(np.diff(times, axis=0) >= 0):
+        if np.all(np.diff(times, axis=1) >= 0):
             return
         raise ValueError(
             "All intervals must be in the form [start, stop] with start <= stop."
@@ -832,7 +832,7 @@ class Interval:
             if ss[sort_ind][0] == 1
             else union_starts
         )
-        union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+        union_stops = np.ravel(np.array(np.where(ss_cumsum == 0)))
         if union_starts.size != union_stops.size:
             raise ValueError(
                 "Mismatched number of union starts and stops. "
