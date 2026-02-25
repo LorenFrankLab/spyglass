@@ -803,7 +803,7 @@ class Interval:
         # same sorting to the start-end arrays
         combined_intervals = np.concatenate((il1, il2))
         ss = np.concatenate((il1_start_end, il2_start_end))
-        sort_ind = np.argsort(combined_intervals)
+        sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
         ss_cumsum = np.cumsum(ss[sort_ind])
         if any(ss_cumsum < 0):
