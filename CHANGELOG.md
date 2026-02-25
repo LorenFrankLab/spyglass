@@ -183,6 +183,8 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
+    - Fix fetching position df in SortedSpikesDecodingV1.get_ahead_behind_distance()
+        #1540
 
 - LFP
 
