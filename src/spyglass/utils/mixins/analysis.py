@@ -661,6 +661,7 @@ class AnalysisMixin(BaseMixin):
                 nwb_object = ScratchData(
                     name=table_name or "numpy_array",
                     data=nwb_object,
+                    description="Numpy array stored in scratch space",
                 )
             if nwb_object.name in nwbf.scratch:
                 raise ValueError(
