@@ -66,8 +66,11 @@ class DLCProject(SpyglassMixin, dj.Manual):
     -> LabTeam
     bodyparts        : blob         # list of bodyparts to label
     frames_per_video : int          # number of frames to extract from each video
-    config_path      : varchar(120) # path to config.yaml for model
+    config_path      : varchar(255) # path to config.yaml for model
     """
+
+    # NOTE: #1534, config~path: varchar(120) -> varchar(255)
+    #       to accommodate longer paths for nested projects.
 
     class BodyPart(SpyglassMixin, dj.Part):
         """Part table to hold bodyparts used in each project."""

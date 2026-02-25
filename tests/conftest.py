@@ -288,9 +288,13 @@ def pytest_addoption(parser):
     parser.addoption(
         "--base-dir",
         action="store",
-        default="./tests/_data/",
+        default=None,
         dest="base_dir",
-        help="Directory for local input file.",
+        help=(
+            "Directory for local input file. "
+            "Also reads SPYGLASS_BASE_DIR env var when unset. "
+            "Default: './tests/_data/'."
+        ),
     )
     parser.addoption(
         "--no-teardown",
@@ -339,7 +343,10 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    BASE_DIR = Path(config.option.base_dir).absolute()
+    _base_dir = config.option.base_dir or os.environ.get(
+        "SPYGLASS_BASE_DIR", "./tests/_data/"
+    )
+    BASE_DIR = Path(_base_dir).expanduser().absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
