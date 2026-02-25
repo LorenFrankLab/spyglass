@@ -36,24 +36,19 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    @property
+    @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
 
-        Note: Using @property instead of @cached_property so we always get
-        current value from dj.config, even if test_mode changes after first access.
-
         Used by ...
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        import datajoint as dj
+        from spyglass.settings import test_mode
 
-        # Check dj.config directly instead of importing module-level variable
-        # which gets stale if load_config() is called after initial import
-        return dj.config.get("custom", {}).get("test_mode", False)
+        return test_mode
 
     @cached_property
     def _spyglass_version(self):
