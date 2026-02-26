@@ -207,6 +207,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
     - Improve get_recording efficiency #1522
+    - Raise error if `FigURLCurationSelection` finds no curation label #1531
 
 ## [0.5.5] (Aug 6, 2025)
 
