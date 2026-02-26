@@ -73,7 +73,9 @@ class BaseMixin:
         Avoids circular import. Prevents prompt on delete.
 
         Note: Using cached property b/c we don't expect test_mode to change
-        during runtime, and it avoids repeated lookups.
+        during runtime, and it avoids repeated lookups. Changing to @property
+        wouldn't reload the config. It would just re-fetch from the settings
+        module.
 
         Used by ...
         - BaseMixin._spyglass_version
