@@ -381,7 +381,6 @@ def _write_sorting_to_nwb_with_curation(
             )
         else:
             for unit_id in unit_ids:
-                # spike_times = sorting.get_unit_spike_train(unit_id)
                 nwbf.add_unit(
                     spike_times=units_dict[unit_id],
                     id=unit_id,

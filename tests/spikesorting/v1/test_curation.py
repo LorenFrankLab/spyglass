@@ -164,13 +164,20 @@ def curation_mocks(tmp_path):
             mock_nwbf = MagicMock()
             mock_nwbf.units.to_dataframe.return_value = units_df
 
-            self.write_nwbf = MagicMock()
-            self.write_nwbf._units = None
-            type(self.write_nwbf).units = property(
-                lambda s: self.write_nwbf._units,
-                lambda s, v: setattr(self.write_nwbf, "_units", v),
-            )
+            class _WriteNWBMock(MagicMock):
+                def __init__(self, *args, **kwargs):
+                    super().__init__(*args, **kwargs)
+                    self._units = None
 
+                @property
+                def units(self):
+                    return self._units
+
+                @units.setter
+                def units(self, value):
+                    self._units = value
+
+            self.write_nwbf = _WriteNWBMock()
             mock_io_read = MagicMock()
             mock_io_read.read.return_value = mock_nwbf
             mock_io_read.__enter__ = MagicMock(return_value=mock_io_read)
