@@ -201,6 +201,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
+    - Allow `CurationV1` to save without any spikes #1533
 
 ## [0.5.5] (Aug 6, 2025)
 
