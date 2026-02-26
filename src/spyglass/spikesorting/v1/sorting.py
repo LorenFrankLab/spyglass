@@ -14,7 +14,7 @@ import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
 from spyglass.spikesorting.v1.recording import (  # noqa: F401
@@ -187,14 +187,13 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int               # in Unix time, to the nearest second
     """
 
-    _use_transaction, _allow_insert = False, True
     _parallel_make = True  # True if n_workers > 1
 
-    def make(self, key: dict):
+    def make_fetch(self, key: dict) -> list:
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
         """
-        # FETCH (Spyglass logic - always tested):
+        # FETCH
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
@@ -202,25 +201,42 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1()
+
+        nwb_file_name = recording_key["nwb_file_name"]
+
         artifact_removed_intervals = (
             IntervalList
             & {
-                "nwb_file_name": (SpikeSortingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-                "interval_list_name": (SpikeSortingSelection & key).fetch1(
-                    "interval_list_name"
-                ),
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": recording_key["interval_list_name"],
             }
         ).fetch1("valid_times")
+
         sorter, sorter_params = (
             SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
+
         recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
             recording_key["analysis_file_name"]
         )
 
-        # External dependency - MOCKABLE in tests
+        return [
+            nwb_file_name,
+            artifact_removed_intervals,
+            sorter,
+            sorter_params,
+            recording_analysis_nwb_file_abs_path,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        nwb_file_name: str,
+        artifact_removed_intervals: IntervalLike,
+        sorter: str,
+        sorter_params: dict,
+        recording_analysis_nwb_file_abs_path: str,
+    ):
         sorting, timestamps = self._run_spike_sorter(
             recording_analysis_nwb_file_abs_path=recording_analysis_nwb_file_abs_path,
             artifact_removed_intervals=artifact_removed_intervals,
@@ -228,25 +244,34 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params=sorter_params,
         )
 
-        # External I/O - MOCKABLE in tests
-        key["time_of_sort"] = int(time.time())
-        key["analysis_file_name"], key["object_id"] = (
-            self._save_sorting_results(
-                sorting=sorting,
-                timestamps=timestamps,
-                artifact_removed_intervals=artifact_removed_intervals,
-                nwb_file_name=(SpikeSortingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-            )
+        time_of_sort = int(time.time())
+        analysis_file_name, object_id = self._save_sorting_results(
+            sorting=sorting,
+            timestamps=timestamps,
+            artifact_removed_intervals=artifact_removed_intervals,
+            nwb_file_name=nwb_file_name,
         )
 
-        # Database operations (Spyglass logic - always tested)
-        AnalysisNwbfile().add(
-            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
-            key["analysis_file_name"],
+        return [nwb_file_name, time_of_sort, analysis_file_name, object_id]
+
+    def make_insert(
+        self,
+        key: dict,
+        nwb_file_name: str,
+        time_of_sort: int,
+        analysis_file_name: str,
+        object_id: str,
+    ):
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        self.insert1(
+            dict(
+                key,
+                time_of_sort=time_of_sort,
+                analysis_file_name=analysis_file_name,
+                object_id=object_id,
+            ),
+            skip_duplicates=True,
         )
-        self.insert1(key, skip_duplicates=True)
 
     def _run_spike_sorter(
         self,

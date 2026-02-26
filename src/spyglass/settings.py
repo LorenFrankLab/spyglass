@@ -314,7 +314,7 @@ class SpyglassConfig:
             )
 
         if set_stores:
-            if mismatch_raw or mismatch_analysis:
+            if (mismatch_raw or mismatch_analysis) and not self.test_mode:
                 logger.warning(
                     "Setting config DJ stores to resolve mismatch.\n\t"
                     + f"raw     : {self.raw_dir}\n\t"

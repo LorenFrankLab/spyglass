@@ -388,7 +388,7 @@ class TestStateEnforcement:
 
 
 class TestExceptionHandling:
-    """Test exception handling and cleanup logging."""
+    """Test exception handling and cleanup."""
 
     def test_file_not_registered_on_exception(
         self, master_analysis_table, mini_copy_name, mock_create, teardown
@@ -423,17 +423,12 @@ class TestExceptionHandling:
         mini_copy_name,
         mock_create,
         teardown,
-        caplog,
     ):
         """Test that failed files are logged for cleanup detection."""
         table = master_analysis_table
         mock_create(table)
 
         analysis_file = None
-
-        import logging
-
-        caplog.set_level(logging.WARNING)
 
         try:
             with table.build(mini_copy_name) as builder:
@@ -444,11 +439,12 @@ class TestExceptionHandling:
         except RuntimeError:
             pass  # Expected
 
-        # Check that warning was logged
-        assert any(
-            "not registered due to exception" in record.message
-            for record in caplog.records
-        ), "Should log warning about unregistered file"
+        assert (
+            builder._exception_occurred
+        ), "Builder should have recorded that an exception occurred"
+
+        err_type = builder._exception_log[analysis_file]
+        assert err_type is RuntimeError, "Failed to log exception type"
 
         # Cleanup
         if teardown and analysis_file:

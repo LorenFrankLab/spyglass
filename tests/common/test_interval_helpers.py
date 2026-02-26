@@ -16,6 +16,10 @@ def cautious_interval(interval_list, mini_dict):
         valid_times=[[0, 1]],
         pipeline="",
     )
+    # Always clean up before inserting to handle --no-teardown reruns where
+    # test_cautious_insert_update may have changed the times to [[0, 2]]
+    pk = {k: insert[k] for k in interval_list.primary_key if k in insert}
+    (interval_list & pk).delete_quick()
     interval_list.insert1(insert, skip_duplicates=True)
     yield insert
 

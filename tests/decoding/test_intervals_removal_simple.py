@@ -13,6 +13,8 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from tests.conftest import VERBOSE
+
 
 @pytest.fixture
 def create_interval_labels():
@@ -482,6 +484,7 @@ class TestIntervalIdxWarning:
     when interval_idx is specified but results don't have interval_labels.
     """
 
+    @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
     def test_interval_idx_warning_when_no_labels(self, caplog):
         """Should warn when interval_idx specified but no interval_labels."""
         from unittest.mock import patch

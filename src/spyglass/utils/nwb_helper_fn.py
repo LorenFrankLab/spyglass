@@ -177,11 +177,12 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
         obj_path.stem[:-1] + "_spyglass_config.yaml"
     )
     if not os.path.exists(config_path):
-        from spyglass.settings import base_dir  # noqa: F401
+        from spyglass.settings import base_dir, test_mode  # noqa: F401
 
         rel_path = obj_path.relative_to(base_dir)
         table = f"{calling_table}: " if calling_table else ""
-        logger.info(f"{table}No config found at {rel_path}")
+        if not test_mode:
+            logger.info(f"{table}No config found at {rel_path}")
         ret = dict()
         __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
         return ret
@@ -368,7 +369,7 @@ def estimate_sampling_rate(
 
 
 def get_valid_intervals(
-    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
+    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0, warn=True
 ):
     """Finds the set of all valid intervals in a list of timestamps.
 
@@ -388,6 +389,9 @@ def get_valid_intervals(
     min_valid_len : float, optional
         Length of smallest valid interval. Default to 0. If greater
         than interval duration, log warning and use half the total time.
+    warn : bool, optional
+        Whether to log a warning if the minimum valid interval length is greater
+        than the total time of the timestamps. Default, True.
 
     Returns
     -------

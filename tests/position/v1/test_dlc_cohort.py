@@ -40,7 +40,7 @@ def test_cohort_error(cohort_tbls):
         dict(select_pk, bodyparts_params_dict=dict(bad_bp="bad_bp"))
     )
     if select_tbl & select_pk:
-        select_tbl.delete(safemode=False)
+        (select_tbl & select_pk).delete(safemode=False)
     select_tbl.insert1(select_key, skip_duplicates=True)
 
     with pytest.raises(ValueError):

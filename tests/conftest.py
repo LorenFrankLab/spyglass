@@ -6,6 +6,36 @@ tests in that subdirectory.
 """
 
 import os
+
+# ---------------------------------------------------------------------------
+# Environment variables — set before any package imports so that TensorFlow,
+# CUDA, and Qt pick them up at their first import.
+# ---------------------------------------------------------------------------
+
+# Suppress TensorFlow C++ logging (0=DEBUG … 3=FATAL-only).
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+
+# Disable oneDNN fused-ops to avoid the "numerical results may differ" banner.
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+
+# Qt requires a display; offscreen keeps headless CI from crashing.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("DISPLAY", ":0")
+
+# Disable all tqdm progress bars; they pollute test output.
+os.environ.setdefault("TQDM_DISABLE", "1")
+
+# Suppress ResourceWarning at the OS level so datajoint/hash.py unclosed-file
+# warnings don't bleed through even during GC finalisation.
+_existing = os.environ.get("PYTHONWARNINGS", "")
+_rw_filter = "ignore::ResourceWarning"
+if _rw_filter not in _existing:
+    os.environ["PYTHONWARNINGS"] = (
+        f"{_existing},{_rw_filter}" if _existing else _rw_filter
+    )
+
+# ---------------------------------------------------------------------------
+
 import sys
 import warnings
 from contextlib import nullcontext
@@ -13,9 +43,15 @@ from pathlib import Path
 from shutil import rmtree as shutil_rmtree
 
 import datajoint as dj
+import datajoint.external as _dj_external
+import datajoint.hash as _dj_hash
+import hdmf.build.objectmapper as _hdmf_objectmapper
 import numpy as np
 import pynwb
+import pynwb.device as _pynwb_device
+import pynwb.io.device as _pynwb_io_device
 import pytest
+import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
 from numba import NumbaWarning
@@ -25,6 +61,145 @@ from .container import DockerMySQLManager
 from .data_downloader import DataDownloader
 
 # ------------------------------- TESTS CONFIG -------------------------------
+
+
+# ---------- Fix ResourceWarning from datajoint.hash.uuid_from_file -----------
+# Patch uuid_from_file to properly close file handles (upstream opens without
+# `with`, triggering ResourceWarning on GC). This is safe: the function reads
+# the whole file before returning, so closing after uuid_from_stream is fine.
+def _uuid_from_file_safe(filepath, *, init_string=""):
+    with Path(filepath).open("rb") as f:
+        return _dj_hash.uuid_from_stream(f, init_string=init_string)
+
+
+_dj_hash.uuid_from_file = _uuid_from_file_safe
+# datajoint.external uses `from .hash import uuid_from_file` at import time,
+# creating a local binding that bypasses the patch above.  Patch the external
+# module's namespace directly so both paths use the safe version.
+_dj_external.uuid_from_file = _uuid_from_file_safe
+
+# ----------- Prevent NWB-2.9 migration warnings from test NWB file -----------
+# Patch pynwb Device NWB-2.9 migration warnings triggered by the test NWB file,
+# which was written before NWB 2.9 (Device.model stored as string, manufacturer
+# as a field).  pynwb uses stacklevel= values that attribute these warnings to
+# hdmf internals (hdmf.build.objectmapper / hdmf.utils) rather than to pynwb,
+# so they bypass any module-specific filter and can defeat category-only filters
+# once an hdmf module's __warningregistry__ pre-dates the filter installation.
+#
+# Two distinct call sites require two different strategies:
+#
+#   (a) pynwb/io/device.py uses `from warnings import warn` — the `warn` name
+#       lives in pynwb.io.device's namespace, so it is directly patchable.
+#
+#   (b) pynwb/device.py uses `import warnings; warnings.warn(...)` — we cannot
+#       replace an attribute on the warnings module itself without side-effects,
+#       so we wrap Device.__init__ instead.
+
+_orig_io_device_warn = _pynwb_io_device.warn
+
+
+def _io_device_warn_filtered(message, *args, **kwargs):
+    if "Device.model was detected as a string" not in str(message):
+        _orig_io_device_warn(message, *args, **kwargs)
+
+
+_pynwb_io_device.warn = _io_device_warn_filtered
+
+_orig_device_init = _pynwb_device.Device.__init__
+
+
+def _device_init_no_field_deprecations(*args, **kwargs):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"The '(?:manufacturer|model_number|model_name)' field is deprecated",
+            category=DeprecationWarning,
+        )
+        return _orig_device_init(*args, **kwargs)
+
+
+# hdmf's objectmapper calls get_docval(cls.__init__) to discover constructor
+# arguments.  get_docval reads the __docval__ / __docval_idx__ attributes that
+# the @docval decorator stores in func.__dict__.  Copy the original function's
+# __dict__ to the wrapper so that Device subclasses which inherit __init__
+# (e.g. ndx-franklab-novela's CameraDevice) still work correctly.
+_device_init_no_field_deprecations.__dict__.update(_orig_device_init.__dict__)
+_device_init_no_field_deprecations.__name__ = _orig_device_init.__name__
+_device_init_no_field_deprecations.__module__ = _orig_device_init.__module__
+
+_pynwb_device.Device.__init__ = _device_init_no_field_deprecations
+
+# ------ Suppress warnings that bypass Python-level filters at call-time ------
+#
+# Two remaining warnings survive even broad `filterwarnings("ignore", ...)`
+# calls because they fire inside contexts where `warnings.filters` has been
+# cleared or overridden:
+#
+#   (1) MissingRequiredBuildWarning — hdmf.build.objectmapper.__check_quantity
+#       warns when an NWB container is missing a required attribute.  The test
+#       NWB file predates NWB 2.9 and lacks 'source_script_file_name'.
+#
+#   (2) sklearn UserWarning — sklearn.utils.parallel._FuncWrapper.__call__
+#       warns when sklearn.delayed is used with non-sklearn Parallel.  Worse,
+#       that same __call__ executes ``warnings.filters = []`` inside a
+#       catch_warnings block, which clears ALL Python-level filters for the
+#       duration of every wrapped parallel task — causing (1) to escape even
+#       when our "ignore" filters are present.
+#
+# Both modules use ``import warnings; warnings.warn(...)`` style, so we cannot
+# patch the `warn` name directly in their namespace the way we did for
+# pynwb.io.device.  Instead we replace each module's `warnings` attribute with
+# a thin proxy object that:
+#   • Intercepts warn() and suppresses the specific message/category.
+#   • Stores attribute *writes* (e.g. proxy.filters = []) locally so they never
+#     propagate to the real warnings module — preventing _FuncWrapper from
+#     clearing the real warnings.filters state.
+#   • Delegates all other attribute *reads* to the real warnings module.
+
+
+class _ModuleWarningsProxy:
+    """Proxy for a module-level `warnings` reference.
+
+    Suppresses specific warn() calls before they reach the real warnings
+    module.  Attribute writes are stored locally (preventing callers like
+    sklearn._FuncWrapper from zeroing out the real warnings.filters list).
+    Attribute reads fall through to the real warnings module.
+    """
+
+    def __init__(self, suppress_fn):
+        # Use object.__setattr__ to avoid triggering our own __setattr__ logic.
+        object.__setattr__(self, "_suppress_fn", suppress_fn)
+
+    def warn(self, message, *args, **kwargs):
+        if not object.__getattribute__(self, "_suppress_fn")(
+            message, *args, **kwargs
+        ):
+            # stacklevel=2 so the warning is attributed to the caller of the
+            # module's warnings.warn(), not to this proxy line.
+            kwargs.setdefault("stacklevel", 2)
+            warnings.warn(message, *args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(warnings, name)
+
+
+# (1) Suppress MissingRequiredBuildWarning from hdmf objectmapper.
+_hdmf_objectmapper.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        a
+        and isinstance(a[0], type)
+        and issubclass(a[0], MissingRequiredBuildWarning)
+    )
+)
+
+# (2) Suppress sklearn cross-library delayed/Parallel mismatch warning AND
+#     prevent _FuncWrapper from clearing the real warnings.filters.
+_sklearn_parallel.warnings = _ModuleWarningsProxy(
+    lambda msg, *a, **kw: (
+        "sklearn.utils.parallel.delayed" in str(msg)
+        and "sklearn.utils.parallel.Parallel" in str(msg)
+    )
+)
 
 # globals in pytest_configure:
 #     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
@@ -40,6 +215,50 @@ warnings.filterwarnings(
 warnings.filterwarnings("ignore", category=FutureWarning, module="sklearn")
 warnings.filterwarnings("ignore", category=PerformanceWarning, module="pandas")
 warnings.filterwarnings("ignore", category=NumbaWarning, module="numba")
+
+# RuntimeWarning: os.fork() was called after os.forkserver() or JAX import.
+# JAX disables fork after parallelism starts; these are harmless in tests.
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*fork.*")
+warnings.filterwarnings(
+    "ignore", category=RuntimeWarning, message=".*os\\.fork.*"
+)
+
+# spikeinterface leaves mmap'd file handles open (traces_cached_seg*.raw).
+# These show up as ResourceWarning during GC; suppress by module path.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*traces_cached_seg.*",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    module="spikeinterface",
+)
+
+# TemporaryDirectory objects may be GC'd before __exit__ is called in some
+# test teardown scenarios; suppress the resulting ResourceWarning.
+warnings.filterwarnings(
+    "ignore",
+    category=ResourceWarning,
+    message=".*TemporaryDirectory.*",
+)
+
+# numcodecs/__init__.py registers `atexit.register(blosc.destroy)` where
+# `blosc.destroy` is decorated with @deprecated (PyPI `deprecated` package).
+# This fires a DeprecationWarning at process exit.  We could filter it, but
+# ms4alg.py calls `warnings.resetwarnings()` during sorting — since pytest
+# runs with `-p no:warnings` (no catch_warnings restoration), that clears all
+# our filters and they are not restored before atexit fires.
+# Unregistering the atexit handler is cleaner: blosc._init() has already run,
+# and skipping _destroy() in the test process is harmless.
+try:
+    import atexit as _atexit
+    import numcodecs.blosc as _numcodecs_blosc
+
+    _atexit.unregister(_numcodecs_blosc.destroy)
+except Exception:
+    pass  # numcodecs not installed — nothing to unregister
 
 
 def pytest_addoption(parser):
@@ -69,9 +288,13 @@ def pytest_addoption(parser):
     parser.addoption(
         "--base-dir",
         action="store",
-        default="./tests/_data/",
+        default=None,
         dest="base_dir",
-        help="Directory for local input file.",
+        help=(
+            "Directory for local input file. "
+            "Also reads SPYGLASS_BASE_DIR env var when unset. "
+            "Default: './tests/_data/'."
+        ),
     )
     parser.addoption(
         "--no-teardown",
@@ -120,7 +343,10 @@ def pytest_configure(config):
     NO_DLC = config.option.no_dlc
     pytest.NO_DLC = NO_DLC
 
-    BASE_DIR = Path(config.option.base_dir).absolute()
+    _base_dir = config.option.base_dir or os.environ.get(
+        "SPYGLASS_BASE_DIR", "./tests/_data/"
+    )
+    BASE_DIR = Path(_base_dir).expanduser().absolute()
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
@@ -219,26 +445,36 @@ def worker_id(request):
 
 
 @pytest.fixture(scope="session")
-def dj_conn(request, server, worker_id, verbose, teardown):
-    """Fixture for datajoint connection with pytest-xdist support.
+def dj_config(verbose):
+    """Fixture for branch-specific config name"""
+    SERVER.wait()  # ensure MySQL is ready before any test uses these credentials
 
-    For parallel execution, each worker gets its own database schema prefix
-    to avoid race conditions and ensure test isolation.
-    """
     # Worker-specific config file to avoid conflicts
     config_file = "dj_local_conf.json"
-    if branch_name := server.branch_name:
+    if branch_name := SERVER.branch_name:
         config_file = f"dj_local_conf_{branch_name}.json"
 
     if Path(config_file).exists():
         os.remove(config_file)
 
     # Set worker-specific schema prefix for database isolation
-    dj.config.update(server.credentials)
+    dj.config.update(SERVER.credentials)
     dj.config["loglevel"] = "INFO" if verbose else "ERROR"
     dj.config["database.prefix"] = "pytests"
     dj.config["custom"]["spyglass_dirs"] = {"base": str(BASE_DIR)}
     dj.config.save(config_file)
+
+    return config_file
+
+
+@pytest.fixture(scope="session")
+def dj_conn(dj_config):
+    """Fixture for datajoint connection with pytest-xdist support.
+
+    For parallel execution, each worker gets its own database schema prefix
+    to avoid race conditions and ensure test isolation.
+    """
+    dj.config.load(dj_config)
 
     try:
         dj.conn().ping()
@@ -342,9 +578,7 @@ def mini_insert(
         ["Root User", "email", "root", 1], skip_duplicates=True
     )
 
-    dj_logger.info("Inserting test data.")
-
-    if not server.connected:
+    if not SERVER.connected:
         raise ConnectionError("No server connection.")
 
     if len(Nwbfile & mini_dict) != 0:
@@ -627,9 +861,9 @@ def trodes_pos_v1(teardown, sgp, trodes_sel_keys):
 @pytest.fixture(scope="session")
 def pos_merge_tables(dj_conn):
     """Return the merge tables as activated."""
-    from spyglass.common.common_position import TrackGraph
     from spyglass.lfp.lfp_merge import LFPOutput
     from spyglass.linearization.merge import LinearizedPositionOutput
+    from spyglass.linearization.v0.main import TrackGraph
     from spyglass.position.position_merge import PositionOutput
 
     # must import common_position before LinOutput to avoid circular import
@@ -1423,7 +1657,10 @@ def pop_rec(spike_v1, mini_dict, team_name):
     ssr_pk = (
         (spike_v1.SpikeSortingRecordingSelection & key).proj().fetch1("KEY")
     )
-    spike_v1.SpikeSortingRecording.populate(ssr_pk)
+    spike_v1.SpikeSortingRecording.populate()
+
+    if not spike_v1.SpikeSortingRecording() & ssr_pk:
+        raise ValueError("SpikeSortingRecording failed to populate.")
 
     yield ssr_pk
 

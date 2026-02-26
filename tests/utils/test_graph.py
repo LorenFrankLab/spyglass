@@ -1,8 +1,6 @@
 import pytest
 from datajoint.utils import to_camel_case
 
-from tests.conftest import VERBOSE
-
 
 @pytest.fixture(scope="session")
 def leaf(lin_merge):
@@ -10,7 +8,7 @@ def leaf(lin_merge):
 
 
 @pytest.fixture(scope="session")
-def restr_graph(leaf, verbose, lin_merge_key):
+def restr_graph(leaf, lin_merge_key):
     from spyglass.utils.dj_graph import RestrGraph
 
     _ = lin_merge_key  # linearization merge table populated
@@ -20,7 +18,7 @@ def restr_graph(leaf, verbose, lin_merge_key):
         leaves={leaf.full_table_name: True},
         include_files=True,
         cascade=True,
-        verbose=verbose,
+        verbose=False,
     )
 
 
@@ -44,6 +42,7 @@ def add_graph_rgs(add_graph_tables):
         leaves={tables["B1"].full_table_name: restr_1},
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_1.cascade()
 
@@ -51,6 +50,7 @@ def add_graph_rgs(add_graph_tables):
         seed_table=add_graph_tables["B2"],
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_2.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_2)
     rg_2.cascade()
@@ -59,6 +59,7 @@ def add_graph_rgs(add_graph_tables):
         seed_table=add_graph_tables["B2"],
         direction="up",
         cascade=True,
+        verbose=False,
     )
     rg_3.add_leaf(table_name=tables["B2"].full_table_name, restriction=restr_3)
     rg_3.cascade()
@@ -145,8 +146,21 @@ def test_rg_restr_ft(restr_graph):
 
 
 def test_rg_file_paths(restr_graph):
-    """Test collection of upstream file paths."""
-    assert len(restr_graph.file_paths) == 3, "Unexpected number of file paths."
+    """Test collection of upstream file paths.
+
+    NOTE: This test previously tested how many files were collected, which may
+    differ if only subset of tests are run. Instead, we now check which tables
+    store collected files. See #1440, #1534 for context.
+    """
+    expected_tbls = [
+        "`position_linearization_v1`.`__linearized_position_v1`",
+        "`position_v1_trodes_position`.`__trodes_pos_v1`",
+    ]
+    stored_files = restr_graph._stored_files(as_dict=True)
+    for tbl in expected_tbls:
+        assert tbl in stored_files, f"Expected table {tbl} did not show file."
+
+    assert len(restr_graph.file_paths) > 1, "Unexpected file paths collected."
 
 
 def test_rg_invalid_table(restr_graph):
@@ -170,11 +184,10 @@ def test_rg_restr_subset(restr_graph, leaf):
     assert len(prev_ft) == len(new_ft), "Subset sestriction changed length."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_rg_no_restr(caplog, restr_graph, common):
     restr_graph._set_restr(common.LabTeam, restriction=False)
-    restr_graph._get_ft(common.LabTeam.full_table_name, with_restr=True)
-    assert "No restr" in caplog.text, "No warning logged on no restriction."
+    ret = restr_graph._get_ft(common.LabTeam.full_table_name, with_restr=True)
+    assert not ret, "Expected empty restricted table when no restriction."
 
 
 def test_rg_invalid_direction(restr_graph, leaf):
@@ -260,18 +273,16 @@ def test_restr_from_downstream(graph_tables, table, restr, expect_n, msg):
     assert len(graph_tables[table]() << restr) == expect_n, msg
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_ban_node(caplog, graph_tables):
+def test_ban_node(graph_tables):
     search_restr = "sk_attr > 17"
     ParentNode = graph_tables["ParentNode"]()
     SkNode = graph_tables["SkNode"]()
 
     ParentNode.ban_search_table(SkNode)
-    ParentNode >> search_restr
-    assert "could not be applied" in caplog.text, "Found banned table."
-
-    ParentNode.see_banned_tables()
-    assert "Banned tables" in caplog.text, "Banned tables not logged."
+    assert (ParentNode >> search_restr) is None, "Banned table still reachable."
+    assert (
+        SkNode.full_table_name in ParentNode._banned_search_tables
+    ), "Banned table not in set."
 
     ParentNode.unban_search_table(SkNode)
     assert len(ParentNode >> search_restr) == 3, "Unban failed."
@@ -282,11 +293,11 @@ def test_null_restrict_by(graph_tables):
     assert (PkNode >> True) == PkNode, "Null restriction failed."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_restrict_by_this_table(caplog, graph_tables):
+def test_restrict_by_this_table(graph_tables):
     PkNode = graph_tables["PkNode"]()
-    PkNode >> "pk_id > 4"
-    assert "valid for" in caplog.text, "No warning logged without search."
+    dist = (PkNode >> "pk_id > 4").restriction
+    plain = (PkNode & "pk_id > 4").restriction
+    assert dist == plain, "Restricting by own table did not use existing restr."
 
 
 def test_invalid_restr_direction(graph_tables):
@@ -295,15 +306,15 @@ def test_invalid_restr_direction(graph_tables):
         PkNode.restrict_by("bad_attr > 0", direction="invalid_direction")
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_warn_nonrestrict(caplog, graph_tables):
+def test_warn_nonrestrict(graph_tables):
     ParentNode = graph_tables["ParentNode"]()
     restr_parent = ParentNode & "parent_id > 4 AND parent_id < 9"
 
-    restr_parent >> "sk_id > 0"
-    assert "Same length" in caplog.text, "No warning logged on non-restrict."
-    restr_parent >> "sk_id > 99"
-    assert "No entries" in caplog.text, "No warning logged on non-restrict."
+    ret = restr_parent >> "sk_id > 0"
+    assert len(ret) == len(restr_parent), "Restriction should have no effect."
+
+    ret = restr_parent >> "sk_id > 99"
+    assert len(ret) == 0, "Return should be empty."
 
 
 def test_restr_many_to_one(graph_tables_many_to_one):
@@ -326,12 +337,9 @@ def test_restr_invalid_err(graph_tables):
         len(PkNode << set(["parent_attr > 15", "parent_attr < 20"]))
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_restr_invalid(caplog, graph_tables):
-    graph_tables["PkNode"]() << "invalid_restr=1"
-    assert (
-        "could not be applied" in caplog.text
-    ), "No warning logged on invalid restr."
+def test_restr_invalid(graph_tables):
+    result = graph_tables["PkNode"]() << "invalid_restr=1"
+    assert result is None, "Invalid restriction should return None."
 
 
 @pytest.fixture(scope="session")

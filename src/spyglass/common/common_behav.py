@@ -87,7 +87,9 @@ class PositionSource(SpyglassMixin, dj.Manual):
         src_key = dict(**sess_key, source="imported", import_file_name="")
 
         if all_pos is None:
-            logger.info(f"No position data found in {nwb_file_name}. Skipping.")
+            cls()._info_msg(
+                f"No position data found in {nwb_file_name}. Skipping."
+            )
             return
 
         sources = []
@@ -406,7 +408,7 @@ class StateScriptFile(SpyglassMixin, dj.Imported):
             "associated_files"
         ) or nwbf.processing.get("associated files")
         if associated_files is None:
-            logger.info(
+            self._info_msg(
                 "Unable to import StateScriptFile: no processing module named "
                 + f'"associated_files" found in {nwb_file_name}.'
             )
@@ -485,7 +487,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             The video object from the NWB file
         cam_device_regex : str, optional
             Regular expression pattern to extract camera device number.
-            Default: r"camera_device (\d+)"
+            Default: r"camera_device (\\d+)"
 
         Returns
         -------
@@ -645,7 +647,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             if isinstance(obj, pynwb.image.ImageSeries)
         }
         if not videos:
-            logger.warning(
+            self._warn_msg(
                 f"No video data interface found in {nwb_file_name}\n"
             )
             return
@@ -720,7 +722,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
             )
 
         elif imported_count == 0 and verbose:
-            logger.info(
+            self._info_msg(
                 f"No video found corresponding to file {nwb_file_name}, "
                 f"epoch {interval_list_name}"
             )
@@ -860,7 +862,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Skip populating if no pos interval list names
         if len(pos_intervals) == 0:
-            logger.error(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
+            self._err_msg(f"NO POS INTERVALS FOR {key};\n{no_pop_msg}")
             self.insert1(null_key, **insert_opts)
             return
 
@@ -897,7 +899,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
 
         # Check that each pos interval was matched to only one epoch
         if len(matching_pos_intervals) != 1:
-            logger.warning(
+            self._warn_msg(
                 f"{no_pop_msg}. Found {len(matching_pos_intervals)} pos "
                 + f"intervals for\n\t{key}\n\t"
                 + f"Matching intervals: {matching_pos_intervals}"
@@ -910,7 +912,7 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
             dict(key, position_interval_name=matching_pos_intervals[0]),
             **insert_opts,
         )
-        logger.info(
+        self._info_msg(
             "Populated PosIntervalMap for "
             + f'{nwb_file_name}, {key["interval_list_name"]}'
         )

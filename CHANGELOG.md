@@ -42,6 +42,11 @@ RecordingRecompute().alter()
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()
+
+# Increase DLCProject.config_path length
+from spyglass.position.v1.position_dlc_project import DLCProject
+
+DLCProject().alter()
 ```
 
 ### Breaking Changes
@@ -140,6 +145,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove imports of ndx extensions in main package to prevent errors in nwb io
     #1506
 - Add `analysis_table` property to mixin for custom pipelines #1525
+- Quiet pytest output for expected warnings in test runs #1534
 
 ### Pipelines
 
@@ -194,6 +200,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+    - Increase `DLCProject.config_path` length #1534
 
 - Spikesorting
 

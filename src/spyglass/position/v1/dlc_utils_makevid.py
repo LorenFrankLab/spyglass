@@ -115,6 +115,7 @@ class VideoMaker:
         self.ffmpeg_fmt_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
 
         prev_backend = matplotlib.get_backend()
+        plt.close("all")  # Required before backend switch (matplotlib >= 3.8)
         matplotlib.use("Agg")  # Use non-interactive backend
 
         _ = self._set_frame_info()
@@ -399,7 +400,9 @@ class VideoMaker:
     def process_frames(self):
         """Process video frames in batches and generate matplotlib frames."""
 
-        progress_bar = tqdm(leave=True, position=0, disable=self.debug)
+        disable = False if test_mode else self.debug
+
+        progress_bar = tqdm(leave=True, position=0, disable=disable)
         progress_bar.reset(total=self.n_frames)
 
         for start_frame in range(0, self.n_frames, self.batch_size):

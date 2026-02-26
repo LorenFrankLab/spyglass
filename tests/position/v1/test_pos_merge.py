@@ -47,7 +47,9 @@ def test_merge_fetch_video_path(pos_merge, dlc_key, populate_dlc):
     assert Path(path).exists(), f"Video path does not exist: {path}"
 
 
-def test_merge_id_order(pos_merge):
+def test_merge_id_order(trodes_pos_v1, pos_merge):
+    _ = trodes_pos_v1  # Ensure populated
+
     merge_keys = pos_merge.TrodesPosV1().fetch("KEY")
     assert len(merge_keys) > 1
     nwb_file_list, merge_ids = (pos_merge & merge_keys).fetch_nwb(

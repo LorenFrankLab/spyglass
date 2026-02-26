@@ -253,7 +253,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
                 mode="zeros",
             )
 
-        logger.info(f"Running spike sorting on {key}...")
+        self._info_msg(f"Running spike sorting on {key}...")
 
         sorter_temp_dir = tempfile.TemporaryDirectory(dir=temp_dir)
         # add tempdir option for mountainsort
@@ -283,6 +283,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             # whiten recording separately; make sure dtype is float32
             # to avoid downstream error with svd
             recording = sip.whiten(recording, dtype="float32")
+            # NOTE: mountainsort4's ms4alg.py calls warnings.resetwarnings()
+            # at import time, which clears all user-defined warning filters.
             sorting = sis.run_sorter(
                 sorter,
                 recording,
@@ -315,6 +317,9 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     def cleanup(self, dry_run=False, verbose=True):
         """Clean up spike sorting directories that are not in the table."""
+        if self._test_mode:
+            verbose = False
+
         sort_dir = Path(sorting_dir)
         tracked = set(self.fetch("sorting_path"))
         all_dirs = {str(f) for f in sort_dir.iterdir() if f.is_dir()}

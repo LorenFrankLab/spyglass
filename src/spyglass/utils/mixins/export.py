@@ -111,7 +111,7 @@ class ExportMixin(FetchMixin):
     def _start_export(self, paper_id, analysis_id):
         """Start export process."""
         if self.export_id:
-            self._logger.info(
+            self._info_msg(
                 f"Export {self.export_id} in progress. Starting new."
             )
             self._stop_export(warn=False)
@@ -127,7 +127,7 @@ class ExportMixin(FetchMixin):
     def _stop_export(self, warn=True):
         """End export process."""
         if not self.export_id and warn:
-            self._logger.warning("Export not in progress.")
+            self._warn_msg("Export not in progress.")
         del self.export_id
 
     # --------------------------- Utility Functions ---------------------------

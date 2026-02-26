@@ -201,7 +201,7 @@ class IngestionMixin(BaseMixin):
         this_tbl, self_tbl = _camel(table), _camel(self)
 
         suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
-        logger.info(
+        self._info_msg(
             f"{nwb_file_name} inserts {n_entries} into {this_tbl}{suffix}"
         )
 
@@ -311,7 +311,7 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
-                logger.info(
+                self._info_msg(
                     f"Key {key} missing required attribute {attr.name}."
                 )
                 return False

@@ -16,6 +16,7 @@ class BaseMixin:
         - RestrictByMixin
         - ExportMixin
         - AnalysisMixin
+        - Merge
         """
 
         from spyglass.utils import logger
@@ -36,24 +37,53 @@ class BaseMixin:
 
         return [TableChain, RestrGraph]
 
-    @property
+    def _info_msg(self, msg: str) -> None:
+        """Log info message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+
+        Used by ...
+        - AnalysisMixin.copy and .create
+        - IngestionMixin._insert_logline
+        - Merge._merge_repr
+        """
+        log = self._logger.debug if self._test_mode else self._logger.info
+        log(msg)
+
+    def _warn_msg(self, msg: str) -> None:
+        """Log warning message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.warning
+        log(msg)
+
+    def _err_msg(self, msg: str) -> None:
+        """Log error message, but debug if in test mode.
+
+        Quiets logs during testing, but preserves user experience during use.
+        """
+        log = self._logger.debug if self._test_mode else self._logger.error
+        log(msg)
+
+    @cached_property
     def _test_mode(self) -> bool:
         """Return True if in test mode.
 
         Avoids circular import. Prevents prompt on delete.
 
-        Note: Using @property instead of @cached_property so we always get
-        current value from dj.config, even if test_mode changes after first access.
+        Note: Using cached property b/c we don't expect test_mode to change
+        during runtime, and it avoids repeated lookups. Changing to @property
+        wouldn't reload the config. It would just re-fetch from the settings
+        module.
 
         Used by ...
         - BaseMixin._spyglass_version
         - HelpersMixin
         """
-        import datajoint as dj
+        from spyglass.settings import config as sg_config
 
-        # Check dj.config directly instead of importing module-level variable
-        # which gets stale if load_config() is called after initial import
-        return dj.config.get("custom", {}).get("test_mode", False)
+        return sg_config.get("test_mode", False)
 
     @cached_property
     def _spyglass_version(self):

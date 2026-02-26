@@ -901,6 +901,9 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
     def cleanup(self, dry_run=False, verbose=True):
         """Removes the recording data from the recording directory."""
+        if self._test_mode:
+            verbose = False
+
         rec_dir = Path(recording_dir)
         tracked = set(self.fetch("recording_path"))
         all_dirs = {str(f) for f in rec_dir.iterdir() if f.is_dir()}
