@@ -41,10 +41,7 @@ class DecodingOutput(_Merge, SpyglassMixin):
         """Fetch a filepath attribute from all part parents, skipping missing."""
         paths = []
         for tbl in self.merge_get_parent(multi_source=True):
-            try:
-                paths.extend(tbl.fetch(attr).tolist())
-            except FileNotFoundError:
-                pass
+            paths.extend(tbl.fetch(attr).tolist())
         return paths
 
     def cleanup(self, dry_run=False):

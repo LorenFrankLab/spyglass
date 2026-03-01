@@ -194,14 +194,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
     hash=null: varchar(32) # Hash of the NWB file
     """
 
-    def _insert_sort_interval(self, key):
-        """Insert sort interval valid times into IntervalList.
-
-        Separated from make() so it can be called before _hash_upstream in
-        the no-transaction populate path, preventing a false-positive hash
-        mismatch that would silently delete the just-populated row.
-        """
-
     def make_fetch(self, key):
         """Populate SpikeSortingRecording.
 
@@ -231,12 +223,16 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
 
         Returns
         -------
-        dict
-           Result of _make_file, containing:
-                analysis_file_name: str
-                object_id: UUID
-                electrodes_id: str
-                hash: str
+        list containing:
+           nwb_file_name: str
+               same as input nwb_file_name, preventing fetch in _make_file
+           file_dict: dict
+               Result of _make_file, containing:
+                   analysis_file_name: str
+                   object_id: UUID
+                   electrodes_id: str
+                   hash: str
+           sort_interval_valid_times: IntervalList
         """
         file_dict = self._make_file(key, parent_file_name=nwb_file_name)
 

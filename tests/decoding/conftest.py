@@ -420,7 +420,10 @@ def clusterless_pop(
     yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
-        decode_merge.cleanup()
+        try:
+            decode_merge.cleanup()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
@@ -461,7 +464,10 @@ def clusterless_pop_estimated(
     yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
-        decode_merge.cleanup()
+        try:
+            decode_merge.cleanup()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
