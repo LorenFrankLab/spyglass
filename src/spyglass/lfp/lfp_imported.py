@@ -3,10 +3,8 @@ import numpy as np
 import pynwb
 
 from spyglass.common.common_interval import IntervalList  # noqa: F401
-from spyglass.common.common_nwbfile import (
-    AnalysisNwbfile,
-    Nwbfile,
-)  # noqa: F401
+from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa: F401
+from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.lfp.lfp_electrode import LFPElectrodeGroup  # noqa: F401
 from spyglass.utils import logger
@@ -46,7 +44,7 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
         ]
 
         if len(lfp_objects) == 0:
-            logger.warning(
+            self._warn_msg(
                 f"No LFP objects found in {nwb_file_name}. Skipping."
             )
             return
@@ -96,7 +94,9 @@ class ImportedLFP(SpyglassMixin, dj.Imported):
             interval_key = {
                 "nwb_file_name": nwb_file_name,
                 "interval_list_name": f"imported lfp {i} valid times",
-                "valid_times": get_valid_intervals(timestamps, sampling_rate),
+                "valid_times": get_valid_intervals(
+                    timestamps, sampling_rate, warn=not self._test_mode
+                ),
                 "pipeline": "imported_lfp",
             }
             IntervalList().insert1(interval_key)
