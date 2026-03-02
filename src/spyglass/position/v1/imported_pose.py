@@ -71,6 +71,7 @@ class ImportedPose(SpyglassMixin, dj.Manual):
                     timestamps,
                     sampling_rate=sampling_rate,
                     min_valid_len=sampling_rate,
+                    warn=not self._test_mode,
                 )
                 interval_pk = {
                     "nwb_file_name": nwb_file_name,

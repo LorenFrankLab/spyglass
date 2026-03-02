@@ -1,6 +1,7 @@
-import builtins
 import contextlib
 import csv
+import inspect
+import sys
 from pathlib import Path
 
 try:
@@ -10,29 +11,58 @@ except ImportError:  # pragma: no cover
     evaluate_network, get_evaluation_folder = None, None  # pragma: no cover
 
 from spyglass.position.utils import get_most_recent_file
+from spyglass.settings import test_mode
 
 
 @contextlib.contextmanager
 def suppress_print_from_package(package: str = "deeplabcut"):
-    original_print = builtins.print
+    """Suppress stdout/stderr writes that originate from *package*.
 
-    def dummy_print(*args, **kwargs):
-        stack = [
-            frame.f_globals.get("__name__")
-            for frame in inspect.stack()
-            if hasattr(frame, "f_globals")
-        ]
-        if any(name and name.startswith(package) for name in stack):
-            return  # Suppress if the call comes from the target package
-        return original_print(*args, **kwargs)
+    Replaces sys.stdout and sys.stderr with a proxy that walks the call stack
+    on every write; output whose innermost package-level frame matches
+    ``package`` is dropped, everything else passes through unchanged.
 
-    import inspect
+    More reliable than patching builtins.print because it also catches tqdm
+    progress bars and any code that calls sys.stdout.write() directly.
+    """
 
-    builtins.print = dummy_print
+    class _PackageFilter:
+        """Proxy stream: suppress writes from *package*, pass others through."""
+
+        def __init__(self, stream: object) -> None:
+            self._stream = stream
+
+        def write(self, text: str) -> int:
+            for frame_info in inspect.stack():
+                # Real FrameInfo objects store the frame in .frame;
+                # test mocks may expose f_globals directly on the object.
+                fg = getattr(frame_info, "f_globals", None)
+                if fg is None:
+                    raw = getattr(frame_info, "frame", None)
+                    fg = getattr(raw, "f_globals", {}) if raw else {}
+                if fg.get("__name__", "").startswith(package):
+                    return len(text)  # drop — came from target package
+            return self._stream.write(text)
+
+        def flush(self) -> None:
+            return self._stream.flush()
+
+        def __getattr__(self, name: str):
+            return getattr(self._stream, name)
+
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    sys.stdout = _PackageFilter(old_stdout)
+    sys.stderr = _PackageFilter(old_stderr)
     try:
         yield
     finally:
-        builtins.print = original_print
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr
+
+
+test_mode_suppress = (
+    suppress_print_from_package if test_mode else contextlib.nullcontext
+)
 
 
 def get_dlc_model_eval(

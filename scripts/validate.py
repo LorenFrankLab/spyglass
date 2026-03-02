@@ -198,6 +198,11 @@ def check_spyglass_import() -> None:
         print(f"✓ Spyglass version: {version}")
     except ImportError as e:
         raise RuntimeError(f"Cannot import spyglass: {e}")
+    except Exception as e:
+        if type(e).__name__ == "OperationalError" and "Can't connect" in str(e):
+            print("⚠ Spyglass import warning: Database connection issues")
+            return  # Elsewhere, this is not treated as critical, so only warn
+        raise
 
 
 def check_spyglass_config() -> None:

@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.position.utils_dlc import test_mode_suppress
 from spyglass.settings import test_mode
 
 
@@ -234,21 +235,22 @@ def do_pose_estimation(
     if dlc_project_path != output_dir:
         config_filepath = save_yaml(dlc_project_path, dlc_config)
     # ---- Trigger DLC prediction job ----
-    analyze_videos(
-        config=config_filepath,
-        videos=video_filepaths,
-        shuffle=dlc_model["shuffle"],
-        trainingsetindex=dlc_model["trainingsetindex"],
-        destfolder=output_dir,
-        modelprefix=dlc_model["model_prefix"],
-        videotype=videotype,
-        gputouse=gputouse,
-        save_as_csv=save_as_csv,
-        batchsize=batchsize,
-        cropping=cropping,
-        TFGPUinference=TFGPUinference,
-        dynamic=dynamic,
-        robust_nframes=robust_nframes,
-        allow_growth=allow_growth,
-        use_shelve=use_shelve,
-    )
+    with test_mode_suppress():
+        analyze_videos(
+            config=config_filepath,
+            videos=video_filepaths,
+            shuffle=dlc_model["shuffle"],
+            trainingsetindex=dlc_model["trainingsetindex"],
+            destfolder=output_dir,
+            modelprefix=dlc_model["model_prefix"],
+            videotype=videotype,
+            gputouse=gputouse,
+            save_as_csv=save_as_csv,
+            batchsize=batchsize,
+            cropping=cropping,
+            TFGPUinference=TFGPUinference,
+            dynamic=dynamic,
+            robust_nframes=robust_nframes,
+            allow_growth=allow_growth,
+            use_shelve=use_shelve,
+        )

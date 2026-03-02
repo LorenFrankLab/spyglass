@@ -105,9 +105,9 @@ def declare_all_merge_tables() -> Tuple[Type[dj.Table]]:
     from spyglass.decoding.decoding_merge import DecodingOutput  # noqa: F401
     from spyglass.lfp.lfp_merge import LFPOutput  # noqa: F401
     from spyglass.position.position_merge import PositionOutput  # noqa: F401
-    from spyglass.spikesorting.spikesorting_merge import (  # noqa: F401
+    from spyglass.spikesorting.spikesorting_merge import (
         SpikeSortingOutput,
-    )
+    )  # noqa: F401
 
     return DecodingOutput, LFPOutput, PositionOutput, SpikeSortingOutput
 
@@ -686,8 +686,8 @@ def accept_divergence(
     """
     if test_mode:
         # If get here in test mode, is because want to test failure
-        logger.warning(
-            "accept_divergence called in test mode, returning False w/o prompt"
+        logger.debug(
+            "\naccept_divergence called in testing, returning False w/o prompt"
         )
         return False
     tbl_msg = ""
