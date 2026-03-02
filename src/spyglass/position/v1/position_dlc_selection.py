@@ -434,8 +434,8 @@ class DLCPosVideo(SpyglassMixin, dj.Computed):
         if pose_estimation_params is None:
             pose_estimation_params = dict()
 
-        logger.info(f"video filename: {video_filename}")
-        logger.info("Loading position data...")
+        self._info_msg(f"video filename: {video_filename}")
+        self._info_msg("Loading position data...")
 
         v1_key = {k: v for k, v in key.items() if k in DLCPosV1.primary_key}
         pos_info_df = (

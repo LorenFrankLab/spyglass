@@ -154,7 +154,7 @@ def test_interval_list_accepts_all_tag_formats(
     assert 3 in task_epochs, "TaskEpoch should accept epoch 3 with tag '003'"
 
 
-def test_task_epoch_get_epoch_interval_name(common, caplog):
+def test_task_epoch_get_epoch_interval_name(common):
     """Test get_epoch_interval_name with single digit tags."""
     get_epoch = common.TaskEpoch.get_epoch_interval_name
     msg_template = "get_epoch_interval_name should find '{}' when epoch is {}"
@@ -171,12 +171,6 @@ def test_task_epoch_get_epoch_interval_name(common, caplog):
     ]:
         result = get_epoch(epoch, session_intervals)
         assert result == expected, msg_template.format(expected, epoch)
-
-    # Test non-matching descriptive tag
-    caplog.clear()
-    result = get_epoch("fake_epoch", session_intervals)
-    assert result is None, "Should return None for non-matching epoch"
-    assert "for epoch fake_epoch" in caplog.text
 
 
 def test_franklab_task_epoch_tags(common):

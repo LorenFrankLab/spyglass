@@ -90,7 +90,7 @@ class Session(SpyglassIngestion, dj.Imported):
             base_key = base_key or dict()
             experimenter_list = nwb_obj.experimenter
             if not experimenter_list:
-                logger.info("No experimenter metadata found for Session.\n")
+                self._info_msg("No experimenter metadata found for Session.\n")
                 return dict()
 
             entries = []

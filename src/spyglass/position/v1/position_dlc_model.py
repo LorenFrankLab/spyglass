@@ -305,7 +305,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         self.BodyPart.insert(
             {**part_key, "bodypart": bp} for bp in dlc_config["bodyparts"]
         )
-        logger.info(
+        self._info_msg(
             f"Finished inserting {model_name}, training iteration"
             f" {dlc_config['iteration']} into DLCModel"
         )

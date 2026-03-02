@@ -56,7 +56,7 @@ class LabMember(SpyglassIngestion, dj.Manual):
         base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
-            logger.info("No experimenter metadata found.\n")
+            self._info_msg("No experimenter metadata found.\n")
             return dict()
 
         entries = []
@@ -181,7 +181,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
         base_key = base_key or dict()
         experimenter_list = nwb_obj.experimenter
         if not experimenter_list:
-            logger.info("No experimenter metadata found for LabTeam.\n")
+            self._info_msg("No experimenter metadata found for LabTeam.\n")
             return dict()
 
         team_entries = []
@@ -259,7 +259,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             query = (LabMember.LabMemberInfo() & member_dict).fetch(
                 "google_user_name"
             )
-            if not query:
+            if not query and not cls()._test_mode:
                 logger.warning(
                     "To help manage permissions in LabMemberInfo, please add "
                     + f"Google user ID for {team_member}"
@@ -348,7 +348,7 @@ class Lab(SpyglassIngestion, dj.Manual):
             .get(self)
         )
         if not insert_entries:
-            logger.info("No lab metadata found.\n")
+            self._info_msg("No lab metadata found.\n")
             return dict()
         if len(insert_entries) > 1:
             logger.info(
