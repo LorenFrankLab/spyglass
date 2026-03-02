@@ -290,11 +290,11 @@ class MetricCuration(SpyglassMixin, dj.Computed):
         # cannot handle these objects.
         # TODO: refactor upstream to allow for passing of keys to avoid fetch,
         # only fetching data from disk here.
-        logger.info("Extracting waveforms...")
+        self._info_msg("Extracting waveforms...")
         waveforms = self.get_waveforms(key)
 
         # compute metrics
-        logger.info("Computing metrics...")
+        self._info_msg("Computing metrics...")
         metrics = {}
         for metric_name, metric_param_dict in metric_params.items():
             metrics[metric_name] = self._compute_metric(
@@ -306,11 +306,11 @@ class MetricCuration(SpyglassMixin, dj.Computed):
                 for unit_id, value in metrics["nn_isolation"].items()
             }
 
-        logger.info("Applying curation...")
+        self._info_msg("Applying curation...")
         labels = self._compute_labels(metrics, label_params)
         merge_groups = self._compute_merge_groups(metrics, merge_params)
 
-        logger.info("Saving to NWB...")
+        self._info_msg("Saving to NWB...")
         analysis_file_name, object_id = _write_metric_curation_to_nwb(
             nwb_file_name, waveforms, metrics, labels, merge_groups
         )
@@ -373,14 +373,20 @@ class MetricCuration(SpyglassMixin, dj.Computed):
 
         # Extract non-sparse waveforms by default
         waveform_params.setdefault("sparse", False)
-        waveforms = si.extract_waveforms(
-            recording=recording,
-            sorting=sorting,
-            folder=waveforms_dir,
-            overwrite=overwrite,
-            load_if_exists=not overwrite,
-            **waveform_params,
+        dir_empty = not Path(waveforms_dir).exists() or not any(
+            Path(waveforms_dir).iterdir()
         )
+
+        if overwrite or dir_empty:
+            waveforms = si.extract_waveforms(
+                recording=recording,
+                sorting=sorting,
+                folder=waveforms_dir,
+                overwrite=overwrite,
+                **waveform_params,
+            )
+        else:
+            waveforms = si.load_waveforms(waveforms_dir)
 
         self._waves_cache[key_hash] = waveforms
 

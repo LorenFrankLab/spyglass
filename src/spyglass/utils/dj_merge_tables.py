@@ -13,6 +13,7 @@ from datajoint.utils import from_camel_case, get_master, to_camel_case
 from IPython.core.display import HTML
 
 from spyglass.utils.logging import logger
+from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.mixins.export import ExportMixin
 
 RESERVED_PRIMARY_KEY = "merge_id"
@@ -66,14 +67,14 @@ class Merge(ExportMixin, dj.Manual):
         self._reserved_sk = RESERVED_SECONDARY_KEY
         if not self.is_declared:
             if not is_merge_table(self):  # Check definition
-                logger.warning(
+                self._warn_msg(
                     "Merge table with non-default definition\n"
                     + f"Expected:\n{MERGE_DEFINITION.strip()}\n"
                     + f"Actual  :\n{self.definition.strip()}"
                 )
             for part in self.parts(as_objects=True):
                 if part.primary_key != self.primary_key:
-                    logger.warning(  # PK is only 'merge_id' in parts, no others
+                    self._warn_msg(  # PK is only 'merge_id' in parts, no others
                         f"Unexpected primary key in {part.table_name}"
                         + f"\n\tExpected: {self.primary_key}"
                         + f"\n\tActual  : {part.primary_key}"
@@ -100,7 +101,7 @@ class Merge(ExportMixin, dj.Manual):
         self._ensure_dependencies_loaded()
 
         if camel_case and kwargs.get("as_objects"):
-            logger.warning(
+            self._warn_msg(
                 "Overriding as_objects=True to return CamelCase part names."
             )
             kwargs["as_objects"] = False
@@ -270,7 +271,7 @@ class Merge(ExportMixin, dj.Manual):
             )
         ]
         if not parts:
-            logger.warning("No parts found. Try adjusting restriction.")
+            cls()._warn_msg("No parts found. Try adjusting restriction.")
             return
 
         attr_dict = {  # NULL for non-numeric, 0 for numeric
@@ -889,7 +890,7 @@ class Merge(ExportMixin, dj.Manual):
         Added to support MRO of SpyglassMixin
         """
         if warn:
-            logger.warning("!! Bypassing cautious_delete !!")
+            self._warn_msg("!! Bypassing cautious_delete !!")
             self._log_delete(start=time(), super_delete=True)
         super().delete(*args, **kwargs)
 
