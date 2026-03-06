@@ -319,7 +319,7 @@ class Raw(SpyglassIngestion, dj.Imported):
         if timestamps is None:
             raise ValueError("Neither rate nor timestamps are available.")
         return estimate_sampling_rate(
-            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=True
+            np.asarray(timestamps[: int(1e6)]), 1.5, verbose=not self._test_mode
         )
 
     def _valid_times_from_raw(self, nwb_object):
@@ -337,6 +337,7 @@ class Raw(SpyglassIngestion, dj.Imported):
             sampling_rate=self._rate_fallback(nwb_object),
             gap_proportion=1.75,
             min_valid_len=0,
+            warn=not self._test_mode,
         )
 
     def generate_entries_from_nwb_object(self, nwb_obj, base_key=None):
@@ -400,7 +401,7 @@ class SampleCount(SpyglassMixin, dj.Imported):
         # TODO: change name when nwb file is changed
         sample_count = get_data_interface(nwbf, "sample_count")
         if sample_count is None:
-            logger.info(
+            self._info_msg(
                 "Unable to import SampleCount: no data interface named "
                 + f'"sample_count" found in {nwb_file_name}.'
             )

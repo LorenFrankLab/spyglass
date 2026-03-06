@@ -53,7 +53,7 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
         nwb = (Nwbfile() & nwb_key).fetch_nwb()[0]
         opto_epoch_obj = nwb.intervals.get("optogenetic_epochs", None)
         if opto_epoch_obj is None:
-            logger.warning(
+            self._warn_msg(
                 f"No optogenetic epochs found in NWB file {nwb_key['nwb_file_name']}"
             )
             return
@@ -103,15 +103,15 @@ class OptogeneticProtocol(SpyglassMixin, dj.Manual):
                 spatial_inserts.append(spatial_key)
         # insert keys
         with self._safe_context():
-            logger.info("Inserting Protocol")
+            self._info_msg("Inserting Protocol")
             self.insert(epoch_inserts)
-            logger.info("Inserting RippleTrigger")
+            self._info_msg("Inserting RippleTrigger")
             self.RippleTrigger.insert(ripple_inserts)
-            logger.info("Inserting ThetaTrigger")
+            self._info_msg("Inserting ThetaTrigger")
             self.ThetaTrigger.insert(theta_inserts)
-            logger.info("Inserting SpeedConditional")
+            self._info_msg("Inserting SpeedConditional")
             self.SpeedConditional.insert(speed_inserts)
-            logger.info("Inserting SpatialConditional")
+            self._info_msg("Inserting SpatialConditional")
             self.SpatialConditional.insert(spatial_inserts)
 
     @staticmethod

@@ -50,18 +50,17 @@ def test_null_file_like(schema_test, Mixin):
     assert len(ret) == len(Mixin()), "Null file_like not working."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_bad_file_like(caplog, schema_test, Mixin):
+def test_bad_file_like(schema_test, Mixin):
     schema_test(Mixin)
-    Mixin().file_like("BadName")
-    assert "No file_like field" in caplog.text, "No warning issued."
+    assert (
+        Mixin().file_like("BadName") is None
+    ), "Expected None for missing field."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_insert_fail(caplog, common, mini_dict):
+def test_insert_fail(common, mini_dict):
     this_key = dict(mini_dict, interval_list_name="BadName")
-    common.PositionSource().find_insert_fail(this_key)
-    assert "IntervalList: MISSING" in caplog.text, "No warning issued."
+    result = common.PositionSource().find_insert_fail(this_key)
+    assert "MISSING" in result, "Expected MISSING parent in result."
 
 
 def test_exp_summary(Nwbfile):
@@ -90,12 +89,12 @@ def test_cautious_del_dry_run(Nwbfile, frequent_imports):
     ), "Dry run delete not working."
 
 
-@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy.")
-def test_empty_cautious_del(caplog, schema_test, Mixin):
+def test_empty_cautious_del(schema_test, Mixin):
     schema_test(Mixin)
-    Mixin().cautious_delete(safemode=False)
-    Mixin().cautious_delete(safemode=False)
-    assert "empty" in caplog.text, "No warning issued."
+    mixin = Mixin()
+    mixin.cautious_delete(safemode=False)
+    assert len(mixin) == 0, "Table should be empty after delete."
+    mixin.cautious_delete(safemode=False)  # Should not raise on empty table
 
 
 def test_super_delete(schema_test, Mixin, common):
@@ -173,3 +172,25 @@ def test_mixin_del_orphans(dj_conn, Mixin, MixinChild):
     Mixin().delete_orphans(dry_run=False, safemode=False)
     post_del = Mixin().fetch1("id")
     assert post_del == 0, "Delete orphans not working."
+
+
+def test_test_mode_property_uses_settings(schema_test, Mixin):
+    """Test that _test_mode property uses spyglass.settings.config.
+
+    Verifies fix for issue #1528 where string "false" was incorrectly
+    evaluated as True. The property should now use spyglass.settings.config.test_mode
+    which properly converts strings to booleans via str_to_bool().
+    """
+    schema_test(Mixin)
+
+    # The _test_mode property should return a boolean
+    test_mode_value = Mixin()._test_mode
+    assert isinstance(
+        test_mode_value, bool
+    ), "_test_mode should return a boolean value"
+
+    # In test environment, test_mode should be True
+    # (set by load_config fixture in conftest.py)
+    assert (
+        test_mode_value is True
+    ), "_test_mode should be True in test environment"

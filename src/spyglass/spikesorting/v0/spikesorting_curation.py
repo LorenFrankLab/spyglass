@@ -682,7 +682,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             )
             qm[metric_name] = metric
 
-        logger.info(f"Computed all metrics: {qm}")
+        self._info_msg(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, quality_metrics_path)  # save dict as json
 
         object_id = AnalysisNwbfile().add_units_metrics(
@@ -1140,7 +1140,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             "quality_metrics", "curation_labels"
         )
         if metrics == {}:
-            logger.warning(
+            self._warn_msg(
                 f"Metrics for Curation {key} should normally be calculated "
                 + "before insertion here"
             )
