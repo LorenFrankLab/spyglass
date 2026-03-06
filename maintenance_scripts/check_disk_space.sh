@@ -138,7 +138,8 @@ echo "$OUTPUT" >> "$SPACE_LOG"
 
 # Send full disk space report via Slack every Monday
 if [[ "$(date +%u)" == "1" ]]; then
-  send_slack_message "$OUTPUT"
+  send_slack_message "DISK SPACE:
+  $OUTPUT"
 fi
 
 if [[ "$SPACE_EMAIL_ON_PASS" == "true" ]] && [[ "$FOUND_ISSUE" == "0" ]]; then

@@ -23,7 +23,7 @@ def schema_test(teardown, dj_conn):
     Adapted from datajoint/conftest.py.
     """
     schema_test = dj.Schema("test_conftest", {}, connection=dj_conn)
-    # schema_any(TTest) # Declare table using schema_any as func
+    # schema_any(Test) # Declare table using schema_any as func
     yield schema_test
     if teardown:
         schema_test.drop(force=True)
