@@ -568,13 +568,15 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         # Alternatively, video timestamps are valid if there is an epoch whose interval is >= threshold % inside the
         # video timestamps (i.e., the video covers the whole epoch).
-        dt = np.median(np.diff(timestamps))
         timestamps_interval = [timestamps[0], timestamps[-1]]
         max_interval_overlap_pct = 0
         for interval in valid_times.times:
-            pseudo_interval_timestamps = np.arange(interval[0], interval[1], dt)
-            these_times = (pseudo_interval_timestamps >= timestamps_interval[0]) & (pseudo_interval_timestamps <= timestamps_interval[1])
-            interval_overlap_pct = np.sum(these_times) / len(pseudo_interval_timestamps) # fraction of the epoch interval that is covered by video timestamps
+            # Calculate overlap between timestamp range and interval analytically
+            overlap_start = max(interval[0], timestamps_interval[0])
+            overlap_end = min(interval[1], timestamps_interval[1])
+            overlap_duration = max(0, overlap_end - overlap_start)
+            interval_duration = interval[1] - interval[0]
+            interval_overlap_pct = overlap_duration / interval_duration
             max_interval_overlap_pct = max(max_interval_overlap_pct, interval_overlap_pct)
 
         if overlap_pct < self._timestamp_overlap_threshold and max_interval_overlap_pct < self._timestamp_overlap_threshold:
