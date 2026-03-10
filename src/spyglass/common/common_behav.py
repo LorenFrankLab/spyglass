@@ -560,31 +560,37 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 )
             return entries, None
 
-        # Single-file ImageSeries
-        # Video timestamps are valid if >= threshold % of timestamps overlap with epoch intervals
-        # (i.e., the epoch covers the whole video).
+        # Single-file ImageSeries: valid if >= threshold% of timestamps
+        # overlap with epoch intervals (epoch covers the video).
         these_times = valid_times.contains(timestamps)
         overlap_pct = len(these_times) / len(timestamps)
 
-        # Alternatively, video timestamps are valid if there is an epoch whose interval is >= threshold % inside the
-        # video timestamps (i.e., the video covers the whole epoch).
+        # Also valid if a single epoch interval is >= threshold% covered
+        # by the video timestamps (video covers the whole epoch).
         timestamps_interval = [timestamps[0], timestamps[-1]]
         max_interval_overlap_pct = 0
         for interval in valid_times.times:
-            # Calculate overlap between timestamp range and interval analytically
             overlap_start = max(interval[0], timestamps_interval[0])
             overlap_end = min(interval[1], timestamps_interval[1])
             overlap_duration = max(0, overlap_end - overlap_start)
             interval_duration = interval[1] - interval[0]
+            if interval_duration <= 0:
+                continue
             interval_overlap_pct = overlap_duration / interval_duration
-            max_interval_overlap_pct = max(max_interval_overlap_pct, interval_overlap_pct)
+            max_interval_overlap_pct = max(
+                max_interval_overlap_pct, interval_overlap_pct
+            )
 
-        if overlap_pct < self._timestamp_overlap_threshold and max_interval_overlap_pct < self._timestamp_overlap_threshold:
+        if (
+            overlap_pct < self._timestamp_overlap_threshold
+            and max_interval_overlap_pct < self._timestamp_overlap_threshold
+        ):
             threshold_pct = self._timestamp_overlap_threshold * 100
             return [], (
                 f"Only {overlap_pct:.1%} of timestamps overlap with epoch, "
-                f"and only {max_interval_overlap_pct:.1%} of the epoch intervals are covered by the timestamps, "
-                f"(need ≥{threshold_pct:.0f}%)"
+                f"and the best-covered epoch interval has only "
+                f"{max_interval_overlap_pct:.1%} of its duration covered "
+                f"by the timestamps (need ≥{threshold_pct:.0f}%)"
             )
 
         return [self._prepare_video_entry(key, video_obj)], None
