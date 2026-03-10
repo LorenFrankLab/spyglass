@@ -187,7 +187,7 @@ def difference_artifact_detector(
     # these are artifact times - need to subtract these from valid timestamps
     artifact_valid_times = Interval(valid_intervals).intersect(
         artifact_intervals_s
-    )
+    ).times
 
     starts = np.searchsorted(valid_timestamps, artifact_valid_times[:, 0])
     ends = np.searchsorted(valid_timestamps, artifact_valid_times[:, 1])
@@ -201,7 +201,7 @@ def difference_artifact_detector(
         new_timestamps, sampling_frequency, 1.5, 0.000001
     )
 
-    return artifact_removed_valid_times, artifact_intervals_s
+    return artifact_removed_valid_times, artifact_intervals_s.times
 
 
 def _check_artifact_thresholds(
