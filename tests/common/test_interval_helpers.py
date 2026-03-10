@@ -91,7 +91,9 @@ def test_interval_getitem_tuple(interval_obj):
     intervals = np.array([[0, 2], [5, 6]])
     obj = interval_obj(intervals)
     starts = obj[:, 0].times
-    assert np.array_equal(starts, intervals[:, 0]), "Problem Interval.__getitem__ tuple"
+    assert np.array_equal(
+        starts, intervals[:, 0]
+    ), "Problem Interval.__getitem__ tuple"
 
 
 def test_interval_getitem_err(interval_obj):
