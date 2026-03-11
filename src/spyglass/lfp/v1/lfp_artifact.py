@@ -227,6 +227,17 @@ class LFPArtifactDetection(SpyglassMixin, dj.Computed):
             referencing=ref,
         )
 
+        # Convert Interval object to np array
+        if hasattr(artifact_removed_valid_times, "times"):
+            artifact_removed_valid_times = np.asarray(artifact_removed_valid_times.times)
+        else:
+            artifact_removed_valid_times = np.asarray(artifact_removed_valid_times)
+
+        if hasattr(artifact_times, "times"):
+            artifact_times = np.asarray(artifact_times.times)
+        else:
+            artifact_times = np.asarray(artifact_times)
+
         key.update(
             dict(
                 artifact_times=artifact_times,
