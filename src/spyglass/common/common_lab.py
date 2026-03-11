@@ -259,7 +259,7 @@ class LabTeam(SpyglassIngestion, dj.Manual):
             query = (LabMember.LabMemberInfo() & member_dict).fetch(
                 "google_user_name"
             )
-            query_is_empty = query.size == 0
+            query_is_empty = len(query) == 0
             if query_is_empty and not cls()._test_mode:
                 logger.warning(
                     "To help manage permissions in LabMemberInfo, please add "
