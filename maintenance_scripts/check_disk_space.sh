@@ -59,6 +59,8 @@ send_email_message() {
 
 # Send slack message
 send_slack_message() {
+  # Note: This will not handle special characters. If needed, can extend to
+  # accept a JSON payload and use `--data-binary` instead of `-d`.
   if [[ -z "$SLACK_TOKEN" || -z "$SLACK_CHANNEL" ]]; then
     return 0
   fi
@@ -134,6 +136,8 @@ for i in "${!DRIVE_LIST[@]}"; do
 
 done
 
+# NOTE: `echo` may cause issues on alternative shells.
+# If needed, can extend to use `printf` instead.
 echo "$OUTPUT" >> "$SPACE_LOG"
 
 # Send full disk space report via Slack every Monday
