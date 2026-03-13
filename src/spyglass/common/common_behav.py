@@ -570,12 +570,12 @@ class VideoFile(SpyglassMixin, dj.Imported):
         timestamps_interval = [timestamps[0], timestamps[-1]]
         max_interval_overlap_pct = 0
         for interval in valid_times.times:
-            overlap_start = max(interval[0], timestamps_interval[0])
-            overlap_end = min(interval[1], timestamps_interval[1])
-            overlap_duration = max(0, overlap_end - overlap_start)
             interval_duration = interval[1] - interval[0]
             if interval_duration <= 0:
                 continue
+            overlap_start = max(interval[0], timestamps_interval[0])
+            overlap_end = min(interval[1], timestamps_interval[1])
+            overlap_duration = max(0, overlap_end - overlap_start)
             interval_overlap_pct = overlap_duration / interval_duration
             max_interval_overlap_pct = max(
                 max_interval_overlap_pct, interval_overlap_pct
