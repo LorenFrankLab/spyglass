@@ -110,7 +110,8 @@ for label, interval_data in results.groupby("interval_labels"):
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Allow email send on space check success, clean up maintenance logging #1381
+- Allow email send on space check success, clean up maintenance logging #1381,
+    #1544
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
@@ -177,6 +178,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
     - Support ingestion of multi-epoch video files #1548
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not available #1546
 
 - Decoding
 
