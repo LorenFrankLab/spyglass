@@ -86,6 +86,16 @@ def test_interval_getitem(interval_obj):
     assert np.array_equal(obj, intervals[1:]), "Problem Interval.__getitem__"
 
 
+def test_interval_getitem_tuple(interval_obj):
+    # Test tuple indexing, e.g. interval[:, 0] for all start times
+    intervals = np.array([[0, 2], [5, 6]])
+    obj = interval_obj(intervals)
+    starts = obj[:, 0].times
+    assert np.array_equal(
+        starts, intervals[:, 0]
+    ), "Problem Interval.__getitem__ tuple"
+
+
 def test_interval_getitem_err(interval_obj):
     obj = interval_obj(np.array([[0, 2], [5, 6]]))
     with pytest.raises(ValueError):

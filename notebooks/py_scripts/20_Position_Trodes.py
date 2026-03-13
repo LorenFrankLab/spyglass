@@ -216,7 +216,7 @@ sgp.v1.TrodesPosV1.populate(trodes_key)
 sgp.v1.TrodesPosV1 & trodes_key
 
 # When we populatethe `TrodesPosV1` table, we automatically create an entry in the `PositionOutput` merge table.
-# Since this table supports position information from multiple methods, it's best practive to access data through here.
+# Since this table supports position information from multiple methods, it's best practice to access data through here.
 #
 # We can view the entry in this table:
 
