@@ -177,6 +177,7 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Support ingestion of multi-epoch video files #1548
     - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not available #1546
 
 - Decoding
