@@ -816,7 +816,7 @@ class Interval:
                 + "Please check the input interval lists for validity."
             )
 
-        # a switch of cumulative sum from zero to 1 indicates the beginning of a
+        # a switch of cumulative sum from 0 to 1 indicates the beginning of a
         # joint interval; a cumulative sum of 0 indicates the end
         union_starts = np.ravel(
             np.array(
