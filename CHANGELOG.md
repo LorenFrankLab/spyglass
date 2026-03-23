@@ -198,6 +198,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - LFP
 
     - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
+    - Update artifact detection algorithms to return times #1553
 
 - Position
 
