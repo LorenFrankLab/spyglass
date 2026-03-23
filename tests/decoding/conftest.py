@@ -1,3 +1,4 @@
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -12,7 +13,6 @@ def mock_netcdf_saves():
     by intercepting xarray.Dataset.to_netcdf() calls and using pickle instead.
     """
     import pickle
-    from pathlib import Path
 
     def mock_to_netcdf(
         self,
@@ -31,10 +31,18 @@ def mock_netcdf_saves():
             # Return bytes if no path given (original behavior for some use cases)
             return None
 
+        # Ensure parent directory exists
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+
         # Keep the .nc extension to match expectations, but write pickle format
         # This avoids netCDF4/HDF5 errors while maintaining file path compatibility
-        with open(path, "wb") as f:
-            pickle.dump(self, f)
+        try:
+            with open(path, "wb") as f:
+                pickle.dump(self, f)
+        except (FileNotFoundError, PermissionError, OSError):
+            # Copilot suggested that this is where a file might throw error
+            # during teardown, attempted automatic cleanup.
+            pass
 
         return None
 
@@ -412,7 +420,10 @@ def clusterless_pop(
     yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
-        decode_merge.cleanup()
+        try:
+            decode_merge.cleanup()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
@@ -453,7 +464,10 @@ def clusterless_pop_estimated(
     yield decode_v1.clusterless.ClusterlessDecodingV1 & selection_key
 
     if teardown:
-        decode_merge.cleanup()
+        try:
+            decode_merge.cleanup()
+        except Exception:
+            pass
 
 
 @pytest.fixture(scope="session")
@@ -596,8 +610,6 @@ def create_fake_decoding_results(n_time=100, n_position_bins=50, n_states=2):
     import xarray as xr
 
     time = np.linspace(0, 10, n_time)
-    position_bins = np.linspace(0, 100, n_position_bins)
-    states = np.arange(n_states)
     state_names = ["Continuous", "Fragmented"][:n_states]
 
     # n_state_bins is the product of position bins and states
@@ -749,22 +761,36 @@ def mock_detector_io_globally(mock_results_storage):
             return xr.open_dataset(filename_str, engine="netcdf4")
         except (FileNotFoundError, OSError) as e:
             # OSError with "Unknown file format" means old pickle file exists
-            # FileNotFoundError means file doesn't exist at all
+            # (from a prior --no-teardown run where mock_netcdf_saves wrote
+            # pickle format). Fall back to pickle to keep reruns working.
             if "Unknown file format" in str(e):
-                raise FileNotFoundError(
-                    f"Mock result has invalid format (likely old pickle file): {filename_str}. "
-                    "Please delete old *_mocked.nc files from tests/_data/analysis/"
-                )
+                import pickle
+
+                try:
+                    with open(filename_str, "rb") as f:
+                        return pickle.load(f)
+                except Exception:
+                    raise FileNotFoundError(
+                        f"Mock result has invalid format: {filename_str}. "
+                        "Please delete old *_mocked.nc files from tests/_data/analysis/"
+                    )
             raise FileNotFoundError(f"Mock result not found: {filename_str}")
 
     def _mock_load_model(filename):
-        """Load classifier from in-memory storage."""
+        """Load classifier from in-memory storage or disk."""
         filename_str = str(filename)
         if filename_str in mock_results_storage["classifiers"]:
             return mock_results_storage["classifiers"][filename_str]
-        raise FileNotFoundError(
-            f"Mock classifier not found in memory: {filename_str}"
-        )
+        # Fall back to disk for --no-teardown reruns where in-memory is empty
+        import pickle
+
+        try:
+            with open(filename_str, "rb") as f:
+                return pickle.load(f)
+        except (FileNotFoundError, OSError):
+            raise FileNotFoundError(
+                f"Mock classifier not found in memory or on disk: {filename_str}"
+            )
 
     # Patch the detector base classes' load methods globally
     with (

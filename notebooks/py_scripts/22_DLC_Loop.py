@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.14.7
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -79,11 +79,6 @@ import numpy as np
 import pandas as pd
 import pynwb
 from spyglass.position import PositionOutput
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
 
 # ignore datajoint+jupyter async warnings
 import warnings
@@ -423,7 +418,7 @@ matching_rows
 # ```
 #
 
-# This loop will generate posiiton data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see \*\*\*)
+# This loop will generate posititon data for all epochs associated with the pre-defined camera in one day, for one rat (based on the NWB file; see \*\*\*)
 # <br>The output should print Pose Estimation and Centroid plots for each epoch.
 #
 # - It defines `col1val` as each `nwb_file_name` entry in the table, one at a time.
@@ -439,9 +434,9 @@ for row in matching_rows:
 
         ##insert pose estimation task
         key = {
-            "nwb_file_name": nwb_file_name,
-            "epoch": epoch,
-            "video_file_num": video_file_num,
+            "nwb_file_name": col1val,
+            "epoch": col2val,
+            "video_file_num": col3val,
             **model_key,
         }
 

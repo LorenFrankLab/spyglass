@@ -1,5 +1,4 @@
 import datajoint as dj
-import ndx_franklab_novela
 import pynwb
 
 from spyglass.common.common_device import DataAcquisitionDevice
@@ -54,7 +53,7 @@ class Session(SpyglassIngestion, dj.Imported):
             "subject": {"subject_id": "subject_id"},
         }
 
-    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):
+    class DataAcquisitionDevice(SpyglassIngestion, dj.Part):  # noqa: F811
         definition = """
         # Part table linking Session to multiple DataAcquisitionDevice entries.
         -> Session
@@ -63,7 +62,7 @@ class Session(SpyglassIngestion, dj.Imported):
 
         @property
         def _source_nwb_object_type(self):
-            return ndx_franklab_novela.DataAcqDevice
+            return "DataAcqDevice"
 
         @property
         def table_key_to_obj_attr(self):
@@ -91,7 +90,7 @@ class Session(SpyglassIngestion, dj.Imported):
             base_key = base_key or dict()
             experimenter_list = nwb_obj.experimenter
             if not experimenter_list:
-                logger.info("No experimenter metadata found for Session.\n")
+                self._info_msg("No experimenter metadata found for Session.\n")
                 return dict()
 
             entries = []

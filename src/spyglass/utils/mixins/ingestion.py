@@ -3,14 +3,17 @@ from typing import Callable, Dict, List, Optional, Type, Union
 
 import datajoint as dj
 from datajoint.utils import to_camel_case
+from packaging.version import Version
 from pynwb import NWBFile
 
 from spyglass.utils.dj_helper_fn import accept_divergence
 from spyglass.utils.logging import logger
 from spyglass.utils.mixins.base import BaseMixin
+from spyglass.utils.nwb_hash import get_file_namespaces
+from spyglass.utils.nwb_helper_fn import is_nwb_obj_type
 
 # typing alias compatible with Python 3.9
-IngestionEntries = Dict["IngestionMixin", List[dict]]
+IngestionEntries = dict["IngestionMixin", list[dict]]
 # How IngestionMixin handles generated entries from NWB objects
 # Dict keys are IngestionMixin table classes, or FreeTable Table objects
 # Values are lists of dicts to insert into those tables
@@ -46,6 +49,9 @@ class IngestionMixin(BaseMixin):
     _only_ingest_first = False
     _source_nwb_object_name = None  # Optional filter on object name
     _single_entry_per_table = False  # If True, DynamicTables map to a single entry, otherwise, one per row
+    _extension_requirements = (
+        dict()
+    )  # Optional dict of {extension_name: min_version} to check before ingesting
 
     @property
     def table_key_to_obj_attr(
@@ -159,7 +165,7 @@ class IngestionMixin(BaseMixin):
         matching_objects = [
             obj
             for obj in nwb_file.objects.values()
-            if isinstance(obj, self._source_nwb_object_type)
+            if is_nwb_obj_type(obj, self._source_nwb_object_type)
         ]
 
         if self._source_nwb_object_name:
@@ -195,7 +201,7 @@ class IngestionMixin(BaseMixin):
         this_tbl, self_tbl = _camel(table), _camel(self)
 
         suffix = "" if this_tbl == self_tbl else f" via {self_tbl}"
-        logger.info(
+        self._info_msg(
             f"{nwb_file_name} inserts {n_entries} into {this_tbl}{suffix}"
         )
 
@@ -226,8 +232,17 @@ class IngestionMixin(BaseMixin):
         nwb_file = query.fetch_nwb()[0]
         base_entry = nwb_key if "nwb_file_name" in self.primary_key else dict()
 
-        # compile list of table entries from all objects in this file
+        # fetch relevant NWB objects from file
         fetched_objs = self.get_nwb_objects(nwb_file, nwb_file_name)
+        if len(fetched_objs) == 0:
+            return dict()
+
+        # check extension requirements (if any). Logs warning if objects found and
+        # requirements not met
+        if not self.check_extension_requirements(nwb_file_name):
+            return dict()
+
+        # compile list of table entries from all objects in this file
         entries = (
             self.generate_entries_from_nwb_object(
                 nwb_obj=fetched_objs[0],
@@ -296,7 +311,7 @@ class IngestionMixin(BaseMixin):
             if attr.nullable or attr.autoincrement or attr.default is not None:
                 continue  # skip nullable, autoincrement, or default val attrs
             if attr.name not in key or key.get(attr.name) is None:
-                logger.info(
+                self._info_msg(
                     f"Key {key} missing required attribute {attr.name}."
                 )
                 return False
@@ -435,3 +450,39 @@ class IngestionMixin(BaseMixin):
         if isinstance(a, str) and isinstance(b, str):
             return a.lower() != b.lower()
         return a != b  # prevent false positive on None != ""
+
+    def check_extension_requirements(self, nwb_file_name: str) -> bool:
+        """Check that the NWB file meets the extension requirements (if any).
+
+        Parameters
+        ----------
+        nwb_file_name : str
+            The name of the NWB file to check.
+
+        Returns
+        -------
+        bool
+            True if the NWB file meets the extension requirements, False otherwise.
+        """
+        # early exit if no extension requirements specified
+        if not self._extension_requirements:
+            return True
+
+        from spyglass.common.common_nwbfile import Nwbfile
+
+        nwb_file_path = Nwbfile().get_abs_path(nwb_file_name)
+        file_namespaces = get_file_namespaces(nwb_file_path)
+
+        for extension, min_version in self._extension_requirements.items():
+            if (extension not in file_namespaces) or (
+                Version(file_namespaces.get(extension)) < Version(min_version)
+            ):
+                logger.warning(
+                    f"NWB file {nwb_file_name} can not be ingested into "
+                    + f"{self.camel_name} due to unmet extension requirement:"
+                    + f"{extension} >= {min_version} \n"
+                    + "Please submit feature request or contact the Spyglass team"
+                    + " for assistance."
+                )
+                return False
+        return True

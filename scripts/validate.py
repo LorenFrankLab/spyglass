@@ -108,12 +108,12 @@ def get_required_python_version() -> tuple[int, int]:
     Future: Consider extracting to scripts/_shared.py if the installer
     becomes a package, but for now standalone scripts are simpler.
     """
-    fallback = (3, 9)
+    fallback = (3, 10)
     try:
         import tomllib  # Python 3.11+
     except ImportError:
         try:
-            import tomli as tomllib  # Python 3.9-3.10
+            import tomli as tomllib  # Python 3.10
         except ImportError:
             return fallback
 
@@ -122,7 +122,7 @@ def get_required_python_version() -> tuple[int, int]:
         with pyproject_path.open("rb") as f:
             data = tomllib.load(f)
 
-        # Parse ">=3.9,<3.13" format
+        # Parse ">=3.10,<3.13" format
         requires_python = data["project"]["requires-python"]
         match = re.search(r">=(\d+)\.(\d+)", requires_python)
         if match:
@@ -198,6 +198,11 @@ def check_spyglass_import() -> None:
         print(f"✓ Spyglass version: {version}")
     except ImportError as e:
         raise RuntimeError(f"Cannot import spyglass: {e}")
+    except Exception as e:
+        if type(e).__name__ == "OperationalError" and "Can't connect" in str(e):
+            print("⚠ Spyglass import warning: Database connection issues")
+            return  # Elsewhere, this is not treated as critical, so only warn
+        raise
 
 
 def check_spyglass_config() -> None:

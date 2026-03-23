@@ -160,6 +160,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     -> IntervalList
+    data_object_id: varchar(40)
     """
 
     class MyAnalysisPart(SpyglassMixin, dj.Part):
@@ -181,14 +182,19 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
         interval = (IntervalList & key).fetch_interval()
         interval = interval.intersect(params["valid_times"])
         interval.name = my_new_name
-        analysis_file_name = AnalysisNwbfile.create(key, data)
+        test_data = [[1,2,3],[4,5,6]]
+        with self.analysis_table.build(nwb_file_name) as builder:
+            # store results in file
+            data_id = builder.add_nwb_object(test_data, "test")
+
         # 3. Insert results
         IntervalList.insert1(interval.as_dict)
         self.insert1(
             {
                 **key,
-                **interval.primary_key
-                "analysis_file_name": analysis_file_name,
+                **interval.primary_key,
+                "analysis_file_name": builder.analysis_file_name,
+                "data_object_id": data_id
             }
         )
         self.MyAnalysisPart.insert1({**key, "result": 1})
@@ -213,14 +219,14 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
     ...
 
     def make_fetch(self, key):
-        one = SomeUpstreamTable.fetch1(...) # (1)
-        two = AnotherUpstreamTable.fetch1(...) # (2)
+        one = SomeUpstreamTable.fetch1(...)  # (1)
+        two = AnotherUpstreamTable.fetch1(...)  # (2)
 
         return [one, two]
 
     def make_compute(self, key, one, two):
         result = some_analysis_function(one, two)  # (3)
-        self_insert = {'result_field': result}  # (4)
+        self_insert = {"result_field": result}  # (4)
 
         return self_insert
 
@@ -232,7 +238,7 @@ class MyAnalysis(SpyglassMixin, dj.Computed):
 2. `make_fetch` must be deterministic and idempotent.
     - Deterministic: given the same key, it always returns the same data.
     - Idempotent: calling it multiple times has the same effect as calling it
-      once.
+        once.
 3. `make_compute` runs time-consuming computations.
 4. `make_compute` should not modify the key or the database.
 5. `make_insert` modifies the database.

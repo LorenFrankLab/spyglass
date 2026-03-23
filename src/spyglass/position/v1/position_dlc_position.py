@@ -189,18 +189,18 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             Path(infer_output_dir(key=key, makedir=False)) / "log.log"
         )
         self._logged_make(key)
-        logger.info("inserted entry into DLCSmoothInterp")
+        self._info_msg("inserted entry into DLCSmoothInterp")
 
     @file_log(logger, console=False)
     def _logged_make(self, key):
         METERS_PER_CM = 0.01
 
-        logger.info("-----------------------")
+        self._info_msg("-----------------------")
         idx = pd.IndexSlice
         # Get labels to smooth from Parameters table
         params = (DLCSmoothInterpParams() & key).fetch1("params")
         # Get DLC output dataframe
-        logger.info("fetching Pose Estimation Dataframe")
+        self._info_msg("fetching Pose Estimation Dataframe")
 
         bp_key = key.copy()
         if test_mode:  # during testing, analysis_file not in BodyPart table
@@ -208,7 +208,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
         dlc_df = (DLCPoseEstimation.BodyPart() & bp_key).fetch1_dataframe()
         dt = np.median(np.diff(dlc_df.index.to_numpy()))
-        logger.info("Identifying indices to NaN")
+        self._info_msg("Identifying indices to NaN")
         likelihood_thresh = params.pop("likelihood_thresh")
         df_w_nans, bad_inds = nan_inds(
             dlc_df.copy(),
@@ -221,11 +221,11 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())
-            logger.info("interpolating across low likelihood times")
+            self._info_msg("interpolating across low likelihood times")
             interp_df = interp_pos(df_w_nans.copy(), nan_spans, **interp_params)
         else:
             interp_df = df_w_nans.copy()
-            logger.info("skipping interpolation")
+            self._info_msg("skipping interpolation")
 
         if params.get("smooth"):
             smooth_params = params.get("smoothing_params")
@@ -238,13 +238,13 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             ].pop("smoothing_duration", None)
 
             dt = np.median(np.diff(dlc_df.index.to_numpy()))
-            logger.info(f"Smoothing using method: {smooth_method}")
+            self._info_msg(f"Smoothing using method: {smooth_method}")
             smooth_df = smooth_func(
                 interp_df, smoothing_duration=smooth_dur, sampling_rate=1 / dt
             )
         else:
             smooth_df = interp_df.copy()
-            logger.info("skipping smoothing")
+            self._info_msg("skipping smoothing")
 
         final_df = smooth_df.drop(["likelihood"], axis=1)
         final_df = final_df.rename_axis("time").reset_index()
@@ -261,7 +261,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         nwb_analysis_file = AnalysisNwbfile()
         position = pynwb.behavior.Position()
         video_frame_ind = pynwb.behavior.BehavioralTimeSeries()
-        logger.info("Creating NWB objects")
+        self._info_msg("Creating NWB objects")
         position.create_spatial_series(
             name="position",
             timestamps=final_df.time.to_numpy(),

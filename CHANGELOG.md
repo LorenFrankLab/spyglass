@@ -8,12 +8,48 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Alter Decoding v1 table
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
 FirFilterParameters().alter()
 DecodingParameters().alter()
+
+# Alter v0 recompute table
+from spyglass.spikesorting.v0.spikesorting_recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+# Alter v1 recompute table
+from spyglass.spikesorting.v1.recompute import (
+    RecordingRecompute,
+    RecordingRecomputeSelection,
+    RecordingRecomputeVersions,  # noqa F401
+    UserEnvironment,  # noqa F401
+)
+
+RecordingRecomputeSelection().alter()
+RecordingRecompute().alter()
+
+
+# Fix LFPBandV1 issue #1481
+from spyglass.lfp.analysis.v1 import LFPBandV1
+
+LFPBandV1().fix_1481()
+
+# Increase DLCProject.config_path length
+from spyglass.position.v1.position_dlc_project import DLCProject
+
+DLCProject().alter()
 ```
+
+### Breaking Changes
 
 #### LFPBandV1 Fix
 
@@ -30,15 +66,14 @@ LFPBandV1().fix_1481()
 #### AutomaticCuration Fix
 
 If you were using `v0.AutomaticCuration` after April 2025, you may have stored
-inaccurate labels due to #14XX. To fix these, please run the following after updating:
+inaccurate labels due to #1513. To fix these, please run the following after
+updating:
 
 ```python
 from spyglass.spikesorting.v0 import AutomaticCuration
 
-AutomaticCuration().fix_15XX()
+AutomaticCuration().fix_1513()
 ```
-
-### Breaking Changes
 
 #### Decoding Results Structure
 
@@ -55,17 +90,19 @@ memory usage significantly.
 ```python
 # OLD (before v0.5.6):
 results.isel(intervals=0)  # Get first interval
-for i in range(results.sizes['intervals']):  # Iterate intervals
+for i in range(results.sizes["intervals"]):  # Iterate intervals
     interval_data = results.isel(intervals=i)
 
 # NEW (v0.5.6+):
 results.where(results.interval_labels == 0, drop=True)  # Get first interval
 for label in np.unique(results.interval_labels.values):  # Iterate intervals
-    if label >= 0:  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
+    if (
+        label >= 0
+    ):  # Skip -1 (outside intervals, only with estimate_decoding_params=True)
         interval_data = results.where(results.interval_labels == label, drop=True)
 
 # Or use groupby:
-for label, interval_data in results.groupby('interval_labels'):
+for label, interval_data in results.groupby("interval_labels"):
     if label >= 0:
         # process interval_data
         pass
@@ -75,11 +112,11 @@ for label, interval_data in results.groupby('interval_labels'):
 
 - `0, 1, 2, ...` - Sequential interval indices (0-indexed)
 - `-1` - Time points outside any decoding interval (only when
-  `estimate_decoding_params=True`)
+    `estimate_decoding_params=True`)
 
 ### Documentation
 
-- Delete extra pyscripts that were renamed # 1363
+- Delete extra pyscripts that were renamed #1363
 - Add note on fetching changes to setup notebook #1371
 - Revise table field docstring heading and `mermaid` diagram generation #1402
 - Add pages for custom analysis tables and class inheritance structure #1435
@@ -87,11 +124,12 @@ for label, interval_data in results.groupby('interval_labels'):
 
 ### Infrastructure
 
-- Add cross-platform installer script with Docker support, input validation,
-    and automated environment setup #1414
+- Add cross-platform installer script with Docker support, input validation, and
+    automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Allow email send on space check success, clean up maintenance logging #1381
+- Allow email send on space check success, clean up maintenance logging #1381,
+    #1544
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
@@ -99,6 +137,8 @@ for label, interval_data in results.groupby('interval_labels'):
     from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507
@@ -108,18 +148,30 @@ for label, interval_data in results.groupby('interval_labels'):
 - Allow for permissive name selection when identifying objects in ingestion nwb
     #1490
 - Update fixes for accessing files from DANDI #1477
-- Deprecate `populate` transaction workaround with tripart `make` calls #1422,
+- Deprecate `populate` transaction workaround with tripart `make` calls #1422
     #1505
 - Improve export process for speed and generalization #1387
 - Additional methods for updating files for DANDI standards #1387
 - Implementation of union and intersect methods for restriction graphs #1387
 - Add file issue checks to AnalysisNwbfile cleanup steps #1431
+- Update to latest `black` and `jupytext` versions #1508
+- Update minimum Python version to 3.10 #1508
+- Remove outdated cli scripts #1508
+- Pin datajoint version < 2.0 #1516
+- Log expected recompute failures #1470
+- Track file created/deletion status of recomputes #1470
+- Upgrade to pynwb>=3.1 #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io
+    #1506
+- Add `analysis_table` property to mixin for custom pipelines #1525
+- Quiet pytest output for expected warnings in test runs #1534
 
 ### Pipelines
 
 - Behavior
 
     - Add methods for calling moseq visualization functions #1374
+    - Ensure latent moseq dimension is compatible with dataset #1511
 
 - Common
 
@@ -141,6 +193,11 @@ for label, interval_data in results.groupby('interval_labels'):
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+    - Allow ingestion of nwb files without behavior module #1441
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Support ingestion of multi-epoch video files #1548
+    - Fix bug with `LabTeam().create_new_team` when `google_user_name` is not
+        available #1546
 
 - Decoding
 
@@ -150,9 +207,12 @@ for label, interval_data in results.groupby('interval_labels'):
         merge IDs are fetched in non-chronological order #1471
     - Separate `ClusterlessDecodingV1` to tri-part `make` #1467
     - **BREAKING**: Remove `intervals` dimension from decoding results. Results
-      from multiple intervals are now concatenated along the `time` dimension
-      with an `interval_labels` coordinate to track interval membership. This
-      eliminates NaN padding and reduces memory usage. See migration guide above.
+        from multiple intervals are now concatenated along the `time` dimension
+        with an `interval_labels` coordinate to track interval membership. This
+        eliminates NaN padding and reduces memory usage. See migration guide
+        above.
+    - Fix fetching position dataframe in
+        `SortedSpikesDecodingV1.get_ahead_behind_distance()` #1540
 
 - LFP
 
@@ -164,12 +224,16 @@ for label, interval_data in results.groupby('interval_labels'):
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+    - Increase `DLCProject.config_path` length #1534
 
 - Spikesorting
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
-    - Implement fix for `AutomaticCuration` incorrect labels #15XY
+    - Improve get_recording efficiency #1522
+    - Raise error if `FigURLCurationSelection` finds no curation label #1531
+    - Allow `CurationV1` to save without any spikes #1533
+    - Implement fix for `AutomaticCuration` incorrect labels #1537
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -288,7 +352,7 @@ for label, interval_data in results.groupby('interval_labels'):
     - Initialize tables in pytests #1181
     - Download test data without credentials, trigger on approved PRs #1180
     - Add coverage of decoding pipeline to pytests #1155
-- Allow python \< 3.13 #1169
+- Allow python < 3.13 #1169
 - Remove numpy version restriction #1169
 - Merge table delete removes orphaned master entries #1164
 - Edit `merge_fetch` to expect positional before keyword arguments #1181

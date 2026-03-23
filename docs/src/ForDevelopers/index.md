@@ -24,8 +24,8 @@ review the article on [database management](./Management.md).
 This folder also contains a number of articles on understanding pipelines in
 order to develop your own.
 
-- [Mixin Architecture](./Classes.md) explains the mixin-based class architecture,
-    including design goals, organization, and usage patterns.
+- [Mixin Architecture](./Classes.md) explains the mixin-based class
+    architecture, including design goals, organization, and usage patterns.
 - [Code for Reuse](./Reuse.md) discusses good practice for writing readable and
     reusable code in Python.
 - [Table Types](./TableTypes.md) explains the different table motifs in Spyglass

@@ -111,7 +111,7 @@ class ExportMixin(FetchMixin):
     def _start_export(self, paper_id, analysis_id):
         """Start export process."""
         if self.export_id:
-            self._logger.info(
+            self._info_msg(
                 f"Export {self.export_id} in progress. Starting new."
             )
             self._stop_export(warn=False)
@@ -127,7 +127,7 @@ class ExportMixin(FetchMixin):
     def _stop_export(self, warn=True):
         """End export process."""
         if not self.export_id and warn:
-            self._logger.warning("Export not in progress.")
+            self._warn_msg("Export not in progress.")
         del self.export_id
 
     # --------------------------- Utility Functions ---------------------------
@@ -458,7 +458,7 @@ class ExportMixin(FetchMixin):
                 f"Export: detected custom AnalysisNwbfile table {this_name}"
             )
             self._copy_to_common()
-        elif custom_parent := self._custom_analysis_parent:
+        elif self._custom_analysis_parent:
             self._parent_copy_to_common(fnames=fnames)
 
         # Insert into ExportSelection.File (FK now guaranteed valid)
@@ -529,7 +529,7 @@ class ExportMixin(FetchMixin):
 
     def is_restr(self, restr) -> bool:
         """Check if a restriction is actually restricting."""
-        return bool(restr) and restr != True and not isinstance(restr, Top)
+        return bool(restr) and not restr and not isinstance(restr, Top)
 
     # -------------------------- Intercept DJ methods --------------------------
 

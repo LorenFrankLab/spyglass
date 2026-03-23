@@ -31,8 +31,10 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_optogenetics import (
+    OpticalFiberDevice,
     OpticalFiberImplant,
     OptogeneticProtocol,
+    Virus,
     VirusInjection,
 )
 from spyglass.common.common_sensors import SensorData
@@ -101,6 +103,8 @@ def single_transaction_make(
     all tables will have exactly one key_source entry per nwb file.
     """
 
+    nwbfile_tbl = Nwbfile()
+
     file_restr = {"nwb_file_name": nwb_file_name}
     with Nwbfile._safe_context():
         for table in tables:
@@ -121,7 +125,7 @@ def single_transaction_make(
                 continue
 
             # If imported/computed table, get key from key_source
-            logger.info(f"Populating {table.__name__}...")
+            nwbfile_tbl._info_msg(f"Populating {table.__name__}...")
             key_source = getattr(table, "key_source", None)
             if key_source is None:  # Generate key from parents
                 parents = table.parents(as_objects=True)
@@ -136,8 +140,7 @@ def single_transaction_make(
             if table_name in [
                 "ImportedPose",
                 "ImportedLFP",
-                "VirusInjection",
-                "OpticalFiberImplant",
+                "OptogeneticProtocol",
             ]:
                 key_source = Nwbfile()
 
@@ -199,6 +202,8 @@ def populate_all_common(
             DataAcquisitionDeviceAmplifier,  # Parent node
             DataAcquisitionDeviceSystem,  # Parent node
             DataAcquisitionDevice,  # Depends on DataAcq*Amp, DataAcq*Sys
+            OpticalFiberDevice,  # Parent node
+            Virus,  # Parent node
         ],
         [
             Probe,  # Depends on ProbeType, DataAcquisitionDevice
@@ -226,7 +231,7 @@ def populate_all_common(
             ImportedPose,  # Depends on Session
             ImportedLFP,  # Depends on ElectrodeGroup
             VirusInjection,  # Depends on Session
-            OpticalFiberImplant,  # Depends on Session
+            OpticalFiberImplant,  # Depends on Session and OpticalFiberDevice
             OptogeneticProtocol,  # Depends on Session and TaskEpoch
         ],
         [

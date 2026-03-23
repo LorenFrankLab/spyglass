@@ -682,7 +682,7 @@ class QualityMetrics(SpyglassMixin, dj.Computed):
             )
             qm[metric_name] = metric
 
-        logger.info(f"Computed all metrics: {qm}")
+        self._info_msg(f"Computed all metrics: {qm}")
         self._dump_to_json(qm, quality_metrics_path)  # save dict as json
 
         object_id = AnalysisNwbfile().add_units_metrics(
@@ -1468,7 +1468,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             "quality_metrics", "curation_labels"
         )
         if metrics == {}:
-            logger.warning(
+            self._warn_msg(
                 f"Metrics for Curation {key} should normally be calculated "
                 + "before insertion here"
             )
@@ -1549,7 +1549,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         recording = si.load_extractor(recording_path)
         timestamps = SpikeSortingRecording._get_recording_timestamps(recording)
 
-        (analysis_file_name, units_object_id) = Curation().save_sorting_nwb(
+        analysis_file_name, units_object_id = Curation().save_sorting_nwb(
             key=key,
             sorting=sorting,
             timestamps=timestamps,
@@ -1610,7 +1610,7 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
         """Returns the recording related to this curation. Useful for operations downstream of merge table"""
         # expand the key
         recording_key = (cls & key).fetch1("KEY")
-        return SpikeSortingRecording()._get_filtered_recording(recording_key)
+        return SpikeSortingRecording().load_recording(recording_key)
 
     @classmethod
     def get_sorting(cls, key):
