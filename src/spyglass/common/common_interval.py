@@ -412,13 +412,11 @@ class Interval:
 
     def __getitem__(self, item) -> T:
         """Get item from the interval list."""
-        if isinstance(item, (slice, int)):
+        if isinstance(item, (slice, int, tuple)):
             return Interval(self.times[item], **self.kwargs)
-        # elif isinstance(item, slice):
-        #     return Interval(self.times[item], **self.kwargs)
         else:
             raise ValueError(
-                f"Unrecognized item type: {type(item)}. Must be int or slice."
+                f"Unrecognized item type: {type(item)}. Must be int, slice, or tuple."
             )
 
     def __iter__(self) -> iter:
