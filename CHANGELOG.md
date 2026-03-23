@@ -110,7 +110,8 @@ for label, interval_data in results.groupby("interval_labels"):
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Allow email send on space check success, clean up maintenance logging #1381
+- Allow email send on space check success, clean up maintenance logging #1381,
+    #1544
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
@@ -176,6 +177,8 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Support ingestion of multi-epoch video files #1548
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not available #1546
     - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
@@ -190,6 +193,8 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
+    - Fix fetching position df in SortedSpikesDecodingV1.get_ahead_behind_distance()
+        #1540
 
 - LFP
 
@@ -209,6 +214,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
+    - Allow `CurationV1` to save without any spikes #1533
 
 ## [0.5.5] (Aug 6, 2025)
 
