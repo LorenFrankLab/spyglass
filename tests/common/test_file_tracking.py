@@ -44,6 +44,7 @@ def analysis_file_issues(file_tracking_module, teardown):
 @pytest.fixture(scope="module")
 def custom_analysis_with_files(custom_config, dj_conn, common_nwbfile):
     """Create custom analysis table with test files."""
+    from spyglass.common import Nwbfile  # noqa: F401
     from spyglass.utils.dj_mixin import SpyglassAnalysis
 
     prefix = custom_config
@@ -113,8 +114,8 @@ def test_check1_file_existing(
         "full_table_name": analysis_tbl.full_table_name,
         "analysis_file_name": analysis_file_name,
     }
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Check the file - should not find issues
     issue_found = analysis_file_issues.check1_file(
@@ -133,14 +134,17 @@ def test_check_files_with_valid_file(
     analysis_file_name, analysis_tbl = test_analysis_file
 
     # Clear previous entries for this table
-    if teardown:
-        (
-            analysis_file_issues
-            & {"full_table_name": analysis_tbl.full_table_name}
-        ).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (
+        analysis_file_issues & {"full_table_name": analysis_tbl.full_table_name}
+    ).delete_quick()
 
-    # Run check_files - should find no issues with valid file
-    issue_count = analysis_file_issues.check_files(analysis_tbl)
+    # Run check_files - should find no issues with the specific valid file.
+    # Restrict to this file only: the table is shared across test modules, so
+    # checking all entries would include files from other tests that may be
+    # missing (e.g. after --no-teardown reruns).
+    restricted_tbl = analysis_tbl & {"analysis_file_name": analysis_file_name}
+    issue_count = analysis_file_issues.check_files(restricted_tbl)
 
     # Valid files should return 0 issues
     assert issue_count == 0
@@ -152,15 +156,14 @@ def test_get_tbl_method_exists(analysis_file_issues):
     assert callable(analysis_file_issues.get_tbl)
 
 
-def test_show_downstream_no_issues(analysis_file_issues, caplog):
+def test_show_downstream_no_issues(analysis_file_issues):
     """Test show_downstream() with no issues."""
     # Call with restriction that matches nothing
     result = analysis_file_issues.show_downstream(
         restriction={"analysis_file_name": "definitely_nonexistent_file.nwb"}
     )
 
-    assert "No issues found" in caplog.text
-    assert not result  # Should return empty list
+    assert isinstance(result, list) and not result, "Should be an empty list"
 
 
 def test_integration_check_all_files_method_exists(common_nwbfile):
@@ -205,9 +208,8 @@ def test_check1_file_missing_from_disk(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     try:
         # Check the file - should detect it's missing
@@ -244,9 +246,8 @@ def test_check1_file_filenotfound_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Mock get_abs_path to raise FileNotFoundError
     error_msg = "File path could not be constructed"
@@ -283,9 +284,8 @@ def test_check1_file_checksum_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Mock get_abs_path to raise DataJointError (simulating checksum mismatch)
     error_msg = "Checksum mismatch for file"

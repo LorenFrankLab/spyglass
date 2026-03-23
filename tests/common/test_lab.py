@@ -108,3 +108,29 @@ def test_decompose_name_error(common_lab):
         common_lab.decompose_name("This Invalid Name")
     with pytest.raises(ValueError):
         common_lab.decompose_name("This, Invalid, Name")
+
+
+@pytest.fixture
+def add_member_without_info(common_lab):
+    common_lab.LabMember.insert1(
+        dict(
+            lab_member_name="This Noinfouser",
+            first_name="This",
+            last_name="Noinfouser",
+        ),
+        skip_duplicates=True,
+    )
+    yield
+
+
+def test_create_team_member_without_lab_member_info(
+    common_lab, add_member_without_info
+):
+    common_lab.LabTeam.create_new_team(
+        team_name="No Info Team",
+        team_members=["This Noinfouser"],
+    )
+    team_members = (
+        common_lab.LabTeam.LabTeamMember & {"team_name": "No Info Team"}
+    ).fetch("lab_member_name")
+    assert "This Noinfouser" in team_members

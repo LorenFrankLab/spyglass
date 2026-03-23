@@ -16,6 +16,10 @@ def cautious_interval(interval_list, mini_dict):
         valid_times=[[0, 1]],
         pipeline="",
     )
+    # Always clean up before inserting to handle --no-teardown reruns where
+    # test_cautious_insert_update may have changed the times to [[0, 2]]
+    pk = {k: insert[k] for k in interval_list.primary_key if k in insert}
+    (interval_list & pk).delete_quick()
     interval_list.insert1(insert, skip_duplicates=True)
     yield insert
 
@@ -80,6 +84,16 @@ def test_interval_getitem(interval_obj):
     intervals = np.array([[0, 2], [5, 6]])
     obj = interval_obj(intervals)[1:].times
     assert np.array_equal(obj, intervals[1:]), "Problem Interval.__getitem__"
+
+
+def test_interval_getitem_tuple(interval_obj):
+    # Test tuple indexing, e.g. interval[:, 0] for all start times
+    intervals = np.array([[0, 2], [5, 6]])
+    obj = interval_obj(intervals)
+    starts = obj[:, 0].times
+    assert np.array_equal(
+        starts, intervals[:, 0]
+    ), "Problem Interval.__getitem__ tuple"
 
 
 def test_interval_getitem_err(interval_obj):

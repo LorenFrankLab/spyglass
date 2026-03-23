@@ -42,6 +42,11 @@ RecordingRecompute().alter()
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()
+
+# Increase DLCProject.config_path length
+from spyglass.position.v1.position_dlc_project import DLCProject
+
+DLCProject().alter()
 ```
 
 ### Breaking Changes
@@ -105,7 +110,8 @@ for label, interval_data in results.groupby("interval_labels"):
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Allow email send on space check success, clean up maintenance logging #1381
+- Allow email send on space check success, clean up maintenance logging #1381,
+    #1544
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
@@ -137,8 +143,10 @@ for label, interval_data in results.groupby("interval_labels"):
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
 - Upgrade to pynwb>=3.1 #1506
-- Remove imports of ndx extensions in main package to prevent errors in nwb io #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io
+    #1506
 - Add `analysis_table` property to mixin for custom pipelines #1525
+- Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
 
 ### Pipelines
@@ -170,6 +178,8 @@ for label, interval_data in results.groupby("interval_labels"):
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Support ingestion of multi-epoch video files #1548
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not available #1546
 
 - Decoding
 
@@ -183,6 +193,8 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
+    - Fix fetching position df in SortedSpikesDecodingV1.get_ahead_behind_distance()
+        #1540
 
 - LFP
 
@@ -194,12 +206,15 @@ for label, interval_data in results.groupby("interval_labels"):
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+    - Increase `DLCProject.config_path` length #1534
 
 - Spikesorting
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
     - Improve get_recording efficiency #1522
+    - Raise error if `FigURLCurationSelection` finds no curation label #1531
+    - Allow `CurationV1` to save without any spikes #1533
 
 ## [0.5.5] (Aug 6, 2025)
 

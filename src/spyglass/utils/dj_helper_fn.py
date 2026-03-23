@@ -698,8 +698,8 @@ def accept_divergence(
     """
     if test_mode:
         # If get here in test mode, is because want to test failure
-        logger.warning(
-            "accept_divergence called in test mode, returning False w/o prompt"
+        logger.debug(
+            "\naccept_divergence called in testing, returning False w/o prompt"
         )
         return False
     tbl_msg = ""
