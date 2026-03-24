@@ -413,7 +413,7 @@ class Interval:
     def __len__(self) -> int:
         return len(self.times)
 
-    def __getitem__(self, item) -> T:
+    def __getitem__(self, item: Union[int, slice, tuple]) -> np.ndarray:
         """Get item from the interval list."""
         if isinstance(item, (slice, int, tuple)):
             return self.times[item]
@@ -800,7 +800,7 @@ class Interval:
         sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
         ss_cumsum = np.cumsum(ss[sort_ind])
-        if any(ss_cumsum < 0):
+        if np.any(ss_cumsum < 0):
             raise ValueError(
                 "Negative cumulative sum found in union. "
                 + "This indicates an error in the interval lists, "
