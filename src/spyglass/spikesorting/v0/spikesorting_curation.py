@@ -1459,7 +1459,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 f"Fix1513Status: metrics file not found: "
                 f"{metrics_path}; skipping {key}"
             )
-            return None
+            raise
 
         overlap = sum(1 for m in label_params if m in quality_metrics)
         if overlap <= 1:
