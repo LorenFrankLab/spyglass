@@ -70,9 +70,9 @@ inaccurate labels due to #1513. To fix these, please run the following after
 updating:
 
 ```python
-from spyglass.spikesorting.v0 import AutomaticCuration
+from spyglass.spikesorting.v0 import Fix1513Status
 
-AutomaticCuration().fix_1513()
+Fix1513Status.populate()
 ```
 
 #### Decoding Results Structure
