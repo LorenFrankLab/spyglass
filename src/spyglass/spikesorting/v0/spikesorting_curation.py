@@ -1356,22 +1356,27 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     -----
     **Recommended workflow**:
 
-    Step 1 — Fast pass: populate all out-of-scope entries as none_needed.
-    In-scope entries are silently skipped and remain for Step 2::
+    Step 1 — Admin fast pass: populate all out-of-scope entries as
+    none_needed. In-scope entries are silently skipped and remain for
+    Step 2::
 
         Fix1513Status.populate(make_kwargs={"action": "none_needed_only"})
 
-    Step 2 — Interactive review of remaining impacted entries::
+    Step 2 — Each data owner reviews their own entries. Using
+    ``pending_for_member`` restricts populate to sessions you own,
+    avoiding ``PermissionError`` on other members' curations::
 
-        Fix1513Status.populate()
+        unreviewed, _ = Fix1513Status.pending_for_member("Alice")
+        Fix1513Status.populate(unreviewed)
 
     Batch update (safe for Cases A and B; raises ValueError for Case C)::
 
-        Fix1513Status.populate(make_kwargs={"action": "update"})
+        Fix1513Status.populate(unreviewed, make_kwargs={"action": "update"})
 
-    Batch keep (record decision without changing labels)::
+    If running unrestricted and permission errors should not halt the run,
+    use DataJoint's ``suppress_errors`` flag (errors are still logged)::
 
-        Fix1513Status.populate(make_kwargs={"action": "keep"})
+        Fix1513Status.populate(suppress_errors=True)
 
     Outstanding work::
 
@@ -1381,11 +1386,8 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         Fix1513Status & "action='skip'"
         # Repopulate requested but not confirmed:
         Fix1513Status & "action='repopulate' AND repopulated=0"
-
-    Per-member review queue (unreviewed + skipped entries for one owner)::
-
-        unreviewed, skipped = Fix1513Status.pending_for_member("Alice")
-        Fix1513Status.populate(unreviewed)
+        # Per-member breakdown:
+        Fix1513Status.pending_summary()
     """
 
     definition = """
