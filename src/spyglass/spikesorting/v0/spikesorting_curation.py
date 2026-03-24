@@ -1,4 +1,6 @@
 import json
+import pynwb
+
 import os
 import shutil
 import time
@@ -1112,319 +1114,6 @@ class AutomaticCuration(SpyglassMixin, dj.Computed):
         """
         return {int(k): v for k, v in labels.items()}
 
-    def fix_15XX(self, restriction=True, dry_run=True, verbose=True):
-        """Find and repair entries affected by get_labels bugs.
-
-        PR #1281 (2025-04-22) introduced three bugs in `get_labels`:
-
-        A. **Early return**: `return parent_labels` was indented inside
-           the `for metric` loop, so only the first metric was
-           processed. Affects entries with >1 metric in label_params.
-        B. **List aliasing**: `parent_labels[unit_id] = label[2]`
-           assigned the label list without copying, so units sharing
-           a metric shared the same list object. Mutations on one
-           unit could corrupt others.
-        C. **Duplicate comparison**: `label[2] not in parent_labels`
-           compared a list against a list of strings. This always
-           evaluated True for flat lists, so `.extend()` ran
-           unconditionally, creating duplicate labels.
-
-        Bugs B and C can affect single-metric entries when
-        `parent_labels` has pre-existing entries from a prior
-        curation step.
-
-        For each impacted entry, this method:
-        1. Recomputes labels using the fixed `get_labels` logic.
-        2. Updates `Curation.curation_labels` with corrected labels.
-        3. Updates `CuratedSpikeSorting.Unit.label` on existing rows.
-
-        Steps 2-3 are wrapped in a transaction per entry to prevent
-        partial updates on interruption.
-
-        Note: if a unit's accept/reject status changed, the NWB
-        analysis file still contains the old unit set. A full
-        repopulation of `CuratedSpikeSorting` is needed in those
-        cases. Such entries are flagged in `reject_status_changed`.
-
-        Parameters
-        ----------
-        restriction : str, dict, optional
-            Restrict to a subset of AutomaticCuration entries.
-        dry_run : bool
-            If True, report affected entries without modifying the
-            database. Default True.
-        verbose : bool
-            If True, print progress and details. Default True.
-
-        Returns
-        -------
-        list of dict
-            Each dict has keys: auto_curation_key, curation_key,
-            old_labels, new_labels, changed, has_downstream,
-            reject_status_changed.
-        """
-        restr = (self & restriction) if restriction else self
-        if verbose:
-            logger.info(f"fix_15XX: scanning {len(restr)} entries")
-
-        results = []
-        for key in restr:
-            result = self._fix1_15XX(key, dry_run, verbose)
-            if result is not None:
-                results.append(result)
-
-        if verbose:
-            logger.info(
-                f"fix_15XX: {len(results)} impacted entries"
-                + (" (dry run)" if dry_run else " (applied)")
-            )
-
-        return results
-
-    def _fix1_15XX(self, key, dry_run=True, verbose=True):
-        """Detect and repair a single AutomaticCuration entry.
-
-        Returns a result dict if the entry is impacted, None otherwise.
-        See `fix_15XX` for full documentation.
-        """
-        from copy import deepcopy
-        from datetime import datetime
-
-        bug_date = datetime(2025, 4, 22).timestamp()
-
-        # --- Early return 1: empty label_params ---
-        params = (self & key) * AutomaticCurationParameters
-        label_params = params.fetch1("label_params")
-        if not label_params:
-            return None
-
-        # --- Early return 2: created before bug date ---
-        auto_curation_key = (self & key).fetch1("auto_curation_key")
-        time_created = (Curation & auto_curation_key).fetch1("time_of_creation")
-        if time_created < bug_date:
-            return None
-
-        # --- Load quality metrics ---
-        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
-        try:
-            with open(metrics_path) as f:
-                quality_metrics = json.load(f)
-        except FileNotFoundError:
-            if verbose:
-                logger.warning(
-                    f"fix_15XX: metrics file not found: "
-                    f"{metrics_path}; skipping {key}"
-                )
-            return None
-
-        # --- Recompute labels ---
-        parent_curation = (Curation & key).fetch(as_dict=True)[0]
-        parent_labels = parent_curation["curation_labels"]
-
-        new_labels = self._normalize_labels(
-            self.get_labels(
-                sorting=None,
-                parent_labels=deepcopy(parent_labels),
-                quality_metrics=quality_metrics,
-                label_params=label_params,
-            )
-        )
-        stored_labels = self._normalize_labels(
-            (Curation & auto_curation_key).fetch1("curation_labels")
-        )
-
-        if new_labels == stored_labels:
-            return None
-
-        # --- Determine downstream impact ---
-        has_downstream = (
-            len(CuratedSpikeSortingSelection & auto_curation_key) > 0
-        )
-
-        reject_changed = []
-        if has_downstream:
-            all_uids = set(stored_labels.keys()) | set(new_labels.keys())
-            for uid in all_uids:
-                old_reject = (
-                    uid in stored_labels and "reject" in stored_labels[uid]
-                )
-                new_reject = uid in new_labels and "reject" in new_labels[uid]
-                if old_reject != new_reject:
-                    reject_changed.append(
-                        {
-                            "unit": uid,
-                            "was_rejected": old_reject,
-                            "should_reject": new_reject,
-                        }
-                    )
-
-        result = {
-            "auto_curation_key": auto_curation_key,
-            "curation_key": {
-                k: auto_curation_key[k]
-                for k in Curation.primary_key
-                if k in auto_curation_key
-            },
-            "old_labels": stored_labels,
-            "new_labels": new_labels,
-            "changed": True,
-            "has_downstream": has_downstream,
-            "reject_status_changed": reject_changed,
-        }
-
-        if verbose:
-            n_diff = sum(
-                1
-                for u in set(stored_labels) | set(new_labels)
-                if stored_labels.get(u) != new_labels.get(u)
-            )
-            logger.info(
-                f"fix_15XX: {auto_curation_key} — "
-                f"{n_diff} unit(s) with label changes"
-                + (
-                    f", {len(reject_changed)} reject " f"status change(s)"
-                    if reject_changed
-                    else ""
-                )
-            )
-
-        if not dry_run:
-            # NWB edit happens before the DB transaction. If the
-            # file edit fails, DB state is unchanged and the entry
-            # can be retried. If the DB commit fails after a
-            # successful file write, the labels in the NWB are
-            # already correct and idempotent reprocessing is safe.
-            with Curation.connection.transaction:
-                Curation.update1(
-                    {
-                        **auto_curation_key,
-                        "curation_labels": new_labels,
-                    }
-                )
-                if has_downstream:
-                    self._fix_15XX_units(auto_curation_key, new_labels, verbose)
-
-        return result
-
-    @staticmethod
-    def _fix_15XX_units(curation_key, new_labels, verbose=True):
-        """Update CuratedSpikeSorting.Unit labels for a curation.
-
-        Updates the label column on existing Unit rows. Does NOT
-        add or remove rows — if accept/reject status changed, a
-        full repopulation of CuratedSpikeSorting is needed.
-
-        Parameters
-        ----------
-        curation_key : dict
-            Primary key to the Curation entry.
-        new_labels : dict
-            Corrected labels dict with int keys
-            ``{unit_id: [label, ...]}``.
-        verbose : bool
-            If True, log changes.
-        """
-        unit_rows = (CuratedSpikeSorting.Unit & curation_key).fetch(
-            as_dict=True
-        )
-        for row in unit_rows:
-            uid = int(row["unit_id"])
-            old_label = row["label"]
-            new_label = ",".join(new_labels.get(uid, []))
-            if old_label != new_label:
-                if verbose:
-                    logger.info(
-                        f"  unit {uid}: " f"'{old_label}' -> '{new_label}'"
-                    )
-                CuratedSpikeSorting.Unit.update1(
-                    {
-                        **{
-                            k: row[k]
-                            for k in CuratedSpikeSorting.Unit.primary_key
-                        },
-                        "label": new_label,
-                    }
-                )
-
-    @staticmethod
-    def _fix_15XX_nwb(curation_key, new_labels, verbose=True):
-        """Update labels in the CuratedSpikeSorting NWB analysis file.
-
-        Edits the ``label`` column in the NWB units table in place
-        and updates the external-table checksum so DataJoint's
-        filepath store stays consistent.
-
-        Does NOT add or remove unit rows. If accept/reject status
-        changed such that units need to be added, a full
-        repopulation of CuratedSpikeSorting is required.
-
-        Parameters
-        ----------
-        curation_key : dict
-            Primary key to the Curation entry (used to look up
-            the CuratedSpikeSorting analysis file).
-        new_labels : dict
-            Corrected labels dict ``{unit_id: [label, ...]}``.
-        verbose : bool
-            If True, log file path and changes.
-        """
-        import pynwb
-
-        css_row = (CuratedSpikeSorting & curation_key).fetch(as_dict=True)
-        if not css_row:
-            return
-        css_row = css_row[0]
-        analysis_file_name = css_row["analysis_file_name"]
-        abs_path = AnalysisNwbfile().get_abs_path(analysis_file_name)
-
-        if verbose:
-            logger.info(f"  NWB: editing {abs_path}")
-
-        with pynwb.NWBHDF5IO(
-            path=abs_path, mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            if nwbf.units is None or "label" not in nwbf.units:
-                if verbose:
-                    logger.info("  NWB: no units/label column; skip")
-                return
-
-            unit_ids = list(nwbf.units.id.data[:])
-            label_col = nwbf.units["label"]
-            changed = False
-
-            for idx, uid in enumerate(unit_ids):
-                new_val = ",".join(new_labels.get(int(uid), []))
-
-                old_val = label_col[idx]
-                if old_val != new_val:
-                    label_col.data[idx] = new_val
-                    changed = True
-                    if verbose:
-                        logger.info(
-                            f"  NWB unit {uid}: " f"'{old_val}' -> '{new_val}'"
-                        )
-
-            if changed:
-                io.write(nwbf)
-
-        # Update the external-table checksum to match edited file
-        if changed:
-            abs_path = Path(abs_path)
-            anwb = AnalysisNwbfile()
-            rel_path = abs_path.relative_to(anwb._analysis_dir)
-            ext_tbl = anwb._ext_tbl
-            ext_key = (ext_tbl & f"filepath = '{str(rel_path)}'").fetch1()
-            ext_key.update(
-                {
-                    "contents_hash": dj.hash.uuid_from_file(abs_path),
-                    "size": abs_path.stat().st_size,
-                }
-            )
-            ext_tbl.update1(ext_key)
-            if verbose:
-                logger.info("  NWB: checksum updated")
-
 
 @schema
 class CuratedSpikeSortingSelection(SpyglassMixin, dj.Manual):
@@ -1651,3 +1340,752 @@ class CuratedSpikeSorting(SpyglassMixin, dj.Computed):
             * SortGroup.SortGroupElectrode()
         ) * BrainRegion()
         return sort_group_info
+
+
+@schema
+class Fix1513Status(SpyglassMixin, dj.Computed):
+    """Interactive review and repair table for AutomaticCuration Bug A.
+
+    PR #1281 (2025-04-22) introduced an early-return bug (Bug A) in
+    ``AutomaticCuration.get_labels``: only the first metric in
+    ``label_params`` was processed. This table surfaces a per-unit
+    before/after comparison and lets the data owner decide the
+    appropriate action per entry.
+
+    Usage
+    -----
+    **Recommended workflow**:
+
+    Step 1 — Fast pass: populate all out-of-scope entries as none_needed.
+    In-scope entries are silently skipped and remain for Step 2::
+
+        Fix1513Status.populate(make_kwargs={"action": "none_needed_only"})
+
+    Step 2 — Interactive review of remaining impacted entries::
+
+        Fix1513Status.populate()
+
+    Batch update (safe for Cases A and B; raises ValueError for Case C)::
+
+        Fix1513Status.populate(make_kwargs={"action": "update"})
+
+    Batch keep (record decision without changing labels)::
+
+        Fix1513Status.populate(make_kwargs={"action": "keep"})
+
+    Outstanding work::
+
+        # Not yet reviewed (includes entries skipped by none_needed_only):
+        AutomaticCuration - Fix1513Status
+        # Deferred entries (explicitly skipped by user):
+        Fix1513Status & "action='skip'"
+        # Repopulate requested but not confirmed:
+        Fix1513Status & "action='repopulate' AND repopulated=0"
+
+    Per-member review queue (unreviewed + skipped entries for one owner)::
+
+        unreviewed, skipped = Fix1513Status.pending_for_member("Alice")
+        Fix1513Status.populate(unreviewed)
+    """
+
+    definition = """
+    -> AutomaticCuration
+    ---
+    action        : enum('keep','update','repopulate','skip','none_needed')
+    reviewed_by   : varchar(80)   # LabMember.lab_member_name of acting user
+    owner_member  : varchar(80)   # Session experimenter (curation owner)
+    reviewed_at   : datetime
+    repopulated=0 : tinyint       # 1 after CuratedSpikeSorting confirmed
+    notes=''      : varchar(500)
+    """
+
+    # Class-level permission cache — persists across populate() calls.
+    # Keyed by nwb_file_name; all AutomaticCuration entries sharing the
+    # same nwb_file_name belong to the same Session (and experimenter),
+    # so one lookup is sufficient.
+    _perm_pass = {}  # {nwb_file_name: owner_member} — permitted
+    _perm_fail = set()  # {nwb_file_name} — denied
+
+    # ------------------------------------------------------------------
+    # Core diff computation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_label_diff(key):
+        """Compute the label diff for a single AutomaticCuration entry.
+
+        Returns a dict describing the change, or None if the entry is
+        out of scope (no change needed / no Bug A impact).
+
+        Parameters
+        ----------
+        key : dict
+            Primary key for AutomaticCuration.
+
+        Returns
+        -------
+        dict or None
+            Keys: auto_curation_key, curation_key, old_labels,
+            new_labels, reject_status_changed.  None if entry is
+            out of scope or unchanged.
+        """
+        from copy import deepcopy
+        from datetime import datetime
+
+        bug_date = datetime(2025, 4, 22).timestamp()
+
+        # --- Early return 1: empty label_params ---
+        label_params = (
+            (AutomaticCuration & key) * AutomaticCurationParameters
+        ).fetch1("label_params")
+        if not label_params:
+            return None
+
+        # --- Early return 2: created before bug date ---
+        auto_curation_key = (AutomaticCuration & key).fetch1(
+            "auto_curation_key"
+        )
+        time_created = (Curation & auto_curation_key).fetch1("time_of_creation")
+        if time_created < bug_date:
+            return None
+
+        # --- Early return 3: ≤1 overlapping metric (Bug A scope only) ---
+        metrics_path = (QualityMetrics & key).fetch1("quality_metrics_path")
+        try:
+            with open(metrics_path) as f:
+                quality_metrics = json.load(f)
+        except FileNotFoundError:
+            logger.warning(
+                f"Fix1513Status: metrics file not found: "
+                f"{metrics_path}; skipping {key}"
+            )
+            return None
+
+        overlap = sum(1 for m in label_params if m in quality_metrics)
+        if overlap <= 1:
+            return None
+
+        # --- Recompute labels ---
+        parent_curation = (Curation & key).fetch(as_dict=True)[0]
+        parent_labels = AutomaticCuration._normalize_labels(
+            parent_curation["curation_labels"]
+        )
+        stored_labels = AutomaticCuration._normalize_labels(
+            (Curation & auto_curation_key).fetch1("curation_labels")
+        )
+
+        new_labels = AutomaticCuration._normalize_labels(
+            AutomaticCuration.get_labels(
+                sorting=None,
+                parent_labels=deepcopy(parent_labels),
+                quality_metrics=quality_metrics,
+                label_params=label_params,
+            )
+        )
+
+        if stored_labels == new_labels:
+            return None
+
+        # --- Compute reject-status changes ---
+        all_uids = set(stored_labels.keys()) | set(new_labels.keys())
+        reject_status_changed = []
+        for uid in all_uids:
+            old_reject = uid in stored_labels and "reject" in stored_labels[uid]
+            new_reject = uid in new_labels and "reject" in new_labels[uid]
+            if old_reject != new_reject:
+                reject_status_changed.append(
+                    {
+                        "unit": uid,
+                        "was_rejected": old_reject,
+                        "should_reject": new_reject,
+                    }
+                )
+
+        return {
+            "auto_curation_key": auto_curation_key,
+            "curation_key": {
+                k: auto_curation_key[k]
+                for k in Curation.primary_key
+                if k in auto_curation_key
+            },
+            "old_labels": stored_labels,
+            "new_labels": new_labels,
+            "reject_status_changed": reject_status_changed,
+        }
+
+    # ------------------------------------------------------------------
+    # Permission check
+    # ------------------------------------------------------------------
+
+    def _check_permission(self, key, user_name, is_admin):
+        """Return owner_member str. Raise PermissionError if denied.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key for AutomaticCuration (must include
+            ``nwb_file_name``).
+        user_name : str
+            LabMember name of the current user.
+        is_admin : bool
+            True if the DataJoint user is an admin.
+
+        Returns
+        -------
+        str
+            owner_member name (or ``"unknown"`` if no Session link).
+
+        Raises
+        ------
+        PermissionError
+            If the user is not on a team with the curation owner.
+        """
+        from spyglass.common import LabMember, LabTeam
+
+        nwb_file = key["nwb_file_name"]
+        if nwb_file in self._perm_pass:
+            return self._perm_pass[nwb_file]
+        if nwb_file in self._perm_fail:
+            raise PermissionError(
+                f"Permission denied for nwb_file_name='{nwb_file}' "
+                f"(cached). User '{user_name}' is not on a team with "
+                f"the curation owner."
+            )
+
+        # Cache miss — run full chain
+        exp_summary = (self & key)._get_exp_summary()
+        owners = exp_summary.fetch(self._member_pk) if exp_summary else []
+        owner_member = owners[0] if owners else "unknown"
+
+        if is_admin or owner_member == "unknown":
+            if owner_member == "unknown":
+                logger.warning(
+                    f"Fix1513Status: no Session link found for "
+                    f"{key}; proceeding without permission check."
+                )
+            self._perm_pass[nwb_file] = owner_member
+            return owner_member
+
+        permitted = any(
+            user_name in LabTeam().get_team_members(o, reload=True)
+            for o in set(owners)
+        )
+        if permitted:
+            self._perm_pass[nwb_file] = owner_member
+            return owner_member
+
+        self._perm_fail.add(nwb_file)
+        raise PermissionError(
+            f"User '{user_name}' is not on a team with curation "
+            f"owner(s) {set(owners)} for nwb_file_name='{nwb_file}'."
+        )
+
+    # ------------------------------------------------------------------
+    # Repair helpers (migrated from AutomaticCuration)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _repair_unit_labels(curation_key, new_labels, verbose=True):
+        """Update CuratedSpikeSorting.Unit labels for a curation.
+
+        Updates the label column on existing Unit rows. Does NOT
+        add or remove rows — if accept/reject status changed, a
+        full repopulation of CuratedSpikeSorting is needed.
+
+        Parameters
+        ----------
+        curation_key : dict
+            Primary key to the Curation entry.
+        new_labels : dict
+            Corrected labels dict with int keys
+            ``{unit_id: [label, ...]}``.
+        verbose : bool
+            If True, log changes.
+        """
+        unit_rows = (CuratedSpikeSorting.Unit & curation_key).fetch(
+            as_dict=True
+        )
+        for row in unit_rows:
+            uid = int(row["unit_id"])
+            old_label = row["label"]
+            new_label = ",".join(new_labels.get(uid, []))
+            if old_label != new_label:
+                if verbose:
+                    logger.info(f"  unit {uid}: '{old_label}' -> '{new_label}'")
+                CuratedSpikeSorting.Unit.update1(
+                    {
+                        **{
+                            k: row[k]
+                            for k in CuratedSpikeSorting.Unit.primary_key
+                        },
+                        "label": new_label,
+                    }
+                )
+
+    @staticmethod
+    def _repair_nwb_labels(curation_key, new_labels, verbose=True):
+        """Update labels in all CuratedSpikeSorting NWB analysis files.
+
+        Does NOT add or remove unit rows. If accept/reject status
+        changed such that units need to be added, a full
+        repopulation of CuratedSpikeSorting is required.
+
+        Parameters
+        ----------
+        curation_key : dict
+            Primary key to the Curation entry.
+        new_labels : dict
+            Corrected labels dict ``{unit_id: [label, ...]}``.
+        verbose : bool
+            If True, log file path and changes.
+        """
+        css_rows = (CuratedSpikeSorting & curation_key).fetch(as_dict=True)
+        for css_row in css_rows:
+            abs_path = AnalysisNwbfile().get_abs_path(
+                css_row["analysis_file_name"]
+            )
+            Fix1513Status._patch_nwb_file(abs_path, new_labels, verbose)
+
+    @staticmethod
+    def _patch_nwb_file(abs_path, new_labels, verbose):
+        """Edit the label column in one NWB file and update its checksum.
+
+        Parameters
+        ----------
+        abs_path : str or Path
+            Absolute path to the NWB analysis file.
+        new_labels : dict
+            Corrected labels dict ``{unit_id: [label, ...]}``.
+        verbose : bool
+            If True, log changes.
+        """
+        if verbose:
+            logger.info(f"  NWB: editing {abs_path}")
+
+        with pynwb.NWBHDF5IO(
+            path=abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            if nwbf.units is None or "label" not in nwbf.units:
+                if verbose:
+                    logger.info("  NWB: no units/label column; skip")
+                return
+
+            unit_ids = list(nwbf.units.id.data[:])
+            label_col = nwbf.units["label"]
+            changed = False
+
+            for idx, uid in enumerate(unit_ids):
+                new_val = ",".join(new_labels.get(int(uid), []))
+                old_val = label_col[idx]
+                if old_val != new_val:
+                    label_col.data[idx] = new_val
+                    changed = True
+                    if verbose:
+                        logger.info(
+                            f"  NWB unit {uid}: '{old_val}' -> '{new_val}'"
+                        )
+
+            if changed:
+                io.write(nwbf)
+
+        if not changed:
+            return
+
+        # Update the external-table checksum to match the edited file
+        abs_path = Path(abs_path)
+        anwb = AnalysisNwbfile()
+        rel_path = abs_path.relative_to(anwb._analysis_dir)
+        ext_tbl = anwb._ext_tbl
+        ext_key = (ext_tbl & f"filepath = '{str(rel_path)}'").fetch1()
+        ext_key.update(
+            {
+                "contents_hash": dj.hash.uuid_from_file(abs_path),
+                "size": abs_path.stat().st_size,
+            }
+        )
+        ext_tbl.update1(ext_key)
+        if verbose:
+            logger.info("  NWB: checksum updated")
+
+    # ------------------------------------------------------------------
+    # Display helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _print_diff(diff, owner_member):
+        """Print a per-unit before/after label comparison table.
+
+        Parameters
+        ----------
+        diff : dict
+            Return value of ``_compute_label_diff``.
+        owner_member : str
+            Lab member name of the curation owner.
+        """
+        ack = diff["auto_curation_key"]
+        sorting_id = ack.get("sorting_id", ack.get("sort_group_id", str(ack)))
+        curation_id = ack.get("curation_id", "?")
+
+        old_labels = diff["old_labels"]
+        new_labels = diff["new_labels"]
+        reject_changed_units = {
+            r["unit"] for r in diff["reject_status_changed"]
+        }
+
+        changed_units = sorted(
+            u
+            for u in set(old_labels) | set(new_labels)
+            if old_labels.get(u) != new_labels.get(u)
+        )
+
+        print(
+            f"\nEntry: {sorting_id} / curation_id={curation_id}"
+            f"  owner: {owner_member}"
+        )
+        print(f"Units with label changes: {len(changed_units)}\n")
+
+        col_w = 23
+        hdr = (
+            f"  {'unit':>4}  {'stored_labels':<{col_w}}"
+            f"  {'expected_labels':<{col_w}}  reject_changed"
+        )
+        sep = f"  {'----':>4}  {'-' * col_w}  {'-' * col_w}  {'-' * 14}"
+        print(hdr)
+        print(sep)
+
+        for uid in changed_units:
+            old_str = str(old_labels.get(uid, []))
+            new_str = str(new_labels.get(uid, []))
+            if uid in reject_changed_units:
+                rc = diff["reject_status_changed"]
+                entry = next(r for r in rc if r["unit"] == uid)
+                if entry["should_reject"]:
+                    rc_str = "YES -> rejected"
+                else:
+                    rc_str = "YES -> accepted"
+            else:
+                rc_str = ""
+            print(
+                f"  {uid:>4}  {old_str:<{col_w}}"
+                f"  {new_str:<{col_w}}  {rc_str}"
+            )
+
+    @staticmethod
+    def _get_case(reject_status_changed):
+        """Classify the reject-status change to determine safe actions.
+
+        Parameters
+        ----------
+        reject_status_changed : list of dict
+            ``{unit, was_rejected, should_reject}`` entries from diff.
+
+        Returns
+        -------
+        str
+            ``'A'`` — no reject-status change.
+            ``'B'`` — only newly-rejected units (update safe + NWB fix).
+            ``'C'`` — any newly-accepted units (must repopulate).
+        """
+        if not reject_status_changed:
+            return "A"
+        if any(not r["should_reject"] for r in reject_status_changed):
+            return "C"
+        return "B"
+
+    @staticmethod
+    def _prompt_action(case):
+        """Interactively prompt the user for the repair action.
+
+        Parameters
+        ----------
+        case : str
+            One of ``'A'``, ``'B'``, ``'C'`` from ``_get_case``.
+
+        Returns
+        -------
+        str
+            One of ``'keep'``, ``'update'``, ``'repopulate'``,
+            ``'skip'``.
+        """
+        if case == "C":
+            warning = (
+                "WARNING: Some units that should now be accepted are "
+                "absent from the NWB file. 'update' is not available; "
+                "use 'repopulate' to rebuild from scratch."
+            )
+            print(warning)
+            prompt = "(k)eep  (r)epopulate  (s)kip  [k/r/s]: "
+            valid = {"k": "keep", "r": "repopulate", "s": "skip"}
+        elif case == "B":
+            prompt = (
+                "(k)eep  (u)pdate [incl. NWB]  (r)epopulate  (s)kip"
+                "  [k/u/r/s]: "
+            )
+            valid = {
+                "k": "keep",
+                "u": "update",
+                "r": "repopulate",
+                "s": "skip",
+            }
+        else:  # case A
+            prompt = "(k)eep  (u)pdate  (s)kip  [k/u/s]: "
+            valid = {"k": "keep", "u": "update", "s": "skip"}
+
+        while True:
+            choice = input(prompt).strip().lower()
+            if choice in valid:
+                return valid[choice]
+            print(
+                f"Invalid choice '{choice}'. "
+                f"Please enter one of: {list(valid.keys())}"
+            )
+
+    # ------------------------------------------------------------------
+    # Pending entries queries
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def pending_summary(cls):
+        """Print and return pending entry counts grouped by lab member.
+
+        Aggregates unreviewed and skipped entries across all lab members
+        so a PI or admin can see the full repair workload at a glance.
+
+        Returns
+        -------
+        dict[str, dict]
+            ``{lab_member_name: {"unreviewed": int, "skipped": int}}``
+
+        Examples
+        --------
+        ::
+
+            Fix1513Status.pending_summary()
+            # lab_member_name    unreviewed    skipped
+            # -----------------  ------------  -------
+            # Alice              5             2
+            # Bob                3             0
+        """
+        from spyglass.common import Session
+
+        unreviewed_all = (AutomaticCuration * Session.Experimenter) - cls()
+        unreviewed_counts = (
+            dj.U("lab_member_name")
+            .aggr(unreviewed_all, unreviewed="count(*)")
+            .fetch(as_dict=True)
+        )
+
+        skipped_all = cls() & "action='skip'"
+        skipped_counts = (
+            dj.U("owner_member")
+            .aggr(skipped_all, skipped="count(*)")
+            .fetch(as_dict=True)
+        )
+
+        # Merge into a single dict keyed by member name
+        summary = {}
+        for row in unreviewed_counts:
+            summary[row["lab_member_name"]] = {
+                "unreviewed": row["unreviewed"],
+                "skipped": 0,
+            }
+        for row in skipped_counts:
+            member = row["owner_member"]
+            if member not in summary:
+                summary[member] = {"unreviewed": 0, "skipped": 0}
+            summary[member]["skipped"] = row["skipped"]
+
+        # Print aligned table
+        if not summary:
+            print("No pending entries.")
+            return summary
+
+        col_w = max(len(m) for m in summary) + 2
+        header = f"  {'lab_member_name':<{col_w}}  unreviewed  skipped"
+        print(header)
+        print(f"  {'-' * col_w}  ----------  -------")
+        for member, counts in sorted(summary.items()):
+            print(
+                f"  {member:<{col_w}}  "
+                f"{counts['unreviewed']:<10}  "
+                f"{counts['skipped']}"
+            )
+
+        return summary
+
+    @classmethod
+    def pending_for_member(cls, lab_member_name):
+        """Return unreviewed and skipped Fix1513Status entries for a member.
+
+        Useful for lab members to see what curation entries they own that
+        still need a repair decision.
+
+        Parameters
+        ----------
+        lab_member_name : str
+            ``LabMember.lab_member_name`` to filter by (e.g. ``"Alice"``)
+
+        Returns
+        -------
+        tuple[dj.expression.QueryExpression, dj.expression.QueryExpression]
+            ``(unreviewed, skipped)``
+
+            ``unreviewed`` — ``AutomaticCuration`` entries not yet in
+            ``Fix1513Status`` that belong to sessions owned by the member.
+            These have never been processed (or were left unpopulated by a
+            ``none_needed_only`` pass because they are in-scope).
+
+            ``skipped`` — ``Fix1513Status`` entries with ``action='skip'``
+            where the member is the curation owner.  These need revisiting.
+
+        Examples
+        --------
+        ::
+
+            unreviewed, skipped = Fix1513Status.pending_for_member("Alice")
+            print(f"Unreviewed: {len(unreviewed)}, Skipped: {len(skipped)}")
+            # Populate only Alice's unreviewed entries interactively:
+            Fix1513Status.populate(unreviewed)
+        """
+        from spyglass.common import Session
+
+        member_filter = {"lab_member_name": lab_member_name}
+
+        # AutomaticCuration entries owned by member and not yet reviewed.
+        # The natural join on nwb_file_name connects AutomaticCuration to
+        # Session.Experimenter through the primary-key chain.
+        unreviewed = (
+            AutomaticCuration * Session.Experimenter & member_filter
+        ) - cls()
+
+        # Fix1513Status entries the member deferred with action='skip'.
+        skipped = cls() & {"action": "skip", "owner_member": lab_member_name}
+
+        n_unreviewed = len(unreviewed)
+        n_skipped = len(skipped)
+        print(
+            f"Pending for '{lab_member_name}': "
+            f"{n_unreviewed} unreviewed, {n_skipped} skipped"
+        )
+        if n_unreviewed:
+            print(
+                "  Run Fix1513Status.populate(unreviewed) "
+                "to process interactively."
+            )
+        if n_skipped:
+            print(
+                "  Re-open skipped entries by deleting their rows "
+                "then re-populating:\n"
+                "    skipped.delete()\n"
+                "    Fix1513Status.populate(unreviewed)"
+            )
+
+        return unreviewed, skipped
+
+    # ------------------------------------------------------------------
+    # make
+    # ------------------------------------------------------------------
+
+    def make(self, key, action="report"):
+        """Review and optionally repair one AutomaticCuration entry.
+
+        Called by ``Fix1513Status.populate()``.  Pass ``action`` via
+        ``make_kwargs`` to batch-process without interactive prompts.
+
+        Parameters
+        ----------
+        key : dict
+            AutomaticCuration primary key supplied by DataJoint.
+        action : str
+            ``'report'`` (default) — compute diff and prompt.
+            ``'none_needed_only'`` — insert ``none_needed`` for
+              out-of-scope entries; silently pass in-scope entries
+              so they remain unpopulated for a later interactive run.
+              Useful for a fast first pass to clear trivial entries.
+            ``'update'`` — apply label fix (raises ValueError for
+              Case C entries where spike data is missing from NWB).
+            ``'repopulate'`` — delete + repopulate CuratedSpikeSorting.
+            ``'keep'`` — record decision, no label changes.
+            ``'skip'`` — defer; row inserted with action='skip'.
+        """
+        from copy import deepcopy  # noqa: F401 (used via get_labels)
+        from datetime import datetime
+
+        from spyglass.common import LabMember
+
+        # --- Steps 1–3: cheap scope + diff check (no permission needed)
+        diff = self._compute_label_diff(key)
+        if diff is None:
+            self.insert1(
+                {
+                    **key,
+                    "action": "none_needed",
+                    "reviewed_by": "system",
+                    "owner_member": "n/a",
+                    "reviewed_at": datetime.now(),
+                }
+            )
+            return
+
+        # --- none_needed_only fast path: skip in-scope entries ---
+        # Key remains unpopulated; populate() will retry on the next call.
+        if action == "none_needed_only":
+            return
+
+        # --- Step 4: permission check ---
+        dj_user = dj.config["database.user"]
+        user_name = LabMember().get_djuser_name(dj_user)
+        is_admin = dj_user in LabMember().admin
+        owner_member = self._check_permission(key, user_name, is_admin)
+
+        # --- Step 5: display diff ---
+        self._print_diff(diff, owner_member)
+        case = self._get_case(diff["reject_status_changed"])
+
+        # --- Step 6: determine action ---
+        if action == "report":
+            action = self._prompt_action(case)
+        elif action == "update" and case == "C":
+            raise ValueError(
+                "action='update' is not safe for this entry: some units "
+                "that should now be accepted are absent from the NWB file "
+                "(spike data was never written). Use action='repopulate'."
+            )
+
+        # --- Step 7: execute ---
+        auto_curation_key = diff["auto_curation_key"]
+        new_labels = diff["new_labels"]
+        # Use computed table (not Selection) to detect existing downstream rows
+        has_downstream = len(CuratedSpikeSorting & auto_curation_key) > 0
+        repopulated = 0
+
+        if action == "update":
+            with Curation.connection.transaction:
+                Curation.update1(
+                    {**auto_curation_key, "curation_labels": new_labels}
+                )
+                if has_downstream:
+                    self._repair_unit_labels(auto_curation_key, new_labels)
+                    if case == "B":
+                        self._repair_nwb_labels(auto_curation_key, new_labels)
+        elif action == "repopulate":
+            with Curation.connection.transaction:
+                Curation.update1(
+                    {**auto_curation_key, "curation_labels": new_labels}
+                )
+            if has_downstream:
+                (CuratedSpikeSorting & auto_curation_key).delete()
+            CuratedSpikeSorting.populate(auto_curation_key)
+            repopulated = 1
+
+        self.insert1(
+            {
+                **key,
+                "action": action,
+                "reviewed_by": user_name,
+                "owner_member": owner_member,
+                "reviewed_at": datetime.now(),
+                "repopulated": repopulated,
+            }
+        )
