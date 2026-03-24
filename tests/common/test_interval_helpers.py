@@ -54,9 +54,14 @@ def interval_obj(common):
     yield common.common_interval.Interval
 
 
-def test_invalid_interval(interval_obj):
+def test_invalid_interval_order(interval_obj):
     with pytest.raises(ValueError):
         interval_obj(np.array([[1, 0]]))  # End time before start time
+
+
+def test_invalid_interval_shape(interval_obj):
+    with pytest.raises(ValueError):
+        interval_obj(np.array([[0, 1, 2]]))  # Invalid shape for intervals
 
 
 def test_interval_no_duplicates(interval_obj):

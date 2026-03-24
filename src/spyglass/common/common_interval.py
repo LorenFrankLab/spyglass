@@ -497,6 +497,10 @@ class Interval:
             raise ValueError(
                 "All intervals must be in the form [start, stop] with start <= stop."
             )
+        if len(times) and times.shape[1] != 2:
+            raise ValueError(
+                f"Intervals must have shape (N, 2). Got shape {times.shape}."
+            )
 
         return np.asarray(times)
 
@@ -790,6 +794,8 @@ class Interval:
         # Concatenate the two lists so we can resort the intervals and apply the
         # same sorting to the start-end arrays
         combined_intervals = np.concatenate((il1, il2))
+        if len(combined_intervals) == 0:
+            return Interval(np.array([]), **self.kwargs)
         ss = np.concatenate((il1_start_end, il2_start_end))
         sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
