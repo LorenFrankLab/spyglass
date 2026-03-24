@@ -416,7 +416,7 @@ class Interval:
     def __getitem__(self, item) -> T:
         """Get item from the interval list."""
         if isinstance(item, (slice, int, tuple)):
-            return Interval(self.times[item], **self.kwargs)
+            return self.times[item]
         else:
             raise ValueError(
                 f"Unrecognized item type: {type(item)}. Must be int, slice, or tuple."
@@ -470,47 +470,35 @@ class Interval:
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
-        """Extract interval_list from a given object and validate."""
-        extracted = self._extract_only(interval_list, from_inds=from_inds)
-        self._validate_intervals(extracted, from_inds=from_inds)
-        return extracted
+        times = None
 
-    def _extract_only(
-        self, interval_list: IntervalLike, from_inds: bool = False
-    ) -> np.ndarray:
-        """Extract interval_list from a given object."""
+        # extract times from interval_list based on type
         if from_inds:
-            return self.from_inds(interval_list)
+            times = self.from_inds(interval_list)
         elif hasattr(interval_list, "times"):
-            return interval_list.times
+            times = interval_list.times
         elif isinstance(interval_list, dict):
-            return self._import_from_table(interval_list)
+            times = self._import_from_table(interval_list)
         elif isinstance(
             interval_list, (np.generic, np.ndarray, list, int, float, tuple)
         ):
-            return interval_list
+            times = interval_list
         elif interval_list is None:
             return np.array([])
-        else:
+
+        # validate times format
+        if times is None:
             raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
 
-    def _validate_intervals(
-        self, interval_list: IntervalLike, from_inds: bool = False
-    ):
-        """Validate that intervals are in the form [start, stop] with start <= stop."""
-        if not isinstance(interval_list, (np.ndarray, list)):
-            times = self._extract_only(interval_list, from_inds=from_inds)
-        else:
-            times = interval_list
-        if not len(times):
-            return
-        if np.all(np.diff(times, axis=1) >= 0):
-            return
-        raise ValueError(
-            "All intervals must be in the form [start, stop] with start <= stop."
-        )
+        times = self._expand_1d(np.asarray(times))
+        if len(times) and not np.all(np.diff(times, axis=1) >= 0):
+            raise ValueError(
+                "All intervals must be in the form [start, stop] with start <= stop."
+            )
+
+        return np.asarray(times)
 
     @staticmethod
     def from_inds(list_frames) -> List[List[int]]:
@@ -614,7 +602,7 @@ class Interval:
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
         """Expand a 1D interval list to 2D."""
-        if interval_list.ndim == 1:
+        if interval_list.ndim == 1 and interval_list.size > 0:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
@@ -816,17 +804,11 @@ class Interval:
 
         # a switch of cumulative sum from 0 to 1 indicates the beginning of a
         # joint interval; a cumulative sum of 0 indicates the end
-        union_starts = np.ravel(
-            np.array(
-                np.where(
-                    np.logical_and(
-                        ss_cumsum[1:] == 1,
-                        ss_cumsum[:-1] == 0,
-                    )
-                )[0]
-                + 1
-            )
+        cumsum_flip = np.logical_and(
+            ss_cumsum[1:] == 1,
+            ss_cumsum[:-1] == 0,
         )
+        union_starts = np.ravel(np.array(np.where(cumsum_flip)[0] + 1))
         union_starts = (
             np.insert(union_starts, 0, 0)
             if ss[sort_ind][0] == 1

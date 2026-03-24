@@ -54,6 +54,11 @@ def interval_obj(common):
     yield common.common_interval.Interval
 
 
+def test_invalid_interval(interval_obj):
+    with pytest.raises(ValueError):
+        interval_obj(np.array([[1, 0]]))  # End time before start time
+
+
 def test_interval_no_duplicates(interval_obj):
     # Test with a list of intervals
     intervals = np.array([[0, 1], [0, 1], [3, 4]])
@@ -82,7 +87,7 @@ def test_interval_repr(interval_obj):
 def test_interval_getitem(interval_obj):
     # Test with a list of intervals
     intervals = np.array([[0, 2], [5, 6]])
-    obj = interval_obj(intervals)[1:].times
+    obj = interval_obj(intervals)[1:]
     assert np.array_equal(obj, intervals[1:]), "Problem Interval.__getitem__"
 
 
@@ -90,7 +95,7 @@ def test_interval_getitem_tuple(interval_obj):
     # Test tuple indexing, e.g. interval[:, 0] for all start times
     intervals = np.array([[0, 2], [5, 6]])
     obj = interval_obj(intervals)
-    starts = obj[:, 0].times
+    starts = obj[:, 0]
     assert np.array_equal(
         starts, intervals[:, 0]
     ), "Problem Interval.__getitem__ tuple"
