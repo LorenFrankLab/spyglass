@@ -450,9 +450,7 @@ class TestFix1513Status:
 
         with (
             patch.object(table, "_get_exp_summary") as mock_exp,
-            patch(
-                "spyglass.spikesorting.v0.spikesorting_curation.LabTeam"
-            ) as mock_lt,
+            patch("spyglass.common.LabTeam") as mock_lt,
         ):
             mock_exp.return_value = MagicMock(
                 fetch=MagicMock(return_value=["alice"])
@@ -505,9 +503,7 @@ class TestFix1513Status:
 
         with (
             patch.object(table, "_get_exp_summary") as mock_exp,
-            patch(
-                "spyglass.spikesorting.v0.spikesorting_curation.LabTeam"
-            ) as mock_lt,
+            patch("spyglass.common.LabTeam") as mock_lt,
         ):
             mock_exp.return_value = MagicMock(
                 fetch=MagicMock(return_value=["alice"])
@@ -525,9 +521,7 @@ class TestFix1513Status:
 
         with (
             patch.object(table, "_get_exp_summary") as mock_exp,
-            patch(
-                "spyglass.spikesorting.v0.spikesorting_curation.LabTeam"
-            ) as mock_lt,
+            patch("spyglass.common.LabTeam") as mock_lt,
         ):
             mock_exp.return_value = MagicMock(
                 fetch=MagicMock(return_value=["alice"])
@@ -615,7 +609,7 @@ class TestFix1513Status:
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1"),
             patch(f"{module}.Curation") as mock_curation,
-            patch(f"{module}.CuratedSpikeSortingSelection") as mock_css_sel,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -626,7 +620,7 @@ class TestFix1513Status:
             mock_curation.connection.transaction.__exit__ = MagicMock(
                 return_value=False
             )
-            mock_css_sel.__and__ = MagicMock(
+            mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=1))
             )
 
@@ -840,7 +834,7 @@ class TestFix1513Status:
 
         with (
             patch(f"{module}.AutomaticCuration") as mock_ac,
-            patch(f"{module}.Session") as mock_session,
+            patch("spyglass.common.Session") as mock_session,
             patch.object(
                 type(table),
                 "__sub__",
@@ -876,7 +870,7 @@ class TestFix1513Status:
 
         with (
             patch(f"{module}.AutomaticCuration"),
-            patch(f"{module}.Session"),
+            patch("spyglass.common.Session"),
             patch("builtins.print") as mock_print,
             patch.object(
                 type(table),
