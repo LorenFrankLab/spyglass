@@ -868,21 +868,28 @@ class TestFix1513Status:
         skipped_mock = MagicMock()
         skipped_mock.__len__ = MagicMock(return_value=1)
 
+        # Build the mock chain for the unreviewed query:
+        # (AutomaticCuration * Session.Experimenter & member_filter) - cls()
+        # The __sub__ is on the DataJoint join result, not on Fix1513Status,
+        # so we configure the AutomaticCuration mock chain explicitly.
+        filtered_mock = MagicMock()
+        filtered_mock.__sub__ = MagicMock(return_value=unreviewed_mock)
+        joined_mock = MagicMock()
+        joined_mock.__and__ = MagicMock(return_value=filtered_mock)
+
         with (
-            patch(f"{module}.AutomaticCuration"),
-            patch("spyglass.common.Session"),
+            patch(f"{module}.AutomaticCuration") as mock_ac,
+            patch("spyglass.common.Session") as mock_session,
             patch("builtins.print") as mock_print,
-            patch.object(
-                type(table),
-                "__sub__",
-                return_value=unreviewed_mock,
-            ),
             patch.object(
                 type(table),
                 "__and__",
                 return_value=skipped_mock,
             ),
         ):
+            mock_ac.__mul__ = MagicMock(return_value=joined_mock)
+            mock_session.Experimenter = MagicMock()
+
             from spyglass.spikesorting.v0.spikesorting_curation import (
                 Fix1513Status,
             )
