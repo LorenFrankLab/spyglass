@@ -1404,7 +1404,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     # Class-level permission cache — persists across populate() calls.
     # Keyed by nwb_file_name; all AutomaticCuration entries sharing the
     # same nwb_file_name belong to the same Session (and experimenter),
-    # so one lookup is sufficient.
+    # so one lookup is sufficient per Python session (one user per session).
     _perm_pass = {}  # {nwb_file_name: owner_member} — permitted
     _perm_fail = set()  # {nwb_file_name} — denied
 
@@ -2011,7 +2011,6 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             ``'keep'`` — record decision, no label changes.
             ``'skip'`` — defer; row inserted with action='skip'.
         """
-        from copy import deepcopy  # noqa: F401 (used via get_labels)
         from datetime import datetime
 
         from spyglass.common import LabMember

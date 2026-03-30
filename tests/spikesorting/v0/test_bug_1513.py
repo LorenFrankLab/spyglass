@@ -58,7 +58,7 @@ class TestGetLabelsMultiMetric:
         assert "noise" not in result.get(1, [])
 
     def test_no_match_no_label(self, get_labels):
-        """Unit matching neither metric gets no labels."""
+        """Unit matching only the first metric gets those labels, not mua."""
         result = get_labels({}, self.quality_metrics, self.two_metric_params)
         # unit 2: nn_noise_overlap 0.3 > 0.1 -> noise,reject
         #         isi_violation    0.1 <= 0.5 -> no label
@@ -353,13 +353,8 @@ class TestFix1513Status:
             patch(
                 "spyglass.spikesorting.v0.spikesorting_curation"
                 ".AutomaticCuration"
-            ) as mock_ac,
+            ),
         ):
-            mock_ac.return_value.__and__ = lambda s, k: mock_ac
-            mock_ac.__and__ = lambda s, k: mock_ac
-            mock_ac.return_value
-            (mock_ac & key).__mul__ = lambda s, o: s
-            (mock_ac & key).fetch1 = lambda f: {}
             # Simplest path: patch _compute_label_diff directly to test
             # that make() inserts none_needed when it returns None
             with (
@@ -564,7 +559,7 @@ class TestFix1513Status:
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1"),
             patch(f"{module}.Curation") as mock_curation,
-            patch(f"{module}.CuratedSpikeSortingSelection") as mock_css_sel,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -575,7 +570,7 @@ class TestFix1513Status:
             mock_curation.connection.transaction.__exit__ = MagicMock(
                 return_value=False
             )
-            mock_css_sel.__and__ = MagicMock(
+            mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=1))
             )
 
@@ -695,6 +690,7 @@ class TestFix1513Status:
             patch.object(table, "_print_diff"),
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting"),
             patch(f"{module}.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -729,6 +725,7 @@ class TestFix1513Status:
             patch.object(table, "_print_diff"),
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting"),
             patch(f"{module}.LabMember") as mock_lm,
         ):
             mock_lm.return_value.get_djuser_name.return_value = "alice"
@@ -764,7 +761,7 @@ class TestFix1513Status:
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1") as mock_ins,
             patch(f"{module}.Curation") as mock_curation,
-            patch(f"{module}.CuratedSpikeSortingSelection") as mock_css_sel,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
             patch("builtins.input", return_value="u"),
         ):
@@ -776,7 +773,7 @@ class TestFix1513Status:
             mock_curation.connection.transaction.__exit__ = MagicMock(
                 return_value=False
             )
-            mock_css_sel.__and__ = MagicMock(
+            mock_css.__and__ = MagicMock(
                 return_value=MagicMock(__len__=MagicMock(return_value=0))
             )
 
