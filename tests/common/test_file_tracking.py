@@ -79,11 +79,17 @@ def test_analysis_file(mini_copy_name, custom_analysis_with_files, teardown):
     """Create a test analysis file."""
     analysis_tbl, _ = custom_analysis_with_files
     analysis_file_name = analysis_tbl.create(mini_copy_name)
+    # create() only writes to disk; add() registers it in the main table so
+    # check_files() can find it via fetch("analysis_file_name").
+    analysis_tbl.add(mini_copy_name, analysis_file_name)
 
     yield analysis_file_name, analysis_tbl
 
     # Cleanup
     if teardown:
+        (
+            analysis_tbl & {"analysis_file_name": analysis_file_name}
+        ).delete_quick()
         file_path = analysis_tbl.get_abs_path(analysis_file_name)
         if Path(file_path).exists():
             Path(file_path).unlink()
