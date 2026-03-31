@@ -593,12 +593,15 @@ def test_check_files_checksum_mismatch(
     wrong_hash = uuid.uuid4()
     restricted = analysis_tbl & {"analysis_file_name": analysis_file_name}
 
+    abs_path = analysis_tbl.get_abs_path(analysis_file_name)
     with patch.object(
         type(analysis_file_issues),
         "_batch_resolve_paths",
-        return_value=(
-            {analysis_file_name: analysis_tbl.get_abs_path(analysis_file_name)},
-            {analysis_file_name: wrong_hash},
+        new=staticmethod(
+            lambda *a: (
+                {analysis_file_name: abs_path},
+                {analysis_file_name: wrong_hash},
+            )
         ),
     ):
         count = analysis_file_issues.check_files(restricted)
