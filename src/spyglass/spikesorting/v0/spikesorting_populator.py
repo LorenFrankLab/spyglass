@@ -32,8 +32,9 @@ from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSortingSelection,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_sorting")
+schema = SpyglassSchema("spikesorting_sorting")
 
 
 @schema

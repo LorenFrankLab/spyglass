@@ -1,8 +1,9 @@
 import datajoint as dj
 
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_region")
+schema = SpyglassSchema("common_region")
 
 
 @schema

@@ -14,6 +14,8 @@ import h5py
 import numpy as np
 from datajoint.table import Table
 from datajoint.user_tables import TableMeta, UserTable
+
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.logging import logger
 from spyglass.utils.nwb_helper_fn import file_from_dandi, get_nwb_file
 
@@ -741,7 +743,7 @@ def _replace_nan_with_default(data_dict, default_value=-1.0):
 
 
 # Log table for errors encountered during file edits
-schema = dj.schema("common_export_error_log")
+schema = SpyglassSchema("common_export_error_log")
 
 
 @schema

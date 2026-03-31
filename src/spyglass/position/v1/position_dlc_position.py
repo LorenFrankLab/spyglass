@@ -19,8 +19,9 @@ from spyglass.position.v1.dlc_utils import (
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_v1_dlc_position")
+schema = SpyglassSchema("position_v1_dlc_position")
 
 
 @schema

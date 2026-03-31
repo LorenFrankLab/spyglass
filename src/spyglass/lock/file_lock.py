@@ -3,8 +3,9 @@ import os
 import datajoint as dj
 
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("file_lock")
+schema = SpyglassSchema("file_lock")
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile, Nwbfile
 

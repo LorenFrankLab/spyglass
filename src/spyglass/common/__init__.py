@@ -29,6 +29,7 @@ from spyglass.common.common_ephys import (
     Raw,
     SampleCount,
 )
+from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.common.common_interval import (
     IntervalList,
@@ -44,10 +45,9 @@ from spyglass.common.common_interval import (
 from spyglass.common.common_lab import Institution, Lab, LabMember, LabTeam
 from spyglass.common.common_nwbfile import (
     AnalysisNwbfile,
-    Nwbfile,
     AnalysisRegistry,
+    Nwbfile,
 )
-from spyglass.common.common_file_tracking import AnalysisFileIssues
 from spyglass.common.common_optogenetics import (
     OpticalFiberDevice,
     OpticalFiberImplant,

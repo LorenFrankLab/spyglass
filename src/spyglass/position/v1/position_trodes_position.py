@@ -15,9 +15,10 @@ from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.position import fill_nan
 
-schema = dj.schema("position_v1_trodes_position")
+schema = SpyglassSchema("position_v1_trodes_position")
 
 
 @schema

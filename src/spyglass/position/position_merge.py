@@ -8,8 +8,9 @@ from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.position.v1.position_dlc_selection import DLCPosV1
 from spyglass.position.v1.position_trodes_position import TrodesPosV1
 from spyglass.utils import SpyglassMixin, _Merge
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_merge")
+schema = SpyglassSchema("position_merge")
 
 source_class_dict = {
     "IntervalPositionInfo": CommonPos,

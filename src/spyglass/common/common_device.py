@@ -14,8 +14,9 @@ from spyglass.common.errors import PopulateException
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import accept_divergence
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_device")
+schema = SpyglassSchema("common_device")
 
 
 @schema

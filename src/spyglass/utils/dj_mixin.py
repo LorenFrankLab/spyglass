@@ -10,12 +10,14 @@ from spyglass.utils.mixins import (
     ExportMixin,
     HelperMixin,
     IngestionMixin,
+    NoConnectionMixin,
     PopulateMixin,
     RestrictByMixin,
 )
 
 
 class SpyglassMixin(
+    NoConnectionMixin,  # must be first — overrides fetch/repr/etc. when offline
     CautiousDeleteMixin,
     ExportMixin,  # -> FetchMixin -> BaseMixin
     HelperMixin,
@@ -54,6 +56,9 @@ class SpyglassMixin(
         Validates that table doesn't have multiple AnalysisNwbfile foreign keys.
         """
         super().__init__(*args, **kwargs)
+
+        if self._no_connection:
+            return  # schema activation failed; skip all DB-dependent checks
 
         # Uncomment to force Spyglass version check. See #439
         # _ = self._has_updated_sg_version
@@ -202,6 +207,9 @@ class SpyglassAnalysis(SpyglassMixin, AnalysisMixin):
         """
 
         super().__init__(*args, **kwargs)
+
+        if self._no_connection:
+            return  # schema activation failed; skip registration and validation
 
         if self.is_declared:
             return

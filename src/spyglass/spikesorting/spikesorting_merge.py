@@ -9,8 +9,8 @@ from spyglass.spikesorting.imported import ImportedSpikeSorting  # noqa: F401
 from spyglass.spikesorting.v0.spikesorting_curation import (
     CuratedSpikeSorting,
 )  # noqa: F401
-from spyglass.spikesorting.v1 import ArtifactDetectionSelection  # noqa: F401
 from spyglass.spikesorting.v1 import (
+    ArtifactDetectionSelection,  # noqa: F401
     CurationV1,
     MetricCurationSelection,
     SpikeSortingRecordingSelection,
@@ -18,10 +18,11 @@ from spyglass.spikesorting.v1 import (
 )
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.logging import logger
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
-schema = dj.schema("spikesorting_merge")
+schema = SpyglassSchema("spikesorting_merge")
 
 source_class_dict = {
     "CuratedSpikeSorting": CuratedSpikeSorting,

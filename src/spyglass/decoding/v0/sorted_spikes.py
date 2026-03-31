@@ -56,8 +56,9 @@ from spyglass.decoding.v0.utils import (
 )
 from spyglass.spikesorting.v0.spikesorting_curation import CuratedSpikeSorting
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("decoding_sortedspikes")
+schema = SpyglassSchema("decoding_sortedspikes")
 
 
 @schema

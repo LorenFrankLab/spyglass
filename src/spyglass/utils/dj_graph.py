@@ -31,8 +31,12 @@ from tqdm import tqdm
 
 from spyglass.utils import logger
 from spyglass.utils.database_settings import SHARED_MODULES
-from spyglass.utils.dj_helper_fn import PERIPHERAL_TABLES  # is_nonempty,
-from spyglass.utils.dj_helper_fn import ensure_names, fuzzy_get, unique_dicts
+from spyglass.utils.dj_helper_fn import (
+    PERIPHERAL_TABLES,  # is_nonempty,
+    ensure_names,
+    fuzzy_get,
+    unique_dicts,
+)
 
 
 def dj_topo_sort(graph: DiGraph) -> List[str]:

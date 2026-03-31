@@ -5,8 +5,9 @@ from spyglass.linearization.v0.main import (  # noqa F401
 )
 from spyglass.linearization.v1.main import LinearizedPositionV1  # noqa F401
 from spyglass.utils import SpyglassMixin, _Merge
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_linearization_merge")
+schema = SpyglassSchema("position_linearization_merge")
 
 
 @schema

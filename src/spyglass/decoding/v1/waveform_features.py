@@ -12,9 +12,10 @@ from spyglass.settings import temp_dir
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.spikesorting.v1 import SpikeSortingSelection
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.waveforms import _get_peak_amplitude
 
-schema = dj.schema("decoding_waveform_features")
+schema = SpyglassSchema("decoding_waveform_features")
 
 
 @schema
