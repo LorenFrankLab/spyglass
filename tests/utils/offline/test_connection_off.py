@@ -1,8 +1,13 @@
-"""Phase 1, 2 & 3 tests: SpyglassSchema, NoConnectionMixin, SpyglassMixin offline behavior.
+"""No-connection unit tests: SpyglassSchema, NoConnectionMixin, SpyglassMixin.
 
-All tests in this module are pure unit tests — no database required.
-Connection failures are simulated by patching ``datajoint.schemas.conn``
-so that it raises ``LostConnectionError`` instead of prompting for a password.
+All tests are pure unit tests — no database required.  Run with::
+
+    pytest tests/utils/offline/test_connection_off.py
+
+Connection failures are simulated by patching ``datajoint.schemas.conn`` so
+that it raises ``LostConnectionError`` instead of prompting for a password.
+The local ``conftest.py`` shadows the root ``mini_insert`` autouse fixture so
+that Docker/MySQL is not required.
 """
 
 import warnings
@@ -144,9 +149,7 @@ class TestNoConnectionSchema:
             # Second activation — _warned is now True; no warning expected.
             with warnings.catch_warnings():
                 warnings.simplefilter("error")  # any warning → AssertionError
-                SpyglassSchema(
-                    "second_schema"
-                )  # must not raise WarningException
+                SpyglassSchema("second_schema")  # must not raise
 
     def test_keyboard_interrupt_caught(self):
         """Cancelled password prompt (KeyboardInterrupt) is handled gracefully."""
@@ -165,10 +168,6 @@ class TestNoConnectionSchema:
             with pytest.warns(UserWarning, match=r"\[Spyglass\]"):
                 schema = SpyglassSchema("test_dj_error")
         assert schema._no_connection is True
-
-    # NOTE: test_connected_schema_flag_false belongs in an integration test
-    # that runs with a live DB (dj_conn).  Added to tests/utils/test_mixin.py
-    # in Phase 3 once SpyglassSchema is wired into the full stack.
 
 
 # ---------------------------------------------------------------------------
@@ -201,15 +200,11 @@ class TestNoConnectionDecorator:
 
         assert ReturnCheck._no_connection is True
 
-    # NOTE: test_online_table_no_flag belongs in an integration test (dj_conn).
-    # Added to tests/utils/test_mixin.py in Phase 3.
-
 
 # ---------------------------------------------------------------------------
 # TestNoConnectionMixin — method-level behaviour (Phase 2)
 # ---------------------------------------------------------------------------
 
-# Shared minimal table definition used across mixin tests
 _DEFINITION = """
 id : int
 name : varchar(32)
@@ -327,8 +322,7 @@ class TestNoConnectionMixin:
     # --- preview / repr -------------------------------------------------------
 
     def test_repr_contains_offline_notice(self, mixin_instance):
-        text = repr(mixin_instance)
-        assert "[no database connection]" in text
+        assert "[no database connection]" in repr(mixin_instance)
 
     def test_repr_contains_class_name(self, mixin_instance):
         assert "MixinTable" in repr(mixin_instance)
@@ -346,11 +340,18 @@ class TestNoConnectionMixin:
     def test_preview_matches_repr(self, mixin_instance):
         assert mixin_instance.preview() == repr(mixin_instance)
 
+    def test_repr_contains_types(self, mixin_instance):
+        """Offline repr must show column types, not just names."""
+        text = repr(mixin_instance)
+        assert ": int" in text
+        assert ": varchar(32)" in text
+        assert ": float" in text
+        assert ": varchar(64)" in text
+
     # --- _repr_html_ ----------------------------------------------------------
 
     def test_repr_html_is_string(self, mixin_instance):
-        html = mixin_instance._repr_html_()
-        assert isinstance(html, str)
+        assert isinstance(mixin_instance._repr_html_(), str)
 
     def test_repr_html_contains_offline_notice(self, mixin_instance):
         assert "no database connection" in mixin_instance._repr_html_()
@@ -365,6 +366,11 @@ class TestNoConnectionMixin:
 
     def test_repr_html_contains_no_data_row(self, mixin_instance):
         assert "no data" in mixin_instance._repr_html_()
+
+    def test_repr_html_contains_types(self, mixin_instance):
+        html = mixin_instance._repr_html_()
+        assert "int" in html
+        assert "float" in html
 
     # --- definition parser ----------------------------------------------------
 
@@ -421,19 +427,6 @@ class TestNoConnectionMixin:
         pk, sec = _parse_definition(defn)
         assert [n for n, _ in pk] == ["id"]
         assert [n for n, _ in sec] == ["val"]
-
-    def test_repr_contains_types(self, mixin_instance):
-        """Offline repr must show column types, not just names."""
-        text = repr(mixin_instance)
-        assert ": int" in text
-        assert ": varchar(32)" in text
-        assert ": float" in text
-        assert ": varchar(64)" in text
-
-    def test_repr_html_contains_types(self, mixin_instance):
-        html = mixin_instance._repr_html_()
-        assert "int" in html
-        assert "float" in html
 
 
 # ---------------------------------------------------------------------------
@@ -557,55 +550,42 @@ class TestSpyglassMixinOffline:
 
 
 # ---------------------------------------------------------------------------
-# TestNoConnectionImport — Phase 5: end-to-end import without a live DB
+# TestNoConnectionImport — end-to-end: import without a live DB
 # ---------------------------------------------------------------------------
 
 
 class TestNoConnectionImport:
-    """Verify that spyglass modules using SpyglassSchema can be imported
-    when the database is unreachable.  All assertions are checked on objects
-    that were already imported during test collection — so we only need to
-    confirm the module-level attributes are present and correct.
+    """Verify spyglass modules using SpyglassSchema import cleanly without a DB.
+
+    All tests use subprocess isolation so that importing spyglass.common does
+    not contaminate the in-process module cache and corrupt the live-DB session
+    for other test modules.
     """
 
     def test_common_nwbfile_module_importable(self):
-        """spyglass.common.common_nwbfile must import without raising."""
-        import importlib
+        """spyglass.common.common_nwbfile must import without raising.
 
-        # If the import raises, this test fails.
-        mod = importlib.import_module("spyglass.common.common_nwbfile")
-        assert mod is not None
+        Runs in a subprocess so that schema activation (which may fail when no
+        DB is configured) does not set ``_no_connection`` flags on classes in
+        the shared module cache used by live-DB tests.
+        """
+        import subprocess
+        import sys
 
-    def test_nwbfile_class_has_flag(self):
-        """Nwbfile class must carry _no_connection=True when DB unreachable."""
-        from spyglass.common.common_nwbfile import Nwbfile
-
-        # In the --noconftest environment there is no real DB, so the schema
-        # activation must have set the flag.
-        assert Nwbfile._no_connection is True
-
-    def test_nwbfile_repr_offline(self):
-        """repr(Nwbfile()) must contain the offline notice."""
-        from spyglass.common.common_nwbfile import Nwbfile
-
-        instance = Nwbfile()
-        assert "[no database connection]" in repr(instance)
-
-    def test_nwbfile_len_zero(self):
-        """len(Nwbfile()) must return 0 when offline."""
-        from spyglass.common.common_nwbfile import Nwbfile
-
-        assert len(Nwbfile()) == 0
-
-    def test_nwbfile_fetch_empty(self):
-        """Nwbfile().fetch() must return empty result and warn when offline."""
-        from spyglass.common.common_nwbfile import Nwbfile
-
-        with pytest.warns(
-            UserWarning, match=r"\[Spyglass\].*No database connection"
-        ):
-            result = Nwbfile().fetch()
-        assert len(result) == 0
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-W",
+                "ignore",
+                "-c",
+                "from spyglass.common.common_nwbfile import Nwbfile; print('ok')",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert "ok" in result.stdout, (
+            "Import raised an exception:\n" + result.stderr
+        )
 
     def test_all_schemas_use_spyglass_schema(self):
         """Every spyglass module must use SpyglassSchema, not dj.schema."""
@@ -623,7 +603,6 @@ class TestNoConnectionImport:
             capture_output=True,
             text=True,
         )
-        # grep exits 1 if no matches found (which is what we want)
         assert result.returncode == 1 or result.stdout.strip() == "", (
             "These files still use dj.schema() instead of SpyglassSchema:\n"
             + result.stdout

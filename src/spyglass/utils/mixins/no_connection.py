@@ -181,11 +181,11 @@ class NoConnectionMixin:
     # restrict — &, -, ^ operators all call restrict()
     # ------------------------------------------------------------------
 
-    def restrict(self, restriction):
+    def restrict(self, restriction, *args, **kwargs):
         """Return self unchanged; restriction cannot be evaluated offline."""
         if self._no_connection:
             return self
-        return super().restrict(restriction)
+        return super().restrict(restriction, *args, **kwargs)
 
     # ------------------------------------------------------------------
     # fetch / fetch1
@@ -255,7 +255,7 @@ class NoConnectionMixin:
         pk, sec = self._offline_columns
         name = self.__class__.__name__
         db = getattr(self, "database", None)
-        schema_label = f"{db}." if db else ""
+        schema_label = db if db else ""
 
         lines = [
             f"{schema_label}.{name} [no database connection]",

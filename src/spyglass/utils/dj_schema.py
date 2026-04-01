@@ -11,6 +11,7 @@ Normal connected usage is entirely unchanged; ``SpyglassSchema`` is a
 drop-in replacement for ``dj.Schema``.
 """
 
+import inspect
 import warnings
 
 import datajoint as dj
@@ -86,8 +87,22 @@ class SpyglassSchema(dj.Schema):
     # ------------------------------------------------------------------
 
     def __call__(self, cls, *, context=None):
-        """Decorate a table class, or mark it offline if no connection."""
+        """Decorate a table class, or mark it offline if no connection.
+
+        When connected, we must capture the *caller's* frame before delegating
+        to ``dj.Schema.__call__``.  DataJoint resolves foreign-key references
+        via ``inspect.currentframe().f_back.f_locals``, which from inside
+        ``dj.Schema.__call__`` would normally point at the decorated module.
+        Introducing this subclass adds one extra frame, so without the explicit
+        ``context`` hand-off DataJoint would see ``dj_schema.py`` locals instead
+        of the module's globals and fail to resolve sibling table classes.
+        """
         if not self._no_connection:
+            if context is None:
+                # Capture the module-level frame that applied @schema so that
+                # FK lookups (e.g. -> DataAcquisitionDeviceSystem) still work.
+                frame = inspect.currentframe().f_back
+                context = dict(frame.f_locals, **frame.f_globals)
             return super().__call__(cls, context=context)
 
         # Offline path: stamp the flag on the class and any Part sub-classes.
