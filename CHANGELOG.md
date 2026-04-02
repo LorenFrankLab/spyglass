@@ -182,6 +182,9 @@ for label, interval_data in results.groupby("interval_labels"):
     - Support ingestion of multi-epoch video files #1548
     - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
         available #1546
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+        available #1546
+    - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
 
