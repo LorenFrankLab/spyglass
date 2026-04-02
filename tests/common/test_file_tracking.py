@@ -473,14 +473,18 @@ def test_get_recompute_deleted_returns_set(file_tracking_module):
 
 def test_get_recompute_deleted_v1(file_tracking_module):
     """_get_recompute_deleted returns file names from the v1 recompute table."""
+    # Mock the v1 RecordingRecompute table and its query chain so that any
+    # chained query ultimately returns the desired file names.
     mock_recompute = MagicMock()
-    mock_recompute.return_value.with_names.__and__.return_value.fetch.return_value = [
-        "file_a.nwb",
-        "file_b.nwb",
-    ]
+    # Support both class-level and instance-level chaining:
+    for target in (mock_recompute, mock_recompute.return_value):
+        target.__and__.return_value = target
+        target.with_names.return_value = target
+        target.fetch.return_value = ["file_a.nwb", "file_b.nwb"]
+
     with patch(
-        "spyglass.common.common_file_tracking.AnalysisFileIssues._get_recompute_deleted",
-        return_value={"file_a.nwb", "file_b.nwb"},
+        "spyglass.spikesorting.v1.recompute.RecordingRecompute",
+        mock_recompute,
     ):
         result = file_tracking_module._get_recompute_deleted()
     assert "file_a.nwb" in result
@@ -519,9 +523,9 @@ def test_resolve_table_refs_populates_table(
     # Mock AnalysisRegistry and children so the child "matches" the file
     mock_child = MagicMock()
     mock_child.full_table_name = "`test`.`child_table`"
-    mock_child.__and__ = lambda self, other: MagicMock(
-        fetch=lambda field: [analysis_file_name]
-    )
+    # Configure the MagicMock's __and__ operator so (child & file_keys).fetch(...)
+    # returns the analysis_file_name as expected by resolve_table_refs().
+    mock_child.__and__.return_value.fetch.return_value = [analysis_file_name]
 
     with patch(
         "spyglass.common.common_file_tracking.AnalysisRegistry"

@@ -68,7 +68,7 @@ class AnalysisFileIssues(dj.Manual):
     def _get_recompute_deleted() -> set:
         """Return analysis file names intentionally deleted by recompute.
 
-        Queries v0 and v1 spike sorting recompute tables for files that were
+        Queries the v1 spike sorting recompute table for files that were
         successfully recomputed and then deleted (deleted=1).
 
         Returns
@@ -181,13 +181,23 @@ class AnalysisFileIssues(dj.Manual):
             )
 
         stored_hash = hash_map.get(analysis_file_name)
-        if stored_hash is not None and uuid_from_file(fname) != stored_hash:
-            return dict(
-                key,
-                on_disk=True,
-                can_read=False,
-                issue=f"checksum mismatch: {fname}",
-            )
+        if stored_hash is not None:
+            try:
+                current_hash = uuid_from_file(fname)
+            except OSError as exc:
+                return dict(
+                    key,
+                    on_disk=True,
+                    can_read=False,
+                    issue=f"failed to hash file {fname}: {exc}",
+                )
+            if current_hash != stored_hash:
+                return dict(
+                    key,
+                    on_disk=True,
+                    can_read=False,
+                    issue=f"checksum mismatch: {fname}",
+                )
 
         return None
 
@@ -423,12 +433,18 @@ class AnalysisFileIssues(dj.Manual):
                     issues.append(result)
 
         # D: One batch insert instead of one insert1() per issue
+        inserted_count = 0
         if issues:
+            # Count how many of these issues already exist before insertion
+            pre_existing = len(self & issues)
             self.insert(issues, skip_duplicates=True)
+            # Count again after insertion to see how many are now present
+            post_existing = len(self & issues)
+            inserted_count = post_existing - pre_existing
             if resolve_tables:
                 self.resolve_table_refs({"full_table_name": full_table_name})
 
-        return len(issues)
+        return inserted_count
 
     def show_downstream(self, restriction=True):
         """Show downstream tables affected by file issues.
