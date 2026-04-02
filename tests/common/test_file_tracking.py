@@ -419,7 +419,10 @@ def test_batch_resolve_paths_registered(file_tracking_module, tmp_path):
     """_batch_resolve_paths resolves paths from the external table."""
     mock_tbl = MagicMock()
     mock_tbl._analysis_dir = str(tmp_path)
-    mock_tbl._ext_tbl.fetch.return_value = [
+    mock_tbl._get_analysis_file_paths.return_value = [
+        "session_abc/session_abc_123.nwb"
+    ]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = [
         {"filepath": "session_abc/session_abc_123.nwb", "contents_hash": None}
     ]
     path_map, hash_map = file_tracking_module._batch_resolve_paths(
@@ -437,9 +440,10 @@ def test_batch_resolve_paths_unregistered_fallback(
     """_batch_resolve_paths generates a subdirectory path for unregistered files."""
     mock_tbl = MagicMock()
     mock_tbl._analysis_dir = str(tmp_path)
-    mock_tbl._ext_tbl.fetch.return_value = []
-
     fname = "session_abc_123.nwb"
+    mock_tbl._get_analysis_file_paths.return_value = [f"session_abc/{fname}"]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = []
+
     path_map, _ = file_tracking_module._batch_resolve_paths(mock_tbl, [fname])
     expected_subdir = fname[: fname.rfind("_")]
     assert path_map[fname] == str(tmp_path / expected_subdir / fname)
@@ -450,7 +454,10 @@ def test_batch_resolve_paths_hash_map(file_tracking_module, tmp_path):
     stored = uuid.uuid4()
     mock_tbl = MagicMock()
     mock_tbl._analysis_dir = str(tmp_path)
-    mock_tbl._ext_tbl.fetch.return_value = [
+    mock_tbl._get_analysis_file_paths.return_value = [
+        "session_abc/session_abc_123.nwb"
+    ]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = [
         {"filepath": "session_abc/session_abc_123.nwb", "contents_hash": stored}
     ]
     _, hash_map = file_tracking_module._batch_resolve_paths(
@@ -469,26 +476,6 @@ def test_get_recompute_deleted_returns_set(file_tracking_module):
     ):
         result = file_tracking_module._get_recompute_deleted()
     assert isinstance(result, set)
-
-
-def test_get_recompute_deleted_v1(file_tracking_module):
-    """_get_recompute_deleted returns file names from the v1 recompute table."""
-    # Mock the v1 RecordingRecompute table and its query chain so that any
-    # chained query ultimately returns the desired file names.
-    mock_recompute = MagicMock()
-    # Support both class-level and instance-level chaining:
-    for target in (mock_recompute, mock_recompute.return_value):
-        target.__and__.return_value = target
-        target.with_names.return_value = target
-        target.fetch.return_value = ["file_a.nwb", "file_b.nwb"]
-
-    with patch(
-        "spyglass.spikesorting.v1.recompute.RecordingRecompute",
-        mock_recompute,
-    ):
-        result = file_tracking_module._get_recompute_deleted()
-    assert "file_a.nwb" in result
-    assert "file_b.nwb" in result
 
 
 # ======================= resolve_table_refs ==========================

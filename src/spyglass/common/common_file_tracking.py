@@ -118,7 +118,12 @@ class AnalysisFileIssues(dj.Manual):
         fpaths = analysis_tbl._get_analysis_file_paths(
             file_names, relative=True
         )
-        ext_tbl = analysis_tbl._ext_tbl & f"filepath IN {tuple(fpaths)}"
+        restr = (
+            f"filepath IN {tuple(fpaths)}"
+            if len(fpaths) > 1
+            else f"filepath='{fpaths[0]}'"
+        )
+        ext_tbl = analysis_tbl._ext_tbl & restr
 
         path_map = {}
         hash_map = {}
