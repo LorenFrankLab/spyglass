@@ -160,14 +160,27 @@ class TestNoConnectionSchema:
                 schema = SpyglassSchema("test_kb_interrupt")
         assert schema._no_connection is True
 
-    def test_datajoint_error_caught(self):
-        """Generic DataJointError during activation is handled gracefully."""
+    def test_datajoint_error_caught_for_access_denied(self):
+        """DataJointError with auth-style message is caught as a connection failure."""
         from spyglass.utils.dj_schema import SpyglassSchema
 
-        with patch(_CONN_PATH, side_effect=DataJointError("bad config")):
+        with patch(
+            _CONN_PATH,
+            side_effect=DataJointError(
+                "Access denied for user 'root'@'localhost'"
+            ),
+        ):
             with pytest.warns(UserWarning, match=r"\[Spyglass\]"):
                 schema = SpyglassSchema("test_dj_error")
         assert schema._no_connection is True
+
+    def test_datajoint_error_reraises_for_non_connection(self):
+        """DataJointError unrelated to connectivity must propagate, not go offline."""
+        from spyglass.utils.dj_schema import SpyglassSchema
+
+        with patch(_CONN_PATH, side_effect=DataJointError("bad config")):
+            with pytest.raises(DataJointError, match="bad config"):
+                SpyglassSchema("test_dj_reraise")
 
 
 # ---------------------------------------------------------------------------
@@ -589,21 +602,19 @@ class TestNoConnectionImport:
 
     def test_all_schemas_use_spyglass_schema(self):
         """Every spyglass module must use SpyglassSchema, not dj.schema."""
-        import subprocess
+        import re
+        from pathlib import Path
 
-        result = subprocess.run(
-            [
-                "grep",
-                "-r",
-                "--include=*.py",
-                "-l",
-                r"schema\s*=\s*dj\.\(Schema\|schema\)\s*(",
-                "src/spyglass",
-            ],
-            capture_output=True,
-            text=True,
+        pattern = re.compile(
+            r"^\s*schema\s*=\s*dj\.[Ss]chema\s*\(", re.MULTILINE
         )
-        assert result.returncode == 1 or result.stdout.strip() == "", (
+        src_dir = Path("src/spyglass")
+        offenders = [
+            str(f)
+            for f in src_dir.rglob("*.py")
+            if pattern.search(f.read_text(encoding="utf-8"))
+        ]
+        assert not offenders, (
             "These files still use dj.schema() instead of SpyglassSchema:\n"
-            + result.stdout
+            + "\n".join(offenders)
         )
