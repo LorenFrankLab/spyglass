@@ -165,19 +165,10 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-
-        analysis_file_name = (
-            SpikeSortingRecording * SpikeSortingSelection & key
-        ).fetch1("analysis_file_name")
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
+        recording_key = (SpikeSortingRecording * SpikeSortingSelection & key).fetch1(
+            "KEY"
         )
-        recording = se.read_nwb_recording(
-            analysis_file_abs_path, load_time_vector=True
-        )
-        recording.annotate(is_filtered=True)
-
-        return recording
+        return SpikeSortingRecording.get_recording(recording_key)
 
     @classmethod
     def get_sorting(cls, key: dict, as_dataframe=False) -> si.BaseSorting:
