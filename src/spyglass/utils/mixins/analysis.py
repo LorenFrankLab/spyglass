@@ -386,6 +386,41 @@ class AnalysisMixin(BaseMixin):
         )
 
     @classmethod
+    def _get_analysis_file_paths(
+        cls, fnames: list, relative: bool = False, as_str: bool = True
+    ) -> list:
+        """Get the paths for a list of analysis NWB files.
+
+        Parameters
+        ----------
+        fnames : list
+            A list of analysis NWB file names.
+        relative : bool, Optional
+            If true, return paths relative to analysis_dir. Defaults False.
+        as_str : bool, Optional
+            If true, return paths as strings. If false, return as Path objects.
+
+        Returns indices of the specified electrode_ids for an analysis file.
+
+        Parameters
+        ----------
+        analysis_file_name : str
+            The name of the analysis NWB file.
+        electrode_ids : numpy array or list
+            Array or list of electrode IDs.
+
+        Returns
+        -------
+        paths : list
+            A list of paths for the specified analysis NWB files.
+        """
+        ret = [
+            cls.__get_analysis_path(fname, relative=relative)
+            for fname in fnames
+        ]
+        return [str(path) for path in ret] if as_str else ret
+
+    @classmethod
     def copy(cls, nwb_file_name: str):
         """Make a copy of an analysis NWB file.
 

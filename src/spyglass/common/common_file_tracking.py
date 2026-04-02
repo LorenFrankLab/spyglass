@@ -114,11 +114,16 @@ class AnalysisFileIssues(dj.Manual):
         """
         analysis_dir = Path(analysis_tbl._analysis_dir)
 
+        # Restrict ext_tbl before querying
+        fpaths = analysis_tbl._get_analysis_file_paths(
+            file_names, relative=True
+        )
+        ext_tbl = analysis_tbl._ext_tbl & f"filepath IN {tuple(fpaths)}"
+
         path_map = {}
         hash_map = {}
-        for row in analysis_tbl._ext_tbl.fetch(
-            "filepath", "contents_hash", as_dict=True
-        ):
+
+        for row in ext_tbl.fetch("filepath", "contents_hash", as_dict=True):
             fname = Path(row["filepath"]).name
             path_map[fname] = str(analysis_dir / row["filepath"])
             if row["contents_hash"] is not None:

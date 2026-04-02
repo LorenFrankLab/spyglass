@@ -17,9 +17,10 @@ send_slack_message() {
     return 0
   fi
   local MESSAGE="$1"
-  curl -d "text=$MESSAGE" \
+  curl --silent --show-error --fail-with-body \
+    -d "text=$MESSAGE" \
     -d "channel=$SLACK_CHANNEL" \
     -H "Authorization: Bearer $SLACK_TOKEN" \
     -X POST https://slack.com/api/chat.postMessage \
-    2>> "${SLACK_LOG:-/dev/null}"
+    &>> "${SLACK_LOG:-/dev/null}"
 }
