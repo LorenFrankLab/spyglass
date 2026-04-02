@@ -37,11 +37,12 @@ from spyglass.spikesorting.v0.spikesorting_recording import (
     SpikeSortingRecording,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
 from .spikesorting_recording import SortGroup
 from .spikesorting_sorting import SpikeSorting
 
-schema = dj.schema("spikesorting_curation")
+schema = SpyglassSchema("spikesorting_curation")
 
 valid_labels = ["reject", "noise", "artifact", "mua", "accept"]
 

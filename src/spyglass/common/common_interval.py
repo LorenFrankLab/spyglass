@@ -14,8 +14,9 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_interval")
+schema = SpyglassSchema("common_interval")
 
 # TODO: ADD export to NWB function to save relevant intervals in an NWB file
 

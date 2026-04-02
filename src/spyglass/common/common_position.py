@@ -31,8 +31,9 @@ try:
 except (ImportError, ModuleNotFoundError):
     logger.warning("Please update position_tools to >= 0.1.0")
     from position_tools import get_centriod as get_centroid
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_position")
+schema = SpyglassSchema("common_position")
 
 
 @schema

@@ -26,9 +26,10 @@ from spyglass.spikesorting.v1.metric_curation import (
     MetricCurationSelection,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.waveforms import _get_peak_amplitude
 
-schema = dj.schema("spikesorting_burst_v1")
+schema = SpyglassSchema("spikesorting_burst_v1")
 
 METRIC_TBL = MetricCuration()  # initialize to preserve waveform cache
 

@@ -16,9 +16,10 @@ from spyglass.lfp.analysis.v1.lfp_band import LFPBandSelection, LFPBandV1
 from spyglass.lfp.lfp_merge import LFPOutput
 from spyglass.position import PositionOutput
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_helper_fn import get_electrode_indices
 
-schema = dj.schema("ripple_v1")
+schema = SpyglassSchema("ripple_v1")
 
 RIPPLE_DETECTION_ALGORITHMS = {
     "Kay_ripple_detector": Kay_ripple_detector,

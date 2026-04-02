@@ -11,8 +11,9 @@ from track_linearization import (
 from spyglass.common.common_nwbfile import AnalysisNwbfile  # noqa F401
 from spyglass.common.common_position import IntervalPositionInfo  # noqa F401
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_position")
+schema = SpyglassSchema("common_position")
 
 
 @schema

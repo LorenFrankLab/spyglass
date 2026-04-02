@@ -8,8 +8,9 @@ import pandas as pd
 
 from spyglass.position.position_merge import PositionOutput
 from spyglass.utils import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("behavior_v1_core")
+schema = SpyglassSchema("behavior_v1_core")
 
 
 @schema

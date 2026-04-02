@@ -9,9 +9,10 @@ from spyglass.settings import test_mode
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.spikesorting import firing_rate_from_spike_indicator
 
-schema = dj.schema("spikesorting_group_v1")
+schema = SpyglassSchema("spikesorting_group_v1")
 
 
 @schema

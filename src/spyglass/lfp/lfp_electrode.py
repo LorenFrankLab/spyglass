@@ -8,8 +8,9 @@ from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.settings import test_mode
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("lfp_electrode")
+schema = SpyglassSchema("lfp_electrode")
 
 
 @schema

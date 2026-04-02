@@ -25,9 +25,10 @@ from spyglass.spikesorting.utils import (
     get_group_by_shank,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_hash import NwbfileHasher
 
-schema = dj.schema("spikesorting_v1_recording")
+schema = SpyglassSchema("spikesorting_v1_recording")
 
 
 @schema

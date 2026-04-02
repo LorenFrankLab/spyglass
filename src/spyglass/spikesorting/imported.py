@@ -5,8 +5,9 @@ import pynwb
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_imported")
+schema = SpyglassSchema("spikesorting_imported")
 
 
 @schema

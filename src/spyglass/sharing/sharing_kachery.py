@@ -8,6 +8,7 @@ from spyglass.common.common_lab import Lab  # noqa: F401
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import config
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
 # define the environment variable name for the kachery zone and the cloud directory
 kachery_zone_envar = "KACHERY_ZONE"
@@ -25,7 +26,7 @@ except KeyError:
     default_kachery_cloud_dir = None
     default_kachery_resource_url = None
 
-schema = dj.schema("sharing_kachery")
+schema = SpyglassSchema("sharing_kachery")
 
 
 def kachery_download_file(uri: str, dest: str, kachery_zone_name: str) -> str:

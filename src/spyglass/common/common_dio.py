@@ -11,8 +11,9 @@ from spyglass.common.common_interval import IntervalList
 from spyglass.common.common_nwbfile import Nwbfile
 from spyglass.common.common_session import Session  # noqa: F401
 from spyglass.utils import SpyglassIngestion, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_dio")
+schema = SpyglassSchema("common_dio")
 
 
 @schema

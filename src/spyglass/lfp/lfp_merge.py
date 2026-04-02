@@ -8,8 +8,9 @@ from spyglass.lfp.lfp_imported import ImportedLFP  # noqa: F401
 from spyglass.lfp.v1.lfp import LFPV1  # noqa: F401
 from spyglass.utils.dj_merge_tables import _Merge
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("lfp_merge")
+schema = SpyglassSchema("lfp_merge")
 
 
 @schema

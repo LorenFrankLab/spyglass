@@ -14,10 +14,11 @@ from spyglass.position.v1.dlc_utils import (
     two_pt_head_orientation,
 )
 from spyglass.utils import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
 from .position_dlc_cohort import DLCSmoothInterpCohort
 
-schema = dj.schema("position_v1_dlc_orient")
+schema = SpyglassSchema("position_v1_dlc_orient")
 
 # Add new functions for orientation calculation here
 _key_to_func_dict = {

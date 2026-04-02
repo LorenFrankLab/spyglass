@@ -18,8 +18,9 @@ from spyglass.position.v1.position_dlc_pose_estimation import (
 )
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("position_v1_dlc_selection")
+schema = SpyglassSchema("position_v1_dlc_selection")
 
 
 @schema

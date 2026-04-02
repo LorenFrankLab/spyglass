@@ -23,10 +23,11 @@ from spyglass.position.v1.dlc_utils import (
 from spyglass.position.v1.position_dlc_model import DLCModel
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
 from . import dlc_reader
 
-schema = dj.schema("position_v1_dlc_pose_estimation")
+schema = SpyglassSchema("position_v1_dlc_pose_estimation")
 
 
 @schema

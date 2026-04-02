@@ -23,8 +23,9 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
     _consolidate_intervals,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_v1_sorting")
+schema = SpyglassSchema("spikesorting_v1_sorting")
 
 
 @schema

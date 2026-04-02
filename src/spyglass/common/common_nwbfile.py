@@ -37,8 +37,9 @@ BEGIN
     SET MESSAGE_TEXT = 'Inserts disabled during maintenance: {table}';
 END
 """
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("common_nwbfile")
+schema = SpyglassSchema("common_nwbfile")
 
 
 @schema

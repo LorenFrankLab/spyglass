@@ -77,9 +77,10 @@ from spyglass.spikesorting.v0.spikesorting_sorting import (
     SpikeSortingSelection,
 )
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.waveforms import _get_peak_amplitude
 
-schema = dj.schema("decoding_clusterless")
+schema = SpyglassSchema("decoding_clusterless")
 
 
 @schema

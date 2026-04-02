@@ -27,9 +27,10 @@ from spyglass.spikesorting.v0.spikesorting_curation import (
     Waveforms,
 )
 from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.waveforms import _get_peak_amplitude
 
-schema = dj.schema("spikesorting_burst_v0")
+schema = SpyglassSchema("spikesorting_burst_v0")
 
 
 @schema

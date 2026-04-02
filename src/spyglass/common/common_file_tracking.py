@@ -7,8 +7,9 @@ from tqdm import tqdm
 from spyglass.common.common_nwbfile import AnalysisRegistry
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassAnalysis, logger
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.Schema("common_file_tracking")
+schema = SpyglassSchema("common_file_tracking")
 
 
 @schema

@@ -40,10 +40,11 @@ from spyglass.spikesorting.v1.recording import (
 )
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import bytes_to_human_readable
+from spyglass.utils.dj_schema import SpyglassSchema
 from spyglass.utils.nwb_hash import NwbfileHasher, get_file_namespaces
 from spyglass.utils.recompute_helper_fn import H5pyComparator, sort_dict
 
-schema = dj.schema("spikesorting_v1_recompute")
+schema = SpyglassSchema("spikesorting_v1_recompute")
 
 
 def check_xfail(*args, **kwargs) -> Tuple[bool, Optional[str]]:

@@ -7,8 +7,9 @@ from spyglass.spikesorting.analysis.v1.group import _get_spike_obj_name
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
 from spyglass.utils import logger
 from spyglass.utils.dj_mixin import SpyglassMixin
+from spyglass.utils.dj_schema import SpyglassSchema
 
-schema = dj.schema("spikesorting_unit_annotation_v1")
+schema = SpyglassSchema("spikesorting_unit_annotation_v1")
 
 
 @schema
