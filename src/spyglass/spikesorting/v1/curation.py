@@ -165,9 +165,9 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-        recording_key = (SpikeSortingRecording * SpikeSortingSelection & key).fetch1(
-            "KEY"
-        )
+        recording_key = (
+            SpikeSortingRecording * SpikeSortingSelection & key
+        ).fetch1("KEY")
         return SpikeSortingRecording.get_recording(recording_key)
 
     @classmethod
