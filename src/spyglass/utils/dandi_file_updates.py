@@ -2,7 +2,8 @@ from typing import List
 
 import h5py
 
-from spyglass.utils.dj_helper_fn import ExportErrorLog, _resolve_external_table
+from spyglass.utils.dj_helper_fn import _resolve_external_table
+from spyglass.utils.export_error_log import ExportErrorLog
 from spyglass.utils.h5py_helper_fn import (
     add_id_column_to_table,
     convert_dataset_type,

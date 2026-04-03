@@ -1,7 +1,38 @@
+import subprocess
+import sys
+
+import datajoint as dj
 import pytest
 
 from tests.conftest import VERBOSE
 
+
+def test_settings_import_no_db_connection():
+    """Importing SpyglassConfig must not trigger a database connection.
+
+    Regression test for https://github.com/LorenFrankLab/spyglass/issues/...
+    where `from spyglass.settings import SpyglassConfig` caused a premature
+    connection attempt even before a valid database was configured.
+    """
+    code = "\n".join(
+        [
+            "import datajoint as dj",
+            "dj.config['database.host'] = 'invalid_host_that_does_not_exist'",
+            "dj.config['connection.init_function'] = None",
+            "from spyglass.settings import SpyglassConfig",
+            "print('SUCCESS')",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert "SUCCESS" in result.stdout, (
+        "Importing SpyglassConfig triggered a database connection attempt.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
 
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_deprecation_factory(caplog, common):
