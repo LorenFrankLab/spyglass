@@ -34,6 +34,7 @@ def test_settings_import_no_db_connection():
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
 
+
 @pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_deprecation_factory(caplog, common):
     common.common_position.TrackGraph()

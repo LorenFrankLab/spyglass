@@ -740,5 +740,3 @@ def _replace_nan_with_default(data_dict, default_value=-1.0):
             result[key] = default_value
 
     return result
-
-
