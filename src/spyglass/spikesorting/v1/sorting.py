@@ -480,17 +480,25 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
-        units_dict_list = [
-            {
-                unit_id: np.searchsorted(recording.get_times(), spike_times)
-                for unit_id, spike_times in zip(
-                    units.index, units["spike_times"]
+
+        recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
+        units_dict = {}
+        for unit_id, spike_times in zip(units.index, units["spike_times"]):
+            spike_samples = np.searchsorted(recording_times, spike_times)
+            n_excess = int(np.sum(spike_samples >= n_samples))
+            if n_excess > 0:
+                logger.warning(
+                    f"Unit {unit_id} has {n_excess} spike(s) exceeding the "
+                    "recording duration. Clipping to valid sample range. This "
+                    "may be caused by floating-point rounding during the "
+                    "seconds-to-samples conversion."
                 )
-            }
-        ]
+                spike_samples = np.clip(spike_samples, 0, n_samples - 1)
+            units_dict[unit_id] = spike_samples
 
         sorting = si.NumpySorting.from_unit_dict(
-            units_dict_list, sampling_frequency=sampling_frequency
+            [units_dict], sampling_frequency=sampling_frequency
         )
 
         return sorting
