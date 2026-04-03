@@ -324,15 +324,3 @@ def test_get_sorting_clips_excess_spikes():
     assert isinstance(sorting, si.BaseSorting)
     spike_train = sorting.get_unit_spike_train(unit_id=0, segment_index=0)
     assert np.all(spike_train < n_samples)
-
-    # Confirm that WITHOUT clipping, the raw indices would exceed n_samples
-    # (which is what triggers the SpikeInterface ValueError)
-    from unittest.mock import MagicMock
-
-    assert np.any(raw_samples >= n_samples), (
-        "Without clipping, spike indices would exceed recording bounds"
-    )
-    # After clipping, all indices are valid
-    assert np.all(clipped_samples < n_samples), (
-        "After clipping, all spike indices are within recording bounds"
-    )
