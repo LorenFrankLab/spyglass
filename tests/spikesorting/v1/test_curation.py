@@ -271,3 +271,56 @@ def test_empty_units_nwb_readable(empty_units_nwb):
         assert nwbf.units is not None
         units_df = nwbf.units.to_dataframe()
         assert len(units_df) == 0
+
+
+# ============================================================================
+# Excess Spike Clipping Tests (Issue #1092 / GH issue: invalid spike_times)
+# ============================================================================
+
+
+def test_get_sorting_clips_excess_spikes():
+    """Test that the clipping logic in get_sorting handles spike indices
+    exceeding recording bounds.
+
+    Reproduces the scenario where floating-point rounding in the
+    seconds-to-samples round-trip causes np.searchsorted to return
+    an index equal to n_samples (out of bounds), which would cause
+    SpikeInterface to raise a ValueError.
+    """
+    import spikeinterface as si
+
+    sampling_frequency = 30000.0
+    n_samples = 300  # 10 ms recording
+    recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
+
+    # Spike times that are *within* bounds plus one spike just barely beyond
+    # the last timestamp (simulates floating-point round-trip imprecision)
+    spike_times_with_excess = np.append(
+        recording_times[:10].copy(), recording_times[-1] + 1e-9
+    )
+
+    # Verify searchsorted actually returns an out-of-bounds index on this data
+    raw_samples = np.searchsorted(recording_times, spike_times_with_excess)
+    assert np.any(raw_samples >= n_samples), (
+        "Test precondition failed: expected at least one out-of-bounds index"
+    )
+
+    # Apply the same clipping logic as in get_sorting
+    n_excess = int(np.sum(raw_samples >= n_samples))
+    clipped_samples = np.clip(raw_samples, 0, n_samples - 1)
+
+    assert np.all(clipped_samples < n_samples), (
+        "All spike sample indices must be < n_samples after clipping"
+    )
+    assert len(clipped_samples) == len(spike_times_with_excess), (
+        "Clipping should preserve spike count, not remove spikes"
+    )
+
+    # Verify that the resulting NumpySorting is accepted by SpikeInterface
+    units_dict = {0: clipped_samples}
+    sorting = si.NumpySorting.from_unit_dict(
+        [units_dict], sampling_frequency=sampling_frequency
+    )
+    assert isinstance(sorting, si.BaseSorting)
+    spike_train = sorting.get_unit_spike_train(unit_id=0, segment_index=0)
+    assert np.all(spike_train < n_samples)

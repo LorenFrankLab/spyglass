@@ -213,10 +213,20 @@ class CurationV1(SpyglassMixin, dj.Manual):
         sampling_frequency = recording.get_sampling_frequency()
 
         recording_times = recording.get_times()
-        units_dict = {
-            unit.Index: np.searchsorted(recording_times, unit.spike_times)
-            for unit in units.itertuples()
-        }
+        n_samples = recording.get_num_samples()
+        units_dict = {}
+        for unit in units.itertuples():
+            spike_samples = np.searchsorted(recording_times, unit.spike_times)
+            n_excess = int(np.sum(spike_samples >= n_samples))
+            if n_excess > 0:
+                logger.warning(
+                    f"Unit {unit.Index} has {n_excess} spike(s) exceeding the "
+                    "recording duration. Clipping to valid sample range. This "
+                    "may be caused by floating-point rounding during the "
+                    "seconds-to-samples conversion."
+                )
+                spike_samples = np.clip(spike_samples, 0, n_samples - 1)
+            units_dict[unit.Index] = spike_samples
 
         return si.NumpySorting.from_unit_dict(
             [units_dict], sampling_frequency=sampling_frequency
