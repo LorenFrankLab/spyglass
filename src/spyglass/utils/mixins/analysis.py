@@ -400,15 +400,6 @@ class AnalysisMixin(BaseMixin):
         as_str : bool, Optional
             If true, return paths as strings. If false, return as Path objects.
 
-        Returns indices of the specified electrode_ids for an analysis file.
-
-        Parameters
-        ----------
-        analysis_file_name : str
-            The name of the analysis NWB file.
-        electrode_ids : numpy array or list
-            Array or list of electrode IDs.
-
         Returns
         -------
         paths : list
