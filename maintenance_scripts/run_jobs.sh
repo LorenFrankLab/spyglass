@@ -26,6 +26,8 @@ if [[ -z "${SPYGLASS_BASE_PATH}"
 fi
 
 source $SPYGLASS_CONDA_PATH
+source "$SCRIPT_DIR/slack_utils.sh"
+SLACK_LOG="$SPYGLASS_LOG"
 
 EMAIL_TEMPLATE=$(cat <<-EOF
 From: "Spyglass" <$SPYGLASS_EMAIL_SRC>
@@ -88,8 +90,15 @@ if $SPYGLASS_CHMOD_FILES; then
     { on_fail "Could not chmod new files in $SPYGLASS_BASE_PATH"; exit 1; }
 fi
 
-# Run cleanup script
-conda_run python maintenance_scripts/cleanup.py
+# Run cleanup script; capture any file issues to a temp file for Slack reporting
+FILE_ISSUES_OUT=$(mktemp)
+FILE_ISSUES_OUT="$FILE_ISSUES_OUT" conda_run python maintenance_scripts/cleanup.py
+
+if [[ -s "$FILE_ISSUES_OUT" ]]; then # If file exists and is nonempty
+  send_slack_message "Spyglass file issues found:
+$(cat "$FILE_ISSUES_OUT")"
+fi
+rm -f "$FILE_ISSUES_OUT"
 
 echo "SPYGLASS CRON JOB END"
 
