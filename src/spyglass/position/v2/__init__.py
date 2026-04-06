@@ -1,5 +1,7 @@
 from spyglass.position.v2.estim import (
     PoseEstim,
+    PoseEstimParams,
+    PoseEstimSelection,
     PoseParams,
     PoseSelection,
     PoseV2,
@@ -19,6 +21,8 @@ __all__ = [
     "ModelParams",
     "ModelSelection",
     "PoseEstim",
+    "PoseEstimParams",
+    "PoseEstimSelection",
     "PoseParams",
     "PoseSelection",
     "PoseV2",

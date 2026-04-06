@@ -8,8 +8,15 @@ import pandas as pd
 from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile
-from spyglass.position.v2.train import Model, ModelParams, Skeleton
+from spyglass.common.common_behav import VideoFile
+from spyglass.position.v2.train import (
+    Model,
+    ModelParams,
+    Skeleton,
+    default_pk_name,
+)
 from spyglass.position.v2.video import VidFileGroup
+from spyglass.settings import dlc_output_dir
 from spyglass.utils import logger
 
 # ----------------------------- Optional imports ------------------------------
@@ -22,10 +29,214 @@ schema = dj.schema("cbroz_position_v2_estim")
 
 
 @schema
-class PoseEstim(dj.Manual):
+class PoseEstimParams(dj.Lookup):
+    """Parameters for pose estimation inference.
+
+    Stores tool-specific inference parameters (batch_size, device, etc.)
+    as reusable named parameter sets.
+
+    Attributes
+    ----------
+    pose_estim_params_id : str
+        Unique identifier for this parameter set (max 32 chars)
+    params : blob
+        Tool-specific inference parameters dict
+    params_hash : str
+        Hash of params for deduplication
+    """
+
+    definition = """
+    pose_estim_params_id: varchar(32)
+    ---
+    params: blob          # tool-specific inference params
+    params_hash: varchar(64)  # hash of params
+    unique index (params_hash)
+    """
+
+    default_params = {}
+    contents = [
+        (
+            "default",
+            default_params,
+            dj.hash.key_hash(default_params),
+        ),
+    ]
+
+    @classmethod
+    def insert_params(
+        cls,
+        params,
+        params_id=None,
+        skip_duplicates=True,
+    ):
+        """Insert a new inference parameter set.
+
+        Parameters
+        ----------
+        params : dict
+            Tool-specific inference parameters (batch_size, device, etc.)
+        params_id : str, optional
+            Name for this parameter set. If None, auto-generated using
+            default_pk_name convention, by default None
+        skip_duplicates : bool, optional
+            Skip if entry already exists, by default True
+
+        Returns
+        -------
+        dict
+            Key with pose_estim_params_id
+        """
+        params_hash = dj.hash.key_hash(params)
+
+        # Check if params already exist by hash
+        existing = cls() & {"params_hash": params_hash}
+        if existing:
+            return existing.fetch1("KEY")
+
+        if params_id is None:
+            params_id = default_pk_name("pep", params)
+
+        key = {
+            "pose_estim_params_id": params_id,
+            "params": params,
+            "params_hash": params_hash,
+        }
+        cls.insert1(key, skip_duplicates=skip_duplicates)
+        logger.info(f"Inserted PoseEstimParams: {params_id}")
+        return {"pose_estim_params_id": params_id}
+
+
+@schema
+class PoseEstimSelection(dj.Manual):
+    """Selection table for pose estimation tasks.
+
+    Pairs a trained Model with a VidFileGroup and inference parameters,
+    specifying whether to trigger new inference or load existing results.
+
+    Attributes
+    ----------
+    model_id : str
+        Foreign key to Model table
+    vid_group_id : int
+        Foreign key to VidFileGroup table
+    pose_estim_params_id : str
+        Foreign key to PoseEstimParams table
+    task_mode : enum
+        'trigger' to run inference, 'load' to load existing results
+    output_dir : str
+        Results directory (load: existing, trigger: destination)
+    """
+
     definition = """
     -> Model
     -> VidFileGroup
+    -> PoseEstimParams
+    ---
+    task_mode='trigger': enum('load', 'trigger')
+    output_dir='': varchar(255)       # results dir
+    """
+
+    def insert_estimation_task(
+        self,
+        key,
+        task_mode="trigger",
+        params=None,
+        output_dir=None,
+        skip_duplicates=True,
+    ):
+        """Insert a pose estimation task.
+
+        Parameters
+        ----------
+        key : dict
+            Must include model_id and vid_group_id. May include
+            pose_estim_params_id; if not, one is resolved from params.
+        task_mode : str, optional
+            'trigger' to run inference, 'load' to load existing results,
+            by default 'trigger'
+        params : dict, optional
+            Tool-specific inference parameters (batch_size, device, etc.).
+            Ignored if key already contains pose_estim_params_id.
+        output_dir : str, optional
+            Output directory. If None, inferred from model and video info
+        skip_duplicates : bool, optional
+            Skip if entry already exists, by default True
+
+        Returns
+        -------
+        dict
+            The full key (for chaining into populate)
+        """
+        # Resolve params to a PoseEstimParams entry
+        if "pose_estim_params_id" not in key:
+            params = params or {}
+            params_key = PoseEstimParams.insert_params(
+                params, skip_duplicates=True
+            )
+            key = {**key, **params_key}
+
+        if output_dir is None:
+            output_dir = self._infer_output_dir(key)
+
+        self.insert1(
+            {
+                **key,
+                "task_mode": task_mode,
+                "output_dir": str(output_dir),
+            },
+            skip_duplicates=skip_duplicates,
+        )
+
+        logger.info("Inserted entry into PoseEstimSelection")
+        return {**key, "task_mode": task_mode}
+
+    @staticmethod
+    def _infer_output_dir(key):
+        """Infer output directory from model and video group info.
+
+        Parameters
+        ----------
+        key : dict
+            Must include model_id and vid_group_id
+
+        Returns
+        -------
+        str
+            Inferred output directory path
+        """
+        model_id = key.get("model_id", "unknown_model")
+
+        # Try to use the configured dlc_output_dir
+        base_dir = dlc_output_dir
+        if not base_dir:
+            base_dir = Path.cwd() / "pose_estimation_output"
+
+        output_dir = (
+            Path(base_dir) / f"v2_{model_id}_{key.get('vid_group_id', 0)}"
+        )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return str(output_dir)
+
+
+@schema
+class PoseEstim(dj.Computed):
+    """Pose estimation results from model inference on video files.
+
+    Computed from PoseEstimSelection entries. Runs inference (trigger)
+    or loads existing results (load), stores in NWB via AnalysisNwbfile.
+
+    Attributes
+    ----------
+    model_id : str
+        Foreign key via PoseEstimSelection -> Model
+    vid_group_id : int
+        Foreign key via PoseEstimSelection -> VidFileGroup
+    analysis_file_name : str
+        Foreign key to AnalysisNwbfile (nullable)
+    """
+
+    definition = """
+    -> PoseEstimSelection
     ---
     -> [nullable] AnalysisNwbfile
     """
@@ -461,6 +672,215 @@ class PoseEstim(dj.Manual):
         logger.debug(f"Fetched {len(df)} frames of pose data")
         return df
 
+    def make(self, key):
+        """Run or load pose estimation for a Model + VidFileGroup pairing.
+
+        Flow:
+        1. Fetch task_mode, output_dir, inference_params from Selection
+        2. If trigger: run inference via Model().run_inference()
+        3. Find DLC h5 output in output_dir
+        4. Load into ndx-pose NWB via _store_estimation_nwb()
+        5. Insert entry with analysis_file_name
+
+        Parameters
+        ----------
+        key : dict
+            Primary key from PoseEstimSelection
+        """
+        if ndx_pose is None:
+            raise ImportError(
+                "ndx-pose is required for pose estimation. "
+                "Install with: pip install ndx-pose>=0.2.0"
+            )
+
+        # Fetch selection entry
+        task_mode, output_dir = (PoseEstimSelection & key).fetch1(
+            "task_mode", "output_dir"
+        )
+
+        # Fetch inference params from PoseEstimParams
+        inference_params = (PoseEstimParams & key).fetch1("params")
+        inference_params = inference_params or {}
+
+        logger.info(
+            f"PoseEstim.make: mode={task_mode}, " f"output_dir={output_dir}"
+        )
+
+        # Resolve video paths from VidFileGroup.File -> VideoFile
+        video_files = (VidFileGroup.File & key).fetch("KEY")
+        if not video_files:
+            raise ValueError(
+                f"No video files found for vid_group_id="
+                f"{key['vid_group_id']}"
+            )
+
+        video_paths = []
+        nwb_file_name = None
+        for vf_key in video_files:
+            vf_entry = (VideoFile & vf_key).fetch1()
+            if vf_entry.get("path"):
+                video_paths.append(vf_entry["path"])
+            if nwb_file_name is None:
+                nwb_file_name = vf_entry["nwb_file_name"]
+
+        # Step 1: Trigger inference if needed
+        if task_mode == "trigger":
+            logger.info("Triggering inference...")
+            model_key = {"model_id": key["model_id"]}
+            destfolder = output_dir if output_dir else None
+            Model().run_inference(
+                model_key,
+                video_paths if len(video_paths) > 1 else video_paths[0],
+                destfolder=destfolder,
+                **inference_params,
+            )
+
+        # Step 2: Find DLC output file(s) in output_dir
+        output_path = Path(output_dir)
+        if not output_path.exists():
+            raise FileNotFoundError(
+                f"Output directory not found: {output_dir}. "
+                "Ensure inference has been run or output_dir is correct."
+            )
+
+        # Look for DLC h5 output files
+        h5_files = sorted(output_path.glob("*DLC*.h5"))
+        if not h5_files:
+            # Also check for generic h5 files
+            h5_files = sorted(output_path.glob("*.h5"))
+        if not h5_files:
+            raise FileNotFoundError(
+                f"No h5 output files found in {output_dir}. "
+                "Expected DLC output (.h5) files."
+            )
+
+        # Use most recent h5 file
+        dlc_output_path = max(h5_files, key=lambda p: p.stat().st_mtime)
+        logger.info(f"Loading DLC output: {dlc_output_path}")
+
+        # Step 3: Read DLC output into DataFrame
+        df = pd.read_hdf(dlc_output_path)
+        scorer = df.columns.get_level_values(0)[0]
+        bodyparts = df.columns.get_level_values(1).unique().tolist()
+
+        logger.info(
+            f"DLC data: {len(bodyparts)} bodyparts, {len(df)} frames, "
+            f"scorer: {scorer}"
+        )
+
+        # Step 4: Store in NWB via AnalysisNwbfile
+        analysis_file_name = self._store_estimation_nwb(
+            key, df, bodyparts, scorer, nwb_file_name
+        )
+
+        # Step 5: Insert into table
+        self.insert1({**key, "analysis_file_name": analysis_file_name})
+        logger.info("PoseEstim entry inserted.")
+
+    def _store_estimation_nwb(
+        self, key, pose_df, bodyparts, scorer, nwb_file_name
+    ):
+        """Store pose estimation data in an AnalysisNwbfile.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key
+        pose_df : pd.DataFrame
+            DLC output DataFrame with MultiIndex columns
+        bodyparts : list
+            List of bodypart names
+        scorer : str
+            Scorer/model name from DLC output
+        nwb_file_name : str
+            Name of the source NWB file (for AnalysisNwbfile.create)
+
+        Returns
+        -------
+        str
+            The analysis_file_name for the created NWB file
+        """
+        # Create analysis NWB file
+        analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
+        nwb_analysis_file = AnalysisNwbfile()
+
+        # Fetch skeleton info from Model -> Skeleton
+        model_info = (Model & key).fetch1()
+        skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
+        skeleton_entry = (Skeleton & skeleton_key).fetch1()
+        skeleton_entry.get("nodes", bodyparts)
+        skeleton_edges = skeleton_entry.get("edges", [])
+
+        # Build ndx-pose Skeleton
+        edge_array = (
+            np.array(skeleton_edges, dtype="uint8")
+            if skeleton_edges
+            else np.array([], dtype="uint8").reshape(0, 2)
+        )
+        nwb_skeleton = ndx_pose.Skeleton(
+            name=f"skeleton_{key['model_id']}",
+            nodes=bodyparts,
+            edges=edge_array,
+        )
+
+        # Build PoseEstimationSeries for each bodypart
+        timestamps = np.arange(len(pose_df), dtype=float)
+        pose_series_list = []
+
+        for bodypart in bodyparts:
+            x = pose_df[(scorer, bodypart, "x")].values
+            y = pose_df[(scorer, bodypart, "y")].values
+            likelihood = pose_df[(scorer, bodypart, "likelihood")].values
+            pose_data = np.column_stack([x, y])
+
+            series = ndx_pose.PoseEstimationSeries(
+                name=f"{bodypart}_pose",
+                description=f"Pose estimation for {bodypart}",
+                data=pose_data,
+                unit="pixels",
+                reference_frame="(0,0) is top-left corner",
+                timestamps=timestamps,
+                confidence=likelihood,
+                confidence_definition="DLC likelihood score",
+            )
+            pose_series_list.append(series)
+
+        # Build PoseEstimation container
+        pose_estimation = ndx_pose.PoseEstimation(
+            name="PoseEstimation",
+            pose_estimation_series=pose_series_list,
+            description=(f"Pose estimation from model {key['model_id']}"),
+            original_videos=[
+                str(p) for p in (VidFileGroup.File & key).fetch("KEY")
+            ],
+            source_software="DeepLabCut",
+            skeleton=nwb_skeleton,
+            scorer=scorer,
+        )
+
+        # Create a pynwb processing module container
+        import pynwb
+
+        behavior_module = pynwb.ProcessingModule(
+            name="behavior",
+            description="Behavioral pose estimation data",
+        )
+
+        # Add skeleton container and pose estimation
+        skeletons = ndx_pose.Skeletons(skeletons=[nwb_skeleton])
+        behavior_module.add(skeletons)
+        behavior_module.add(pose_estimation)
+
+        # Add to analysis NWB and register
+        nwb_analysis_file.add_nwb_object(analysis_file_name, behavior_module)
+        nwb_analysis_file.add(
+            nwb_file_name=nwb_file_name,
+            analysis_file_name=analysis_file_name,
+        )
+
+        logger.info(f"Stored pose estimation in NWB: {analysis_file_name}")
+        return analysis_file_name
+
 
 @schema
 class PoseParams(dj.Lookup):
@@ -485,6 +905,40 @@ class PoseParams(dj.Lookup):
     centroid: blob  # Centroid calculation params
     smoothing: blob  # Smoothing/interpolation params
     """
+
+    # -- Supported orient methods and their required keys --
+    orient_methods = {
+        "two_pt": ["bodypart1", "bodypart2"],
+        "bisector": ["led1", "led2", "led3"],
+        "none": [],
+    }
+
+    # -- Supported centroid methods: n_points, required point keys, extra keys
+    centroid_methods = {
+        "1pt": {
+            "n_points": 1,
+            "required_point_keys": None,  # any single key
+            "extra_required": [],
+        },
+        "2pt": {
+            "n_points": 2,
+            "required_point_keys": None,  # any two keys
+            "extra_required": ["max_LED_separation"],
+        },
+        "4pt": {
+            "n_points": 4,
+            "required_point_keys": {
+                "greenLED",
+                "redLED_C",
+                "redLED_L",
+                "redLED_R",
+            },
+            "extra_required": ["max_LED_separation"],
+        },
+    }
+
+    # -- Smoothing methods (validated at runtime via SMOOTHING_METHODS) --
+    smoothing_required = ["likelihood_thresh"]
 
     @classmethod
     def insert_default(cls, **kwargs):
@@ -727,36 +1181,29 @@ class PoseParams(dj.Lookup):
         }
         cls.insert1(params, **kwargs)
 
-    @staticmethod
-    def _validate_orient_params(params: dict):
+    @classmethod
+    def _validate_orient_params(cls, params: dict):
         """Validate orientation parameters."""
         if "method" not in params:
             raise ValueError("orient params must include 'method'")
 
         method = params["method"]
-        if method not in ["two_pt", "bisector", "none"]:
+        if method not in cls.orient_methods:
             raise ValueError(
                 f"Invalid orient method: {method}. "
-                "Must be 'two_pt', 'bisector', or 'none'"
+                f"Must be one of: {list(cls.orient_methods.keys())}"
             )
 
-        if method == "two_pt":
-            required = ["bodypart1", "bodypart2"]
-            missing = [k for k in required if k not in params]
-            if missing:
-                raise ValueError(
-                    f"two_pt orientation requires: {required}. Missing: {missing}"
-                )
-        elif method == "bisector":
-            required = ["led1", "led2", "led3"]
-            missing = [k for k in required if k not in params]
-            if missing:
-                raise ValueError(
-                    f"bisector orientation requires: {required}. Missing: {missing}"
-                )
+        required = cls.orient_methods[method]
+        missing = [k for k in required if k not in params]
+        if missing:
+            raise ValueError(
+                f"{method} orientation requires: {required}. "
+                f"Missing: {missing}"
+            )
 
-    @staticmethod
-    def _validate_centroid_params(params: dict):
+    @classmethod
+    def _validate_centroid_params(cls, params: dict):
         """Validate centroid parameters."""
         if "method" not in params:
             raise ValueError("centroid params must include 'method'")
@@ -766,46 +1213,43 @@ class PoseParams(dj.Lookup):
         method = params["method"]
         points = params["points"]
 
-        if method not in ["1pt", "2pt", "4pt"]:
+        if method not in cls.centroid_methods:
             raise ValueError(
                 f"Invalid centroid method: {method}. "
-                "Must be '1pt', '2pt', or '4pt'"
+                f"Must be one of: {list(cls.centroid_methods.keys())}"
             )
 
-        # Validate number of points matches method
-        if method == "1pt" and len(points) != 1:
-            raise ValueError("1pt centroid requires exactly 1 point")
-        elif method == "2pt":
-            if len(points) != 2:
-                raise ValueError("2pt centroid requires exactly 2 points")
-            if "max_LED_separation" not in params:
-                raise ValueError("2pt centroid requires max_LED_separation")
-        elif method == "4pt":
-            if len(points) != 4:
-                raise ValueError("4pt centroid requires exactly 4 points")
-            required_keys = {"greenLED", "redLED_C", "redLED_L", "redLED_R"}
-            if set(points.keys()) != required_keys:
+        spec = cls.centroid_methods[method]
+
+        if len(points) != spec["n_points"]:
+            raise ValueError(
+                f"{method} centroid requires exactly "
+                f"{spec['n_points']} point(s)"
+            )
+
+        if spec["required_point_keys"] is not None:
+            if set(points.keys()) != spec["required_point_keys"]:
                 raise ValueError(
-                    f"4pt centroid requires points: {required_keys}. "
+                    f"{method} centroid requires points: "
+                    f"{spec['required_point_keys']}. "
                     f"Got: {set(points.keys())}"
                 )
-            if "max_LED_separation" not in params:
-                raise ValueError("4pt centroid requires max_LED_separation")
 
-    @staticmethod
-    def _validate_smoothing_params(params: dict):
+        for k in spec["extra_required"]:
+            if k not in params:
+                raise ValueError(f"{method} centroid requires {k}")
+
+    @classmethod
+    def _validate_smoothing_params(cls, params: dict):
         """Validate smoothing parameters."""
-        if "likelihood_thresh" not in params:
-            raise ValueError(
-                "smoothing params must include 'likelihood_thresh'"
-            )
+        for k in cls.smoothing_required:
+            if k not in params:
+                raise ValueError(f"smoothing params must include '{k}'")
 
-        # Validate interpolation params
         if params.get("interpolate", False):
             if "interp_params" not in params:
                 raise ValueError("interpolate=True requires interp_params")
 
-        # Validate smoothing params
         if params.get("smooth", False):
             if "smoothing_params" not in params:
                 raise ValueError("smooth=True requires smoothing_params")
@@ -813,14 +1257,16 @@ class PoseParams(dj.Lookup):
             if "method" not in smooth_params:
                 raise ValueError("smoothing_params must include 'method'")
 
-            # Import here to avoid circular dependency
-            from spyglass.position.utils.interpolation import SMOOTHING_METHODS
+            from spyglass.position.utils.interpolation import (
+                SMOOTHING_METHODS,
+            )
 
             method = smooth_params["method"]
             if method not in SMOOTHING_METHODS:
                 raise ValueError(
                     f"Invalid smoothing method: {method}. "
-                    f"Must be one of: {list(SMOOTHING_METHODS.keys())}"
+                    f"Must be one of: "
+                    f"{list(SMOOTHING_METHODS.keys())}"
                 )
 
 

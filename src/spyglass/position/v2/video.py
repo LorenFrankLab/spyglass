@@ -35,7 +35,7 @@ class VidFileGroup(dj.Manual):
         -> VidFileGroup
         calibration_id: int
         ---
-        # What other fields are needed?
+        # What other fields are needed? blob catch-all?
         path: varchar(255)
         """
 
