@@ -380,10 +380,15 @@ class AnalysisMixin(BaseMixin):
         path : str
             The path for the analysis NWB file.
         """
-        abs_path = cls.__get_file_parent(fname) / fname
-        return (
-            abs_path.relative_to(cls()._analysis_dir) if relative else abs_path
-        )
+        analysis_dir = cls()._analysis_dir
+        old_format = Path(analysis_dir) / fname  # Flat stored, see #1565
+
+        if old_format.exists():
+            abs_path = old_format
+        else:
+            abs_path = cls.__get_file_parent(fname) / fname
+
+        return abs_path.relative_to(analysis_dir) if relative else abs_path
 
     @classmethod
     def _get_analysis_file_paths(
