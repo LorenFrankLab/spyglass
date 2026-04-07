@@ -502,7 +502,7 @@ def _get_epoch_groups(position: pynwb.behavior.Position):
         epoch_start_time[pos_epoch] = (
             timestamps[0]
             if timestamps is not None
-            else spatial_series.get_timestamps()[0]
+            else spatial_series.starting_time
         )
 
     return {
