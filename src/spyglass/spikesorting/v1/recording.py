@@ -423,7 +423,6 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         recording = se.read_nwb_recording(
             analysis_file_abs_path, load_time_vector=True
         )
-        recording.annotate(is_filtered=True)
 
         return recording
 

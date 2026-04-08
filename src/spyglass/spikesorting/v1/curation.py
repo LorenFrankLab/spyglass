@@ -168,7 +168,9 @@ class CurationV1(SpyglassMixin, dj.Manual):
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1("KEY")
-        return SpikeSortingRecording.get_recording(recording_key)
+        recording = SpikeSortingRecording.get_recording(recording_key)
+        recording.annotate(is_filtered=True)
+        return recording
 
     @classmethod
     def get_sorting(cls, key: dict, as_dataframe=False) -> si.BaseSorting:
