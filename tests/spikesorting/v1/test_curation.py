@@ -278,8 +278,8 @@ def test_empty_units_nwb_readable(empty_units_nwb):
 # ============================================================================
 
 
-def test_get_sorting_clips_excess_spikes():
-    """Test that the clipping logic in get_sorting handles spike indices
+def test_get_sorting_removes_excess_spikes():
+    """Test that the removal logic in get_sorting handles spike indices
     exceeding recording bounds.
 
     Reproduces the scenario where floating-point rounding in the
@@ -305,19 +305,19 @@ def test_get_sorting_clips_excess_spikes():
         "Test precondition failed: expected at least one out-of-bounds index"
     )
 
-    # Apply the same clipping logic as in get_sorting
+    # Apply the same removal logic as in get_sorting
     n_excess = int(np.sum(raw_samples >= n_samples))
-    clipped_samples = np.clip(raw_samples, 0, n_samples - 1)
+    valid_samples = raw_samples[raw_samples < n_samples]
 
-    assert np.all(clipped_samples < n_samples), (
-        "All spike sample indices must be < n_samples after clipping"
+    assert np.all(valid_samples < n_samples), (
+        "All spike sample indices must be < n_samples after removal"
     )
-    assert len(clipped_samples) == len(spike_times_with_excess), (
-        "Clipping should preserve spike count, not remove spikes"
+    assert len(valid_samples) == len(spike_times_with_excess) - n_excess, (
+        "Removal should reduce spike count by the number of excess spikes"
     )
 
     # Verify that the resulting NumpySorting is accepted by SpikeInterface
-    units_dict = {0: clipped_samples}
+    units_dict = {0: valid_samples}
     sorting = si.NumpySorting.from_unit_dict(
         [units_dict], sampling_frequency=sampling_frequency
     )

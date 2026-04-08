@@ -221,11 +221,11 @@ class CurationV1(SpyglassMixin, dj.Manual):
             if n_excess > 0:
                 logger.warning(
                     f"Unit {unit.Index} has {n_excess} spike(s) exceeding the "
-                    "recording duration. Clipping to valid sample range. This "
+                    "recording duration. Removing excess spikes. This "
                     "may be caused by floating-point rounding during the "
                     "seconds-to-samples conversion."
                 )
-                spike_samples = np.clip(spike_samples, 0, n_samples - 1)
+                spike_samples = spike_samples[spike_samples < n_samples]
             units_dict[unit.Index] = spike_samples
 
         return si.NumpySorting.from_unit_dict(
