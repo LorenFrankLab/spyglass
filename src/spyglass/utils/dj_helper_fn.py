@@ -560,7 +560,7 @@ def make_file_obj_id_unique(nwb_path: str):
         with h5py.File(nwb_path, "a") as f:
             f.attrs["object_id"] = new_id
     except (BlockingIOError, OSError):
-        from spyglass.utils.export_error_log import ExportErrorLog
+        from spyglass.common.common_usage import ExportErrorLog
 
         ExportErrorLog().insert1(
             {
