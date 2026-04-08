@@ -301,20 +301,20 @@ def test_get_sorting_removes_excess_spikes():
 
     # Verify searchsorted actually returns an out-of-bounds index on this data
     raw_samples = np.searchsorted(recording_times, spike_times_with_excess)
-    assert np.any(raw_samples >= n_samples), (
-        "Test precondition failed: expected at least one out-of-bounds index"
-    )
+    assert np.any(
+        raw_samples >= n_samples
+    ), "Test precondition failed: expected at least one out-of-bounds index"
 
     # Apply the same removal logic as in get_sorting
     n_excess = int(np.sum(raw_samples >= n_samples))
     valid_samples = raw_samples[raw_samples < n_samples]
 
-    assert np.all(valid_samples < n_samples), (
-        "All spike sample indices must be < n_samples after removal"
-    )
-    assert len(valid_samples) == len(spike_times_with_excess) - n_excess, (
-        "Removal should reduce spike count by the number of excess spikes"
-    )
+    assert np.all(
+        valid_samples < n_samples
+    ), "All spike sample indices must be < n_samples after removal"
+    assert (
+        len(valid_samples) == len(spike_times_with_excess) - n_excess
+    ), "Removal should reduce spike count by the number of excess spikes"
 
     # Verify that the resulting NumpySorting is accepted by SpikeInterface
     units_dict = {0: valid_samples}
