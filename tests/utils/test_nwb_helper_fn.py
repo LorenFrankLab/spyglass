@@ -58,7 +58,6 @@ def test_electrode_nwbfile(get_electrode_indices, custom_nwbfile):
     assert ret == [2, 5]
 
 
-
 def test_electrical_series(get_electrode_indices, custom_nwbfile):
     eseries = custom_nwbfile.acquisition["eseries"]
     ret = get_electrode_indices(eseries, [102, 105])
