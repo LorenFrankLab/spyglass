@@ -493,22 +493,45 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def _get_epoch_groups(position: pynwb.behavior.Position):
+def _get_epoch_groups(position: pynwb.behavior.Position) -> dict:
+    """Group spatial series indices by their epoch start time.
+
+    Supports both NWB timing conventions: explicit timestamps and
+    starting_time + rate.
+
+    Parameters
+    ----------
+    position : pynwb.behavior.Position
+        Position interface containing one or more SpatialSeries.
+
+    Returns
+    -------
+    dict
+        Mapping from epoch start time (float, seconds) to a list of
+        spatial series indices sharing that start time.
+    """
     epoch_start_time = {}
     for pos_epoch, spatial_series in enumerate(
         position.spatial_series.values()
     ):
         timestamps = spatial_series.timestamps
-        epoch_start_time[pos_epoch] = (
+        start = (
             timestamps[0]
             if timestamps is not None
             else spatial_series.starting_time
         )
+        if start is None:
+            raise ValueError(
+                f"SpatialSeries '{spatial_series.name}' has neither "
+                "timestamps nor starting_time; cannot determine epoch start."
+            )
+        epoch_start_time[pos_epoch] = start
 
     return {
-        i: [j[0] for j in j]
-        for i, j in groupby(
-            sorted(epoch_start_time.items(), key=lambda x: x[1]), lambda x: x[1]
+        start_time: [item[0] for item in group]
+        for start_time, group in groupby(
+            sorted(epoch_start_time.items(), key=lambda x: x[1]),
+            lambda x: x[1],
         )
     }
 
