@@ -239,6 +239,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove outdated code comments #1304
 - Add code coverage badge, and increase position coverage #1305, #1315
 - Force `TableChain` to follow shortest path #1356
+- Avoid database connections in import of `spyglass.settings` #1563
 
 ### Documentation
 
