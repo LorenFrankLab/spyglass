@@ -197,7 +197,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
 
         # Warn if the sampling rate is not the same as the original
         if lfp_band_sampling_rate is not None:
-            logger.info(
+            self._info_msg(
                 "It is recommended to use the same sampling rate as the original "
                 + "lfp data to avoid aliasing."
             )
@@ -268,7 +268,7 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
                 "electrode_id"
             )
             if set(existing_electrodes) == set(electrode_list):
-                logger.info(
+                self._info_msg(
                     f"LFPBandSelection already exists for {master_key}; "
                     + "not inserting"
                 )
@@ -736,12 +736,12 @@ class LFPBandV1(SpyglassMixin, dj.Computed):
         ]
 
         if not fixed_keys:
-            logger.info("No entries needed to be fixed for the 1481 bug.")
+            self._info_msg("No entries needed to be fixed for the 1481 bug.")
             return
 
         from spyglass.ripple.v1.ripple import RippleTimesV1
 
-        logger.info(
+        self._info_msg(
             f"Fixing {len(fixed_keys)} entries in the RippleTimesV1 table "
             "due to the 1481 bug. See github issue #1481 for more details."
         )

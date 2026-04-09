@@ -264,7 +264,7 @@ class AnalysisMixin(BaseMixin):
 
             # write the new file
             if not recompute_file_name:
-                self._logger.info(f"Writing new NWB file {analysis_file_name}")
+                self._info_msg(f"Writing new NWB file {analysis_file_name}")
 
             analysis_file_abs_path = self.get_abs_path(
                 analysis_file_name, from_schema=bool(recompute_file_name)
@@ -380,10 +380,41 @@ class AnalysisMixin(BaseMixin):
         path : str
             The path for the analysis NWB file.
         """
-        abs_path = cls.__get_file_parent(fname) / fname
-        return (
-            abs_path.relative_to(cls()._analysis_dir) if relative else abs_path
-        )
+        analysis_dir = cls()._analysis_dir
+        old_format = Path(analysis_dir) / fname  # Flat stored, see #1565
+
+        if old_format.exists():
+            abs_path = old_format
+        else:
+            abs_path = cls.__get_file_parent(fname) / fname
+
+        return abs_path.relative_to(analysis_dir) if relative else abs_path
+
+    @classmethod
+    def _get_analysis_file_paths(
+        cls, fnames: list, relative: bool = False, as_str: bool = True
+    ) -> list:
+        """Get the paths for a list of analysis NWB files.
+
+        Parameters
+        ----------
+        fnames : list
+            A list of analysis NWB file names.
+        relative : bool, Optional
+            If true, return paths relative to analysis_dir. Defaults False.
+        as_str : bool, Optional
+            If true, return paths as strings. If false, return as Path objects.
+
+        Returns
+        -------
+        paths : list
+            A list of paths for the specified analysis NWB files.
+        """
+        ret = [
+            cls.__get_analysis_path(fname, relative=relative)
+            for fname in fnames
+        ]
+        return [str(path) for path in ret] if as_str else ret
 
     @classmethod
     def copy(cls, nwb_file_name: str):
@@ -413,7 +444,7 @@ class AnalysisMixin(BaseMixin):
             original_nwb_file_name = query.fetch("nwb_file_name")[0]
             analysis_file_name = cls.__get_new_file_name(original_nwb_file_name)
             # write the new file
-            cls()._logger.info(f"Writing new NWB file {analysis_file_name}...")
+            cls()._info_msg(f"Writing new NWB file {analysis_file_name}...")
             analysis_file_abs_path = cls().get_abs_path(analysis_file_name)
             # export the new NWB file
             with pynwb.NWBHDF5IO(
@@ -661,6 +692,7 @@ class AnalysisMixin(BaseMixin):
                 nwb_object = ScratchData(
                     name=table_name or "numpy_array",
                     data=nwb_object,
+                    description="Numpy array stored in scratch space",
                 )
             if nwb_object.name in nwbf.scratch:
                 raise ValueError(
@@ -831,7 +863,7 @@ class AnalysisMixin(BaseMixin):
                 # to ensure that things go in the right order
 
                 metric_values = metric_values[np.argsort(unit_ids)]
-                self._logger.info(f"Adding metric {metric} : {metric_values}")
+                self._info_msg(f"Adding metric {metric} : {metric_values}")
                 nwbf.add_unit_column(
                     name=metric,
                     description=f"{metric} metric",
@@ -916,7 +948,7 @@ class AnalysisMixin(BaseMixin):
             # If metrics were specified, add one column per metric
             if metrics is not None:
                 for metric_name, metric_dict in metrics.items():
-                    self._logger.info(
+                    self._info_msg(
                         f"Adding metric {metric_name} : {metric_dict}"
                     )
                     metric_data = metric_dict.values().to_list()
@@ -962,9 +994,7 @@ class AnalysisMixin(BaseMixin):
                 nwbf.add_unit(id=id)
 
             for metric_name, metric_dict in metrics.items():
-                self._logger.info(
-                    f"Adding metric {metric_name} : {metric_dict}"
-                )
+                self._info_msg(f"Adding metric {metric_name} : {metric_dict}")
                 metric_data = list(metric_dict.values())
                 nwbf.add_unit_column(
                     name=metric_name, description=metric_name, data=metric_data

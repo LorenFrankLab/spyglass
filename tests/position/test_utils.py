@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.conftest import VERBOSE
+
 
 def test_get_params_fallback(sgp):
     get_params = sgp.utils.get_param_names
@@ -50,6 +52,7 @@ def test_valid_list_error(sgp):
         validate(option_list=["a", "b"], required_items=["a", "c"])
 
 
+@pytest.mark.skipif(not VERBOSE, reason="No logging to test when quiet-spy")
 def test_log_decorator_no_path(sgp):
     from spyglass.position.v1.dlc_utils import file_log
     from spyglass.utils import logger

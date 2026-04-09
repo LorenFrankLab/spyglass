@@ -57,18 +57,8 @@ send_email_message() {
       -T <(echo "$EMAIL")
 }
 
-# Send slack message
-send_slack_message() {
-  if [[ -z "$SLACK_TOKEN" || -z "$SLACK_CHANNEL" ]]; then
-    return 0
-  fi
-  local MESSAGE="$1"
-  curl -d "text=$MESSAGE" \
-    -d "channel=$SLACK_CHANNEL" \
-    -H "Authorization: Bearer $SLACK_TOKEN" \
-    -X POST https://slack.com/api/chat.postMessage \
-    2>> "$SPACE_LOG"
-}
+source "$SCRIPT_DIR/slack_utils.sh"
+SLACK_LOG="$SPACE_LOG"
 
 # Find the longest drive name for padding
 MAX_DRIVE_LEN=0
@@ -110,7 +100,8 @@ for i in "${!DRIVE_LIST[@]}"; do
       printf "%-*s: %s/%s\n" \
       "$MAX_DRIVE_LEN" "$NAME" "$FREE_HUMAN" "$TOTAL_HUMAN"\
     )
-    OUTPUT+="$line\n"
+    OUTPUT+="$line
+"
 
     # Do nothing if under capacity
     if [[ "$FREE_BYTES" -gt "$SPACE_LIMIT_BYTES" ]]; then
@@ -133,7 +124,15 @@ for i in "${!DRIVE_LIST[@]}"; do
 
 done
 
-echo -e "$OUTPUT" >> "$SPACE_LOG"
+# NOTE: `echo` may cause issues on alternative shells.
+# If needed, can extend to use `printf` instead.
+echo "$OUTPUT" >> "$SPACE_LOG"
+
+# Send full disk space report via Slack every Monday
+if [[ "$(date +%u)" == "1" ]]; then
+  send_slack_message "DISK SPACE:
+  $OUTPUT"
+fi
 
 if [[ "$SPACE_EMAIL_ON_PASS" == "true" ]] && [[ "$FOUND_ISSUE" == "0" ]]; then
   for RECIPIENT in $SPACE_EMAIL_RECIPIENTS; do

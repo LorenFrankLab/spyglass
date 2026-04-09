@@ -164,6 +164,25 @@ def gen_export_selection(
         ExportSelection.super_delete(warn=False, safemode=False)
 
 
+def test_custom_analysis_file_setup(custom_analysis_file):
+    table, downstream, analysis_file_name = custom_analysis_file
+
+    # Verify the custom AnalysisNwbfile entry exists
+    assert (
+        len(table & {"analysis_file_name": analysis_file_name}) == 1
+    ), "Custom AnalysisNwbfile entry not created"
+
+    # Verify the custom downstream entry exists
+    assert (
+        len(downstream & {"analysis_file_name": analysis_file_name}) == 1
+    ), "Custom downstream entry not created"
+
+    # Verify the analysis_table property is set correctly
+    assert (
+        downstream.analysis_table.full_table_name == table.full_table_name
+    ), "Custom downstream analysis_table property not set correctly"
+
+
 @pytest.mark.very_slow
 def test_export_selection_files(gen_export_selection, export_tbls):
     ExportSelection, _ = export_tbls
