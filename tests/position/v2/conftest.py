@@ -342,3 +342,60 @@ def mock_dlc_inference_output(tmp_path):
     df.to_csv(str(csv_path))
 
     return {"h5": h5_path, "csv": csv_path, "dataframe": df}
+
+
+# ----------------------------- DLC Fixtures -----------------------------------
+
+
+@pytest.fixture
+def skip_if_no_dlc():
+    """Skip test if DLC unavailable or --no-pose flag is set.
+
+    Mirrors V1's skip_if_no_pose pattern. Use as a fixture parameter in
+    any test that requires a real DLC installation or trained model.
+    Pass ``--no-pose`` to pytest to skip all such tests in CI.
+    """
+    if getattr(pytest, "NO_POSE", False):
+        pytest.skip("Skipping DLC test (--no-pose flag set)")
+    try:
+        import deeplabcut  # noqa: F401
+    except ImportError:
+        pytest.skip("Skipping DLC test (deeplabcut not installed)")
+    yield
+
+
+@pytest.fixture(scope="session")
+def dlc_project_config(tmp_path_factory):
+    """Session-scoped DLC project created from tests/_data/deeplabcut/.
+
+    Builds a minimal DLC project directory (config.yaml, fake trained model,
+    labeled frames) using ``make_dlc_project()``.  No database or DLC
+    installation required.
+
+    Returns
+    -------
+    Path
+        Absolute path to the project's ``config.yaml``.
+    """
+    from tests.position.v2.make_example_dlc_project import make_dlc_project
+
+    project_dir = tmp_path_factory.mktemp("dlc_project", numbered=False)
+    return make_dlc_project(project_dir)
+
+
+@pytest.fixture(scope="session")
+def dlc_bootstrapped_session(dlc_project_config):
+    """Register minimal Spyglass DB entries for the test DLC project.
+
+    Calls ``bootstrap_dlc_session()`` so that
+    ``VidFileGroup.create_from_dlc_config()`` can match the project's video
+    paths to an existing ``Nwbfile`` entry.
+
+    Returns
+    -------
+    str
+        The ``nwb_file_name`` inserted into ``Nwbfile``.
+    """
+    from tests.position.v2.make_example_dlc_project import bootstrap_dlc_session
+
+    return bootstrap_dlc_session(dlc_project_config)

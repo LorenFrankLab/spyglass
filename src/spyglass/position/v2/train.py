@@ -26,8 +26,61 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile, LabMember
 from spyglass.position.utils import get_most_recent_file, get_param_names
+from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.video import VidFileGroup
+from spyglass.settings import dlc_project_dir
 from spyglass.utils import SpyglassMixin, logger
+
+
+def resolve_model_path(stored_path: str) -> Path:
+    """Resolve a stored model_path to an absolute Path.
+
+    Stored paths may be absolute or relative to ``dlc_project_dir``.
+    Absolute paths are returned unchanged. Relative paths are resolved
+    against ``dlc_project_dir`` if it is configured, otherwise against
+    the current working directory.
+
+    Parameters
+    ----------
+    stored_path : str
+        Value stored in the Model.model_path column.
+
+    Returns
+    -------
+    Path
+        Absolute path to the model file.
+    """
+    p = Path(stored_path)
+    if p.is_absolute():
+        return p
+    base = dlc_project_dir or Path.cwd()
+    return Path(base) / p
+
+
+def _to_stored_path(path: Path) -> str:
+    """Convert an absolute model path to a stored (relative if possible) string.
+
+    If ``path`` falls under ``dlc_project_dir``, the relative portion is
+    returned so that entries remain portable across base-directory changes.
+    Otherwise the absolute path is stored unchanged (same as V1 behaviour).
+
+    Parameters
+    ----------
+    path : Path
+        Absolute path to the model file.
+
+    Returns
+    -------
+    str
+        Path string to store in the database.
+    """
+    if dlc_project_dir:
+        try:
+            return str(path.relative_to(dlc_project_dir))
+        except ValueError:
+            pass
+    return str(path)
+
 
 # ------------------------------ Optional imports ------------------------------
 try:
@@ -35,17 +88,21 @@ try:
 except ImportError:
     ndx_pose = None
 
-try:
-    from deeplabcut import create_training_dataset, train_network
-    from deeplabcut.core.engine import Engine
-
+with suppress_print_from_package():
     try:
-        from deeplabcut import evaluate_network
-    except ImportError:
+        from deeplabcut import create_training_dataset, train_network
+        from deeplabcut.core.engine import Engine
+
+        try:
+            from deeplabcut import evaluate_network
+        except (ImportError, RecursionError):
+            evaluate_network = None
+    except (ImportError, RecursionError):
+        # RecursionError can occur when TF 2.16+ (Keras 3) is installed without
+        # tf-keras; the TF compat layer loader recurses infinitely. Set
+        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend support.
+        create_training_dataset, train_network, Engine = [None] * 3
         evaluate_network = None
-except ImportError:
-    create_training_dataset, train_network, Engine = [None] * 3
-    evaluate_network = None
 
 # -------------------------------- Module setup --------------------------------
 warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
@@ -70,6 +127,8 @@ def default_pk_name(prefix: str, params: dict, limit: int = 32) -> str:
     limit : int, optional
         Maximum length of the returned name, by default 32
     """
+    # TODO: Migrate this to general utils for use with other params tables?
+
     when = datetime.utcnow()
     h = dj.hash.key_hash(params)
     return f"{prefix}-{when:%Y%m%d}-{h}"[:limit]
@@ -596,7 +655,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         if not isinstance(key, dict):
             raise TypeError("Key must be a dictionary")
 
-        this_tool = key.get("tool", "UNKNOWN")
+        this_tool = key.get("tool", "UNSPECIFIED").strip()
         if this_tool not in self.tool_info:
             raise ValueError(f"Tool not supported {this_tool}")
 
@@ -617,8 +676,9 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
         params_hash_dict = dict(params_hash=dj.hash.key_hash(params))
         if dupe := (self & params_hash_dict & dict(tool=key["tool"])):
-            logger.warning(f"Entry exists with same params: \n{dupe}")
-            return dupe.fetch1("KEY")
+            dupe_key = dupe.fetch1("KEY")
+            logger.warning(f"Entry exists with same params: {dupe_key}")
+            return dupe_key
 
         model_params_id: str = (key.get("model_params_id") or "").strip()
         if not model_params_id:
@@ -675,8 +735,7 @@ class Model(SpyglassMixin, dj.Computed):
     def make(self, key):
         """Train a new model based on ModelSelection entry.
 
-        This method is called automatically by DataJoint's populate() when
-        a new ModelSelection entry is inserted. It performs the following:
+        Performs the following:
         1. Fetches model parameters and video group information
         2. Creates training dataset (if needed)
         3. Trains the model using the specified tool (DLC, SLEAP, etc.)
@@ -723,7 +782,7 @@ class Model(SpyglassMixin, dj.Computed):
             model_result = self._make_dlc_model(
                 key, params, skeleton_id, vid_group, sel_entry
             )
-        else:
+        else:  # TODO: Add support for SLEAP here
             raise NotImplementedError(
                 f"Training not implemented for tool: {tool}"
             )
@@ -795,6 +854,8 @@ class Model(SpyglassMixin, dj.Computed):
         maxiters = params.get("maxiters", None)  # Use DLC default if None
         displayiters = params.get("displayiters", None)
         saveiters = params.get("saveiters", None)
+        task = config.get("Task", "DLCTask")
+        date = config.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
 
         # Check if this is continued training
         parent_id = sel_entry.get("parent_id")
@@ -812,17 +873,18 @@ class Model(SpyglassMixin, dj.Computed):
         if not training_dataset_path.exists():
             logger.info("Creating training dataset...")
             try:
-                create_training_dataset(
-                    str(config_path),
-                    num_shuffles=shuffle,
-                    Shuffles=[shuffle],
-                    trainIndices=None,
-                    testIndices=None,
-                    net_type=params.get("net_type"),
-                    augmenter_type=params.get(
-                        "augmenter_type", config.get("default_augmenter")
-                    ),
-                )
+                with suppress_print_from_package():
+                    create_training_dataset(
+                        str(config_path),
+                        num_shuffles=shuffle,
+                        Shuffles=[shuffle],
+                        trainIndices=None,
+                        testIndices=None,
+                        net_type=params.get("net_type"),
+                        augmenter_type=params.get(
+                            "augmenter_type", config.get("default_augmenter")
+                        ),
+                    )
                 logger.info("Training dataset created successfully")
             except Exception as e:
                 logger.warning(
@@ -847,7 +909,8 @@ class Model(SpyglassMixin, dj.Computed):
         logger.info(f"Training parameters: {train_params}")
 
         try:
-            train_network(**train_params)
+            with suppress_print_from_package():
+                train_network(**train_params)
         except Exception as e:
             logger.error(f"Training failed: {e}")
             raise
@@ -867,7 +930,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Step 4: Generate model_id
         model_id = default_pk_name(
-            f"DLC-{config['Task']}-{config['date']}",
+            f"DLC-{task}-{date}",
             dict(
                 tool="DLC",
                 shuffle=shuffle,
@@ -897,7 +960,7 @@ class Model(SpyglassMixin, dj.Computed):
             "tool": "DLC",
             "project_path": str(project_path),
             "config_path": str(config_path),
-            "model_path": str(model_path),
+            "model_path": _to_stored_path(model_path),
             "shuffle": shuffle,
             "trainingsetindex": trainingsetindex,
             "iteration": latest_model["iteration"],
@@ -911,8 +974,8 @@ class Model(SpyglassMixin, dj.Computed):
         nwbfile.add_scratch(training_metadata, name="model_training_metadata")
 
         # Write NWB file
-        with NWBHDF5IO(str(nwb_path), mode="w") as io:
-            io.write(nwbfile)
+        with NWBHDF5IO(str(nwb_path), mode="w") as nwb_io:
+            nwb_io.write(nwbfile)
 
         logger.info(f"Model metadata saved to NWB: {nwb_path}")
 
@@ -930,7 +993,7 @@ class Model(SpyglassMixin, dj.Computed):
             key,
             model_id=model_id,
             analysis_file_name=nwb_file_name,
-            model_path=str(model_path),
+            model_path=_to_stored_path(model_path),
         )
 
     def train(
@@ -1207,13 +1270,14 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Run DLC evaluation
         try:
-            evaluate_network(
-                str(config_path),
-                Shuffles=shuffle,
-                trainingsetindex=trainingsetindex,
-                plotting=plotting,
-                show_errors=show_errors,
-            )
+            with suppress_print_from_package():
+                evaluate_network(
+                    str(config_path),
+                    Shuffles=shuffle,
+                    trainingsetindex=trainingsetindex,
+                    plotting=plotting,
+                    show_errors=show_errors,
+                )
         except Exception as e:
             logger.error(f"DLC evaluation failed: {e}")
             raise
@@ -1315,6 +1379,8 @@ class Model(SpyglassMixin, dj.Computed):
 
         Reads the learning_stats.csv file from DLC training output.
 
+        # TODO: Generalize to other tools
+
         Parameters
         ----------
         model_key : dict
@@ -1342,8 +1408,11 @@ class Model(SpyglassMixin, dj.Computed):
         model_entry = (self & model_key).fetch1()
         model_path = Path(model_entry["model_path"])
 
-        # Training stats are in model_path/train/learning_stats.csv
-        stats_path = model_path / "train" / "learning_stats.csv"
+        # model_path is the train/ directory (set by _make_dlc_model via
+        # _get_latest_dlc_model_info which returns pose_cfg.parent).
+        # learning_stats.csv lives in the same train/ directory.
+        model_path = resolve_model_path(str(model_path))
+        stats_path = model_path / "learning_stats.csv"
 
         if not stats_path.exists():
             logger.warning(f"Training stats not found: {stats_path}")
@@ -1521,27 +1590,69 @@ class Model(SpyglassMixin, dj.Computed):
         with open(model_path, "r") as f:
             config = yaml.safe_load(f)
 
-        config = kwargs.update(config) or config
+        # Step 1: Extract and insert skeleton from DLC config
+        skeleton_config = {
+            "bodyparts": config.get("bodyparts", []),
+            "skeleton": config.get("skeleton", []),
+        }
+        if kwargs.get("skeleton_id"):
+            skeleton_config["skeleton_id"] = kwargs["skeleton_id"]
 
-        skeleton = Skeleton().insert1(
-            config, check_duplicates=False, skip_duplicates=True
+        skeleton_key = Skeleton().insert1(
+            skeleton_config,
+            check_duplicates=True,
+            skip_duplicates=True,
+            accept_default=True,
         )
-        model_params = ModelParams().insert1(
-            dict(tool="DLC", params=config),
-            raise_on_duplicate=False,
+        logger.info(f"Skeleton: {skeleton_key['skeleton_id']}")
+
+        # Step 2: Create or retrieve ModelParams entry
+        model_params_key = ModelParams().insert1(
+            dict(
+                tool="DLC",
+                params=config,
+                model_params_id=kwargs.get("model_params_id"),
+                skeleton_id=skeleton_key["skeleton_id"],
+            ),
+            skip_duplicates=True,
+            accept_default=True,
         )
+        logger.info(f"ModelParams: {model_params_key['model_params_id']}")
+
+        # Step 3: Create VidFileGroup linked to registered Spyglass session.
+        # Raises ValueError if no session matches the DLC config's video paths.
+        # Register the session with insert_sessions() before calling import_model().
+        vid_group_key = VidFileGroup.create_from_dlc_config(model_path)
+        logger.info(f"VidFileGroup: {vid_group_key['vid_group_id']}")
+
+        # Step 4: Create ModelSelection entry (no skeleton_id — it lives in
+        # ModelParams, not ModelSelection)
+        sel_key = {**model_params_key, **vid_group_key}
+        ModelSelection().insert1(sel_key, skip_duplicates=True)
+
+        # Return the existing Model entry if one already exists for this path.
+        # model_path is the most stable identifier; default_pk_name embeds
+        # today's date so model_id changes across days.
+        stored_path = _to_stored_path(model_path)
+        if existing := (self & {"model_path": stored_path}):
+            return existing.fetch1()
+
+        # Step 5: Generate model_id and insert directly into Model
+        task = config.get("Task", "DLCTask")
+        date = config.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
         model_id = kwargs.get("model_id") or default_pk_name(
-            f"DLC-{config['Task']}{config['date']}",
-            dict(tool="DLC", model_path=str(model_path)),
+            f"DLC-{task}-{date}",
+            dict(tool="DLC", model_path=stored_path),
         )
-        sel_key = dict(skeleton, **model_params)
-        ModelSelection().insert1(sel_key)
+        model_key = {
+            **sel_key,
+            "model_id": model_id,
+            "model_path": stored_path,
+        }
+        self.insert1(model_key, allow_direct_insert=True)
+        logger.info(f"Model imported: {model_id}")
 
-        raise NotImplementedError("Need to generate NWB file")
-
-        self.insert1(
-            dict(sel_key, model_id=model_id, model_path=str(model_path))
-        )
+        return model_key
 
     def _import_ndx_pose_model(self, model_path: Path, **kwargs):
         """Import a trained model from an ndx-pose NWB file.
@@ -1583,8 +1694,8 @@ class Model(SpyglassMixin, dj.Computed):
         logger.info(f"Importing ndx-pose model from {model_path}")
 
         # Step 1: Read NWB file and extract pose data
-        with NWBHDF5IO(str(model_path), mode="r") as io:
-            nwbfile = io.read()
+        with NWBHDF5IO(str(model_path), mode="r") as nwb_io:
+            nwbfile = nwb_io.read()
 
             # Step 2: Find behavior processing module
             if "behavior" not in nwbfile.processing:
@@ -1747,6 +1858,10 @@ class Model(SpyglassMixin, dj.Computed):
         sel_key = {**model_params_key, **vid_group_key}
         ModelSelection().insert1(sel_key, skip_duplicates=True)
 
+        # Return the existing Model entry if one already exists for this path.
+        if existing := (self & {"model_path": str(model_path)}):
+            return existing.fetch1()
+
         # Step 13: Create Model entry
         model_id = kwargs.get("model_id")
         if not model_id:
@@ -1755,18 +1870,21 @@ class Model(SpyglassMixin, dj.Computed):
                 "mdl", {"model_name": model_name, "nwb_file": str(model_path)}
             )
 
-        # Note: We don't create a new NWB file for ndx-pose imports
-        # The model_path already points to the source NWB file
-        # TODO: Future enhancement - copy or link to AnalysisNwbfile
+        # For ndx-pose imports the source NWB file IS the model artifact —
+        # analysis_file_name is intentionally nullable here. Unlike DLC
+        # imports (which create a fresh AnalysisNwbfile to store training
+        # metadata), the ndx-pose file already contains all model info and
+        # is tracked via model_path. An AnalysisNwbfile link can be added
+        # after import if the file is later registered in a Spyglass session.
         nwb_file_name = kwargs.get("nwb_file_name")
         if nwb_file_name:
-            # Use provided NWB file (must exist in AnalysisNwbfile)
             analysis_file_name = nwb_file_name
         else:
-            # No analysis file - use nullable field
             analysis_file_name = None
             logger.info(
-                "No nwb_file_name provided. Model will not have AnalysisNwbfile link."
+                "ndx-pose import: analysis_file_name=None (model_path is "
+                "the NWB reference). Pass nwb_file_name= to link a "
+                "registered AnalysisNwbfile."
             )
 
         model_key = {
@@ -1781,240 +1899,6 @@ class Model(SpyglassMixin, dj.Computed):
         logger.info(f"Model imported: {model_id}")
 
         return model_key
-
-    def run_inference(
-        self,
-        model_key: dict,
-        video_path: Union[Path, str, list],
-        save_as_csv: bool = False,
-        destfolder: Union[Path, str, None] = None,
-        **kwargs,
-    ) -> Union[str, list]:
-        """Run pose estimation inference on video(s) using a trained model.
-
-        Parameters
-        ----------
-        model_key : dict
-            Primary key for the Model table entry (must include 'model_id')
-        video_path : Union[Path, str, list]
-            Path to video file(s) for inference. Can be:
-            - Single video path (str or Path)
-            - List of video paths
-            - Directory containing videos (will analyze all videos)
-        save_as_csv : bool, optional
-            Whether to save output as CSV in addition to h5, by default False
-        destfolder : Union[Path, str, None], optional
-            Destination folder for output files. If None, saves in same directory
-            as video, by default None
-        **kwargs
-            Additional parameters passed to the underlying inference function
-            (e.g., DLC's analyze_videos). Common options:
-            - shuffle : int, shuffle index (default: 1)
-            - trainingsetindex : int, training set fraction index (default: 0)
-            - batch_size : int, batch size for inference
-            - device : str, device for inference ('cpu', 'cuda', etc.)
-
-        Returns
-        -------
-        Union[str, list]
-            Path(s) to output file(s). Returns single path if single video input,
-            list of paths if multiple videos.
-
-        Raises
-        ------
-        ValueError
-            If model_key doesn't exist in Model table
-        FileNotFoundError
-            If video_path doesn't exist
-        NotImplementedError
-            If model tool is not supported for inference
-
-        Examples
-        --------
-        >>> # Run inference on single video
-        >>> model_key = {"model_id": "my_dlc_model"}
-        >>> output = model.run_inference(model_key, "/path/to/video.mp4")
-        >>>
-        >>> # Run inference with custom options
-        >>> output = model.run_inference(
-        ...     model_key,
-        ...     "/path/to/video.mp4",
-        ...     save_as_csv=True,
-        ...     batch_size=32,
-        ...     device="cuda",
-        ... )
-        """
-        # Validate model exists
-        if not (self & model_key):
-            raise ValueError(
-                f"Model not found in database: {model_key}. "
-                "Please import model first using Model.import_model()"
-            )
-
-        # Fetch model information
-        model_info = (self & model_key).fetch1()
-        model_params_key = {
-            "model_params_id": model_info["model_params_id"],
-            "tool": model_info["tool"],
-        }
-        params_info = (ModelParams() & model_params_key).fetch1()
-        tool = params_info["tool"]
-
-        logger.info(f"Running inference with {tool} model: {model_key}")
-
-        # Dispatch to tool-specific inference method
-        if tool == "DLC":
-            return self._run_dlc_inference(
-                model_info, video_path, save_as_csv, destfolder, **kwargs
-            )
-        elif tool == "ndx-pose":
-            raise NotImplementedError(
-                "Inference from ndx-pose NWB files not yet supported. "
-                "Please use the original DLC project for inference."
-            )
-        else:
-            raise NotImplementedError(
-                f"Inference not supported for tool: {tool}"
-            )
-
-    def _run_dlc_inference(
-        self,
-        model_info: dict,
-        video_path: Union[Path, str, list],
-        save_as_csv: bool,
-        destfolder: Union[Path, str, None],
-        **kwargs,
-    ) -> Union[str, list]:
-        """Run DLC inference on video(s).
-
-        Parameters
-        ----------
-        model_info : dict
-            Model table entry with model_path and other metadata
-        video_path : Union[Path, str, list]
-            Video path(s) for inference
-        save_as_csv : bool
-            Save output as CSV
-        destfolder : Union[Path, str, None]
-            Destination folder for outputs
-        **kwargs
-            Additional DLC analyze_videos parameters
-
-        Returns
-        -------
-        Union[str, list]
-            Output file path(s)
-        """
-        # Validate video path(s) FIRST (before checking DLC import)
-        if isinstance(video_path, (list, tuple)):
-            for vp in video_path:
-                if not Path(vp).exists():
-                    raise FileNotFoundError(f"Video not found: {vp}")
-            videos = [str(vp) for vp in video_path]
-        else:
-            video_path = Path(video_path)
-            if not video_path.exists():
-                raise FileNotFoundError(f"Video not found: {video_path}")
-            videos = str(video_path)
-
-        # Check DLC is available
-        if create_training_dataset is None or train_network is None:
-            raise ImportError(
-                "DeepLabCut is required for inference. "
-                "Install with: pip install deeplabcut>=3.0"
-            )
-
-        # Get DLC config path from model
-        model_path = Path(model_info["model_path"])
-
-        # For DLC models, model_path should point to config.yaml
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model config not found: {model_path}")
-
-        if model_path.suffix not in [".yaml", ".yml"]:
-            raise ValueError(
-                f"DLC model path must be a config.yaml file, got: {model_path}"
-            )
-
-        # Set up DLC analyze_videos parameters
-        analyze_params = {
-            "config": str(model_path),
-            "videos": [videos] if isinstance(videos, str) else videos,
-            "save_as_csv": save_as_csv,
-            "destfolder": str(destfolder) if destfolder else None,
-        }
-
-        # Add any additional parameters from kwargs
-        # Only include DLC-accepted parameters
-        dlc_params = [
-            "shuffle",
-            "trainingsetindex",
-            "videotype",
-            "in_random_order",
-            "snapshot_index",
-            "device",
-            "batch_size",
-            "dynamic",
-            "modelprefix",
-            "robust_nframes",
-            "cropping",
-        ]
-        for param in dlc_params:
-            if param in kwargs:
-                analyze_params[param] = kwargs[param]
-
-        logger.info(f"Running DLC inference on {videos}")
-        logger.debug(f"DLC parameters: {analyze_params}")
-
-        # Import analyze_videos dynamically to avoid import errors
-        try:
-            from deeplabcut import analyze_videos
-        except ImportError:
-            raise ImportError(
-                "Failed to import DeepLabCut analyze_videos. "
-                "Please ensure DeepLabCut>=3.0 is installed."
-            )
-
-        # Run DLC inference
-        try:
-            analyze_videos(**analyze_params)
-        except Exception as e:
-            logger.error(f"DLC inference failed: {e}")
-            raise
-
-        # Determine output file path(s)
-        # DLC saves outputs in the same directory as videos (or destfolder)
-        output_folder = Path(destfolder) if destfolder else None
-
-        if isinstance(videos, list):
-            output_paths = []
-            for vid_path in videos:
-                vid_path = Path(vid_path)
-                output_dir = output_folder if output_folder else vid_path.parent
-                # DLC output naming: {video_stem}DLC_{scorer}.h5
-                output_pattern = f"{vid_path.stem}DLC_*.h5"
-                output_files = list(output_dir.glob(output_pattern))
-                if output_files:
-                    # Get most recent if multiple
-                    output_paths.append(
-                        str(max(output_files, key=lambda p: p.stat().st_mtime))
-                    )
-            logger.info(f"Inference complete. Output files: {output_paths}")
-            return output_paths
-        else:
-            vid_path = Path(videos)
-            output_dir = output_folder if output_folder else vid_path.parent
-            output_pattern = f"{vid_path.stem}DLC_*.h5"
-            output_files = list(output_dir.glob(output_pattern))
-            if not output_files:
-                raise FileNotFoundError(
-                    f"DLC output file not found: {output_dir}/{output_pattern}"
-                )
-            output_path = str(
-                max(output_files, key=lambda p: p.stat().st_mtime)
-            )
-            logger.info(f"Inference complete. Output: {output_path}")
-            return output_path
 
     def verify(
         self,
@@ -2191,6 +2075,7 @@ class Model(SpyglassMixin, dj.Computed):
         if check_inference and checks["model_path_exists"]:
             tool = model_entry["tool"]
 
+            # TODO: Separate into `_verify_dlc`
             if tool == "DLC":
                 # Check if DLC is available
                 if create_training_dataset is None or train_network is None:

@@ -69,8 +69,9 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut>=3.0",  # 3.0+ drops TF and uses PyTorch backend
   "ffmpeg",
+  "ndx-pose>=0.2.0",
 ]
 optional-dependencies.docs = [
   "hatch",                  # Get version from env

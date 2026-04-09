@@ -360,3 +360,98 @@ class TestEndToEndInference:
 
         # Verify workflow completed
         assert len(PoseEstim() & estim_key) == 1
+
+
+class TestInsertEstimationTaskValidation:
+    """Tests for PoseEstimSelection.insert_estimation_task() validation."""
+
+    def test_missing_vid_group_id_raises(self, position_v2):
+        """insert_estimation_task() raises when vid_group_id is absent."""
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        with pytest.raises(ValueError, match="vid_group_id"):
+            PoseEstimSelection().insert_estimation_task(
+                {"model_id": "some_model_id"}
+            )
+
+    def test_invalid_vid_group_id_raises(self, position_v2):
+        """insert_estimation_task() raises when vid_group_id not in VidFileGroup."""
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        with pytest.raises(ValueError, match="not found"):
+            PoseEstimSelection().insert_estimation_task(
+                {
+                    "model_id": "some_model_id",
+                    "vid_group_id": "nonexistent_group_xyz99",
+                }
+            )
+
+
+class TestPoseEstimMakeValidation:
+    """Tests for PoseEstim.make() fail-fast validation."""
+
+    def test_make_raises_when_no_nwb_parent(
+        self,
+        position_v2,
+        model,
+        mock_ndx_pose_nwb_file,
+        tmp_path,
+    ):
+        """PoseEstim.make() raises ValueError when VidFileGroup has no NWB parent.
+
+        Set up all required DB entries (model, vid_group, params, selection)
+        and a real h5 output file, but deliberately leave the VidFileGroup
+        unlinked from any Session/Nwbfile.  The make() call must fail at the
+        AnalysisNwbfile storage step with a descriptive ValueError, not silently
+        store partial data.
+        """
+        import pandas as pd
+
+        PoseEstim = position_v2.estim.PoseEstim
+        PoseEstimParams = position_v2.estim.PoseEstimParams
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        # 1. Import model (ndx-pose path, no DLC weights needed)
+        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+
+        # 2. Create a VidFileGroup with no File entries (no session link)
+        vg_id = "pem_validate_no_nwb_8910"
+        VidFileGroup().insert1(
+            {"vid_group_id": vg_id, "description": "make() validation test"},
+            skip_duplicates=True,
+        )
+
+        # 3. Use the default PoseEstimParams entry (always present from contents)
+        params_id = (
+            PoseEstimParams & {"pose_estim_params_id": "default"}
+        ).fetch1("pose_estim_params_id")
+
+        # 4. Create a real DLC-style h5 output in tmp_path
+        scorer = "DLC_resnet50_TestSep8shuffle1_1"
+        bodyparts = ["nose"]
+        coords = ["x", "y", "likelihood"]
+        columns = pd.MultiIndex.from_product(
+            [[scorer], bodyparts, coords],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        df = pd.DataFrame([[1.0, 2.0, 0.99]], columns=columns)
+        h5_path = tmp_path / f"{scorer}DLC_output.h5"
+        df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+
+        # 5. Insert PoseEstimSelection with output_dir pointing at tmp_path
+        selection_key = {
+            "model_id": model_key["model_id"],
+            "vid_group_id": vg_id,
+            "pose_estim_params_id": params_id,
+        }
+        PoseEstimSelection().insert1(
+            {
+                **selection_key,
+                "task_mode": "load",
+                "output_dir": str(tmp_path),
+            },
+            skip_duplicates=True,
+        )
+
+        # 6. make() should fail at the NWB storage step
+        with pytest.raises(ValueError, match="Cannot store pose estimation"):
+            PoseEstim().make(selection_key)

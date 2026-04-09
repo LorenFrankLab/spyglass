@@ -23,7 +23,7 @@ class TestVidFileGroupHelpers:
 
         # Group should be created even if videos can't be added
         assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], int)
+        assert isinstance(group_key["vid_group_id"], str)
 
     def test_create_from_files_empty_list(self, position_v2):
         """Test that empty file list raises error."""
@@ -59,7 +59,7 @@ class TestVidFileGroupHelpers:
 
         # Group should be created
         assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], int)
+        assert isinstance(group_key["vid_group_id"], str)
 
     def test_create_from_directory_no_matches(self, position_v2, tmp_path):
         """Test that no matching files raises error."""
@@ -91,7 +91,7 @@ class TestVidFileGroupHelpers:
 
         # Group should be created
         assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], int)
+        assert isinstance(group_key["vid_group_id"], str)
 
     def test_add_files_group_not_exists(self, position_v2):
         """Test adding files to non-existent group raises error."""
@@ -99,11 +99,11 @@ class TestVidFileGroupHelpers:
 
         with pytest.raises(ValueError, match="not found"):
             VidFileGroup.add_files(
-                vid_group_id=999999999, video_files=["/fake/path.mp4"]
+                vid_group_id="nonexistent_group", video_files=["/fake/path.mp4"]
             )
 
     def test_insert1_with_string_id(self, position_v2):
-        """Test that string IDs are hashed to integers."""
+        """Test that string IDs are stored as-is."""
         VidFileGroup = position_v2.video.VidFileGroup
 
         group_key = VidFileGroup().insert1(
@@ -114,12 +114,10 @@ class TestVidFileGroupHelpers:
             skip_duplicates=True,
         )
 
-        # Should return integer ID
-        assert isinstance(group_key["vid_group_id"], int)
-        assert group_key["vid_group_id"] > 0
+        assert group_key["vid_group_id"] == "my_string_id"
 
     def test_insert1_with_int_id(self, position_v2):
-        """Test that integer IDs are preserved."""
+        """Test that integer IDs are cast to str."""
         VidFileGroup = position_v2.video.VidFileGroup
 
         group_key = VidFileGroup().insert1(
@@ -127,17 +125,74 @@ class TestVidFileGroupHelpers:
             skip_duplicates=True,
         )
 
-        assert group_key["vid_group_id"] == 42
+        assert group_key["vid_group_id"] == "42"
 
     def test_insert1_auto_generated_id(self, position_v2):
-        """Test that ID is auto-generated from description."""
+        """Test that ID is auto-generated from description via key_hash."""
         VidFileGroup = position_v2.video.VidFileGroup
 
         group_key = VidFileGroup().insert1(
             {"description": "Test group auto ID"}, skip_duplicates=True
         )
 
-        # Should generate an ID
         assert "vid_group_id" in group_key
-        assert isinstance(group_key["vid_group_id"], int)
-        assert group_key["vid_group_id"] > 0
+        assert isinstance(group_key["vid_group_id"], str)
+        assert len(group_key["vid_group_id"]) == 32
+
+
+class TestVidFileGroupGetNwbFile:
+    """Tests for VidFileGroup.get_nwb_file() method."""
+
+    def test_nonexistent_group_raises(self, position_v2):
+        """vid_group_id not in VidFileGroup raises ValueError."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        with pytest.raises(ValueError, match="Video group not found"):
+            VidFileGroup().get_nwb_file("definitely_nonexistent_xyzzy_99")
+
+    def test_empty_group_raises(self, position_v2):
+        """VidFileGroup entry exists but has no File parts → ValueError."""
+        VidFileGroup = position_v2.video.VidFileGroup
+        VidFileGroup().insert1(
+            {
+                "vid_group_id": "gnf_empty_group_test",
+                "description": "get_nwb_file empty group",
+            },
+            skip_duplicates=True,
+        )
+        with pytest.raises(ValueError, match="Video group not found"):
+            VidFileGroup().get_nwb_file("gnf_empty_group_test")
+
+    def test_returns_nwb_name_with_session_link(
+        self, position_v2, mini_insert, mini_dict
+    ):
+        """Happy path: group with VideoFile entry linked to a session returns name."""
+        from spyglass.common import VideoFile
+
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        video_entries = VideoFile().fetch(as_dict=True, limit=1)
+        if not video_entries:
+            pytest.skip("No VideoFile entries in mini session")
+
+        VidFileGroup().insert1(
+            {
+                "vid_group_id": "gnf_linked_group_test",
+                "description": "get_nwb_file session-linked group",
+            },
+            skip_duplicates=True,
+        )
+
+        # VidFileGroup.File PK: vid_group_id + VideoFile PK fields
+        video_pk = {
+            k: v
+            for k, v in video_entries[0].items()
+            if k in ("nwb_file_name", "epoch", "video_file_num")
+        }
+        VidFileGroup.File().insert1(
+            {"vid_group_id": "gnf_linked_group_test", **video_pk},
+            skip_duplicates=True,
+        )
+
+        result = VidFileGroup().get_nwb_file("gnf_linked_group_test")
+        assert "nwb_file_name" in result
+        assert result["nwb_file_name"] == mini_dict["nwb_file_name"]

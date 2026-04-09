@@ -34,7 +34,7 @@
 #
 # ```bash
 # git clone https://github.com/LorenFrankLab/spyglass.git
-# cd spyglass
+# # cd spyglass
 # python scripts/install.py
 # ```
 #
@@ -206,7 +206,7 @@
 #
 # ```bash
 # git clone https://github.com/LorenFrankLab/spyglass.git
-# cd spyglass
+# # cd spyglass
 # python scripts/install.py
 # ```
 #
@@ -233,9 +233,9 @@
 # Commands for the steps above:
 #
 # ```bash
-# cd /your/project/directory/             # 1
+# # cd /your/project/directory/             # 1
 # git clone https://github.com/LorenFrankLab/spyglass/  # 2
-# cd spyglass                             # 3
+# # cd spyglass                             # 3
 # mamba env create -f environments/environment_min.yml # 4 (or environments/environment.yml for full)
 # code notebooks/00_Setup.ipynb           # 5
 # ```
@@ -307,17 +307,23 @@
 #
 # #### Deep Lab Cut (DLC)
 #
+# > **Note**: `spyglass.position.v1` (DLC V1) is legacy. New projects should
+# > use `spyglass.position.v2` (DLC 3.0+). See the Position V2 tutorial.
+#
 # Spyglass provides an environment build for using the DLC pipeline. To create an
 # environment with these features, please:
 # 1. navigate to your cloned spyglass repo.
-# 2. build the environment from the dlc version
+# 2. build the environment from the position version
 # 3. activate the environment to use
 #
 # ```bash
 # # cd /path/to/spyglass # 1
-# mamba env create -f environments/environment_dlc.yml # 2
-# mamba activate spyglass-dlc # 3
+# mamba env create -f environments/environment_position.yml # 2
+# mamba activate spyglass-position # 3
 # ```
+#
+# Legacy DLC 2.x users: `environments/environment_dlc.yml` is still available
+# but deprecated.
 #
 # Alternatively, you can pip install using
 # ```bash
@@ -393,7 +399,7 @@
 #
 # This uses the included `docker-compose.yml` file to create a properly configured
 # MySQL container with persistent storage. To customize settings (port, password),
-# copy `example.env` to `.env` and edit as needed.
+# # copy `example.env` to `.env` and edit as needed.
 #
 # **Or use the installer:**
 # ```bash

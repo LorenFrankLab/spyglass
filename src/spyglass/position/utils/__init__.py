@@ -4,6 +4,7 @@ This module contains tool-agnostic algorithms for pose processing:
 - Orientation calculation (from 2-3 bodyparts)
 - Centroid calculation (from 1-4 bodyparts)
 - Interpolation and smoothing
+- Video generation with pose overlay
 
 These utilities are used by both V1 (DLC-specific) and V2 (multi-tool) pipelines.
 """
@@ -15,6 +16,7 @@ from .centroid import (
     get_4pt_centroid,
 )
 from .general import get_most_recent_file, get_param_names, sanitize_filename
+from .make_video import VideoMaker, make_video
 from .interpolation import (
     SMOOTHING_METHODS,
     get_smoothing_function,
@@ -54,4 +56,7 @@ __all__ = [
     "get_most_recent_file",
     "get_param_names",
     "sanitize_filename",
+    # Video generation
+    "VideoMaker",
+    "make_video",
 ]

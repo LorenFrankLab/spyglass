@@ -1,3 +1,6 @@
+import contextlib
+import io
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Union
@@ -9,11 +12,13 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_behav import VideoFile
+from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.train import (
     Model,
     ModelParams,
     Skeleton,
     default_pk_name,
+    resolve_model_path,
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import dlc_output_dir
@@ -117,7 +122,7 @@ class PoseEstimSelection(dj.Manual):
     ----------
     model_id : str
         Foreign key to Model table
-    vid_group_id : int
+    vid_group_id : str
         Foreign key to VidFileGroup table
     pose_estim_params_id : str
         Foreign key to PoseEstimParams table
@@ -178,6 +183,18 @@ class PoseEstimSelection(dj.Manual):
         if output_dir is None:
             output_dir = self._infer_output_dir(key)
 
+        if "vid_group_id" not in key:
+            raise ValueError(
+                "key must include 'vid_group_id'. "
+                "Use VidFileGroup().insert1() to create a group first."
+            )
+        if not (VidFileGroup() & {"vid_group_id": key["vid_group_id"]}):
+            raise ValueError(
+                f"VidFileGroup '{key['vid_group_id']}' not found. "
+                "Create it first with VidFileGroup().insert1() or "
+                "VidFileGroup.create_from_files()."
+            )
+
         self.insert1(
             {
                 **key,
@@ -212,7 +229,7 @@ class PoseEstimSelection(dj.Manual):
             base_dir = Path.cwd() / "pose_estimation_output"
 
         output_dir = (
-            Path(base_dir) / f"v2_{model_id}_{key.get('vid_group_id', 0)}"
+            Path(base_dir) / f"v2_{model_id}_{key.get('vid_group_id', '')}"
         )
         output_dir.mkdir(parents=True, exist_ok=True)
         return str(output_dir)
@@ -229,7 +246,7 @@ class PoseEstim(dj.Computed):
     ----------
     model_id : str
         Foreign key via PoseEstimSelection -> Model
-    vid_group_id : int
+    vid_group_id : str
         Foreign key via PoseEstimSelection -> VidFileGroup
     analysis_file_name : str
         Foreign key to AnalysisNwbfile (nullable)
@@ -604,8 +621,8 @@ class PoseEstim(dj.Computed):
         if nwb_file_name is None:
             raise ValueError(
                 "Cannot fetch pose data: analysis_file_name is not set. "
-                "PoseEstim entry must reference an AnalysisNwbfile containing "
-                "pose estimation data."
+                "Re-populate with a VidFileGroup linked to a registered "
+                "Nwbfile so the entry references an AnalysisNwbfile."
             )
 
         logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
@@ -677,7 +694,7 @@ class PoseEstim(dj.Computed):
 
         Flow:
         1. Fetch task_mode, output_dir, inference_params from Selection
-        2. If trigger: run inference via Model().run_inference()
+        2. If trigger: run inference via self.run_inference()
         3. Find DLC h5 output in output_dir
         4. Load into ndx-pose NWB via _store_estimation_nwb()
         5. Insert entry with analysis_file_name
@@ -706,29 +723,35 @@ class PoseEstim(dj.Computed):
             f"PoseEstim.make: mode={task_mode}, " f"output_dir={output_dir}"
         )
 
-        # Resolve video paths from VidFileGroup.File -> VideoFile
-        video_files = (VidFileGroup.File & key).fetch("KEY")
-        if not video_files:
-            raise ValueError(
-                f"No video files found for vid_group_id="
-                f"{key['vid_group_id']}"
-            )
-
+        # Resolve video paths (needed for trigger mode inference)
         video_paths = []
-        nwb_file_name = None
-        for vf_key in video_files:
+        for vf_key in (VidFileGroup.File & key).fetch("KEY"):
             vf_entry = (VideoFile & vf_key).fetch1()
             if vf_entry.get("path"):
                 video_paths.append(vf_entry["path"])
-            if nwb_file_name is None:
-                nwb_file_name = vf_entry["nwb_file_name"]
+
+        # Resolve nwb_file_name via the VidFileGroup → Session link.
+        # Returns None when no common NWB parent exists (e.g. tutorial mode).
+        nwb_file_name = None
+        try:
+            nwb_file_name = VidFileGroup().get_nwb_file(key["vid_group_id"])[
+                "nwb_file_name"
+            ]
+        except ValueError:
+            pass
 
         # Step 1: Trigger inference if needed
         if task_mode == "trigger":
+            if not video_paths:
+                raise ValueError(
+                    f"No video files registered for vid_group_id="
+                    f"{key['vid_group_id']}. Cannot trigger inference "
+                    "without registered video files in VideoFile table."
+                )
             logger.info("Triggering inference...")
             model_key = {"model_id": key["model_id"]}
             destfolder = output_dir if output_dir else None
-            Model().run_inference(
+            self.run_inference(
                 model_key,
                 video_paths if len(video_paths) > 1 else video_paths[0],
                 destfolder=destfolder,
@@ -768,14 +791,205 @@ class PoseEstim(dj.Computed):
             f"scorer: {scorer}"
         )
 
-        # Step 4: Store in NWB via AnalysisNwbfile
+        # Step 4: Store data in AnalysisNwbfile (requires registered Nwbfile).
+        if nwb_file_name is None:
+            raise ValueError(
+                "Cannot store pose estimation: no registered Nwbfile linked "
+                f"to VidFileGroup '{key['vid_group_id']}'. Ensure the video "
+                "files in this group are registered in VideoFile and linked "
+                "to a Session via TaskEpoch. Use "
+                "VidFileGroup().get_nwb_file() to verify before populating."
+            )
+
         analysis_file_name = self._store_estimation_nwb(
             key, df, bodyparts, scorer, nwb_file_name
         )
-
-        # Step 5: Insert into table
         self.insert1({**key, "analysis_file_name": analysis_file_name})
         logger.info("PoseEstim entry inserted.")
+
+    def run_inference(
+        self,
+        model_key: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool = False,
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run pose estimation inference on video(s) using a trained model.
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for the Model table entry (must include 'model_id')
+        video_path : Union[Path, str, list]
+            Path to video file(s) for inference. Can be a single path, list of
+            paths, or directory containing videos.
+        save_as_csv : bool, optional
+            Whether to save output as CSV in addition to h5, by default False
+        destfolder : Union[Path, str, None], optional
+            Destination folder for output files. If None, saves alongside
+            video, by default None
+        **kwargs
+            Additional parameters passed to the underlying inference function
+            (e.g., DLC's analyze_videos). Common options:
+            - shuffle : int, shuffle index (default: 1)
+            - trainingsetindex : int, training set fraction index (default: 0)
+            - batch_size : int, batch size for inference
+            - device : str, device for inference ('cpu', 'cuda', etc.)
+
+        Returns
+        -------
+        Union[str, list]
+            Path(s) to output file(s). Returns single path for single video
+            input, list of paths for multiple videos.
+
+        Raises
+        ------
+        ValueError
+            If model_key doesn't exist in Model table
+        FileNotFoundError
+            If video_path doesn't exist
+        NotImplementedError
+            If model tool is not supported for inference
+
+        Examples
+        --------
+        >>> model_key = {"model_id": "my_dlc_model"}
+        >>> output = PoseEstim().run_inference(model_key, "/path/to/video.mp4")
+        """
+        if not (Model() & model_key):
+            raise ValueError(
+                f"Model not found in database: {model_key}. "
+                "Please import model first using Model.import_model()"
+            )
+
+        model_info = (Model() & model_key).fetch1()
+        model_params_key = {
+            "model_params_id": model_info["model_params_id"],
+            "tool": model_info["tool"],
+        }
+        params_info = (ModelParams() & model_params_key).fetch1()
+        tool = params_info["tool"]
+
+        logger.info(f"Running inference with {tool} model: {model_key}")
+
+        if tool == "DLC":
+            return self._run_dlc_inference(
+                model_info, video_path, save_as_csv, destfolder, **kwargs
+            )
+        elif tool == "ndx-pose":
+            raise NotImplementedError(
+                "Inference from ndx-pose NWB files not yet supported. "
+                "Please use the original DLC project for inference."
+            )
+        else:
+            raise NotImplementedError(
+                f"Inference not supported for tool: {tool}"
+            )
+
+    def _run_dlc_inference(
+        self,
+        model_info: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool,
+        destfolder: Union[Path, str, None],
+        **kwargs,
+    ) -> Union[str, list]:
+        """Run DLC inference on video(s).
+
+        Parameters
+        ----------
+        model_info : dict
+            Model table entry with model_path and other metadata
+        video_path : Union[Path, str, list]
+            Video path(s) for inference
+        save_as_csv : bool
+            Save output as CSV
+        destfolder : Union[Path, str, None]
+            Destination folder for outputs
+        **kwargs
+            Additional DLC analyze_videos parameters
+
+        Returns
+        -------
+        Union[str, list]
+            Output file path(s)
+        """
+        if not isinstance(video_path, (list, tuple)):
+            video_path = [video_path]
+
+        for vp in video_path:
+            if not Path(vp).exists():
+                raise FileNotFoundError(f"Video not found: {vp}")
+        videos = [str(vp) for vp in video_path]
+
+        model_path = resolve_model_path(model_info["model_path"])
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model config not found: {model_path}")
+        if model_path.suffix not in [".yaml", ".yml"]:
+            raise ValueError(
+                f"DLC model path must be a config.yaml file, got: {model_path}"
+            )
+
+        analyze_params = {
+            "config": str(model_path),
+            "videos": [videos] if isinstance(videos, str) else videos,
+            "save_as_csv": save_as_csv,
+            "destfolder": str(destfolder) if destfolder else None,
+        }
+        dlc_params = [
+            "shuffle",
+            "trainingsetindex",
+            "videotype",
+            "in_random_order",
+            "snapshot_index",
+            "device",
+            "batch_size",
+            "dynamic",
+            "modelprefix",
+            "robust_nframes",
+            "cropping",
+        ]
+        for param in dlc_params:
+            if param in kwargs:
+                analyze_params[param] = kwargs[param]
+
+        logger.info(f"Running DLC inference on {videos}")
+        logger.debug(f"DLC parameters: {analyze_params}")
+
+        try:
+            from deeplabcut import analyze_videos
+        except ImportError:
+            raise ImportError(
+                "DeepLabCut is required for inference. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        # suppress_print_from_package filters stack-based prints;
+        # redirect_stdout catches anything that bypasses it.
+        try:
+            with (
+                suppress_print_from_package(),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                analyze_videos(**analyze_params)
+        except Exception as e:
+            logger.error(f"DLC inference failed: {e}")
+            raise
+
+        output_folder = Path(destfolder) if destfolder else None
+
+        output_paths = []
+        for vid_path in videos:
+            vid_path = Path(vid_path)
+            output_dir = output_folder if output_folder else vid_path.parent
+            output_files = list(output_dir.glob(f"{vid_path.stem}DLC_*.h5"))
+            if output_files:
+                output_paths.append(
+                    str(max(output_files, key=lambda p: p.stat().st_mtime))
+                )
+        logger.info(f"Inference complete. Output files: {output_paths}")
+        return output_paths if len(output_paths) != 1 else output_paths[0]
 
     def _store_estimation_nwb(
         self, key, pose_df, bodyparts, scorer, nwb_file_name
@@ -1257,9 +1471,7 @@ class PoseParams(dj.Lookup):
             if "method" not in smooth_params:
                 raise ValueError("smoothing_params must include 'method'")
 
-            from spyglass.position.utils.interpolation import (
-                SMOOTHING_METHODS,
-            )
+            from spyglass.position.utils.interpolation import SMOOTHING_METHODS
 
             method = smooth_params["method"]
             if method not in SMOOTHING_METHODS:
@@ -1283,11 +1495,11 @@ class PoseV2(dj.Computed):
     definition = """
     -> PoseSelection
     ---
-    -> AnalysisNwbfile
-    orient_obj_id: varchar(40)
-    centroid_obj_id: varchar(40)
-    velocity_obj_id: varchar(40)
-    smoothed_pose_id: varchar(40)
+    -> [nullable] AnalysisNwbfile
+    orient_obj_id='': varchar(40)
+    centroid_obj_id='': varchar(40)
+    velocity_obj_id='': varchar(40)
+    smoothed_pose_id='': varchar(40)
     """
 
     def fetch_obj(self, objects=None):
@@ -1434,8 +1646,174 @@ class PoseV2(dj.Computed):
 
         return df
 
-    def make_video(self):
-        raise NotImplementedError("Make video from pose")
+    def make_video(
+        self,
+        output_path: Union[Path, str, None] = None,
+        cm_to_pixels: float = 1.0,
+        percent_frames: float = 1.0,
+        **kwargs,
+    ) -> str:
+        """Generate a video with pose overlay from a PoseV2 entry.
+
+        Fetches processed centroid/orientation from this PoseV2 entry, raw
+        bodypart positions and likelihoods from the linked PoseEstim entry,
+        and the source video from VidFileGroup → VideoFile. Renders each
+        frame with matplotlib overlays using
+        ``spyglass.position.utils.make_video.VideoMaker``.
+
+        Parameters
+        ----------
+        output_path : Union[Path, str, None], optional
+            Path for the output video file. Defaults to
+            ``<video_stem>_pose.mp4`` next to the source video.
+        cm_to_pixels : float, optional
+            Conversion factor from centimetres to pixels, by default 1.0.
+        percent_frames : float, optional
+            Fraction of video frames to process (0.0–1.0), by default 1.0.
+        **kwargs
+            Additional keyword arguments forwarded to VideoMaker (e.g.
+            ``batch_size``, ``crop``, ``debug``).
+
+        Returns
+        -------
+        str
+            Absolute path to the output video file.
+
+        Raises
+        ------
+        ValueError
+            If the table restriction does not resolve to exactly one entry,
+            or if no video path is registered for the VidFileGroup.
+        FileNotFoundError
+            If the source video file does not exist on disk.
+
+        Examples
+        --------
+        >>> output = (PoseV2() & key).make_video()
+        >>> print(output)
+        '/data/videos/session_pose.mp4'
+
+        >>> # Crop to a region and process half the frames
+        >>> output = (PoseV2() & key).make_video(
+        ...     output_path="/tmp/cropped.mp4",
+        ...     crop=(100, 600, 50, 450),
+        ...     percent_frames=0.5,
+        ... )
+        """
+        from datajoint.hash import key_hash
+
+        from spyglass.position.utils.make_video import VideoMaker
+
+        _ = self.ensure_single_entry()
+
+        # --- processed pose data ---
+        df = self.fetch1_dataframe()
+        timestamps = df.index.values
+        position_mean = df[["position_x", "position_y"]].values
+        orientation_mean = df["orientation"].values
+
+        # --- source video path ---
+        entry = self.fetch1()
+        vid_group_id = entry["vid_group_id"]
+
+        video_rows = (
+            VidFileGroup.File & {"vid_group_id": vid_group_id}
+        ) * VideoFile
+        paths = video_rows.fetch("path")
+        valid_paths = [p for p in paths if p and Path(p).exists()]
+        if not valid_paths:
+            raise ValueError(
+                f"No valid video path found for vid_group_id='{vid_group_id}'. "
+                "Ensure VideoFile entries have a 'path' field populated."
+            )
+        video_path = valid_paths[0]
+        if len(valid_paths) > 1:
+            logger.warning(
+                f"Multiple videos in group '{vid_group_id}'; "
+                f"using first: {video_path}"
+            )
+
+        # --- fps from video (needed for time display in VideoMaker) ---
+        # Timestamps stored in V2 NWB are frame indices (0, 1, 2, ...) because
+        # DLC does not embed absolute timestamps. fps converts them to seconds.
+        ret = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "v",
+                "-show_entries",
+                "stream=r_frame_rate",
+                "-of",
+                "csv=p=0",
+                str(video_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if ret.returncode != 0:
+            raise FileNotFoundError(
+                f"ffprobe failed on {video_path}: {ret.stderr}"
+            )
+        fps = eval(ret.stdout.strip())  # e.g. "30000/1001" → 29.97
+
+        # video_frame_inds: timestamps ARE frame indices (0, 1, 2, ...) since
+        # DLC runs inference on every frame. Mirrors V1's video_frame_ind column.
+        video_frame_inds = timestamps.astype(int)
+
+        # position_time: convert frame indices to seconds for VideoMaker display
+        position_time = timestamps / fps
+
+        # --- raw bodypart positions + likelihoods from PoseEstim ---
+        centroids: dict = {}
+        likelihoods: dict = {}
+        estim_restriction = {
+            k: entry[k]
+            for k in ("model_id", "vid_group_id", "pose_estim_params_id")
+            if k in entry
+        }
+        if PoseEstim() & estim_restriction:
+            try:
+                pose_df = (PoseEstim() & estim_restriction).fetch1_dataframe()
+                idx = pd.IndexSlice
+                scorer = pose_df.columns.get_level_values(0)[0]
+                bodyparts = pose_df.columns.get_level_values(1).unique()
+                for bp in bodyparts:
+                    centroids[bp] = pose_df.loc[
+                        :, idx[scorer, bp, ["x", "y"]]
+                    ].values
+                    likelihoods[bp] = pose_df.loc[
+                        :, idx[scorer, bp, "likelihood"]
+                    ].values
+            except Exception as e:
+                logger.warning(
+                    f"Could not load raw pose for overlay: {e}. "
+                    "Proceeding without bodypart dots."
+                )
+
+        # --- output path ---
+        if output_path is None:
+            src = Path(video_path)
+            output_path = src.parent / f"{src.stem}_pose.mp4"
+        output_path = str(output_path)
+
+        VideoMaker(
+            video_filename=str(video_path),
+            position_mean=position_mean,
+            orientation_mean=orientation_mean,
+            centroids=centroids,
+            position_time=position_time,
+            video_frame_inds=video_frame_inds,
+            likelihoods=likelihoods or None,
+            output_video_filename=output_path,
+            cm_to_pixels=cm_to_pixels,
+            percent_frames=percent_frames,
+            key_hash=key_hash(entry),
+            **kwargs,
+        )
+        return output_path
 
     def make(self, key):
         """Process raw pose estimation with orientation, centroid, and smoothing.
@@ -1466,6 +1844,17 @@ class PoseV2(dj.Computed):
             smooth_orientation,
             two_pt_orientation,
         )
+
+        # Fail fast: verify Nwbfile link before any expensive computation.
+        nwb_file_name = self._get_nwb_file_name(key)
+        estim_entry = (PoseEstim & key).fetch1()
+        if not estim_entry.get("analysis_file_name") or nwb_file_name is None:
+            raise ValueError(
+                "Cannot store processed pose: the parent PoseEstim entry "
+                f"for VidFileGroup '{key['vid_group_id']}' has no "
+                "AnalysisNwbfile. Ensure the video group is linked to a "
+                "registered Nwbfile before populating."
+            )
 
         # Fetch raw pose data
         logger.info(f"Processing pose for: {key}")
@@ -1507,22 +1896,20 @@ class PoseV2(dj.Computed):
             centroid_smooth, timestamps, sampling_rate
         )
 
-        # Step 6: Store in NWB
+        # Step 6: Store results (nwb_file_name validated at top of make())
         logger.info("Storing results in NWB...")
-        nwb_file_name, obj_ids = self._store_pose_nwb(
-            key,
+        analysis_file_name, obj_ids = self._store_pose_nwb(
+            {**key, "nwb_file_name": nwb_file_name},
             orientation,
             centroid_smooth,
             velocity,
             timestamps,
             sampling_rate,
         )
-
-        # Step 7: Insert into table
         self.insert1(
             {
                 **key,
-                "analysis_file_name": nwb_file_name,
+                "analysis_file_name": analysis_file_name,
                 "orient_obj_id": obj_ids["orient"],
                 "centroid_obj_id": obj_ids["centroid"],
                 "velocity_obj_id": obj_ids["velocity"],
@@ -1573,6 +1960,31 @@ class PoseV2(dj.Computed):
                 continue
 
         return pose_df
+
+    @staticmethod
+    def _get_nwb_file_name(key: dict):
+        """Return the common nwb_file_name for this VidFileGroup, or None.
+
+        Delegates to VidFileGroup.get_nwb_file(), which joins VideoFile →
+        TaskEpoch → Session to confirm all videos share one NWB parent.
+        Returns None when no such parent exists (e.g. tutorial / no registered
+        videos), so callers can fall back to standalone NWB storage.
+
+        Parameters
+        ----------
+        key : dict
+            Must include vid_group_id
+
+        Returns
+        -------
+        str or None
+        """
+        try:
+            return VidFileGroup().get_nwb_file(key["vid_group_id"])[
+                "nwb_file_name"
+            ]
+        except ValueError:
+            return None
 
     def _calculate_orientation(
         self,

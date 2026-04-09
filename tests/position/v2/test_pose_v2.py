@@ -682,3 +682,76 @@ class TestPoseV2Integration:
         assert centroid_smooth.shape == (10, 2)
         assert velocity.shape == (10,)
         assert np.isnan(velocity[0])  # First frame always NaN
+
+
+class TestPoseV2MakeValidation:
+    """Tests for PoseV2.make() fail-fast validation."""
+
+    def test_make_raises_when_no_analysis_file(
+        self,
+        mini_insert,
+        position_v2,
+        model,
+        mock_ndx_pose_nwb_file,
+    ):
+        """PoseV2.make() raises ValueError when PoseEstim has no analysis_file_name.
+
+        When the parent PoseEstim entry was populated without a registered
+        Nwbfile (analysis_file_name=None), PoseV2.make() must raise a
+        descriptive ValueError before touching any expensive computation.
+        """
+        PoseEstim = position_v2.estim.PoseEstim
+        PoseEstimParams = position_v2.estim.PoseEstimParams
+        PoseEstimSelection = position_v2.estim.PoseEstimSelection
+        PoseParams = position_v2.estim.PoseParams
+        PoseSelection = position_v2.estim.PoseSelection
+        PoseV2 = position_v2.estim.PoseV2
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        # 1. Import model (no DLC weights needed)
+        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+
+        # 2. Create a VidFileGroup with no session link
+        vg_id = "pv2_validate_no_anlys_8920"
+        VidFileGroup().insert1(
+            {
+                "vid_group_id": vg_id,
+                "description": "PoseV2.make() validation test",
+            },
+            skip_duplicates=True,
+        )
+
+        # 3. Ensure PoseEstimSelection and PoseEstim entries exist
+        params_id = (
+            PoseEstimParams & {"pose_estim_params_id": "default"}
+        ).fetch1("pose_estim_params_id")
+        selection_key = {
+            "model_id": model_key["model_id"],
+            "vid_group_id": vg_id,
+            "pose_estim_params_id": params_id,
+        }
+        PoseEstimSelection().insert1(
+            {**selection_key, "task_mode": "load", "output_dir": ""},
+            skip_duplicates=True,
+        )
+        # Insert PoseEstim with analysis_file_name=None (no AnalysisNwbfile).
+        # allow_direct_insert=True is required for dj.Computed tables outside make().
+        PoseEstim().insert1(
+            selection_key,
+            skip_duplicates=True,
+            allow_direct_insert=True,
+        )
+
+        # 4. Pick a PoseParams entry — insert default if the table is empty
+        PoseParams.insert_default(skip_duplicates=True)
+        pose_params_name = (PoseParams & {}).fetch("pose_params", limit=1)[0]
+        PoseSelection().insert1(
+            {**selection_key, "pose_params": pose_params_name},
+            skip_duplicates=True,
+        )
+
+        pv2_key = {**selection_key, "pose_params": pose_params_name}
+
+        # 5. make() must fail immediately — before fetching pose data
+        with pytest.raises(ValueError, match="Cannot store processed pose"):
+            PoseV2().make(pv2_key)
