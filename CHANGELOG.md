@@ -148,6 +148,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `analysis_table` property to mixin for custom pipelines #1525
 - Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
+- Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1567
 
 ### Pipelines
 
