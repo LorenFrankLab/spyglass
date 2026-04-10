@@ -3,15 +3,28 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import datajoint as dj
-import keypoint_moseq as kpms
 import numpy as np
+from spyglass.utils import logger
+
+try:
+    import keypoint_moseq as kpms
+except ImportError:
+    logger.warning(
+        "keypoint_moseq not found. This package is necessary to "
+        + "populate the MoseqModel table"
+    )
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput
 from spyglass.settings import moseq_project_dir, moseq_video_dir
 from spyglass.utils import SpyglassMixin
 
-from .core import PoseGroup, format_dataset_for_moseq, results_to_df
+from .core import (
+    PoseGroup,
+    format_dataset_for_moseq,
+    results_to_df,
+    _normalize_1_pose_dataset,
+)
 
 schema = dj.schema("behavior_v1_moseq")
 
@@ -129,7 +142,11 @@ class MoseqModel(SpyglassMixin, dj.Computed):
         video_paths = (PoseGroup & key).fetch_video_paths()  # FETCH
         bodyparts = (PoseGroup & key).fetch1("bodyparts")  # FETCH
         coordinates, confidences = PoseGroup().fetch_pose_datasets(
-            key, format_for_moseq=True
+            key,
+            format_for_moseq=True,
+            normalize=model_params.get("normalize", False),
+            anterior_bodyparts=model_params.get("anterior_bodyparts", None),
+            posterior_bodyparts=model_params.get("posterior_bodyparts", None),
         )
 
         model, epochs_trained = None, None
@@ -520,7 +537,14 @@ class MoseqSyllable(SpyglassMixin, dj.Computed):
         merge_query = PositionOutput & merge_key
         video_path = merge_query.fetch_video_path()
         video_name = Path(video_path).name
+        model_params = (MoseqModelParams & key).fetch1("model_params")
         bodyparts_df = merge_query.fetch_pose_dataframe()
+        if model_params.get("normalize", False):
+            bodyparts_df = _normalize_1_pose_dataset(
+                bodyparts_df,
+                model_params.get("anterior_bodyparts", None),
+                model_params.get("posterior_bodyparts", None),
+            )
 
         if bodyparts is None:
             bodyparts = self.get_bodyparts_from_dataframe(bodyparts_df)
