@@ -471,7 +471,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             {"recording_id": recording_id}
         )
         sampling_frequency = recording.get_sampling_frequency()
-        analysis_file_name = (cls & key).fetch1("analysis_file_name")
+        analysis_file_name = (SpikeSorting & key).fetch1("analysis_file_name")
         analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
             analysis_file_name
         )

@@ -274,53 +274,65 @@ def test_empty_units_nwb_readable(empty_units_nwb):
 
 
 # ============================================================================
-# Excess Spike Clipping Tests (Issue #1092 / GH issue: invalid spike_times)
+# Excess Spike Removal Tests (invalid spike_times from float precision)
 # ============================================================================
 
 
-def test_get_sorting_removes_excess_spikes():
-    """Test that the removal logic in get_sorting handles spike indices
-    exceeding recording bounds.
+def test_curation_get_sorting_removes_excess_spikes():
+    """Test that CurationV1.get_sorting() removes spike samples >= n_samples.
 
-    Reproduces the scenario where floating-point rounding in the
-    seconds-to-samples round-trip causes np.searchsorted to return
-    an index equal to n_samples (out of bounds), which would cause
-    SpikeInterface to raise a ValueError.
+    Verifies that floating-point rounding in the seconds-to-samples round-trip
+    (which causes np.searchsorted to return n_samples) is handled correctly by
+    the actual method. If the filtering logic in get_sorting() is removed this
+    test will fail.
     """
-    import spikeinterface as si
+    from unittest.mock import MagicMock, patch
+
+    import pandas as pd
+
+    from spyglass.spikesorting.v1.curation import CurationV1
 
     sampling_frequency = 30000.0
     n_samples = 300  # 10 ms recording
     recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
 
-    # Spike times that are *within* bounds plus one spike just barely beyond
-    # the last timestamp (simulates floating-point round-trip imprecision)
-    spike_times_with_excess = np.append(
+    # 10 valid spikes, plus one just beyond the last timestamp
+    spike_times = np.append(
         recording_times[:10].copy(), recording_times[-1] + 1e-9
     )
+    units_df = pd.DataFrame({"spike_times": [spike_times]})
 
-    # Verify searchsorted actually returns an out-of-bounds index on this data
-    raw_samples = np.searchsorted(recording_times, spike_times_with_excess)
-    assert np.any(
-        raw_samples >= n_samples
-    ), "Test precondition failed: expected at least one out-of-bounds index"
+    mock_recording = MagicMock()
+    mock_recording.get_sampling_frequency.return_value = sampling_frequency
+    mock_recording.get_times.return_value = recording_times
+    mock_recording.get_num_samples.return_value = n_samples
 
-    # Apply the same removal logic as in get_sorting
-    n_excess = int(np.sum(raw_samples >= n_samples))
-    valid_samples = raw_samples[raw_samples < n_samples]
+    mock_nwbf = MagicMock()
+    mock_nwbf.units.to_dataframe.return_value = units_df
+    mock_io = MagicMock()
+    mock_io.__enter__ = MagicMock(return_value=mock_io)
+    mock_io.__exit__ = MagicMock(return_value=False)
+    mock_io.read.return_value = mock_nwbf
 
-    assert np.all(
-        valid_samples < n_samples
-    ), "All spike sample indices must be < n_samples after removal"
-    assert (
-        len(valid_samples) == len(spike_times_with_excess) - n_excess
-    ), "Removal should reduce spike count by the number of excess spikes"
+    with (
+        patch("spyglass.spikesorting.v1.curation.CurationV1") as mock_tbl,
+        patch(
+            "spyglass.spikesorting.v1.curation.AnalysisNwbfile.get_abs_path",
+            return_value="/fake/path.nwb",
+        ),
+        patch(
+            "spyglass.spikesorting.v1.curation.pynwb.NWBHDF5IO",
+            return_value=mock_io,
+        ),
+        patch.object(CurationV1, "get_recording", return_value=mock_recording),
+    ):
+        mock_tbl.__and__.return_value.fetch1.return_value = "test_analysis.nwb"
+        sorting = CurationV1.get_sorting(key={})
 
-    # Verify that the resulting NumpySorting is accepted by SpikeInterface
-    units_dict = {0: valid_samples}
-    sorting = si.NumpySorting.from_unit_dict(
-        [units_dict], sampling_frequency=sampling_frequency
-    )
-    assert isinstance(sorting, si.BaseSorting)
     spike_train = sorting.get_unit_spike_train(unit_id=0, segment_index=0)
-    assert np.all(spike_train < n_samples)
+    assert np.all(
+        spike_train < n_samples
+    ), "Excess spikes should have been removed by CurationV1.get_sorting()"
+    assert len(spike_train) == 10, (
+        f"Expected 10 spikes after removing 1 excess, got {len(spike_train)}"
+    )
