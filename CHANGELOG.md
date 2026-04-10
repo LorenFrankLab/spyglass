@@ -148,6 +148,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `analysis_table` property to mixin for custom pipelines #1525
 - Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
+- Parallelize `AnalysisFileIssues` checks #1557
 
 ### Pipelines
 
@@ -179,7 +180,10 @@ for label, interval_data in results.groupby("interval_labels"):
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
     - Support ingestion of multi-epoch video files #1548
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not available #1546
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+        available #1546
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+        available #1546
     - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
@@ -194,8 +198,8 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
-    - Fix fetching position df in SortedSpikesDecodingV1.get_ahead_behind_distance()
-        #1540
+    - Fix fetching position df in
+        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
 
 - LFP
 
@@ -240,6 +244,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove outdated code comments #1304
 - Add code coverage badge, and increase position coverage #1305, #1315
 - Force `TableChain` to follow shortest path #1356
+- Avoid database connections in import of `spyglass.settings` #1563
 
 ### Documentation
 
