@@ -66,7 +66,12 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             )
 
     def fetch_pose_datasets(
-        self, key: dict = None, format_for_moseq: bool = False
+        self,
+        key: dict = None,
+        format_for_moseq: bool = False,
+        normalize: bool = False,
+        anterior_bodyparts: List[str] = None,
+        posterior_bodyparts: List[str] = None,
     ):
         """fetch pose information for a group of videos
 
@@ -76,6 +81,14 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             group key
         format_for_moseq : bool, optional
             format for MoSeq, by default False
+        normalize : bool, optional
+            whether to normalize the pose datasets by animal length, by default False
+        anterior_bodyparts : List[str], optional
+            list of anterior body parts to use for normalization, required if
+            normalize is True
+        posterior_bodyparts : List[str], optional
+            list of posterior body parts to use for normalization, required if
+            normalize is True
 
         Returns
         -------
@@ -98,6 +111,15 @@ class PoseGroup(SpyglassMixin, dj.Manual):
                 )
             bodyparts_df = bodyparts_df[bodyparts]
             datasets[video_name] = bodyparts_df
+        if normalize:
+            if anterior_bodyparts is None or posterior_bodyparts is None:
+                raise ValueError(
+                    "anterior_bodyparts and posterior_bodyparts must be "
+                    + "provided for normalization"
+                )
+            datasets = normalize_pose_dataset(
+                datasets, anterior_bodyparts, posterior_bodyparts
+            )
         if format_for_moseq:
             datasets = format_dataset_for_moseq(datasets, bodyparts)
         return datasets
@@ -122,6 +144,82 @@ class PoseGroup(SpyglassMixin, dj.Manual):
             Path((PositionOutput & merge_key).fetch_video_path())
             for merge_key in (self.Pose & key).proj(merge_id="pose_merge_id")
         ]
+
+
+def _normalize_1_pose_dataset(
+    dataset: pd.DataFrame,
+    anterior_bodyparts: List[str],
+    posterior_bodyparts: List[str],
+) -> pd.DataFrame:
+    """
+    Normalize a pose dataset by centering and scaling based on the mean position and length
+    of the anterior and posterior body parts
+
+    Parameters
+    ----------
+    dataset : pd.DataFrame
+        pose dataset to normalize
+    anterior_bodyparts : List[str]
+        list of anterior body parts to use for normalization
+    posterior_bodyparts : List[str]
+        list of posterior body parts to use for normalization
+    """
+    anterior_x = np.array(
+        [dataset[bp, "x"].values for bp in anterior_bodyparts]
+    ).mean(axis=0)
+    anterior_y = np.array(
+        [dataset[bp, "y"].values for bp in anterior_bodyparts]
+    ).mean(axis=0)
+    posterior_x = np.array(
+        [dataset[bp, "x"].values for bp in posterior_bodyparts]
+    ).mean(axis=0)
+    posterior_y = np.array(
+        [dataset[bp, "y"].values for bp in posterior_bodyparts]
+    ).mean(axis=0)
+
+    mean_x_t = (anterior_x + posterior_x) / 2
+    mean_y_t = (anterior_y + posterior_y) / 2
+
+    length_t = np.sqrt(
+        (anterior_x - posterior_x) ** 2 + (anterior_y - posterior_y) ** 2
+    )
+    mean_length = length_t.mean()
+
+    for key in dataset.keys():
+        if key[1] == "x":
+            dataset[key] = ((dataset[key] - mean_x_t) / mean_length) + mean_x_t
+        elif key[1] == "y":
+            dataset[key] = ((dataset[key] - mean_y_t) / mean_length) + mean_y_t
+    return dataset
+
+
+def normalize_pose_dataset(
+    datasets, anterior_bodyparts, posterior_bodyparts
+) -> dict[str, pd.DataFrame]:
+    """
+    Normalize pose datasets by centering and scaling based on the mean position and length
+    of the anterior and posterior body parts
+
+    Parameters
+    ----------
+    datasets : dict[str, pd.DataFrame]
+        dictionary of video name to pose dataset (as returned by fetch_pose_datasets)
+    anterior_bodyparts : List[str]
+        list of anterior body parts to use for normalization
+    posterior_bodyparts : List[str]
+        list of posterior body parts to use for normalization
+
+    Returns
+    -------
+    dict[str, pd.DataFrame]
+        normalized pose datasets
+    """
+
+    for video, dataset in datasets.items():
+        datasets[video] = _normalize_1_pose_dataset(
+            dataset, anterior_bodyparts, posterior_bodyparts
+        )
+    return datasets
 
 
 def format_dataset_for_moseq(
