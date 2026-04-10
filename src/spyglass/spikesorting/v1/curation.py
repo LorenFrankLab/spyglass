@@ -165,10 +165,12 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-        recording_key = (
+        recording_id = (
             SpikeSortingRecording * SpikeSortingSelection & key
-        ).fetch1("KEY")
-        recording = SpikeSortingRecording.get_recording(recording_key)
+        ).fetch1("recording_id")
+        recording = SpikeSortingRecording.get_recording(
+            {"recording_id": recording_id}
+        )
         recording.annotate(is_filtered=True)
         return recording
 
