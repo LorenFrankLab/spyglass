@@ -14,7 +14,11 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.spikesorting.v1.sorting import (
+    SpikeSorting,
+    SpikeSortingSelection,
+    _spike_times_to_valid_samples,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -214,19 +218,12 @@ class CurationV1(SpyglassMixin, dj.Manual):
 
         recording_times = recording.get_times()
         n_samples = recording.get_num_samples()
-        units_dict = {}
-        for unit in units.itertuples():
-            spike_samples = np.searchsorted(recording_times, unit.spike_times)
-            n_excess = int(np.sum(spike_samples >= n_samples))
-            if n_excess > 0:
-                logger.warning(
-                    f"Unit {unit.Index} has {n_excess} spike(s) exceeding the "
-                    "recording duration. Removing excess spikes. This "
-                    "may be caused by floating-point rounding during the "
-                    "seconds-to-samples conversion."
-                )
-                spike_samples = spike_samples[spike_samples < n_samples]
-            units_dict[unit.Index] = spike_samples
+        units_dict = {
+            unit.Index: _spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
+            )
+            for unit in units.itertuples()
+        }
 
         return si.NumpySorting.from_unit_dict(
             [units_dict], sampling_frequency=sampling_frequency

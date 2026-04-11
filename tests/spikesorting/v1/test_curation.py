@@ -278,19 +278,20 @@ def test_empty_units_nwb_readable(empty_units_nwb):
 # ============================================================================
 
 
-def test_curation_get_sorting_removes_excess_spikes():
-    """Test that CurationV1.get_sorting() removes spike samples >= n_samples.
+def test_spike_times_to_valid_samples_drops_out_of_bounds():
+    """The shared helper used by CurationV1.get_sorting() and
+    SpikeSorting.get_sorting() must drop spike sample indices >= n_samples.
 
-    Verifies that floating-point rounding in the seconds-to-samples round-trip
-    (which causes np.searchsorted to return n_samples) is handled correctly by
-    the actual method. If the filtering logic in get_sorting() is removed this
-    test will fail.
+    Reproduces the floating-point round-trip scenario where
+    np.searchsorted returns an index equal to n_samples for a spike just
+    beyond the last recording timestamp, which would otherwise cause
+    SpikeInterface to raise ValueError on the resulting sorting.
     """
-    from unittest.mock import MagicMock, patch
+    import spikeinterface as si
 
-    import pandas as pd
-
-    from spyglass.spikesorting.v1.curation import CurationV1
+    from spyglass.spikesorting.v1.sorting import (
+        _spike_times_to_valid_samples,
+    )
 
     sampling_frequency = 30000.0
     n_samples = 300  # 10 ms recording
@@ -300,39 +301,46 @@ def test_curation_get_sorting_removes_excess_spikes():
     spike_times = np.append(
         recording_times[:10].copy(), recording_times[-1] + 1e-9
     )
-    units_df = pd.DataFrame({"spike_times": [spike_times]})
 
-    mock_recording = MagicMock()
-    mock_recording.get_sampling_frequency.return_value = sampling_frequency
-    mock_recording.get_times.return_value = recording_times
-    mock_recording.get_num_samples.return_value = n_samples
-
-    mock_nwbf = MagicMock()
-    mock_nwbf.units.to_dataframe.return_value = units_df
-    mock_io = MagicMock()
-    mock_io.__enter__ = MagicMock(return_value=mock_io)
-    mock_io.__exit__ = MagicMock(return_value=False)
-    mock_io.read.return_value = mock_nwbf
-
-    with (
-        patch("spyglass.spikesorting.v1.curation.CurationV1") as mock_tbl,
-        patch(
-            "spyglass.spikesorting.v1.curation.AnalysisNwbfile.get_abs_path",
-            return_value="/fake/path.nwb",
-        ),
-        patch(
-            "spyglass.spikesorting.v1.curation.pynwb.NWBHDF5IO",
-            return_value=mock_io,
-        ),
-        patch.object(CurationV1, "get_recording", return_value=mock_recording),
-    ):
-        mock_tbl.__and__.return_value.fetch1.return_value = "test_analysis.nwb"
-        sorting = CurationV1.get_sorting(key={})
-
-    spike_train = sorting.get_unit_spike_train(unit_id=0, segment_index=0)
-    assert np.all(
-        spike_train < n_samples
-    ), "Excess spikes should have been removed by CurationV1.get_sorting()"
-    assert len(spike_train) == 10, (
-        f"Expected 10 spikes after removing 1 excess, got {len(spike_train)}"
+    # Precondition: searchsorted does produce an out-of-bounds index here
+    raw = np.searchsorted(recording_times, spike_times)
+    assert (raw >= n_samples).any(), (
+        "Test precondition failed: expected at least one out-of-bounds "
+        "index from np.searchsorted"
     )
+
+    valid = _spike_times_to_valid_samples(
+        recording_times, spike_times, n_samples, unit_id=0
+    )
+
+    assert valid.shape == (10,), (
+        f"Expected 10 valid samples after dropping 1 excess, "
+        f"got {valid.shape[0]}"
+    )
+    assert (valid < n_samples).all()
+
+    # Resulting NumpySorting must be accepted by SpikeInterface
+    sorting = si.NumpySorting.from_unit_dict(
+        [{0: valid}], sampling_frequency=sampling_frequency
+    )
+    assert isinstance(sorting, si.BaseSorting)
+
+
+def test_spike_times_to_valid_samples_passthrough():
+    """When all spike times are in bounds, the helper returns sample indices
+    identical to ``np.searchsorted`` and drops nothing."""
+    from spyglass.spikesorting.v1.sorting import (
+        _spike_times_to_valid_samples,
+    )
+
+    sampling_frequency = 30000.0
+    n_samples = 300
+    recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
+    spike_times = recording_times[[0, 5, 100, 299]]
+
+    valid = _spike_times_to_valid_samples(
+        recording_times, spike_times, n_samples, unit_id=42
+    )
+    expected = np.searchsorted(recording_times, spike_times)
+    np.testing.assert_array_equal(valid, expected)
+    assert (valid < n_samples).all()

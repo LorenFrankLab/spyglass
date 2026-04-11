@@ -217,6 +217,10 @@ for label, interval_data in results.groupby("interval_labels"):
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
     - Allow `CurationV1` to save without any spikes #1533
+    - Drop spike sample indices that exceed the recording length in
+        `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
+        SpikeInterface `ValueError` caused by floating-point round-trip
+        in the seconds-to-samples conversion #1564
 
 ## [0.5.5] (Aug 6, 2025)
 
