@@ -27,7 +27,7 @@ from spyglass.utils import SpyglassMixin, logger
 schema = dj.schema("spikesorting_v1_sorting")
 
 
-def _spike_times_to_valid_samples(
+def spike_times_to_valid_samples(
     recording_times: np.ndarray,
     spike_times: np.ndarray,
     n_samples: int,
@@ -537,7 +537,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         recording_times = recording.get_times()
         n_samples = recording.get_num_samples()
         units_dict = {
-            unit_id: _spike_times_to_valid_samples(
+            unit_id: spike_times_to_valid_samples(
                 recording_times, spike_times, n_samples, unit_id
             )
             for unit_id, spike_times in zip(units.index, units["spike_times"])

@@ -290,7 +290,7 @@ def test_spike_times_to_valid_samples_drops_out_of_bounds():
     import spikeinterface as si
 
     from spyglass.spikesorting.v1.sorting import (
-        _spike_times_to_valid_samples,
+        spike_times_to_valid_samples,
     )
 
     sampling_frequency = 30000.0
@@ -309,7 +309,7 @@ def test_spike_times_to_valid_samples_drops_out_of_bounds():
         "index from np.searchsorted"
     )
 
-    valid = _spike_times_to_valid_samples(
+    valid = spike_times_to_valid_samples(
         recording_times, spike_times, n_samples, unit_id=0
     )
 
@@ -330,7 +330,7 @@ def test_spike_times_to_valid_samples_passthrough():
     """When all spike times are in bounds, the helper returns sample indices
     identical to ``np.searchsorted`` and drops nothing."""
     from spyglass.spikesorting.v1.sorting import (
-        _spike_times_to_valid_samples,
+        spike_times_to_valid_samples,
     )
 
     sampling_frequency = 30000.0
@@ -338,7 +338,7 @@ def test_spike_times_to_valid_samples_passthrough():
     recording_times = np.arange(n_samples, dtype=float) / sampling_frequency
     spike_times = recording_times[[0, 5, 100, 299]]
 
-    valid = _spike_times_to_valid_samples(
+    valid = spike_times_to_valid_samples(
         recording_times, spike_times, n_samples, unit_id=42
     )
     expected = np.searchsorted(recording_times, spike_times)

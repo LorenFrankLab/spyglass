@@ -17,7 +17,7 @@ from spyglass.spikesorting.v1.recording import (
 from spyglass.spikesorting.v1.sorting import (
     SpikeSorting,
     SpikeSortingSelection,
-    _spike_times_to_valid_samples,
+    spike_times_to_valid_samples,
 )
 from spyglass.utils import SpyglassMixin, logger
 
@@ -219,7 +219,7 @@ class CurationV1(SpyglassMixin, dj.Manual):
         recording_times = recording.get_times()
         n_samples = recording.get_num_samples()
         units_dict = {
-            unit.Index: _spike_times_to_valid_samples(
+            unit.Index: spike_times_to_valid_samples(
                 recording_times, unit.spike_times, n_samples, unit.Index
             )
             for unit in units.itertuples()
