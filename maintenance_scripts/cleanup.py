@@ -6,6 +6,7 @@ This script is intended to be run periodically to clean up the database tables
 temporary directory (deleting old files).
 """
 
+import os
 import subprocess
 import warnings
 from pathlib import Path
@@ -82,7 +83,13 @@ def main():
     print("Cleaning up temporary directory...")
     cleanup_temp_dir(dry_run=False)
     print("Checking for AnalysisFile Issues...")
-    AnalysisNwbfile().check_all_files()
+    results = AnalysisNwbfile().check_all_files()
+    out_path = os.environ.get("FILE_ISSUES_OUT")
+    if out_path:
+        issues = {tbl: cnt for tbl, cnt in results.items() if cnt > 0}
+        with open(out_path, "w") as f:
+            for tbl, cnt in issues.items():
+                f.write(f"{tbl}: {cnt}\n")
 
 
 if __name__ == "__main__":
