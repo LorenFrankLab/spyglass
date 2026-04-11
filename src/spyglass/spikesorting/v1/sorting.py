@@ -39,7 +39,7 @@ def _spike_times_to_valid_samples(
     floating-point rounding in the seconds-to-samples round-trip can cause
     ``np.searchsorted`` to return an index equal to ``n_samples`` (one past
     the last valid sample) for spikes at or near the end of the recording.
-    SpikeInterface rejects such sortings with ``ValueError: "The sorting
+    SpikeInterface rejects such a sorting with ``ValueError: "The sorting
     object has spikes exceeding the recording duration"``. This helper drops
     those out-of-bounds indices and emits a warning identifying the affected
     unit and the count removed.
