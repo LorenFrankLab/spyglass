@@ -14,7 +14,11 @@ from spyglass.spikesorting.v1.recording import (
     SpikeSortingRecording,
     SpikeSortingRecordingSelection,
 )
-from spyglass.spikesorting.v1.sorting import SpikeSorting, SpikeSortingSelection
+from spyglass.spikesorting.v1.sorting import (
+    SpikeSorting,
+    SpikeSortingSelection,
+    spike_times_to_valid_samples,
+)
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_curation")
@@ -208,8 +212,11 @@ class CurationV1(SpyglassMixin, dj.Manual):
         sampling_frequency = recording.get_sampling_frequency()
 
         recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
         units_dict = {
-            unit.Index: np.searchsorted(recording_times, unit.spike_times)
+            unit.Index: spike_times_to_valid_samples(
+                recording_times, unit.spike_times, n_samples, unit.Index
+            )
             for unit in units.itertuples()
         }
 
