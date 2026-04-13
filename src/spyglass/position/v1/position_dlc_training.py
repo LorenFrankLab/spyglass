@@ -197,15 +197,33 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
 
         # Write dlc config file to base project folder
         dlc_cfg_filepath = utils_dlc.save_yaml(project_path, dlc_config)
+
+        # DLC 3.x requires Engine enum, not a raw string. Convert if needed.
+        try:
+            from deeplabcut.core.engine import Engine as _Engine
+
+            _dlc3 = True
+        except ImportError:
+            _dlc3 = False
+
+        def _to_engine(val):
+            """Convert a string engine name to Engine enum for DLC 3.x."""
+            if _dlc3 and isinstance(val, str):
+                return _Engine(val)
+            return val
+
         # ---- create training dataset ----
         training_dataset_kwargs = {
             k: v
             for k, v in dlc_config.items()
             if k in get_param_names(create_training_dataset)
         }
+        if "engine" in training_dataset_kwargs:
+            training_dataset_kwargs["engine"] = _to_engine(
+                training_dataset_kwargs["engine"]
+            )
         self._info_msg("creating training dataset")
 
-        # NOTE: if DLC > 3, this will raise engine error
         with test_mode_suppress():
             create_training_dataset(dlc_cfg_filepath, **training_dataset_kwargs)
 
@@ -215,11 +233,18 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
             for k, v in dlc_config.items()
             if k in get_param_names(train_network)
         }
+        if "engine" in train_network_kwargs:
+            train_network_kwargs["engine"] = _to_engine(
+                train_network_kwargs["engine"]
+            )
         for k in ["shuffle", "trainingsetindex", "maxiters"]:
             if value := train_network_kwargs.get(k):
                 train_network_kwargs[k] = int(value)
         if test_mode:
             train_network_kwargs["maxiters"] = 2
+            if _dlc3:  # DLC 3.x PyTorch uses epochs instead of maxiters
+                train_network_kwargs.setdefault("epochs", 1)
+                train_network_kwargs.setdefault("save_epochs", 1)
 
         try:
             with suppress_print_from_package():
@@ -246,7 +271,9 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         ).glob("*index*")
 
         # DLC goes by snapshot magnitude when judging 'latest' for
-        # evaluation. Here, we mean most recently generated
+        # evaluation. Here, we mean most recently generated and
+        # fallback when no snapshots exist (e.g., test_mode)
+        latest_snapshot = 0
         max_modified_time = 0
         for snapshot in snapshots:
             modified_time = os.path.getmtime(snapshot)

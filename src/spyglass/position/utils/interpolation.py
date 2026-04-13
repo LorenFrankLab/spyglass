@@ -221,7 +221,9 @@ def smooth_moving_avg(
 
     idx = pd.IndexSlice
     x_col, y_col = coord_cols
-    moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
+    moving_avg_window = max(
+        1, int(np.round(smoothing_duration * sampling_rate))
+    )
 
     # Extract x, y arrays
     xy_arr = pos_df.loc[:, idx[[x_col, y_col]]].values

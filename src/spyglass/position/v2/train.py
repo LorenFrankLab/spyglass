@@ -24,12 +24,12 @@ import yaml
 from datajoint.errors import DuplicateError
 from pynwb import NWBHDF5IO
 
-from spyglass.common import AnalysisNwbfile, LabMember
+from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import get_most_recent_file, get_param_names
 from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import dlc_project_dir
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin
 
 
 def resolve_model_path(stored_path: str) -> Path:
@@ -111,7 +111,12 @@ schema = dj.schema("cbroz_position_v2_train")  # TODO: remove cbroz prefix
 
 
 # ----------------------------------- Helpers ----------------------------------
-def default_pk_name(prefix: str, params: dict, limit: int = 32) -> str:
+def default_pk_name(
+    prefix: str,
+    params: dict = None,
+    limit: int = 32,
+    include_hash: bool = True,
+) -> str:
     """Generate a default name based on prefix and params.
 
     Format: PREFIX-YYYYMMDD-HASH where...
@@ -126,11 +131,14 @@ def default_pk_name(prefix: str, params: dict, limit: int = 32) -> str:
         Dictionary of data to hash
     limit : int, optional
         Maximum length of the returned name, by default 32
+    include_hash : bool, optional
+        Whether to include the hash in the name (default: True). If False, only
+        prefix and date. Relevant for tables that store a hash in another field.
     """
     # TODO: Migrate this to general utils for use with other params tables?
 
     when = datetime.utcnow()
-    h = dj.hash.key_hash(params)
+    h = dj.hash.key_hash(params or dict()) if include_hash else ""
     return f"{prefix}-{when:%Y%m%d}-{h}"[:limit]
 
 
@@ -210,7 +218,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     definition = """
     skeleton_id: varchar(32)
     ---
-    edges=NULL: blob # list of edge pairs, List[Tuple[str, str]]
+    bodyparts=NULL: blob   # list of body part names, List[str]
+    edges=NULL: blob       # list of edge pairs, List[Tuple[str, str]]
     hash=NULL : varchar(32) # hash of graph for duplicate detection
     """
 
@@ -223,10 +232,11 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     # Edges are optional to allow unconnected body parts
 
     contents = [
-        ["1LED", "", "1042f79ba7ecbe933e43d9e23b8bb3e2"],
+        ["1LED", "whiteLED", None, "1042f79ba7ecbe933e43d9e23b8bb3e2"],
         [
             "2LED",
             [("greenLED", "redLED_C")],
+            None,
             "3bac2dea32a574e9d97917dc8ea8480a",
         ],
         [
@@ -236,6 +246,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 ("greenLED", "redLED_L"),
                 ("greenLED", "redLED_R"),
             ],
+            None,
             "cfe386902f8c79d228e8ae628079945e",
         ],
     ]
@@ -429,7 +440,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         )
 
         if skeleton_id in self.fetch("skeleton_id"):
-            logger.warning(f"Skeleton ID {skeleton_id} already exists")
+            self._warn_msg(f"Skeleton ID {skeleton_id} already exists")
             return (self & dict(skeleton_id=skeleton_id)).fetch1("KEY")
         if not bodyparts or edges is None:
             raise dj.DataJointError(
@@ -440,10 +451,13 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         labels_norm = [self._normalize_label(x) for x in bodyparts]
         _ = self._validate_bodyparts(set(labels_norm))
 
-        # If dupe error, compute labeled graph
+        # If dupe error, compute labeled graph.
+        # Skip topology-based dedup when the caller provides an explicit
+        # skeleton_id — they want to create a named entry, not reuse an
+        # existing topologically-equivalent one.
         shape_hash = self._shape_hash_from_edges(bodyparts, edges)
         G_new, checks = None, []
-        if check_duplicates:
+        if check_duplicates and not skeleton_id:
             G_new = self._build_labeled_graph(bodyparts, edges)
             checks = self & dict(hash=shape_hash)
 
@@ -461,6 +475,13 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 G_new, G_old, node_match=node_match
             )
             if GM.is_isomorphic():
+                # Back-fill bodyparts blob if missing (schema migration)
+                if row.get("bodyparts") is None:
+                    super().update1(
+                        dict(
+                            skeleton_id=row["skeleton_id"], bodyparts=bodyparts
+                        )
+                    )
                 return dict(skeleton_id=row["skeleton_id"])
 
         # Prompt user for skeleton id if not provided
@@ -474,6 +495,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         super().insert1(
             dict(
                 insert_pk,
+                bodyparts=bodyparts,
                 edges=edges,
                 hash=shape_hash,
             ),
@@ -677,7 +699,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         params_hash_dict = dict(params_hash=dj.hash.key_hash(params))
         if dupe := (self & params_hash_dict & dict(tool=key["tool"])):
             dupe_key = dupe.fetch1("KEY")
-            logger.warning(f"Entry exists with same params: {dupe_key}")
+            self._warn_msg(f"Entry exists with same params: {dupe_key}")
             return dupe_key
 
         model_params_id: str = (key.get("model_params_id") or "").strip()
@@ -758,7 +780,7 @@ class Model(SpyglassMixin, dj.Computed):
         ValueError
             If required parameters or data are missing
         """
-        logger.info(f"Training model for selection: {key}")
+        self._info_msg(f"Training model for selection: {key}")
 
         # Fetch selection details
         sel_entry = (ModelSelection() & key).fetch1()
@@ -775,7 +797,7 @@ class Model(SpyglassMixin, dj.Computed):
         vid_group_key = {"vid_group_id": sel_entry["vid_group_id"]}
         vid_group = (VidFileGroup() & vid_group_key).fetch1()
 
-        logger.info(f"Training {tool} model with params: {params_key}")
+        self._info_msg(f"Training {tool} model with params: {params_key}")
 
         # Dispatch to tool-specific training method
         if tool == "DLC":
@@ -789,7 +811,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Insert into Model table
         self.insert1(model_result)
-        logger.info(f"Model training complete: {model_result['model_id']}")
+        self._info_msg(f"Model training complete: {model_result['model_id']}")
 
     def _make_dlc_model(
         self,
@@ -842,7 +864,7 @@ class Model(SpyglassMixin, dj.Computed):
                 f"DLC config.yaml not found in: {project_path}"
             )
 
-        logger.info(f"Using DLC project: {project_path}")
+        self._info_msg(f"Using DLC project: {project_path}")
 
         # Load config to check training dataset
         with open(config_path, "r") as f:
@@ -860,7 +882,9 @@ class Model(SpyglassMixin, dj.Computed):
         # Check if this is continued training
         parent_id = sel_entry.get("parent_id")
         if parent_id:
-            logger.info(f"Continuing training from parent model: {parent_id}")
+            self._info_msg(
+                f"Continuing training from parent model: {parent_id}"
+            )
             # For continued training, we assume dataset already exists
 
         # Step 1: Create training dataset if needed
@@ -871,7 +895,7 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         if not training_dataset_path.exists():
-            logger.info("Creating training dataset...")
+            self._info_msg("Creating training dataset...")
             try:
                 with suppress_print_from_package():
                     create_training_dataset(
@@ -885,15 +909,15 @@ class Model(SpyglassMixin, dj.Computed):
                             "augmenter_type", config.get("default_augmenter")
                         ),
                     )
-                logger.info("Training dataset created successfully")
+                self._info_msg("Training dataset created successfully")
             except Exception as e:
-                logger.warning(
+                self._warn_msg(
                     f"Training dataset creation failed or already exists: {e}"
                 )
                 # May already exist, continue
 
         # Step 2: Train the network
-        logger.info("Starting model training...")
+        self._info_msg("Starting model training...")
         train_params = {
             "config": str(config_path),
             "shuffle": shuffle,
@@ -906,16 +930,16 @@ class Model(SpyglassMixin, dj.Computed):
         # Remove None values
         train_params = {k: v for k, v in train_params.items() if v is not None}
 
-        logger.info(f"Training parameters: {train_params}")
+        self._info_msg(f"Training parameters: {train_params}")
 
         try:
             with suppress_print_from_package():
                 train_network(**train_params)
         except Exception as e:
-            logger.error(f"Training failed: {e}")
+            self._err_msg(f"Training failed: {e}")
             raise
 
-        logger.info("Training completed successfully")
+        self._info_msg("Training completed successfully")
 
         # Step 3: Find the trained model
         # Get latest model info
@@ -926,7 +950,7 @@ class Model(SpyglassMixin, dj.Computed):
             )
 
         model_path = latest_model["path"]
-        logger.info(f"Trained model path: {model_path}")
+        self._info_msg(f"Trained model path: {model_path}")
 
         # Step 4: Generate model_id
         model_id = default_pk_name(
@@ -977,7 +1001,7 @@ class Model(SpyglassMixin, dj.Computed):
         with NWBHDF5IO(str(nwb_path), mode="w") as nwb_io:
             nwb_io.write(nwbfile)
 
-        logger.info(f"Model metadata saved to NWB: {nwb_path}")
+        self._info_msg(f"Model metadata saved to NWB: {nwb_path}")
 
         # Step 6: Register NWB file in AnalysisNwbfile
         # Note: This may need to be adjusted based on Spyglass conventions
@@ -1054,7 +1078,7 @@ class Model(SpyglassMixin, dj.Computed):
             "vid_group_id": model_entry["vid_group_id"],
         }
 
-        logger.info(
+        self._info_msg(
             f"Creating new training session from model: {model_key['model_id']}"
         )
 
@@ -1070,7 +1094,7 @@ class Model(SpyglassMixin, dj.Computed):
             if k in ModelParams().get_accepted_params(params_entry["tool"]):
                 old_params[k] = v
             else:
-                logger.warning(f"Ignoring unknown parameter: {k}")
+                self._warn_msg(f"Ignoring unknown parameter: {k}")
 
         # Create new ModelParams entry if params changed
         if old_params != params_entry["params"]:
@@ -1105,18 +1129,18 @@ class Model(SpyglassMixin, dj.Computed):
             parent_id=model_key["model_id"],
         )
 
-        logger.info(
+        self._info_msg(
             f"Inserting new ModelSelection with parent_id: {model_key['model_id']}"
         )
         ModelSelection().insert1(new_sel_key, skip_duplicates=True)
 
         # Populate to trigger make()
-        logger.info("Triggering model training...")
+        self._info_msg("Triggering model training...")
         self.populate(new_sel_key)
 
         # Fetch and return new model key
         new_model = (self & new_sel_key).fetch1("KEY")
-        logger.info(f"New model trained: {new_model}")
+        self._info_msg(f"New model trained: {new_model}")
 
         return new_model
 
@@ -1203,7 +1227,7 @@ class Model(SpyglassMixin, dj.Computed):
         params_entry = (ModelParams() & sel_key).fetch1()
         tool = params_entry["tool"]
 
-        logger.info(f"Evaluating model: {model_key['model_id']}")
+        self._info_msg(f"Evaluating model: {model_key['model_id']}")
 
         # Dispatch to tool-specific evaluation
         if tool == "DLC":
@@ -1266,7 +1290,7 @@ class Model(SpyglassMixin, dj.Computed):
             "trainingsetindex", params.get("trainingsetindex", 0)
         )
 
-        logger.info(f"Running DLC evaluation on shuffles: {shuffle}")
+        self._info_msg(f"Running DLC evaluation on shuffles: {shuffle}")
 
         # Run DLC evaluation
         try:
@@ -1279,10 +1303,10 @@ class Model(SpyglassMixin, dj.Computed):
                     show_errors=show_errors,
                 )
         except Exception as e:
-            logger.error(f"DLC evaluation failed: {e}")
+            self._err_msg(f"DLC evaluation failed: {e}")
             raise
 
-        logger.info("Evaluation completed successfully")
+        self._info_msg("Evaluation completed successfully")
 
         # Parse evaluation results
         results = self._parse_dlc_evaluation_results(
@@ -1290,7 +1314,7 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         if show_errors and results:
-            logger.info(
+            self._info_msg(
                 f"Train error: {results['train_error']:.2f} px, "
                 f"Test error: {results['test_error']:.2f} px"
             )
@@ -1321,13 +1345,13 @@ class Model(SpyglassMixin, dj.Computed):
         eval_dir = project_path / "evaluation-results"
 
         if not eval_dir.exists():
-            logger.warning(f"No evaluation results found in {eval_dir}")
+            self._warn_msg(f"No evaluation results found in {eval_dir}")
             return {}
 
         # Find most recent iteration
         iteration_dirs = sorted(eval_dir.glob("iteration-*"))
         if not iteration_dirs:
-            logger.warning("No iteration directories found")
+            self._warn_msg("No iteration directories found")
             return {}
 
         latest_iter = iteration_dirs[-1]
@@ -1342,12 +1366,12 @@ class Model(SpyglassMixin, dj.Computed):
         ]
 
         if not results_csvs:
-            logger.warning(f"No results CSV found for shuffle {shuffle}")
+            self._warn_msg(f"No results CSV found for shuffle {shuffle}")
             return {}
 
         # Use most recent results file
         results_csv = max(results_csvs, key=lambda p: p.stat().st_mtime)
-        logger.debug(f"Reading evaluation results: {results_csv}")
+        self._logger.debug(f"Reading evaluation results: {results_csv}")
 
         # Parse CSV
         import pandas as pd
@@ -1415,7 +1439,7 @@ class Model(SpyglassMixin, dj.Computed):
         stats_path = model_path / "learning_stats.csv"
 
         if not stats_path.exists():
-            logger.warning(f"Training stats not found: {stats_path}")
+            self._warn_msg(f"Training stats not found: {stats_path}")
             return None
 
         # Read CSV (format: iteration, loss, learning_rate)
@@ -1425,7 +1449,9 @@ class Model(SpyglassMixin, dj.Computed):
             names=["iteration", "loss", "learning_rate"],
         )
 
-        logger.debug(f"Loaded {len(df)} training iterations from {stats_path}")
+        self._logger.debug(
+            f"Loaded {len(df)} training iterations from {stats_path}"
+        )
         return df
 
     def plot_training_history(
@@ -1490,7 +1516,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         if save_path:
             plt.savefig(save_path, dpi=300, bbox_inches="tight")
-            logger.info(f"Training plot saved to: {save_path}")
+            self._info_msg(f"Training plot saved to: {save_path}")
             plt.close(fig)
         else:
             plt.show()
@@ -1604,7 +1630,7 @@ class Model(SpyglassMixin, dj.Computed):
             skip_duplicates=True,
             accept_default=True,
         )
-        logger.info(f"Skeleton: {skeleton_key['skeleton_id']}")
+        self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
 
         # Step 2: Create or retrieve ModelParams entry
         model_params_key = ModelParams().insert1(
@@ -1617,13 +1643,13 @@ class Model(SpyglassMixin, dj.Computed):
             skip_duplicates=True,
             accept_default=True,
         )
-        logger.info(f"ModelParams: {model_params_key['model_params_id']}")
+        self._info_msg(f"ModelParams: {model_params_key['model_params_id']}")
 
         # Step 3: Create VidFileGroup linked to registered Spyglass session.
         # Raises ValueError if no session matches the DLC config's video paths.
         # Register the session with insert_sessions() before calling import_model().
         vid_group_key = VidFileGroup.create_from_dlc_config(model_path)
-        logger.info(f"VidFileGroup: {vid_group_key['vid_group_id']}")
+        self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
 
         # Step 4: Create ModelSelection entry (no skeleton_id — it lives in
         # ModelParams, not ModelSelection)
@@ -1650,7 +1676,7 @@ class Model(SpyglassMixin, dj.Computed):
             "model_path": stored_path,
         }
         self.insert1(model_key, allow_direct_insert=True)
-        logger.info(f"Model imported: {model_id}")
+        self._info_msg(f"Model imported: {model_id}")
 
         return model_key
 
@@ -1691,7 +1717,7 @@ class Model(SpyglassMixin, dj.Computed):
         if model_path.suffix != ".nwb":
             raise ValueError("ndx-pose model path must be an .nwb file")
 
-        logger.info(f"Importing ndx-pose model from {model_path}")
+        self._info_msg(f"Importing ndx-pose model from {model_path}")
 
         # Step 1: Read NWB file and extract pose data
         with NWBHDF5IO(str(model_path), mode="r") as nwb_io:
@@ -1738,7 +1764,7 @@ class Model(SpyglassMixin, dj.Computed):
                 pose_estimation = list(pose_estimations.values())[0]
                 model_name = list(pose_estimations.keys())[0]
 
-            logger.info(f"Importing model: {model_name}")
+            self._info_msg(f"Importing model: {model_name}")
 
             # Step 5: Extract skeleton from PoseEstimation
             skeleton_obj = pose_estimation.skeleton
@@ -1757,7 +1783,7 @@ class Model(SpyglassMixin, dj.Computed):
                 node1_idx, node2_idx = int(edge[0]), int(edge[1])
                 edges.append((bodyparts[node1_idx], bodyparts[node2_idx]))
 
-            logger.info(
+            self._info_msg(
                 f"Skeleton has {len(bodyparts)} bodyparts, {len(edges)} edges"
             )
 
@@ -1814,10 +1840,10 @@ class Model(SpyglassMixin, dj.Computed):
             check_duplicates=True,
             skip_duplicates=True,
         )
-        logger.info(f"Skeleton: {skeleton_key['skeleton_id']}")
+        self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
 
         # Step 10: Create or retrieve ModelParams entry
-        logger.info("Creating or retrieving ModelParams entry")
+        self._info_msg("Creating or retrieving ModelParams entry")
         model_params_key = ModelParams().insert1(
             dict(
                 tool=tool,
@@ -1836,7 +1862,7 @@ class Model(SpyglassMixin, dj.Computed):
                 ModelParams() & {"tool": tool, "params_hash": params_hash}
             ).fetch1("KEY")
 
-        logger.info(f"ModelParams: {model_params_key['model_params_id']}")
+        self._info_msg(f"ModelParams: {model_params_key['model_params_id']}")
 
         # Step 11: Create VidFileGroup placeholder
         vid_group_id = f"ndx-pose-{model_name}"
@@ -1852,7 +1878,32 @@ class Model(SpyglassMixin, dj.Computed):
                 VidFileGroup() & {"vid_group_id": vid_group_id}
             ).fetch1("KEY")
 
-        logger.info(f"VidFileGroup: {vid_group_key['vid_group_id']}")
+        self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
+
+        # Step 11b: Link original_videos from NWB to existing VideoFile entries
+        matched_files = []
+        for vid_path in params.get("original_videos", []):
+            try:
+                vf_key = VideoFile().fetch_key_from_path(str(vid_path))
+                matched_files.append(vf_key)
+            except Exception:
+                self._logger.debug(
+                    f"No VideoFile match for ndx-pose video: {vid_path}"
+                )
+        if matched_files:
+            VidFileGroup().add_files(
+                vid_group_key["vid_group_id"], matched_files
+            )
+            self._info_msg(
+                f"Linked {len(matched_files)} video(s) to VidFileGroup "
+                f"'{vid_group_key['vid_group_id']}'"
+            )
+        else:
+            self._info_msg(
+                "No matching VideoFile entries found for original_videos. "
+                "VidFileGroup created as placeholder — call add_files() or "
+                "register sessions before running PoseEstim.populate()."
+            )
 
         # Step 12: Create ModelSelection entry
         sel_key = {**model_params_key, **vid_group_key}
@@ -1877,15 +1928,23 @@ class Model(SpyglassMixin, dj.Computed):
         # is tracked via model_path. An AnalysisNwbfile link can be added
         # after import if the file is later registered in a Spyglass session.
         nwb_file_name = kwargs.get("nwb_file_name")
-        if nwb_file_name:
+        if nwb_file_name and (
+            AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
+        ):
             analysis_file_name = nwb_file_name
         else:
             analysis_file_name = None
-            logger.info(
-                "ndx-pose import: analysis_file_name=None (model_path is "
-                "the NWB reference). Pass nwb_file_name= to link a "
-                "registered AnalysisNwbfile."
-            )
+            if nwb_file_name:
+                self._warn_msg(
+                    f"nwb_file_name {nwb_file_name!r} not found in "
+                    "AnalysisNwbfile; analysis_file_name link skipped."
+                )
+            else:
+                self._info_msg(
+                    "ndx-pose import: analysis_file_name=None (model_path is "
+                    "the NWB reference). Pass nwb_file_name= to link a "
+                    "registered AnalysisNwbfile."
+                )
 
         model_key = {
             **sel_key,
@@ -1896,9 +1955,11 @@ class Model(SpyglassMixin, dj.Computed):
             model_key["analysis_file_name"] = analysis_file_name
 
         self.insert1(model_key, skip_duplicates=True, allow_direct_insert=True)
-        logger.info(f"Model imported: {model_id}")
+        self._info_msg(f"Model imported: {model_id}")
 
-        return model_key
+        # skeleton_id is a secondary attribute of ModelParams, not a Model column.
+        # Include it in the return value for convenience.
+        return {**model_key, "skeleton_id": skeleton_key["skeleton_id"]}
 
     def verify(
         self,
@@ -2127,12 +2188,12 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Log results
         if valid:
-            logger.info(f"Model verification PASSED: {model_key}")
+            self._info_msg(f"Model verification PASSED: {model_key}")
             if warnings:
-                logger.warning(f"Warnings: {warnings}")
+                self._warn_msg(f"Warnings: {warnings}")
         else:
-            logger.error(f"Model verification FAILED: {model_key}")
-            logger.error(f"Errors: {errors}")
+            self._err_msg(f"Model verification FAILED: {model_key}")
+            self._err_msg(f"Errors: {errors}")
 
         return result
 
@@ -2184,3 +2245,62 @@ class Model(SpyglassMixin, dj.Computed):
             except (IndexError, ValueError):
                 continue  # Skip files that don't match the expected pattern
         return latest_model or dict()
+
+    def run_inference(
+        self,
+        model_key: dict,
+        video_path: Union[Path, str, list],
+        save_as_csv: bool = False,
+        destfolder: Union[Path, str, None] = None,
+        **kwargs,
+    ):
+        """Validate inputs and delegate to PoseEstim.run_inference().
+
+        Parameters
+        ----------
+        model_key : dict
+            Primary key for the Model entry (must include 'model_id').
+        video_path : Union[Path, str, list]
+            Path(s) to video file(s) for inference.
+        save_as_csv : bool, optional
+            Whether to save output as CSV in addition to h5, by default False.
+        destfolder : Union[Path, str, None], optional
+            Destination folder for output files. If None, saves alongside
+            video, by default None.
+        **kwargs
+            Additional parameters passed to the underlying inference function.
+
+        Raises
+        ------
+        ValueError
+            If model_key is not in the database, or if the stored model_path is
+            not a DLC config.yaml file (e.g. when imported from an NWB).
+        FileNotFoundError
+            If video_path does not exist on disk.
+        """
+        if not (self & model_key):
+            raise ValueError(f"Model not found in database: {model_key}")
+
+        video_paths = (
+            video_path
+            if isinstance(video_path, (list, tuple))
+            else [video_path]
+        )
+        for vp in video_paths:
+            if not Path(vp).exists():
+                raise FileNotFoundError(f"Video not found: {vp}")
+
+        model_info = (self & model_key).fetch1()
+        resolved = resolve_model_path(model_info["model_path"])
+        if resolved.suffix not in (".yaml", ".yml"):
+            raise ValueError(
+                f"DLC inference requires a config.yaml file; "
+                f"got: {resolved}. "
+                "Re-import the model from its DLC project directory."
+            )
+
+        from spyglass.position.v2.estim import PoseEstim
+
+        return PoseEstim().run_inference(
+            model_key, video_path, save_as_csv, destfolder, **kwargs
+        )

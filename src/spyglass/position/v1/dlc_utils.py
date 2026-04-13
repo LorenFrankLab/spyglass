@@ -376,7 +376,11 @@ def get_video_info(key):
     with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
         nwb_file = in_out.read()
         nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        video_filepath = VideoFile.get_abs_path(vf_key)
+        try:
+            video_filepath = VideoFile.get_abs_path(vf_key)
+        except FileNotFoundError as e:
+            logger.warning(f"Video file not found, skipping: {e}")
+            return None, None, None, None
         video_dir = os.path.dirname(video_filepath) + "/"
         video_filename = video_filepath.split(video_dir)[-1]
         meters_per_pixel = nwb_video.device.meters_per_pixel

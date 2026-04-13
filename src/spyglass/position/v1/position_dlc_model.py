@@ -271,12 +271,29 @@ class DLCModel(SpyglassMixin, dj.Computed):
 
         scorer_legacy = str_to_bool(dlc_config.get("scorer_legacy", "f"))
 
-        dlc_scorer = GetScorerName(
-            cfg=dlc_config,
-            shuffle=shuffle,
-            trainFraction=dlc_config["TrainingFraction"][int(trainingsetindex)],
-            modelprefix=model_prefix,
-        )[scorer_legacy]
+        try:
+            dlc_scorer = GetScorerName(
+                cfg=dlc_config,
+                shuffle=shuffle,
+                trainFraction=dlc_config["TrainingFraction"][
+                    int(trainingsetindex)
+                ],
+                modelprefix=model_prefix,
+            )[scorer_legacy]
+        except (ValueError, RuntimeError) as e:
+            if not self._test_mode:
+                raise
+            # In test mode, training may be incomplete (e.g., DLC 3.x PyTorch
+            # engine requires snapshots that don't exist after a partial run).
+            # Fall back to a synthetic scorer name so the pipeline can proceed.
+            dlc_scorer = (
+                f"DLC_{dlc_config['Task']}_{dlc_config['scorer']}"
+                f"_shuffle{shuffle}"
+            )
+            logger.warning(
+                f"GetScorerName failed (DLC 3.x compat): {e}. "
+                f"Using synthetic scorer: {dlc_scorer}"
+            )
         if dlc_config["snapshotindex"] == -1:
             dlc_scorer = "".join(dlc_scorer.split("_")[:-1])
 

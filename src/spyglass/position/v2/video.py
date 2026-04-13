@@ -5,7 +5,7 @@ import datajoint as dj
 from datajoint.hash import key_hash
 
 from spyglass.common import Session, TaskEpoch, VideoFile
-from spyglass.utils import SpyglassMixin, logger
+from spyglass.utils import SpyglassMixin
 
 schema = dj.schema("cbroz_position_v2_video")
 
@@ -49,8 +49,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         """Insert video file group with automatic ID generation.
 
         If vid_group_id is not provided, it is derived from the description
-        via key_hash (deterministic across processes). Integer IDs are cast to
-        str for schema compatibility.
+        via key_hash (deterministic across processes).
 
         Parameters
         ----------
@@ -79,44 +78,55 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         # NOTE: Allowing a descriptive group ID relies on users to enforce
         # list uniqueness and consistency. The hash fallback provides a
         # deterministic ID fallback, but doesn't prevent duplicates
+
         # TODO: Always generate ID from file list?
 
-        if not isinstance(key, dict):
+        if not isinstance(key, dict):  # Typing gate-keep
             raise TypeError(f"Key must be a dictionary, got {type(key)}")
 
-        description = key.get("description", "")
-        vid_group_id = key.get("vid_group_id")
-        files = key.get("files", [])
+        # Unpack input
+        description_key = dict(description=key.get("description", ""))
 
-        if files:
-            vid_files = VideoFile() & files
-            if not vid_files:
-                raise ValueError(
-                    "No valid video files found. Try adding a list of "
-                    "VideoFile keys to the 'files' field. "
-                    f"Provided: {files}"
-                )
-            if vid_group_id is None:
-                vid_group_id = key_hash({"files": vid_files})
-        else:
-            if vid_group_id is None:
-                vid_group_id = key_hash({"description": description})
+        # Validate files all exist in VideoFile table
+        files = key.get("files", [])  # Allow single dict or list of dicts
+        file_list = [files] if isinstance(files, dict) else files
+        if len(file_list) and not isinstance(file_list[0], dict):
+            file_list = [  # If strings, try to fetch keys from paths
+                VideoFile().fetch_key_from_path(str(f)) for f in file_list
+            ]
 
-        vid_group_id = str(vid_group_id)
-
-        existing = self & {"vid_group_id": vid_group_id}
-        if existing:
-            existing_vids = existing.File().fetch("nwb_file_name")
-            logger.warning(
-                f"Video group with ID '{vid_group_id}' already exists with "
-                f"{len(existing_vids)} files: {existing_vids}. Skipping insert."
+        vid_files = (VideoFile() & file_list).fetch("KEY", as_dict=True)
+        if file_list and not vid_files:
+            self._warn_msg(
+                "Provided files not found in VideoFile table. "
+                "Creating group without files. Provided: " + f"{files}"
             )
-            return {"vid_group_id": vid_group_id}
+            vid_files = []
+        elif file_list and not len(vid_files) == len(file_list):
+            self._warn_msg(
+                f"Some provided files not found in VideoFile table. "
+                f"Provided: {file_list}, found: {vid_files}"
+            )
 
-        insert_dict = {"vid_group_id": vid_group_id, "description": description}
-        super().insert1(insert_dict, **kwargs)
+        vid_group_key = dict(
+            vid_group_id=str(  # Allows user-specified ID or hash fallback
+                key.get("vid_group_id") or key_hash({"files": vid_files})
+            )
+        )
+        existing = self & vid_group_key
+        if existing:
+            existing_vids = (self.File() & vid_group_key).fetch("nwb_file_name")
+            self._warn_msg(
+                f"Video group with ID '{vid_group_key['vid_group_id']}' already "
+                f"exists with {len(existing_vids)} files: {existing_vids}. "
+                "Skipping insert."
+            )
+            return vid_group_key
 
-        return {"vid_group_id": vid_group_id}
+        super().insert1(dict(vid_group_key, **description_key), **kwargs)
+        self.File().insert([dict(vid_group_key, **vf) for vf in vid_files])
+
+        return vid_group_key
 
     @classmethod
     def create_from_files(
@@ -247,7 +257,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 f"in {directory}"
             )
 
-        logger.info(
+        cls()._info_msg(
             f"Found {len(video_files)} video files in {directory} "
             f"matching '{pattern}'"
         )
@@ -299,12 +309,13 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
 
         inserts = []
         for video_path in video_files:
-            inserts.append(
-                dict(
-                    VideoFile().fetch_key_from_path(str(video_path)),
-                    vid_group_id=vid_group_id,
+            try:
+                key = VideoFile().fetch_key_from_path(str(video_path))
+                inserts.append(dict(key, vid_group_id=vid_group_id))
+            except (ValueError, FileNotFoundError):
+                cls()._warn_msg(
+                    f"Video not found in VideoFile table, skipping: {video_path}"
                 )
-            )
 
         cls().File().insert(inserts, skip_duplicates=True)
 
@@ -394,7 +405,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
                 nwb_stem = nwb_name
             if any(nwb_stem in str(vp) for vp in video_paths):
                 matched_nwb = nwb_name
-                logger.info(f"DLC config matched Nwbfile: {matched_nwb}")
+                cls()._info_msg(f"DLC config matched Nwbfile: {matched_nwb}")
                 break
 
         if not matched_nwb:
@@ -408,13 +419,20 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         vid_file_keys = (VideoFile() & {"nwb_file_name": matched_nwb}).fetch(
             "KEY", as_dict=True
         )
+        if not vid_file_keys:
+            raise ValueError(
+                f"Session '{matched_nwb}' matched the DLC config but has no "
+                "VideoFile entries. Ensure videos are registered (via "
+                "insert_sessions()) before calling import_model().\n"
+                f"  config: {config_path}\n"
+                f"  video paths: {video_paths}"
+            )
         return cls().insert1(
             {
                 "description": description,
                 "vid_group_id": vid_group_id,
                 "files": vid_file_keys,
-            },
-            skip_duplicates=True,
+            }
         )
 
     def get_nwb_file(self, vid_group_id: str) -> dict:

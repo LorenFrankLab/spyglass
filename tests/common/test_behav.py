@@ -87,9 +87,9 @@ def test_videofile_update_entries(common, video_keys):
     common.VideoFile().update_entries(key)
 
 
-def test_videofile_getabspath(common, video_keys):
+def test_videofile_getabspath(common):
     """Test get absolute path"""
-    key = video_keys[0]
+    key = common.VideoFile().fetch(as_dict=True)[0]
     path = common.VideoFile().get_abs_path(key)
     file_part = key["nwb_file_name"].split("2")[0] + "_0" + str(key["epoch"])
     assert file_part in path, "VideoFile get_abs_path failed"

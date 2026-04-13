@@ -38,8 +38,10 @@ _SKELETON = [
     ["tailMid", "tailTip"],
 ]
 
-# NWB stem embedded in video paths for create_from_dlc_config() matching
-_NWB_STEM = "minirec20230622_"
+# NWB stem embedded in video paths for create_from_dlc_config() matching.
+# Must NOT match the mini test file (minirec20230622_.nwb) to avoid
+# conftest.mini_insert skipping insert_sessions() prematurely.
+_NWB_STEM = "test_dlc_v2_sess_"
 
 # DLC project identifiers
 _TASK = "TESTv2"

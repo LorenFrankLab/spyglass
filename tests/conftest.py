@@ -49,8 +49,15 @@ import hdmf.build.objectmapper as _hdmf_objectmapper
 import numpy as np
 import pynwb
 import pynwb.device as _pynwb_device
-import pynwb.io.device as _pynwb_io_device
 import pytest
+
+try:
+    import pynwb.io.device as _pynwb_io_device
+
+    _HAS_PYNWB_IO_DEVICE = True
+except ModuleNotFoundError:
+    _pynwb_io_device = None
+    _HAS_PYNWB_IO_DEVICE = False
 import sklearn.utils.parallel as _sklearn_parallel
 from datajoint.logging import logger as dj_logger
 from hdmf.build.warnings import MissingRequiredBuildWarning
@@ -95,15 +102,14 @@ _dj_external.uuid_from_file = _uuid_from_file_safe
 #       replace an attribute on the warnings module itself without side-effects,
 #       so we wrap Device.__init__ instead.
 
-_orig_io_device_warn = _pynwb_io_device.warn
+if _HAS_PYNWB_IO_DEVICE:
+    _orig_io_device_warn = _pynwb_io_device.warn
 
+    def _io_device_warn_filtered(message, *args, **kwargs):
+        if "Device.model was detected as a string" not in str(message):
+            _orig_io_device_warn(message, *args, **kwargs)
 
-def _io_device_warn_filtered(message, *args, **kwargs):
-    if "Device.model was detected as a string" not in str(message):
-        _orig_io_device_warn(message, *args, **kwargs)
-
-
-_pynwb_io_device.warn = _io_device_warn_filtered
+    _pynwb_io_device.warn = _io_device_warn_filtered
 
 _orig_device_init = _pynwb_device.Device.__init__
 
@@ -600,10 +606,10 @@ def mini_insert(
         # Useful try/except for avoiding a full run on insert failure
         # Should be commented out in favor of vanilla insert for debugging
         # the insert_sessions function itself.
-        try:
-            insert_sessions(mini_path.name, raise_err=True)
-        except Exception as e:  # If can't insert session, exit all tests
-            pytest.exit(f"Failed to insert sessions: {e}")
+        # try:
+        insert_sessions(mini_path.name, raise_err=True)
+        # except Exception as e:  # If can't insert session, exit all tests
+        #     pytest.exit(f"Failed to insert sessions: {e}")
 
     if len(Session()) == 0:
         raise ValueError("No sessions inserted.")

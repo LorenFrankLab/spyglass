@@ -517,11 +517,21 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 f"expected pattern '{cam_device_regex}'"
             )
 
+        # Resolve the on-disk path: prefer external_file (actual filename) over
+        # the NWB object name, which is often a generic label like "video_files".
+        ext_files = getattr(video_obj, "external_file", None) or []
+        if ext_files:
+            first_ext = Path(ext_files[0])
+            video_filename = first_ext.name
+        else:
+            video_filename = video_obj.name
+
         return dict(
             key,
             video_file_num=int(match[1]),
             camera_name=camera_name,
             video_file_object_id=video_obj.object_id,
+            path=(Path(video_dir) / video_filename).as_posix(),
         )
 
     def _validate_video_timestamps(self, video_obj, valid_times, key):
@@ -807,7 +817,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         for row in existing_entries:
             if row.get("camera_name"):
                 continue
-            video_nwb = (cls & row).fetch_nwb()[0]
+            video_nwb = (cls & row).fetch_nwb()
             if len(video_nwb) != 1:
                 raise ValueError(
                     f"Expecting 1 video file per entry. {len(video_nwb)} found"
@@ -818,7 +828,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
         for row in existing_entries:
             if row.get("path"):
                 continue
-            abs_path = cls.get_abs_path(row)
+            try:
+                abs_path = cls.get_abs_path(row)
+            except FileNotFoundError as e:
+                logger.warning(f"Skipping path update for {row}: {e}")
+                continue
             row["path"] = abs_path
             cls.update1(row=row)
 
@@ -841,19 +855,53 @@ class VideoFile(SpyglassMixin, dj.Imported):
         """
         video_path_obj = Path(video_dir)
         video_info = (cls & key).fetch1()
+
+        # If the path was stored during make(), use it directly.
+        if stored_path := video_info.get("path"):
+            stored = Path(stored_path)
+            if stored.exists():
+                return stored.as_posix()
+
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+
+        # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
+        # reference to a ProcessingModule), search the NWB for ImageSeries.
+        import pynwb as _pynwb
+
+        if not isinstance(nwb_video, _pynwb.image.ImageSeries):
+            image_series = [
+                obj
+                for obj in nwbf.objects.values()
+                if isinstance(obj, _pynwb.image.ImageSeries)
+            ]
+            if not image_series:
+                raise FileNotFoundError(
+                    f"No ImageSeries found in {key['nwb_file_name']}"
+                )
+            nwb_video = image_series[0]
+
         video_filename = nwb_video.name
-        # see if the file exists and is stored in the base analysis dir
+
+        # Try the NWB object name first (often equals the real filename)
         nwb_video_file_abspath = Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
-        else:
-            raise FileNotFoundError(
-                f"video file with filename: {video_filename} "
-                f"does not exist in {video_path_obj}/"
-            )
+
+        # Fallback: check external_file entries (actual on-disk video paths)
+        for ext_file in getattr(nwb_video, "external_file", None) or []:
+            ext = Path(ext_file)
+            if ext.is_absolute() and ext.exists():
+                return ext.as_posix()
+            abs_ext = video_path_obj / ext.name
+            if abs_ext.exists():
+                return abs_ext.as_posix()
+
+        raise FileNotFoundError(
+            f"video file with filename: {video_filename} "
+            f"does not exist in {video_path_obj}/"
+        )
 
     def fetch_key_from_path(
         self, video_file_path: str, insert: bool = False

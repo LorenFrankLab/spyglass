@@ -83,6 +83,7 @@ os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
 dj.config.load("../dj_local_conf_pv2.json")  # TODO: CHANGE BEFORE MERGE
 
+from spyglass.common import Session, VideoFile
 from spyglass.position.v2 import video, train, estim
 
 from spyglass.position.v2 import (
@@ -105,6 +106,8 @@ _ = (
     train,
     estim,
     BodyPart,
+    Session,
+    VideoFile,
     Model,
     ModelSelection,
     ModelParams,
@@ -216,15 +219,18 @@ def _tutorial_bootstrap_dlc_session(config_path):
     For tutorial / development use only. In production, register your
     session with insert_sessions() before calling Model.import_model().
     """
+    import shutil
+    import subprocess
+
     from spyglass.common import (
+        IntervalList,
         Nwbfile,
         Session,
-        VideoFile,
-        IntervalList,
         Task,
         TaskEpoch,
+        VideoFile,
     )
-    from spyglass.settings import raw_dir
+    from spyglass.settings import raw_dir, video_dir
 
     config_path = Path(config_path)
     with open(config_path) as f:
@@ -233,94 +239,281 @@ def _tutorial_bootstrap_dlc_session(config_path):
     project_path = Path(cfg.get("project_path", str(config_path.parent)))
     nwb_stem = project_path.name  # e.g. 'TEST-Alex-2025-09-08'
     nwb_file_name = f"{nwb_stem}_.nwb"
-    video_paths = list(cfg.get("video_sets", {}).keys())
+    training_video_paths = list(cfg.get("video_sets", {}).keys())
     nwb_file_path = Path(raw_dir) / nwb_file_name
 
-    with open(nwb_file_path, "w") as f:
-        f.write("")  # create empty file to satisfy FK constraints
+    # Copy minirec as a valid NWB template so AnalysisNwbfile.create() can
+    # open it when storing pose estimation results.
+    if not nwb_file_path.exists() or nwb_file_path.stat().st_size == 0:
+        minirec = Path(raw_dir) / "minirec20230622_.nwb"
+        shutil.copy2(str(minirec), str(nwb_file_path))
+        print(f"Copied minirec as placeholder NWB: {nwb_file_path}")
 
+    # Create a 1-second inference clip directly in video_dir.
+    # Inference videos are assumed to live in video_dir; training videos
+    # stay in the DLC project folder (their absolute paths are stored in
+    # the VideoFile.path column so get_abs_path() can find them).
+    src_video = Path(training_video_paths[0])
+    inf_vid_name = f"example_inference{src_video.suffix}"
+    inf_vid_path = Path(video_dir) / inf_vid_name
+    if not inf_vid_path.exists():
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-i",
+                str(src_video),
+                "-t",
+                "1",
+                "-c",
+                "copy",
+                str(inf_vid_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        print(f"Created inference clip: {inf_vid_path}")
+
+    # All video paths: training (DLC project folder) + inference (video_dir).
+    # path= is set explicitly so VideoFile.get_abs_path() short-circuits
+    # via the stored path without needing an NWB lookup.
+    all_video_paths = training_video_paths + [str(inf_vid_path)]
+
+    nwb_key = dict(nwb_file_name=nwb_file_name)
+    interval_key = dict(nwb_key, interval_list_name="tutorial_epoch_1")
     now = datetime.now()
+    ins = dict(allow_direct_insert=True, skip_duplicates=True)
 
-    Nwbfile().insert1(
-        {
-            "nwb_file_name": nwb_file_name,
-            "nwb_file_abs_path": str(nwb_file_path.resolve()),
-        },
-        skip_duplicates=True,
-    )
+    # Check existence before insert: DataJoint uploads external files before
+    # the duplicate check, so skip_duplicates alone will raise if the file
+    # content changed since the first upload.
+    if not (Nwbfile() & nwb_key):
+        Nwbfile().insert1(
+            {**nwb_key, "nwb_file_abs_path": str(nwb_file_path.resolve())},
+            allow_direct_insert=True,
+        )
     Session().insert1(
         {
-            "nwb_file_name": nwb_file_name,
+            **nwb_key,
             "session_description": f"Tutorial dummy: {project_path.name}",
             "session_start_time": now,
             "timestamps_reference_time": now,
         },
-        allow_direct_insert=True,
-        skip_duplicates=True,
+        **ins,
     )
-    Task().insert1({"task_name": "tutorial_dlc"}, skip_duplicates=True)
+    Task().insert1({"task_name": "tutorial_dlc"}, **ins)
     IntervalList().insert1(
-        {
-            "nwb_file_name": nwb_file_name,
-            "interval_list_name": "tutorial_epoch_1",
-            "valid_times": np.array([[0.0, 1.0]]),
-        },
-        skip_duplicates=True,
+        {**interval_key, "valid_times": np.array([[0.0, 1.0]])}, **ins
     )
     TaskEpoch().insert1(
         {
-            "nwb_file_name": nwb_file_name,
+            **interval_key,
             "epoch": 1,
             "task_name": "tutorial_dlc",
-            "interval_list_name": "tutorial_epoch_1",
             "camera_names": [],
         },
-        allow_direct_insert=True,
-        skip_duplicates=True,
+        **ins,
     )
-    for i, video_path in enumerate(video_paths):
+    for i, video_path in enumerate(all_video_paths):
         VideoFile().insert1(
             {
-                "nwb_file_name": nwb_file_name,
+                **nwb_key,
                 "epoch": 1,
                 "video_file_num": i,
                 "camera_name": "tutorial_dlc",
                 "video_file_object_id": str(uuid.uuid4())[:40],
                 "path": str(Path(video_path).resolve()),
             },
-            allow_direct_insert=True,
-            skip_duplicates=True,
+            **ins,
         )
 
     print(
-        f"Tutorial session ready: {nwb_file_name} ({len(video_paths)} video(s))"
+        f"Tutorial session ready: {nwb_file_name} ({len(all_video_paths)} video(s))"
     )
-    return nwb_file_name
+    return nwb_file_name, inf_vid_path
 
 
 # %%
-# Point to your DLC project config file
+# Point to your DLC project config file.
+# If this path does not exist, a self-contained demo runs automatically.
 dlc_path = Path.home() / "DeepLabCut"
-dlc_path = (
-    Path.home() / "wrk" / "alt" / "DeepLabCut"
-)  # TODO: REMOVE BEFORE MERGE
+dlc_path = Path.home() / "wrk/alt/DeepLabCut"  # TODO: REMOVE BEFORE MERGE
 config_path = dlc_path / "examples" / "TEST-Alex-2025-09-08" / "config.yaml"
 
-# Import the model; bootstrap a tutorial session if none is registered yet.
 model_key = None
+nwb_file_name = None
+inf_vid_path = None  # Inference video path (set below)
+_demo_output_dir = None  # Set to a pre-computed h5 dir when in demo mode
+
 if config_path.exists():
+    # ── Real data path ────────────────────────────────────────────────────
     try:
         model_key = Model().import_model(config_path)
     except ValueError:
         # No Spyglass Session matched the DLC video paths.
         # Tutorial: create minimal dummy entries and retry.
         # Production: run insert_sessions('your_session.nwb') instead.
-        _tutorial_bootstrap_dlc_session(config_path)
+        print("Bootstrapping tutorial session for DLC import...")
+        nwb_file_name, inf_vid_path = _tutorial_bootstrap_dlc_session(
+            config_path
+        )
         model_key = Model().import_model(config_path)
+
+    # Re-derive inference clip path on re-runs (bootstrap already created it).
+    if inf_vid_path is None:
+        from spyglass.settings import video_dir
+
+        with open(config_path) as _f:
+            _cfg = yaml.safe_load(_f)
+        _vids = list(_cfg.get("video_sets", {}).keys())
+        if _vids:
+            _src = Path(_vids[0])
+            _candidate = Path(video_dir) / f"example_inference{_src.suffix}"
+            if _candidate.exists():
+                inf_vid_path = _candidate
+
     print(f"Imported model: {model_key}")
+
 else:
-    print(f"Config not found at {config_path}")
-    print("Adjust the path or run testscript.py to create example project")
+    # ── Demo mode ─────────────────────────────────────────────────────────
+    # config_path not found: create a synthetic DLC project, bootstrap a
+    # Spyglass session, and load pre-generated pose data so PoseV2.make()
+    # runs end-to-end without a trained DLC model.
+    print(f"Config not found at {config_path}. Running demo mode...")
+
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+
+    import spyglass
+
+    from spyglass.common import (
+        IntervalList,
+        Nwbfile,
+        Session,
+        Task,
+        TaskEpoch,
+        VideoFile,
+    )
+    from spyglass.settings import raw_dir, video_dir
+
+    # Add tests/position/v2 to path so we can use make_dlc_project()
+    _tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
+    if str(_tests_v2) not in sys.path:
+        sys.path.insert(0, str(_tests_v2))
+    from make_example_dlc_project import _NWB_STEM, make_dlc_project
+
+    # 1. Create synthetic DLC project (bodyparts: whiteLED, tailBase, tailMid, tailTip)
+    _demo_base = Path(raw_dir) / "dlc_demo"
+    _demo_base.mkdir(exist_ok=True)
+    config_path = make_dlc_project(_demo_base)
+    print(f"Demo DLC project: {config_path}")
+
+    # 2. Bootstrap Spyglass session. The NWB stem must match the token
+    #    embedded in the demo project's video paths (_NWB_STEM) so that
+    #    create_from_dlc_config() can find the session.
+    _nwb_file_name = f"{_NWB_STEM}.nwb"
+    _nwb_key = {"nwb_file_name": _nwb_file_name}
+    _nwb_path = Path(raw_dir) / _nwb_file_name
+
+    # Minirec copy gives AnalysisNwbfile.create() a valid NWB to open.
+    if not _nwb_path.exists() or _nwb_path.stat().st_size == 0:
+        _minirec = Path(raw_dir) / "minirec20230622_.nwb"
+        shutil.copy2(str(_minirec), str(_nwb_path))
+
+    with open(config_path) as _f:
+        _cfg = yaml.safe_load(_f)
+    _training_vids = list(_cfg.get("video_sets", {}).keys())
+
+    # Demo inference video: 2-second synthetic clip generated by ffmpeg.
+    inf_vid_path = Path(video_dir) / "demo_inference.avi"
+    if not inf_vid_path.exists():
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:size=640x480:rate=30",
+                "-t",
+                "2",
+                str(inf_vid_path),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        print(f"Created demo inference video: {inf_vid_path}")
+
+    _all_vids = _training_vids + [str(inf_vid_path)]
+    _now = datetime.now()
+    _ins = dict(allow_direct_insert=True, skip_duplicates=True)
+    _int_key = {**_nwb_key, "interval_list_name": "demo_epoch_1"}
+
+    if not (Nwbfile() & _nwb_key):
+        Nwbfile().insert1(
+            {**_nwb_key, "nwb_file_abs_path": str(_nwb_path.resolve())},
+            allow_direct_insert=True,
+        )
+    Session().insert1(
+        {
+            **_nwb_key,
+            "session_description": "Demo DLC session",
+            "session_start_time": _now,
+            "timestamps_reference_time": _now,
+        },
+        **_ins,
+    )
+    Task().insert1({"task_name": "demo_dlc"}, **_ins)
+    IntervalList().insert1(
+        {**_int_key, "valid_times": np.array([[0.0, 2.0]])}, **_ins
+    )
+    TaskEpoch().insert1(
+        {**_int_key, "epoch": 1, "task_name": "demo_dlc", "camera_names": []},
+        **_ins,
+    )
+    for _i, _vp in enumerate(_all_vids):
+        VideoFile().insert1(
+            {
+                **_nwb_key,
+                "epoch": 1,
+                "video_file_num": _i,
+                "camera_name": "demo_dlc",
+                "video_file_object_id": str(uuid.uuid4())[:40],
+                "path": str(Path(_vp).resolve()),
+            },
+            **_ins,
+        )
+
+    # Import model (session now registered; VideoFile entries exist)
+    model_key = Model().import_model(config_path)
+    nwb_file_name = _nwb_file_name
+
+    # 3. Generate synthetic DLC-format h5 output so PoseEstim.make() can
+    #    run in task_mode='load' without real model weights.
+    _demo_bodyparts = ["whiteLED", "tailBase", "tailMid", "tailTip"]
+    _scorer = "DLCdemo"
+    _n_frames = 60
+    _rng = np.random.default_rng(42)
+    _cols = pd.MultiIndex.from_tuples(
+        [
+            (_scorer, bp, c)
+            for bp in _demo_bodyparts
+            for c in ["x", "y", "likelihood"]
+        ],
+        names=["scorer", "bodyparts", "coords"],
+    )
+    _vals = {}
+    for _bp in _demo_bodyparts:
+        _vals[(_scorer, _bp, "x")] = _rng.uniform(50, 590, _n_frames)
+        _vals[(_scorer, _bp, "y")] = _rng.uniform(50, 430, _n_frames)
+        _vals[(_scorer, _bp, "likelihood")] = _rng.uniform(0.5, 1.0, _n_frames)
+    _demo_df = pd.DataFrame(_vals, columns=_cols)
+
+    _demo_output_dir = Path(tempfile.mkdtemp(prefix="dlc_demo_out_"))
+    _demo_df.to_hdf(
+        str(_demo_output_dir / "videoDLC_demo.h5"), key="df_with_missing"
+    )
+    print(f"Demo model: {model_key}")
 
 # %% [markdown]
 # The import process:
@@ -334,41 +527,10 @@ else:
 #
 
 # %%
-# Trim a training video from the DLC project to 1 second for fast inference.
-# video_path defaults to None; update it here to point to any video you prefer.
-import subprocess
+Model().import_model(config_path)
 
-video_path = None
-if config_path.exists():
-    with open(config_path) as f:
-        dlc_config = yaml.safe_load(f)
-    src_videos = list(dlc_config.get("video_sets", {}).keys())
-    if src_videos:
-        src_video = Path(src_videos[0])
-        example_video = (
-            src_video.parent / f"example_inference{src_video.suffix}"
-        )
-        if not example_video.exists():
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-i",
-                    str(src_video),
-                    "-t",
-                    "1",
-                    "-c",
-                    "copy",
-                    str(example_video),
-                ],
-                check=True,
-                capture_output=True,
-            )
-            print(f"Created 1-second clip: {example_video}")
-        else:
-            print(f"Example video already exists: {example_video}")
-        video_path = example_video
-    else:
-        print("No training videos found in DLC config")
+# %%
+VideoFile()
 
 # %%
 # Check the model entry
@@ -415,6 +577,39 @@ else:
     print(f"ndx-pose file not found: {ndx_pose_path}")
 
 # %% [markdown]
+# #### Importing from DLC h5 output (production workflow)
+#
+# If you have run DLC inference and have `.h5` pose output files,
+# `deeplabcut.analyze_videos_converth5_to_nwb` (requires `dlc2nwb`) converts
+# them to an ndx-pose NWB with real `original_videos` paths. Any
+# `VideoFile` entries in Spyglass whose paths match those videos are then
+# automatically linked to `VidFileGroup.File` during `Model.import_model()`.
+#
+# Register your session with `insert_sessions()` before importing, so that
+# `VideoFile` entries exist for the matching videos.
+
+# %%
+try:
+    import dlc2nwb  # noqa: F401
+    import deeplabcut as _dlc
+
+    # Set config_path and video_folder to your project paths, then:
+    # config_path = "your/config/path/config.yaml"
+    # video_folder = "your/video/folder"
+    # _dlc.analyze_videos_converth5_to_nwb(config_path, video_folder)
+    #
+    # Locate the produced NWB file and import:
+    # nwb_files = list(Path(video_folder).glob("*.nwb"))
+    # ndx_model_key = Model().import_model(nwb_files[0])
+
+    print("dlc2nwb available — uncomment the lines above to run.")
+except ImportError:
+    print(
+        "dlc2nwb not installed. Install with: pip install dlc2nwb\n"
+        "Required by deeplabcut.analyze_videos_converth5_to_nwb."
+    )
+
+# %% [markdown]
 # ### [PoseEstim](#TableOfContents) <a id="PoseEstim"></a>
 #
 
@@ -455,9 +650,11 @@ else:
 # %% [markdown]
 # ##### Step 1 — Inference parameters (`PoseEstimParams`)
 #
+# In this table, `params_hash` is a unique identifier for the set of params used.
+# This will raise an error if you attempt to insert a new entry with `params`
+# matching an existing row.
 
 # %%
-# The 'default' parameter set ships with Spyglass (empty dict → tool defaults).
 # Define custom params for your hardware:
 PoseEstimParams.insert_params(
     params={"device": "cuda", "batch_size": 8},
@@ -470,54 +667,75 @@ PoseEstimParams()
 # %% [markdown]
 # ##### Step 2 — Estimation task (`PoseEstimSelection`)
 #
+# Pose estimation uses **two separate `VidFileGroup` entries**:
+#
+# - **Training group** (`training_vid_group_id`): created by `import_model()` and
+#   linked to `ModelSelection`. Contains the original labeled videos used for
+#   training. Used by `get_nwb_file()` to resolve the parent session.
+# - **Inference group** (`inf_vid_group_id`): created here for the video(s) you
+#   want to run inference on. Linked to `PoseEstimSelection`.
+#
+# This structure supports multi-camera recordings but is not designed for
+# batch processing across many sessions.
 
 # %%
-# vid_group_id is created during Model.import_model() and stored
-# as a secondary attribute on the Model table via ModelSelection.
-vid_group_id = None
+# Video group 1: training videos (created by import_model)
+training_vid_group_id = model_key["vid_group_id"] if model_key else None
+
+# Video group 2: inference video (created here for PoseEstimSelection)
+inf_vid_group_key = None
 estim_key = None
-if model_key:
-    vid_group_id = (Model() & model_key).fetch1("vid_group_id")
+
+if inf_vid_path and model_key:
+    inf_vid_group_key = VidFileGroup().insert1(
+        {
+            "description": f"Inference video for {model_key['model_id']}",
+            "files": [inf_vid_path],
+        },
+        skip_duplicates=True,
+    )
+
+    # In demo mode _demo_output_dir points to a pre-generated h5 file;
+    # use task_mode='load' so PoseEstim.make() skips DLC inference.
+    _task_mode = "load" if _demo_output_dir else "trigger"
 
     estim_key = PoseEstimSelection().insert_estimation_task(
         key={
             "model_id": model_key["model_id"],
-            "vid_group_id": vid_group_id,
+            "vid_group_id": inf_vid_group_key["vid_group_id"],
         },
-        task_mode="trigger",  # 'load' to read existing output
+        task_mode=_task_mode,
         params={"device": "cpu"},  # swap to "cuda" for GPU
+        output_dir=str(_demo_output_dir) if _demo_output_dir else None,
     )
     print(f"Selection ready: {estim_key}")
 else:
-    print("No model_key; skipping selection.")
+    print("No inference video available — skipping PoseEstimSelection.")
+
+# %%
+inf_vid_path
 
 # %% [markdown]
 # ##### Step 3 — Run inference (`PoseEstim.populate()`)
 #
 
 # %%
-# PoseEstim.populate() calls self.run_inference() internally,
-# then stores the result as an ndx-pose NWB file.
-pose_df = None
-if estim_key:
-    PoseEstim.populate(estim_key)
-    pose_df = (PoseEstim() & estim_key).fetch1_dataframe()
-    print(pose_df.head())
-else:
-    # Tutorial fallback: load from the bundled DLC example dataset.
-    _dlc_example_dir = Path(
-        "~/wrk/alt/DeepLabCut/examples/TEST-Alex-2025-09-08/videos"
-    ).expanduser()
-    _h5_files = sorted(_dlc_example_dir.glob("*DLC*.h5"))
-    if _h5_files:
-        pose_df = pd.read_hdf(str(_h5_files[0]))
-        pose_df.index = np.arange(len(pose_df)) / 30.0
-        print(
-            f"Loaded DLC example: {_h5_files[0].name} ({len(pose_df)} frames)"
-        )
-        print(pose_df.head())
-    else:
-        print("No inference output or DLC example found")
+# Inspect both video groups
+if training_vid_group_id:
+    print("Training VidFileGroup:")
+    print(VidFileGroup().File() & {"vid_group_id": training_vid_group_id})
+if inf_vid_group_key:
+    print("Inference VidFileGroup:")
+    print(
+        VidFileGroup().File()
+        & {"vid_group_id": inf_vid_group_key["vid_group_id"]}
+    )
+
+# %%
+# PoseEstim.populate() runs an inference then stores the data as an ndx-pose NWB
+PoseEstim.populate(estim_key)
+pose_df = (PoseEstim() & estim_key).fetch1_dataframe()
+print(pose_df.head())
 
 # %% [markdown]
 # ### [PoseParams](#TableOfContents) <a id="PoseParams"></a>
@@ -580,14 +798,14 @@ PoseParams.insert_custom(
     params_name="tutorial_custom",
     orient={
         "method": "two_pt",  # Use two points to define orientation
-        "bodypart1": "nose",
-        "bodypart2": "tail_base",
+        "bodypart1": "bodypart1",
+        "bodypart2": "bodypart2",
         "interpolate": True,
         "smooth": True,
     },
     centroid={
         "method": "1pt",  # Use single point as centroid
-        "points": {"point1": "nose"},
+        "points": {"point1": "objectA"},
     },
     smoothing={
         "interpolate": True,
@@ -600,9 +818,8 @@ PoseParams.insert_custom(
             "method": "moving_avg",
             "smoothing_duration": 0.3,  # 300ms window
         },
-        "likelihood_thresh": 0.95,
+        "likelihood_thresh": 0.1,  # Low threshold; tutorial data has ~0.45 likelihoods
     },
-    skip_duplicates=True,
 )
 
 # %% [markdown]
@@ -623,67 +840,40 @@ PoseParams.insert_custom(
 # %% [markdown]
 # #### Create Processing Selection
 #
-# > **Prerequisite** — `PoseEstim.populate()` and `PoseV2.populate()` both require
-# > the model's `VidFileGroup` to be linked to a registered `Nwbfile` via
-# > `VideoFile → TaskEpoch → Session`. Both will raise a `ValueError` if the link
-# > is missing. Verify with:
+# Insert a `PoseSelection` row that links a `PoseEstim` result to a set of
+# `PoseParams`, then call `PoseV2.populate()` to run the processing pipeline.
+#
+# > **Prerequisite** — `PoseEstim` must be populated before inserting
+# > `PoseSelection`. Both `PoseEstim` and `PoseV2` require the inference
+# > `VidFileGroup` to be linked to a registered `Nwbfile`. Verify with:
 # > ```python
 # > VidFileGroup().get_nwb_file(vid_group_id)  # raises if not linked
 # > ```
+#
 
 # %%
-# Direct processing using PoseV2 helper methods.
-# Production workflow: PoseEstimSelection → PoseEstim.populate()
-#                    → PoseSelection → PoseV2.populate()
-# See the Prerequisite note above for the full production example.
+# +
+pose_selection_key = None
 processed_df = None
 
-if pose_df is not None:
-    bodyparts = pose_df.columns.get_level_values(1).unique().tolist()
-    print(f"Detected bodyparts: {bodyparts}")
-    bp0 = bodyparts[0]
-    bp1 = bodyparts[1] if len(bodyparts) > 1 else bodyparts[0]
-
-    params = (PoseParams() & {"pose_params": "tutorial_custom"}).fetch1()
-    orient_params = {**params["orient"], "bodypart1": bp0, "bodypart2": bp1}
-    centroid_params = {**params["centroid"], "points": {"point1": bp0}}
-    smooth_params = params["smoothing"]
-
-    timestamps = pose_df.index.values.astype(float)
-    sampling_rate = 1 / np.median(np.diff(timestamps))
-
-    pv2 = PoseV2()
-    thresh = smooth_params.get("likelihood_thresh", 0.95)
-    filtered_df = pv2._apply_likelihood_threshold(pose_df.copy(), thresh)
-    orientation = pv2._calculate_orientation(
-        filtered_df, orient_params, timestamps, sampling_rate
+if estim_key:
+    pose_selection_key = {**estim_key, "pose_params": "tutorial_custom"}
+    PoseSelection().insert1(
+        pose_selection_key, skip_duplicates=True, ignore_extra_fields=True
     )
-    centroid = pv2._calculate_centroid(filtered_df, centroid_params)
-    centroid_smooth = pv2._smooth_position(
-        centroid, timestamps, sampling_rate, smooth_params
-    )
-    velocity = pv2._calculate_velocity(
-        centroid_smooth, timestamps, sampling_rate
-    )
+    print(f"PoseSelection: {pose_selection_key}")
 
-    processed_df = pd.DataFrame(
-        {
-            "position_x": centroid_smooth[:, 0],
-            "position_y": centroid_smooth[:, 1],
-            "orientation": orientation,
-            "velocity": velocity,
-        },
-        index=timestamps,
-    )
-
+    PoseV2.populate(pose_selection_key)
+    processed_df = (PoseV2() & pose_selection_key).fetch1_dataframe()
     print(processed_df.head())
     print(
-        f"\nTime range: {processed_df.index[0]:.2f} "
-        f"– {processed_df.index[-1]:.2f} s"
+        f"\nTime range: {processed_df.index[0]:.2f}"
+        f" – {processed_df.index[-1]:.2f} s"
     )
     print(f'Mean speed: {processed_df["velocity"].mean():.2f} cm/s')
 else:
-    print("No pose data available; skipping PoseV2 processing.")
+    print("No estim_key available — skipping PoseV2.")
+# -
 
 # %% [markdown]
 # The PoseV2.make() pipeline performs:
@@ -729,7 +919,6 @@ if processed_df is not None:
         f"Time range: {processed_df.index[0]:.2f} - {processed_df.index[-1]:.2f} s"
     )
     print(f"Mean speed: {processed_df['velocity'].mean():.2f} cm/s")
-    # Production equivalent: (PoseV2() & pose_v2_key).fetch1_dataframe()
 
 # %% [markdown]
 # #### Method 2: fetch_obj()
@@ -741,12 +930,12 @@ if processed_df is not None:
 
 # %%
 # Production: fetch raw pynwb objects via fetch_obj()
-# objs = (PoseV2() & pose_v2_key).fetch_obj()
+# objs = (PoseV2() & pose_selection_key).fetch_obj()
 # Returns dict with: 'orient', 'centroid', 'velocity', 'smoothed_pose'
 # as BehavioralTimeSeries / Position pynwb objects for custom NWB access.
 #
-# orient_obj = (PoseV2() & pose_v2_key).fetch_obj("orient")
-# centroid_obj = (PoseV2() & pose_v2_key).fetch_obj(["centroid", "velocity"])
+# orient_obj = (PoseV2() & pose_selection_key).fetch_obj("orient")
+# centroid_obj = (PoseV2() & pose_selection_key).fetch_obj(["centroid", "velocity"])
 
 # %% [markdown]
 # ### [Visualization](#TableOfContents) <a id="Visualization"></a>
@@ -818,44 +1007,6 @@ if processed_df is not None:
 # %% [markdown]
 # #### Quiver Plot (Orientation Arrows)
 #
-
-# %%
-if processed_df is not None:
-    # Subsample for clarity
-    step = len(processed_df) // 50
-    subsampled = processed_df.iloc[::step]
-
-    fig, ax = plt.subplots(figsize=(12, 10))
-
-    # Plot trajectory
-    ax.plot(
-        processed_df["position_x"],
-        processed_df["position_y"],
-        "gray",
-        alpha=0.3,
-        linewidth=0.5,
-    )
-
-    # Add orientation arrows
-    arrow_length = 10  # cm
-    ax.quiver(
-        subsampled["position_x"],
-        subsampled["position_y"],
-        arrow_length * np.cos(subsampled["orientation"]),
-        arrow_length * np.sin(subsampled["orientation"]),
-        subsampled["velocity"],
-        cmap="viridis",
-        alpha=0.8,
-        scale=200,
-    )
-
-    ax.set_xlabel("X position (cm)")
-    ax.set_ylabel("Y position (cm)")
-    ax.set_title("Trajectory with orientation (colored by speed)")
-    ax.axis("equal")
-    ax.invert_yaxis()
-    plt.colorbar(label="Speed (cm/s)", ax=ax)
-    plt.show()
 
 # %% [markdown]
 # ### [V1 vs V2 Comparison](#TableOfContents) <a id="Comparison"></a>

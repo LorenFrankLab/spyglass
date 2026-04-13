@@ -22,7 +22,7 @@ from spyglass.position.v2.train import (
 )
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import dlc_output_dir
-from spyglass.utils import logger
+from spyglass.utils import SpyglassMixin
 
 # ----------------------------- Optional imports ------------------------------
 try:
@@ -34,7 +34,7 @@ schema = dj.schema("cbroz_position_v2_estim")
 
 
 @schema
-class PoseEstimParams(dj.Lookup):
+class PoseEstimParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose estimation inference.
 
     Stores tool-specific inference parameters (batch_size, device, etc.)
@@ -57,6 +57,8 @@ class PoseEstimParams(dj.Lookup):
     params_hash: varchar(64)  # hash of params
     unique index (params_hash)
     """
+
+    # TODO: Make `params_hash` hidden by adding a `_` prefix?
 
     default_params = {}
     contents = [
@@ -98,8 +100,8 @@ class PoseEstimParams(dj.Lookup):
         if existing:
             return existing.fetch1("KEY")
 
-        if params_id is None:
-            params_id = default_pk_name("pep", params)
+        if params_id is None:  # Use `pep-{YYYYMMDD}`
+            params_id = default_pk_name(prefix="pep", include_hash=False)
 
         key = {
             "pose_estim_params_id": params_id,
@@ -107,12 +109,12 @@ class PoseEstimParams(dj.Lookup):
             "params_hash": params_hash,
         }
         cls.insert1(key, skip_duplicates=skip_duplicates)
-        logger.info(f"Inserted PoseEstimParams: {params_id}")
+        cls._info_msg(f"Inserted PoseEstimParams: {params_id}")
         return {"pose_estim_params_id": params_id}
 
 
 @schema
-class PoseEstimSelection(dj.Manual):
+class PoseEstimSelection(SpyglassMixin, dj.Manual):
     """Selection table for pose estimation tasks.
 
     Pairs a trained Model with a VidFileGroup and inference parameters,
@@ -204,7 +206,7 @@ class PoseEstimSelection(dj.Manual):
             skip_duplicates=skip_duplicates,
         )
 
-        logger.info("Inserted entry into PoseEstimSelection")
+        self._info_msg("Inserted entry into PoseEstimSelection")
         return {**key, "task_mode": task_mode}
 
     @staticmethod
@@ -236,7 +238,7 @@ class PoseEstimSelection(dj.Manual):
 
 
 @schema
-class PoseEstim(dj.Computed):
+class PoseEstim(SpyglassMixin, dj.Computed):
     """Pose estimation results from model inference on video files.
 
     Computed from PoseEstimSelection entries. Runs inference (trigger)
@@ -258,8 +260,29 @@ class PoseEstim(dj.Computed):
     -> [nullable] AnalysisNwbfile
     """
 
-    @staticmethod
+    def insert1(self, row, **kwargs):
+        """Insert a single row, allowing direct inserts outside of populate.
+
+        Defaults pose_estim_params_id to 'default' when not provided. Also
+        creates a PoseEstimSelection entry (task_mode='load') if one doesn't
+        already exist, so callers can insert with just {model_id, vid_group_id}.
+        """
+        kwargs.setdefault("allow_direct_insert", True)
+        row = dict(row)
+        row.setdefault("pose_estim_params_id", "default")
+
+        sel_fields = ["model_id", "vid_group_id", "pose_estim_params_id"]
+        sel_key = {k: row[k] for k in sel_fields if k in row}
+        if len(sel_key) == 3 and not (PoseEstimSelection() & sel_key):
+            PoseEstimSelection().insert1(
+                {**sel_key, "task_mode": "load", "output_dir": ""},
+                skip_duplicates=True,
+            )
+
+        super().insert1(row, **kwargs)
+
     def load_dlc_output(
+        self,
         dlc_output_path: Union[Path, str],
         nwb_file_name: Union[Path, str, None] = None,
         pose_estimation_name: str = "PoseEstimation",
@@ -313,7 +336,7 @@ class PoseEstim(dj.Computed):
         if not dlc_output_path.exists():
             raise FileNotFoundError(f"DLC output not found: {dlc_output_path}")
 
-        logger.info(f"Loading DLC output: {dlc_output_path}")
+        self._info_msg(f"Loading DLC output: {dlc_output_path}")
 
         # Load DLC output data
         if dlc_output_path.suffix == ".h5":
@@ -331,7 +354,7 @@ class PoseEstim(dj.Computed):
         scorer = df.columns.get_level_values(0)[0]
         bodyparts = df.columns.get_level_values(1).unique().tolist()
 
-        logger.info(
+        self._info_msg(
             f"DLC data: {len(bodyparts)} bodyparts, {len(df)} frames, "
             f"scorer: {scorer}"
         )
@@ -350,10 +373,10 @@ class PoseEstim(dj.Computed):
 
         # Create or load NWB file
         if nwb_path.exists():
-            logger.info(f"Updating existing NWB file: {nwb_path}")
+            self._info_msg(f"Updating existing NWB file: {nwb_path}")
             io_mode = "r+"
         else:
-            logger.info(f"Creating new NWB file: {nwb_path}")
+            self._info_msg(f"Creating new NWB file: {nwb_path}")
             io_mode = "w"
 
         # Build ndx-pose structure
@@ -446,11 +469,11 @@ class PoseEstim(dj.Computed):
             # Write NWB file
             io.write(nwbfile)
 
-        logger.info(f"DLC output loaded into NWB: {nwb_path}")
+        self._info_msg(f"DLC output loaded into NWB: {nwb_path}")
         return nwb_path
 
-    @staticmethod
     def load_from_nwb(
+        self,
         nwb_file_path: Union[Path, str],
         pose_estimation_name: str = None,
     ) -> dict:
@@ -510,7 +533,7 @@ class PoseEstim(dj.Computed):
         if not nwb_file_path.exists():
             raise FileNotFoundError(f"NWB file not found: {nwb_file_path}")
 
-        logger.info(f"Loading pose data from NWB: {nwb_file_path}")
+        self._info_msg(f"Loading pose data from NWB: {nwb_file_path}")
 
         # Read NWB file and validate structure
         with NWBHDF5IO(str(nwb_file_path), mode="r") as io:
@@ -552,7 +575,7 @@ class PoseEstim(dj.Computed):
                 selected_name = list(pose_estimations.keys())[0]
                 pose_estimation = pose_estimations[selected_name]
                 if len(pose_estimations) > 1:
-                    logger.warning(
+                    self._warn_msg(
                         f"Multiple PoseEstimation objects found. "
                         f"Using '{selected_name}'. "
                         f"Available: {', '.join(pose_estimations.keys())}"
@@ -585,7 +608,7 @@ class PoseEstim(dj.Computed):
             "source_software": source_software,
         }
 
-        logger.info(
+        self._info_msg(
             f"Loaded pose data: {len(bodyparts)} bodyparts, {n_frames} frames, "
             f"source: {source_software}"
         )
@@ -625,7 +648,7 @@ class PoseEstim(dj.Computed):
                 "Nwbfile so the entry references an AnalysisNwbfile."
             )
 
-        logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
+        self._logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
 
         # Get NWB file path
         nwb_file_matches = AnalysisNwbfile() & {
@@ -664,7 +687,7 @@ class PoseEstim(dj.Computed):
             # Build DataFrame from PoseEstimationSeries
             data_dict = {}
 
-            for series in pose_estimation.pose_estimation_series:
+            for series in pose_estimation.pose_estimation_series.values():
                 bodypart = series.name.replace("_pose", "")
 
                 # Extract x, y data (shape: n_frames, 2)
@@ -686,7 +709,8 @@ class PoseEstim(dj.Computed):
                 df.columns, names=["scorer", "bodyparts", "coords"]
             )
 
-        logger.debug(f"Fetched {len(df)} frames of pose data")
+        self._logger.debug(f"Fetched {len(df)} frames of pose data")
+
         return df
 
     def make(self, key):
@@ -719,7 +743,7 @@ class PoseEstim(dj.Computed):
         inference_params = (PoseEstimParams & key).fetch1("params")
         inference_params = inference_params or {}
 
-        logger.info(
+        self._info_msg(
             f"PoseEstim.make: mode={task_mode}, " f"output_dir={output_dir}"
         )
 
@@ -748,7 +772,7 @@ class PoseEstim(dj.Computed):
                     f"{key['vid_group_id']}. Cannot trigger inference "
                     "without registered video files in VideoFile table."
                 )
-            logger.info("Triggering inference...")
+            self._info_msg("Triggering inference...")
             model_key = {"model_id": key["model_id"]}
             destfolder = output_dir if output_dir else None
             self.run_inference(
@@ -779,14 +803,14 @@ class PoseEstim(dj.Computed):
 
         # Use most recent h5 file
         dlc_output_path = max(h5_files, key=lambda p: p.stat().st_mtime)
-        logger.info(f"Loading DLC output: {dlc_output_path}")
+        self._info_msg(f"Loading DLC output: {dlc_output_path}")
 
         # Step 3: Read DLC output into DataFrame
         df = pd.read_hdf(dlc_output_path)
         scorer = df.columns.get_level_values(0)[0]
         bodyparts = df.columns.get_level_values(1).unique().tolist()
 
-        logger.info(
+        self._info_msg(
             f"DLC data: {len(bodyparts)} bodyparts, {len(df)} frames, "
             f"scorer: {scorer}"
         )
@@ -805,7 +829,7 @@ class PoseEstim(dj.Computed):
             key, df, bodyparts, scorer, nwb_file_name
         )
         self.insert1({**key, "analysis_file_name": analysis_file_name})
-        logger.info("PoseEstim entry inserted.")
+        self._info_msg("PoseEstim entry inserted.")
 
     def run_inference(
         self,
@@ -871,7 +895,7 @@ class PoseEstim(dj.Computed):
         params_info = (ModelParams() & model_params_key).fetch1()
         tool = params_info["tool"]
 
-        logger.info(f"Running inference with {tool} model: {model_key}")
+        self._info_msg(f"Running inference with {tool} model: {model_key}")
 
         if tool == "DLC":
             return self._run_dlc_inference(
@@ -954,8 +978,8 @@ class PoseEstim(dj.Computed):
             if param in kwargs:
                 analyze_params[param] = kwargs[param]
 
-        logger.info(f"Running DLC inference on {videos}")
-        logger.debug(f"DLC parameters: {analyze_params}")
+        self._info_msg(f"Running DLC inference on {videos}")
+        self._logger.debug(f"DLC parameters: {analyze_params}")
 
         try:
             from deeplabcut import analyze_videos
@@ -974,7 +998,7 @@ class PoseEstim(dj.Computed):
             ):
                 analyze_videos(**analyze_params)
         except Exception as e:
-            logger.error(f"DLC inference failed: {e}")
+            self._err_msg(f"DLC inference failed: {e}")
             raise
 
         output_folder = Path(destfolder) if destfolder else None
@@ -988,7 +1012,7 @@ class PoseEstim(dj.Computed):
                 output_paths.append(
                     str(max(output_files, key=lambda p: p.stat().st_mtime))
                 )
-        logger.info(f"Inference complete. Output files: {output_paths}")
+        self._info_msg(f"Inference complete. Output files: {output_paths}")
         return output_paths if len(output_paths) != 1 else output_paths[0]
 
     def _store_estimation_nwb(
@@ -1018,19 +1042,33 @@ class PoseEstim(dj.Computed):
         analysis_file_name = AnalysisNwbfile().create(nwb_file_name)
         nwb_analysis_file = AnalysisNwbfile()
 
-        # Fetch skeleton info from Model -> Skeleton
-        model_info = (Model & key).fetch1()
+        # Fetch skeleton info from ModelParams (via Model join).
+        # Restrict by model_id only: key also contains the inference
+        # vid_group_id which differs from the model's training vid_group_id.
+        # skeleton_id lives in ModelParams, not Model itself.
+        model_info = (
+            Model * ModelParams & {"model_id": key["model_id"]}
+        ).fetch1()
         skeleton_key = {"skeleton_id": model_info["skeleton_id"]}
         skeleton_entry = (Skeleton & skeleton_key).fetch1()
-        skeleton_entry.get("nodes", bodyparts)
         skeleton_edges = skeleton_entry.get("edges", [])
 
-        # Build ndx-pose Skeleton
-        edge_array = (
-            np.array(skeleton_edges, dtype="uint8")
-            if skeleton_edges
-            else np.array([], dtype="uint8").reshape(0, 2)
-        )
+        # Build ndx-pose Skeleton — edges must be integer index pairs into
+        # the nodes (bodyparts) list, not name pairs.
+        bp_index = {bp: i for i, bp in enumerate(bodyparts)}
+        if skeleton_edges:
+            edge_indices = [
+                [bp_index[a], bp_index[b]]
+                for a, b in skeleton_edges
+                if a in bp_index and b in bp_index
+            ]
+            edge_array = (
+                np.array(edge_indices, dtype="uint8")
+                if edge_indices
+                else np.array([], dtype="uint8").reshape(0, 2)
+            )
+        else:
+            edge_array = np.array([], dtype="uint8").reshape(0, 2)
         nwb_skeleton = ndx_pose.Skeleton(
             name=f"skeleton_{key['model_id']}",
             nodes=bodyparts,
@@ -1072,32 +1110,40 @@ class PoseEstim(dj.Computed):
             scorer=scorer,
         )
 
-        # Create a pynwb processing module container
+        # Write behavior module directly into the analysis NWB file.
+        # add_nwb_object() writes to scratch space; processing modules must
+        # be appended via NWBHDF5IO instead.
         import pynwb
 
-        behavior_module = pynwb.ProcessingModule(
-            name="behavior",
-            description="Behavioral pose estimation data",
-        )
+        analysis_abs_path = nwb_analysis_file.get_abs_path(analysis_file_name)
+        with pynwb.NWBHDF5IO(
+            path=analysis_abs_path, mode="a", load_namespaces=True
+        ) as io:
+            nwbf = io.read()
+            if "behavior" not in nwbf.processing:
+                behavior_module = nwbf.create_processing_module(
+                    name="behavior",
+                    description="Behavioral pose estimation data",
+                )
+            else:
+                behavior_module = nwbf.processing["behavior"]
 
-        # Add skeleton container and pose estimation
-        skeletons = ndx_pose.Skeletons(skeletons=[nwb_skeleton])
-        behavior_module.add(skeletons)
-        behavior_module.add(pose_estimation)
+            skeletons = ndx_pose.Skeletons(skeletons=[nwb_skeleton])
+            behavior_module.add(skeletons)
+            behavior_module.add(pose_estimation)
+            io.write(nwbf)
 
-        # Add to analysis NWB and register
-        nwb_analysis_file.add_nwb_object(analysis_file_name, behavior_module)
         nwb_analysis_file.add(
             nwb_file_name=nwb_file_name,
             analysis_file_name=analysis_file_name,
         )
 
-        logger.info(f"Stored pose estimation in NWB: {analysis_file_name}")
+        self._info_msg(f"Stored pose estimation in NWB: {analysis_file_name}")
         return analysis_file_name
 
 
 @schema
-class PoseParams(dj.Lookup):
+class PoseParams(SpyglassMixin, dj.Lookup):
     """Parameters for pose processing (orientation, centroid, smoothing).
 
     Attributes
@@ -1393,6 +1439,7 @@ class PoseParams(dj.Lookup):
             "centroid": centroid,
             "smoothing": smoothing,
         }
+        kwargs.setdefault("skip_duplicates", True)
         cls.insert1(params, **kwargs)
 
     @classmethod
@@ -1483,7 +1530,7 @@ class PoseParams(dj.Lookup):
 
 
 @schema
-class PoseSelection(dj.Manual):
+class PoseSelection(SpyglassMixin, dj.Manual):
     definition = """
     -> PoseEstim
     -> PoseParams
@@ -1491,15 +1538,15 @@ class PoseSelection(dj.Manual):
 
 
 @schema
-class PoseV2(dj.Computed):
+class PoseV2(SpyglassMixin, dj.Computed):
     definition = """
     -> PoseSelection
     ---
     -> [nullable] AnalysisNwbfile
-    orient_obj_id='': varchar(40)
-    centroid_obj_id='': varchar(40)
-    velocity_obj_id='': varchar(40)
-    smoothed_pose_id='': varchar(40)
+    orient_object_id='': varchar(40)
+    centroid_object_id='': varchar(40)
+    velocity_object_id='': varchar(40)
+    smoothed_pose_object_id='': varchar(40)
     """
 
     def fetch_obj(self, objects=None):
@@ -1536,8 +1583,8 @@ class PoseV2(dj.Computed):
         Notes
         -----
         - Uses fetch_nwb() to retrieve objects from AnalysisNwbfile
-        - Object IDs are stored in table columns: orient_obj_id,
-          centroid_obj_id, velocity_obj_id, smoothed_pose_id
+        - Object IDs are stored in table columns: orient_object_id,
+          centroid_object_id, velocity_object_id, smoothed_pose_object_id
         - Requires exactly one entry in the restriction
         """
         # Ensure single entry
@@ -1545,10 +1592,10 @@ class PoseV2(dj.Computed):
 
         # Map user-friendly names to database column names
         object_map = {
-            "orient": "orient_obj_id",
-            "centroid": "centroid_obj_id",
-            "velocity": "velocity_obj_id",
-            "smoothed_pose": "smoothed_pose_id",
+            "orient": "orient_object_id",
+            "centroid": "centroid_object_id",
+            "velocity": "velocity_object_id",
+            "smoothed_pose": "smoothed_pose_object_id",
         }
 
         # Determine which objects to fetch
@@ -1570,15 +1617,17 @@ class PoseV2(dj.Computed):
                 f"Valid options: {list(object_map.keys())}"
             )
 
-        # Fetch NWB objects using object ID attributes
-        nwb_attrs = [object_map[obj] for obj in fetch_objects]
+        # Use standard FetchMixin infrastructure with automatic object ID processing
+        nwb_attrs = [object_map[obj] for obj in fetch_objects] + [
+            "analysis_file_name"
+        ]
         nwb_data = self.fetch_nwb(*nwb_attrs)[0]
 
-        # Build result dictionary with user-friendly names
+        # Build result dictionary using processed NWB objects from FetchMixin
+        # FetchMixin._process_object_ids converts "name_object_id" -> "name"
         result = {}
         for obj_name in fetch_objects:
-            db_col = object_map[obj_name]
-            result[obj_name] = nwb_data[db_col]
+            result[obj_name] = nwb_data[obj_name]
 
         return result
 
@@ -1622,7 +1671,7 @@ class PoseV2(dj.Computed):
 
         # Extract data from NWB objects
         centroid_series = objs["centroid"].spatial_series["centroid"]
-        orient_series = objs["orient"].time_series["orientation"]
+        orient_series = objs["orient"].spatial_series["orientation"]
         velocity_series = objs["velocity"].time_series["velocity"]
 
         # Get timestamps from centroid (should be same for all)
@@ -1728,7 +1777,7 @@ class PoseV2(dj.Computed):
             )
         video_path = valid_paths[0]
         if len(valid_paths) > 1:
-            logger.warning(
+            self._warn_msg(
                 f"Multiple videos in group '{vid_group_id}'; "
                 f"using first: {video_path}"
             )
@@ -1788,7 +1837,7 @@ class PoseV2(dj.Computed):
                         :, idx[scorer, bp, "likelihood"]
                     ].values
             except Exception as e:
-                logger.warning(
+                self._warn_msg(
                     f"Could not load raw pose for overlay: {e}. "
                     "Proceeding without bodypart dots."
                 )
@@ -1857,7 +1906,7 @@ class PoseV2(dj.Computed):
             )
 
         # Fetch raw pose data
-        logger.info(f"Processing pose for: {key}")
+        self._info_msg(f"Processing pose for: {key['model_id']}")
         pose_df = (PoseEstim & key).fetch1_dataframe()
 
         # Fetch parameters
@@ -1875,29 +1924,29 @@ class PoseV2(dj.Computed):
         pose_df = self._apply_likelihood_threshold(pose_df, likelihood_thresh)
 
         # Step 2: Calculate orientation
-        logger.info("Calculating orientation...")
+        self._info_msg("Calculating orientation...")
         orientation = self._calculate_orientation(
             pose_df, orient_params, timestamps, sampling_rate
         )
 
         # Step 3: Calculate centroid
-        logger.info("Calculating centroid...")
+        self._info_msg("Calculating centroid...")
         centroid = self._calculate_centroid(pose_df, centroid_params)
 
         # Step 4: Apply interpolation and smoothing to centroid
-        logger.info("Smoothing centroid...")
+        self._info_msg("Smoothing centroid...")
         centroid_smooth = self._smooth_position(
             centroid, timestamps, sampling_rate, smooth_params
         )
 
         # Step 5: Calculate velocity
-        logger.info("Calculating velocity...")
+        self._info_msg("Calculating velocity...")
         velocity = self._calculate_velocity(
             centroid_smooth, timestamps, sampling_rate
         )
 
         # Step 6: Store results (nwb_file_name validated at top of make())
-        logger.info("Storing results in NWB...")
+        self._info_msg("Storing results in NWB...")
         analysis_file_name, obj_ids = self._store_pose_nwb(
             {**key, "nwb_file_name": nwb_file_name},
             orientation,
@@ -1910,17 +1959,16 @@ class PoseV2(dj.Computed):
             {
                 **key,
                 "analysis_file_name": analysis_file_name,
-                "orient_obj_id": obj_ids["orient"],
-                "centroid_obj_id": obj_ids["centroid"],
-                "velocity_obj_id": obj_ids["velocity"],
-                "smoothed_pose_id": obj_ids["smoothed_pose"],
+                "orient_object_id": obj_ids["orient"],
+                "centroid_object_id": obj_ids["centroid"],
+                "velocity_object_id": obj_ids["velocity"],
+                "smoothed_pose_object_id": obj_ids["smoothed_pose"],
             }
         )
-        logger.info("Pose processing complete!")
+        self._info_msg("Pose processing complete!")
 
-    @staticmethod
     def _apply_likelihood_threshold(
-        pose_df: pd.DataFrame, likelihood_thresh: float
+        self, pose_df: pd.DataFrame, likelihood_thresh: float
     ) -> pd.DataFrame:
         """Set position to NaN where likelihood is below threshold.
 
@@ -1954,7 +2002,7 @@ class PoseV2(dj.Computed):
                 )
             except KeyError:
                 # No likelihood column for this bodypart, skip
-                logger.warning(
+                self._warn_msg(
                     f"No likelihood column for {bodypart}, skipping threshold"
                 )
                 continue
@@ -2268,11 +2316,11 @@ class PoseV2(dj.Computed):
         METERS_PER_CM = 0.01
 
         # Create or get analysis NWB file
-        analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
+        a_fname = AnalysisNwbfile().create(key["nwb_file_name"])
         nwb_analysis_file = AnalysisNwbfile()
 
         # Create Position object for centroid
-        position = pynwb.behavior.Position()
+        position = pynwb.behavior.Position(name="centroid")
         position.create_spatial_series(
             name="centroid",
             timestamps=timestamps,
@@ -2284,18 +2332,20 @@ class PoseV2(dj.Computed):
         )
 
         # Create BehavioralTimeSeries for orientation
-        orientation_ts = pynwb.behavior.BehavioralTimeSeries()
-        orientation_ts.create_timeseries(
+        orientation_ts = pynwb.behavior.CompassDirection(name="orientation")
+        orientation_ts.create_spatial_series(
             name="orientation",
             timestamps=timestamps,
             data=orientation,
+            conversion=1.0,
             unit="radians",
-            description="Head orientation in radians",
+            description="Animal orientation in radians",
             comments="Counter-clockwise from positive x-axis, range [-π, π]",
+            # reference_frame=??,
         )
 
         # Create BehavioralTimeSeries for velocity
-        velocity_ts = pynwb.behavior.BehavioralTimeSeries()
+        velocity_ts = pynwb.behavior.BehavioralTimeSeries(name="velocity")
         velocity_ts.create_timeseries(
             name="velocity",
             timestamps=timestamps,
@@ -2306,7 +2356,7 @@ class PoseV2(dj.Computed):
         )
 
         # Create Position object for smoothed pose (centroid with metadata)
-        smoothed_pose = pynwb.behavior.Position()
+        smoothed_pose = pynwb.behavior.Position(name="smoothed_pose")
         smoothed_pose.create_spatial_series(
             name="smoothed_position",
             timestamps=timestamps,
@@ -2319,24 +2369,18 @@ class PoseV2(dj.Computed):
 
         # Add objects to NWB file and get their IDs
         obj_ids = {
-            "orient": nwb_analysis_file.add_nwb_object(
-                analysis_file_name, orientation_ts
-            ),
-            "centroid": nwb_analysis_file.add_nwb_object(
-                analysis_file_name, position
-            ),
-            "velocity": nwb_analysis_file.add_nwb_object(
-                analysis_file_name, velocity_ts
-            ),
+            "orient": nwb_analysis_file.add_nwb_object(a_fname, orientation_ts),
+            "centroid": nwb_analysis_file.add_nwb_object(a_fname, position),
+            "velocity": nwb_analysis_file.add_nwb_object(a_fname, velocity_ts),
             "smoothed_pose": nwb_analysis_file.add_nwb_object(
-                analysis_file_name, smoothed_pose
+                a_fname, smoothed_pose
             ),
         }
 
         # Register the relationship between raw and analysis NWB files
         nwb_analysis_file.add(
             nwb_file_name=key["nwb_file_name"],
-            analysis_file_name=analysis_file_name,
+            analysis_file_name=a_fname,
         )
 
-        return analysis_file_name, obj_ids
+        return a_fname, obj_ids

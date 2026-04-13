@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
-from spyglass.position.utils_dlc import test_mode_suppress
 from spyglass.settings import test_mode
 
 
@@ -191,66 +190,3 @@ def save_yaml(output_dir, config_dict, filename="dj_dlc_config", mkdir=True):
     output_filepath = Path(output_dir) / f"{filename}.yaml"
     write_config(output_filepath, config_dict)
     return str(output_filepath)
-
-
-def do_pose_estimation(
-    video_filepaths,
-    dlc_model,
-    project_path,
-    output_dir,
-    videotype="",
-    gputouse=None,
-    save_as_csv=False,
-    batchsize=None,
-    cropping=None,
-    TFGPUinference=True,
-    dynamic=(False, 0.5, 10),
-    robust_nframes=False,
-    allow_growth=False,
-    use_shelve=False,
-):
-    """Launch DLC's analyze_videos within element-deeplabcut
-
-    Other optional parameters may be set other than those described below. See
-    deeplabcut.analyze_videos parameters for descriptions/defaults.
-
-    Parameters
-    ----------
-    video_filepaths: list of videos to analyze
-    dlc_model: element-deeplabcut dlc.Model dict
-    project_path: path to project config.yml
-    output_dir: where to save output
-    """
-    from deeplabcut.pose_estimation_tensorflow import analyze_videos
-
-    # ---- Build and save DLC configuration (yaml) file ----
-    dlc_config = dlc_model["config_template"]
-    dlc_project_path = Path(project_path)
-    dlc_config["project_path"] = dlc_project_path.as_posix()
-
-    # ---- Write config files ----
-    # To output dir: Important for loading/parsing output in datajoint
-    _ = save_yaml(output_dir, dlc_config)
-    # To project dir: Required by DLC to run the analyze_videos
-    if dlc_project_path != output_dir:
-        config_filepath = save_yaml(dlc_project_path, dlc_config)
-    # ---- Trigger DLC prediction job ----
-    with test_mode_suppress():
-        analyze_videos(
-            config=config_filepath,
-            videos=video_filepaths,
-            shuffle=dlc_model["shuffle"],
-            trainingsetindex=dlc_model["trainingsetindex"],
-            destfolder=output_dir,
-            modelprefix=dlc_model["model_prefix"],
-            videotype=videotype,
-            gputouse=gputouse,
-            save_as_csv=save_as_csv,
-            batchsize=batchsize,
-            cropping=cropping,
-            TFGPUinference=TFGPUinference,
-            dynamic=dynamic,
-            robust_nframes=robust_nframes,
-            allow_growth=allow_growth,
-            use_shelve=use_shelve,
-        )
