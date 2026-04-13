@@ -598,7 +598,7 @@ def cross_product(a, b):
     return a[0] * b[1] - a[1] * b[0]
 
 
-# To check if only one bodypart's points are wihin bounds
+# To check if only one bodypart's points are within bounds
 def check_bounds_single(xy_loc, bounds):
     inside = np.ones(
         len(xy_loc), dtype=bool
@@ -608,7 +608,7 @@ def check_bounds_single(xy_loc, bounds):
         B = bounds[
             (i + 1) % len(bounds)
         ]  # Loop around the boundary, A->B, B->C, C->D, D->A
-        edge = B - A  # computes the vector aroun boundary points
+        edge = B - A  # computes the vector around boundary points
 
         # Loop through each animal's position
         for j in range(len(xy_loc)):
