@@ -15,6 +15,7 @@ from spyglass.position.v1.dlc_utils import (
     interp_pos,
     validate_option,
     validate_smooth_params,
+    check_bounds_all_bodyparts
 )
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.settings import test_mode
@@ -218,6 +219,11 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         )
 
         nan_spans = get_span_start_stop(np.where(bad_inds)[0])
+
+
+        if params.get('if_bounds'):
+            df_w_nans= check_bounds_all_bodyparts(df_w_nans, params.get("bounds"))
+
 
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())

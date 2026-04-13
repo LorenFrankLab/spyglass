@@ -588,6 +588,46 @@ def get_span_start_stop(indices):
         span_inds.append((group[0], group[-1]))
     return span_inds
 
+#SONA ADDING CODE...
+
+def cross_product(a,b):
+    if np.isnan(a.any()) or np.isnan(b.any()):
+        return
+    return a[0]* b[1] - a[1]* b[0]
+
+#To check if only one bodypart's points are wihin bounds
+def check_bounds_single(xy_loc, bounds):
+    inside = np.ones(len(xy_loc), dtype=bool)  # Set all points as inside initially
+    for i in range(len(bounds)):
+        A = bounds[i]
+        B = bounds[(i + 1) % len(bounds)]  # Loop around the boundary, A->B, B->C, C->D, D->A
+        edge = B - A                        # computes the vector aroun boundary points
+
+        # Loop through each animal's position
+        for j in range(len(xy_loc)):
+            vector = xy_loc[j] - A  # Vector from A to animal's position
+
+            # Compute the cross product for the current animal's position
+            cp = cross_product(edge, vector)
+
+            # Update the inside mask: If the cross product is negative, it's inside
+            if cp >= 0:
+                inside[j] = False  # Mark as outside if the cross product is not negative
+
+
+    return inside
+
+def check_bounds_all_bodyparts(df, bounds):
+    inside_dict = {}
+    df_copy=df.copy()
+
+    xy_loc = df_copy[["x", "y"]].to_numpy()
+    inside = check_bounds_single(xy_loc, bounds)
+    print(inside)
+    outside = ~inside
+    df_copy.loc[outside, ("x")] = np.nan
+    df_copy.loc[outside, ("y")] = np.nan
+    return df_copy
 
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
     """Interpolate x and y positions in DLC dataframe"""
