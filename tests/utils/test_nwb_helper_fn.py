@@ -1,7 +1,10 @@
 import datetime
 
+import numpy as np
 import pynwb
 import pytest
+
+from spyglass.utils.nwb_helper_fn import _get_epoch_groups
 
 
 @pytest.fixture(scope="module")
@@ -61,3 +64,35 @@ def test_electrical_series(get_electrode_indices, custom_nwbfile):
     eseries = custom_nwbfile.acquisition["eseries"]
     ret = get_electrode_indices(eseries, [102, 105])
     assert ret == [0, 3]
+
+
+def test_get_epoch_groups_with_timestamps():
+    """_get_epoch_groups works when SpatialSeries has explicit timestamps."""
+    spatial_series = pynwb.behavior.SpatialSeries(
+        name="series_0",
+        data=np.zeros((100, 2)),
+        timestamps=np.linspace(0.0, 99.0 / 30.0, 100),
+        reference_frame="unknown",
+    )
+    position = pynwb.behavior.Position(spatial_series=spatial_series)
+    epoch_groups = _get_epoch_groups(position)
+    assert len(epoch_groups) == 1
+    assert list(epoch_groups.keys())[0] == pytest.approx(0.0)
+    assert 0 in epoch_groups[list(epoch_groups.keys())[0]]
+
+
+def test_get_epoch_groups_with_rate():
+    """_get_epoch_groups works when SpatialSeries uses starting_time + rate."""
+    spatial_series = pynwb.behavior.SpatialSeries(
+        name="series_0",
+        data=np.zeros((100, 2)),
+        starting_time=5.0,
+        rate=30.0,
+        reference_frame="unknown",
+    )
+    position = pynwb.behavior.Position(spatial_series=spatial_series)
+    assert spatial_series.timestamps is None
+    epoch_groups = _get_epoch_groups(position)
+    assert len(epoch_groups) == 1
+    assert list(epoch_groups.keys())[0] == pytest.approx(5.0)
+    assert 0 in epoch_groups[list(epoch_groups.keys())[0]]

@@ -148,6 +148,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `analysis_table` property to mixin for custom pipelines #1525
 - Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
+- Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1567
 - Parallelize `AnalysisFileIssues` checks #1557
 
 ### Pipelines
@@ -221,6 +223,12 @@ for label, interval_data in results.groupby("interval_labels"):
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
     - Allow `CurationV1` to save without any spikes #1533
+    - Trigger recompute in `CurationV1.get_recording` when necessary #1561
+    - Drop spike sample indices that exceed the recording length in
+        `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
+        SpikeInterface `ValueError` caused by floating-point round-trip
+        in the seconds-to-samples conversion #1564
+
 
 ## [0.5.5] (Aug 6, 2025)
 
