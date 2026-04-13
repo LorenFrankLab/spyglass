@@ -569,7 +569,17 @@ def _get_pos_dict(
             spatial_series = all_spatial_series[index]
             valid_times = None
             if incl_times:  # get the valid intervals for the position data
-                timestamps = np.asarray(spatial_series.timestamps)
+                if spatial_series.timestamps is None:
+                    starting_time = spatial_series.starting_time
+                    rate = spatial_series.rate
+                    num_samples = spatial_series.data.shape[0]
+                    timestamps = np.linspace(
+                        starting_time,
+                        starting_time + (num_samples - 1) / rate,
+                        num_samples,
+                    )
+                else:
+                    timestamps = np.asarray(spatial_series.timestamps)
                 sampling_rate = estimate_sampling_rate(
                     timestamps, verbose=verbose, filename=session_id
                 )
