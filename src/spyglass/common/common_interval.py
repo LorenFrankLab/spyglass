@@ -11,6 +11,7 @@ import pandas as pd
 import pynwb
 
 from spyglass.common.common_session import Session  # noqa: F401
+from spyglass.settings import test_mode
 from spyglass.utils import SpyglassIngestion, logger
 from spyglass.utils.dj_helper_fn import get_child_tables
 
@@ -127,7 +128,9 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if len(interval_lists_df["nwb_file_name"].unique()) > 1:
             raise ValueError(
-                ">1 nwb_file_name found in IntervalList. the intended use of plot_intervals is to compare intervals within a single nwb_file_name."
+                ">1 nwb_file_name found in IntervalList. "
+                + "the intended use of plot_intervals is to compare intervals "
+                + "within a single nwb_file_name."
             )
 
         interval_list_names = interval_lists_df["interval_list_name"].values
@@ -136,7 +139,8 @@ class IntervalList(SpyglassIngestion, dj.Manual):
 
         if n_compare > 100:
             warnings.warn(
-                f"plot_intervals is plotting {n_compare} intervals. if this is unintended, please pass in a smaller IntervalList.",
+                f"plot_intervals is plotting {n_compare} intervals. "
+                + "if this is unintended, please pass in a smaller IntervalList.",
                 UserWarning,
             )
 
@@ -334,7 +338,7 @@ class Interval:
         from_inds=False,
         no_overlap=False,
         no_duplicates=True,
-        warn=True,
+        warn=not test_mode,  # warn by default, unless running pytests
         **kwargs,
     ) -> None:
         """Initialize the Intervals class with a list of intervals.
@@ -358,6 +362,7 @@ class Interval:
             Additional keyword arguments to pass to the class, including
             "valid_times" and "interval_list_name" for times and name.
         """
+
         self.kwargs = dict(  # Returned objects will set this behavior
             kwargs,
             no_overlap=no_overlap,
@@ -408,15 +413,13 @@ class Interval:
     def __len__(self) -> int:
         return len(self.times)
 
-    def __getitem__(self, item) -> T:
+    def __getitem__(self, item: Union[int, slice, tuple]) -> np.ndarray:
         """Get item from the interval list."""
-        if isinstance(item, (slice, int)):
-            return Interval(self.times[item], **self.kwargs)
-        # elif isinstance(item, slice):
-        #     return Interval(self.times[item], **self.kwargs)
+        if isinstance(item, (slice, int, tuple)):
+            return self.times[item]
         else:
             raise ValueError(
-                f"Unrecognized item type: {type(item)}. Must be int or slice."
+                f"Unrecognized item type: {type(item)}. Must be int, slice, or tuple."
             )
 
     def __iter__(self) -> iter:
@@ -467,23 +470,39 @@ class Interval:
     def _extract(
         self, interval_list: IntervalLike, from_inds: bool = False
     ) -> np.ndarray:
-        """Extract interval_list from a given object."""
+        times = None
+
+        # extract times from interval_list based on type
         if from_inds:
-            return self.from_inds(interval_list)
+            times = self.from_inds(interval_list)
         elif hasattr(interval_list, "times"):
-            return interval_list.times
+            times = interval_list.times
         elif isinstance(interval_list, dict):
-            return self._import_from_table(interval_list)
+            times = self._import_from_table(interval_list)
         elif isinstance(
             interval_list, (np.generic, np.ndarray, list, int, float, tuple)
         ):
-            return interval_list
+            times = interval_list
         elif interval_list is None:
             return np.array([])
-        else:
+
+        # validate times format
+        if times is None:
             raise TypeError(
                 f"Unrecognized interval_list type: {type(interval_list)}"
             )
+
+        times = self._expand_1d(np.asarray(times))
+        if len(times) and not np.all(np.diff(times, axis=1) >= 0):
+            raise ValueError(
+                "All intervals must be in the form [start, stop] with start <= stop."
+            )
+        if len(times) and times.shape[1] != 2:
+            raise ValueError(
+                f"Intervals must have shape (N, 2). Got shape {times.shape}."
+            )
+
+        return np.asarray(times)
 
     @staticmethod
     def from_inds(list_frames) -> List[List[int]]:
@@ -587,7 +606,7 @@ class Interval:
     @staticmethod
     def _expand_1d(interval_list: np.ndarray) -> np.ndarray:
         """Expand a 1D interval list to 2D."""
-        if interval_list.ndim == 1:
+        if interval_list.ndim == 1 and interval_list.size > 0:
             return np.expand_dims(interval_list, 0)
         return interval_list
 
@@ -775,16 +794,40 @@ class Interval:
         # Concatenate the two lists so we can resort the intervals and apply the
         # same sorting to the start-end arrays
         combined_intervals = np.concatenate((il1, il2))
+        if len(combined_intervals) == 0:
+            return Interval(np.array([]), **self.kwargs)
         ss = np.concatenate((il1_start_end, il2_start_end))
-        sort_ind = np.argsort(combined_intervals)
+        sort_ind = np.lexsort((-1 * ss, combined_intervals))
         combined_intervals = combined_intervals[sort_ind]
+        ss_cumsum = np.cumsum(ss[sort_ind])
+        if np.any(ss_cumsum < 0):
+            raise ValueError(
+                "Negative cumulative sum found in union. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
 
-        # a cumulative sum of 1 indicates the beginning of a joint interval; a
-        # cumulative sum of 0 indicates the end
-        union_starts = np.ravel(
-            np.array(np.where(np.cumsum(ss[sort_ind]) == 1))
+        # a switch of cumulative sum from 0 to 1 indicates the beginning of a
+        # joint interval; a cumulative sum of 0 indicates the end
+        cumsum_flip = np.logical_and(
+            ss_cumsum[1:] == 1,
+            ss_cumsum[:-1] == 0,
         )
-        union_stops = np.ravel(np.array(np.where(np.cumsum(ss[sort_ind]) == 0)))
+        union_starts = np.ravel(np.array(np.where(cumsum_flip)[0] + 1))
+        union_starts = (
+            np.insert(union_starts, 0, 0)
+            if ss[sort_ind][0] == 1
+            else union_starts
+        )
+        union_stops = np.ravel(np.array(np.where(ss_cumsum == 0)))
+        if union_starts.size != union_stops.size:
+            raise ValueError(
+                "Mismatched number of union starts and stops. "
+                + "This indicates an error in the interval lists, "
+                + "such as an end time before a start time. "
+                + "Please check the input interval lists for validity."
+            )
         union = [
             [combined_intervals[start], combined_intervals[stop]]
             for start, stop in zip(union_starts, union_stops)

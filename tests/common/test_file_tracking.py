@@ -6,10 +6,16 @@ Tests custom analysis table support for file tracking, including:
 3. get_tbl() - Finding downstream tables with file references
 4. show_downstream() - Showing affected downstream tables
 5. Integration with AnalysisNwbfile.check_all_files()
+6. _check_path() - Thread-safe existence and checksum check
+7. _batch_resolve_paths() - Batch path/hash resolution from external table
+8. _get_recompute_deleted() - Fetching recompute-deleted file names
+9. resolve_table_refs() - Populating the table field post-insertion
+10. check_files() - limit, deleted_files, and checksum detection
 """
 
+import uuid
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import datajoint as dj
 import pytest
@@ -44,6 +50,7 @@ def analysis_file_issues(file_tracking_module, teardown):
 @pytest.fixture(scope="module")
 def custom_analysis_with_files(custom_config, dj_conn, common_nwbfile):
     """Create custom analysis table with test files."""
+    from spyglass.common import Nwbfile  # noqa: F401
     from spyglass.utils.dj_mixin import SpyglassAnalysis
 
     prefix = custom_config
@@ -72,11 +79,17 @@ def test_analysis_file(mini_copy_name, custom_analysis_with_files, teardown):
     """Create a test analysis file."""
     analysis_tbl, _ = custom_analysis_with_files
     analysis_file_name = analysis_tbl.create(mini_copy_name)
+    # create() only writes to disk; add() registers it in the main table so
+    # check_files() can find it via fetch("analysis_file_name").
+    analysis_tbl.add(mini_copy_name, analysis_file_name)
 
     yield analysis_file_name, analysis_tbl
 
     # Cleanup
     if teardown:
+        (
+            analysis_tbl & {"analysis_file_name": analysis_file_name}
+        ).delete_quick()
         file_path = analysis_tbl.get_abs_path(analysis_file_name)
         if Path(file_path).exists():
             Path(file_path).unlink()
@@ -113,8 +126,8 @@ def test_check1_file_existing(
         "full_table_name": analysis_tbl.full_table_name,
         "analysis_file_name": analysis_file_name,
     }
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Check the file - should not find issues
     issue_found = analysis_file_issues.check1_file(
@@ -133,14 +146,17 @@ def test_check_files_with_valid_file(
     analysis_file_name, analysis_tbl = test_analysis_file
 
     # Clear previous entries for this table
-    if teardown:
-        (
-            analysis_file_issues
-            & {"full_table_name": analysis_tbl.full_table_name}
-        ).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (
+        analysis_file_issues & {"full_table_name": analysis_tbl.full_table_name}
+    ).delete_quick()
 
-    # Run check_files - should find no issues with valid file
-    issue_count = analysis_file_issues.check_files(analysis_tbl)
+    # Run check_files - should find no issues with the specific valid file.
+    # Restrict to this file only: the table is shared across test modules, so
+    # checking all entries would include files from other tests that may be
+    # missing (e.g. after --no-teardown reruns).
+    restricted_tbl = analysis_tbl & {"analysis_file_name": analysis_file_name}
+    issue_count = analysis_file_issues.check_files(restricted_tbl)
 
     # Valid files should return 0 issues
     assert issue_count == 0
@@ -152,15 +168,14 @@ def test_get_tbl_method_exists(analysis_file_issues):
     assert callable(analysis_file_issues.get_tbl)
 
 
-def test_show_downstream_no_issues(analysis_file_issues, caplog):
+def test_show_downstream_no_issues(analysis_file_issues):
     """Test show_downstream() with no issues."""
     # Call with restriction that matches nothing
     result = analysis_file_issues.show_downstream(
         restriction={"analysis_file_name": "definitely_nonexistent_file.nwb"}
     )
 
-    assert "No issues found" in caplog.text
-    assert not result  # Should return empty list
+    assert isinstance(result, list) and not result, "Should be an empty list"
 
 
 def test_integration_check_all_files_method_exists(common_nwbfile):
@@ -205,9 +220,8 @@ def test_check1_file_missing_from_disk(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     try:
         # Check the file - should detect it's missing
@@ -244,9 +258,8 @@ def test_check1_file_filenotfound_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Mock get_abs_path to raise FileNotFoundError
     error_msg = "File path could not be constructed"
@@ -283,9 +296,8 @@ def test_check1_file_checksum_error(
         "analysis_file_name": analysis_file_name,
     }
 
-    # Clear any previous entries for this file
-    if teardown:
-        (analysis_file_issues & key).delete_quick()
+    # Always clear before test to avoid stale entries from prior --no-teardown runs
+    (analysis_file_issues & key).delete_quick()
 
     # Mock get_abs_path to raise DataJointError (simulating checksum mismatch)
     error_msg = "Checksum mismatch for file"
@@ -318,5 +330,283 @@ def test_check1_file_checksum_error(
     assert issue_entry["table"] == "dummy_child_table"
 
     # Cleanup
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+
+# ======================= _check_path (unit tests, no DB) ==========================
+
+
+def test_check_path_deleted_file(file_tracking_module):
+    """_check_path returns None for files in the deleted_files set."""
+    result = file_tracking_module._check_path(
+        fname="/irrelevant/path.nwb",
+        analysis_file_name="path.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files={"path.nwb"},
+        hash_map={},
+    )
+    assert result is None
+
+
+def test_check_path_missing_file(file_tracking_module, tmp_path):
+    """_check_path returns a not-on-disk issue dict when file is absent."""
+    missing = str(tmp_path / "missing.nwb")
+    result = file_tracking_module._check_path(
+        fname=missing,
+        analysis_file_name="missing.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files=set(),
+        hash_map={},
+    )
+    assert result is not None
+    assert result["on_disk"] is False
+    assert result["can_read"] is False
+    assert "path not found" in result["issue"]
+
+
+def test_check_path_existing_no_hash(file_tracking_module, tmp_path):
+    """_check_path returns None when file exists and no hash is stored."""
+    f = tmp_path / "file.nwb"
+    f.write_bytes(b"content")
+    result = file_tracking_module._check_path(
+        fname=str(f),
+        analysis_file_name="file.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files=set(),
+        hash_map={},
+    )
+    assert result is None
+
+
+def test_check_path_checksum_match(file_tracking_module, tmp_path):
+    """_check_path returns None when file exists and hash matches stored value."""
+    from datajoint.hash import uuid_from_file
+
+    f = tmp_path / "file.nwb"
+    f.write_bytes(b"content")
+    result = file_tracking_module._check_path(
+        fname=str(f),
+        analysis_file_name="file.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files=set(),
+        hash_map={"file.nwb": uuid_from_file(str(f))},
+    )
+    assert result is None
+
+
+def test_check_path_checksum_mismatch(file_tracking_module, tmp_path):
+    """_check_path returns a checksum issue dict when stored hash doesn't match."""
+    f = tmp_path / "file.nwb"
+    f.write_bytes(b"content")
+    result = file_tracking_module._check_path(
+        fname=str(f),
+        analysis_file_name="file.nwb",
+        full_table_name="`test`.`table`",
+        deleted_files=set(),
+        hash_map={"file.nwb": uuid.uuid4()},  # wrong hash
+    )
+    assert result is not None
+    assert result["on_disk"] is True
+    assert result["can_read"] is False
+    assert "checksum mismatch" in result["issue"]
+
+
+# ======================= _batch_resolve_paths (unit tests) ==========================
+
+
+def test_batch_resolve_paths_registered(file_tracking_module, tmp_path):
+    """_batch_resolve_paths resolves paths from the external table."""
+    mock_tbl = MagicMock()
+    mock_tbl._analysis_dir = str(tmp_path)
+    mock_tbl._get_analysis_file_paths.return_value = [
+        "session_abc/session_abc_123.nwb"
+    ]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = [
+        {"filepath": "session_abc/session_abc_123.nwb", "contents_hash": None}
+    ]
+    path_map, hash_map = file_tracking_module._batch_resolve_paths(
+        mock_tbl, ["session_abc_123.nwb"]
+    )
+    assert path_map["session_abc_123.nwb"] == str(
+        tmp_path / "session_abc" / "session_abc_123.nwb"
+    )
+    assert "session_abc_123.nwb" not in hash_map  # NULL hash excluded
+
+
+def test_batch_resolve_paths_unregistered_fallback(
+    file_tracking_module, tmp_path
+):
+    """_batch_resolve_paths generates a subdirectory path for unregistered files."""
+    mock_tbl = MagicMock()
+    mock_tbl._analysis_dir = str(tmp_path)
+    fname = "session_abc_123.nwb"
+    mock_tbl._get_analysis_file_paths.return_value = [f"session_abc/{fname}"]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = []
+
+    path_map, _ = file_tracking_module._batch_resolve_paths(mock_tbl, [fname])
+    expected_subdir = fname[: fname.rfind("_")]
+    assert path_map[fname] == str(tmp_path / expected_subdir / fname)
+
+
+def test_batch_resolve_paths_hash_map(file_tracking_module, tmp_path):
+    """_batch_resolve_paths populates hash_map for non-NULL contents_hash."""
+    stored = uuid.uuid4()
+    mock_tbl = MagicMock()
+    mock_tbl._analysis_dir = str(tmp_path)
+    mock_tbl._get_analysis_file_paths.return_value = [
+        "session_abc/session_abc_123.nwb"
+    ]
+    mock_tbl._ext_tbl.__and__.return_value.fetch.return_value = [
+        {"filepath": "session_abc/session_abc_123.nwb", "contents_hash": stored}
+    ]
+    _, hash_map = file_tracking_module._batch_resolve_paths(
+        mock_tbl, ["session_abc_123.nwb"]
+    )
+    assert hash_map["session_abc_123.nwb"] == stored
+
+
+# ======================= _get_recompute_deleted ==========================
+
+
+def test_get_recompute_deleted_returns_set(file_tracking_module):
+    """_get_recompute_deleted always returns a set, even on import failure."""
+    with patch.dict(
+        "sys.modules", {"spyglass.spikesorting.v1.recompute": None}
+    ):
+        result = file_tracking_module._get_recompute_deleted()
+    assert isinstance(result, set)
+
+
+# ======================= resolve_table_refs ==========================
+
+
+def test_resolve_table_refs_no_null_entries(analysis_file_issues):
+    """resolve_table_refs returns 0 when no entries have NULL table field."""
+    result = analysis_file_issues.resolve_table_refs(
+        {"analysis_file_name": "definitely_nonexistent_file.nwb"}
+    )
+    assert result == 0
+
+
+def test_resolve_table_refs_populates_table(
+    analysis_file_issues, test_analysis_file, teardown
+):
+    """resolve_table_refs populates the table field for matching children."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+    (analysis_file_issues & key).delete_quick()
+
+    # Insert an issue with table=NULL
+    analysis_file_issues.insert1(
+        dict(key, on_disk=False, can_read=False, issue="test for resolve")
+    )
+    assert (analysis_file_issues & key).fetch1("table") is None
+
+    # Mock AnalysisRegistry and children so the child "matches" the file
+    mock_child = MagicMock()
+    mock_child.full_table_name = "`test`.`child_table`"
+    # Configure the MagicMock's __and__ operator so (child & file_keys).fetch(...)
+    # returns the analysis_file_name as expected by resolve_table_refs().
+    mock_child.__and__.return_value.fetch.return_value = [analysis_file_name]
+
+    with patch(
+        "spyglass.common.common_file_tracking.AnalysisRegistry"
+    ) as mock_registry:
+        mock_registry.return_value.get_class.return_value = MagicMock(
+            return_value=MagicMock(
+                children=MagicMock(return_value=[mock_child])
+            )
+        )
+        updated = analysis_file_issues.resolve_table_refs(key)
+
+    assert updated == 1
+    assert (analysis_file_issues & key).fetch1(
+        "table"
+    ) == "`test`.`child_table`"
+
+    if teardown:
+        (analysis_file_issues & key).delete_quick()
+
+
+# ======================= check_files new behaviors ==========================
+
+
+def test_check_files_limit(analysis_file_issues, test_analysis_file):
+    """check_files(limit=0) checks no files and returns 0."""
+    _, analysis_tbl = test_analysis_file
+    restricted = analysis_tbl & {"analysis_file_name": "nonexistent_file.nwb"}
+    result = analysis_file_issues.check_files(restricted, limit=0)
+    assert result == 0
+
+
+def test_check_files_skips_deleted_files(
+    analysis_file_issues, test_analysis_file, tmp_path, teardown
+):
+    """check_files skips files present in deleted_files set."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+    (analysis_file_issues & key).delete_quick()
+
+    # Move file away so it would normally be flagged as missing
+    file_path = Path(analysis_tbl.get_abs_path(analysis_file_name))
+    temp_path = file_path.with_suffix(".nwb.tmp")
+    file_path.rename(temp_path)
+
+    try:
+        restricted = analysis_tbl & {"analysis_file_name": analysis_file_name}
+        count = analysis_file_issues.check_files(
+            restricted,
+            deleted_files={
+                analysis_file_name
+            },  # tell check_files it was deleted
+        )
+        assert count == 0
+        assert len(analysis_file_issues & key) == 0
+    finally:
+        temp_path.rename(file_path)
+
+
+def test_check_files_checksum_mismatch(
+    analysis_file_issues, test_analysis_file, teardown
+):
+    """check_files records a checksum issue when the stored hash doesn't match."""
+    analysis_file_name, analysis_tbl = test_analysis_file
+
+    key = {
+        "full_table_name": analysis_tbl.full_table_name,
+        "analysis_file_name": analysis_file_name,
+    }
+    (analysis_file_issues & key).delete_quick()
+
+    wrong_hash = uuid.uuid4()
+    restricted = analysis_tbl & {"analysis_file_name": analysis_file_name}
+
+    abs_path = analysis_tbl.get_abs_path(analysis_file_name)
+    with patch.object(
+        type(analysis_file_issues),
+        "_batch_resolve_paths",
+        new=staticmethod(
+            lambda *a: (
+                {analysis_file_name: abs_path},
+                {analysis_file_name: wrong_hash},
+            )
+        ),
+    ):
+        count = analysis_file_issues.check_files(restricted)
+
+    assert count == 1
+    entry = (analysis_file_issues & key).fetch1()
+    assert entry["on_disk"] is True or entry["on_disk"] == 1
+    assert "checksum mismatch" in entry["issue"]
+
     if teardown:
         (analysis_file_issues & key).delete_quick()

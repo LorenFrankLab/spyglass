@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import datajoint as dj
 import pytest
 
 # Add scripts to path
@@ -1120,6 +1121,7 @@ class TestInvalidCLIArguments:
                 str(tmp_path),
             ],
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             text=True,
             env={**os.environ, "HOME": str(tmp_path)},
         )
@@ -1238,6 +1240,7 @@ class TestConfigOnlyErrorScenarios:
                 str(tmp_path),
             ],
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             text=True,
             env={**os.environ, "HOME": str(tmp_path)},
             timeout=5,  # Should fail quickly, not hang
@@ -2046,8 +2049,11 @@ class TestConfigCompatibility:
     can consume without missing required keys.
     """
 
-    def test_installer_has_all_settings_keys(self, tmp_path):
+    def test_installer_has_all_settings_keys(self, dj_config, tmp_path):
         """Installer config contains all keys expected by settings.py."""
+
+        dj.config.load(dj_config)  # Database connection before import
+
         from spyglass.settings import SpyglassConfig
 
         base_dir = tmp_path / "spyglass_data"
@@ -2122,9 +2128,8 @@ class TestConfigCompatibility:
         }
 
         # Get settings.py config structure
-        sg_config = SpyglassConfig()
+        sg_config = SpyglassConfig(base_dir=str(base_dir))
         settings_config = sg_config._generate_dj_config(
-            base_dir=str(base_dir),
             database_user="testuser",
             database_password="testpass",
             database_host="localhost",

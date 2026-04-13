@@ -42,6 +42,11 @@ RecordingRecompute().alter()
 from spyglass.lfp.analysis.v1 import LFPBandV1
 
 LFPBandV1().fix_1481()
+
+# Increase DLCProject.config_path length
+from spyglass.position.v1.position_dlc_project import DLCProject
+
+DLCProject().alter()
 ```
 
 ### Breaking Changes
@@ -105,7 +110,8 @@ for label, interval_data in results.groupby("interval_labels"):
     automated environment setup #1414
 - Set default codecov threshold for test fail, disable patch check #1370, #1372
 - Simplify PR template #1370
-- Allow email send on space check success, clean up maintenance logging #1381
+- Allow email send on space check success, clean up maintenance logging #1381,
+    #1544
 - Update pynwb pin to >=2.5.0 for `TimeSeries.get_timestamps` #1385
 - Sort `UserEnvironment` dict objects by key for consistency #1380
 - Fix typo in VideoFile.make #1427
@@ -113,6 +119,8 @@ for label, interval_data in results.groupby("interval_labels"):
     from NWB #1433
 - Split `SpyglassMixin` into task-specific mixins #1435 #1451
 - Auto-load within-Spyglass tables for graph operations #1368
+- Add explicit `kachery-cloud` dependency #1430
+- Default to globally saved config #1430
 - Allow rechecking of recomputes #1380, #1413
 - Add `SpyglassIngestion` class to centralize functionality #1377, #1423, #1465,
     #1484, #1489, #1507
@@ -134,12 +142,22 @@ for label, interval_data in results.groupby("interval_labels"):
 - Pin datajoint version < 2.0 #1516
 - Log expected recompute failures #1470
 - Track file created/deletion status of recomputes #1470
+- Upgrade to pynwb>=3.1 #1506
+- Remove imports of ndx extensions in main package to prevent errors in nwb io
+    #1506
+- Add `analysis_table` property to mixin for custom pipelines #1525
+- Quiet pytest output for expected warnings in test runs #1534
+- Fix update bug in `_resolve_external_tables` #1536
+- Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1567
+- Parallelize `AnalysisFileIssues` checks #1557
 
 ### Pipelines
 
 - Behavior
 
     - Add methods for calling moseq visualization functions #1374
+    - Ensure latent moseq dimension is compatible with dataset #1511
 
 - Common
 
@@ -162,6 +180,13 @@ for label, interval_data in results.groupby("interval_labels"):
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
     - Allow ingestion of nwb files without behavior module #1441
+    - Warn when ingesting ImageSeries without TaskEpoch #1461
+    - Support ingestion of multi-epoch video files #1548
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+        available #1546
+    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
+        available #1546
+    - Fix bug from overlapping intervals in interval union #1520
 
 - Decoding
 
@@ -175,10 +200,13 @@ for label, interval_data in results.groupby("interval_labels"):
         with an `interval_labels` coordinate to track interval membership. This
         eliminates NaN padding and reduces memory usage. See migration guide
         above.
+    - Fix fetching position df in
+        SortedSpikesDecodingV1.get_ahead_behind_distance() #1540
 
 - LFP
 
     - `LFPBandV1`: fix bug that inserted LFP times instead of LFP band times #1482
+    - Update artifact detection algorithms to return times #1553
 
 - Position
 
@@ -186,11 +214,21 @@ for label, interval_data in results.groupby("interval_labels"):
     - DLC parameter handling improvements and default value corrections #1379
     - Fix ingestion nwb files with position objects but no spatial series #1405
     - Ignore `percent_frames` when using `limit` in `DLCPosVideo` #1418
+    - Increase `DLCProject.config_path` length #1534
 
 - Spikesorting
 
     - Implement short-transaction `SpikeSortingRecording.make` for v0 #1338
     - Fix `FigURLCuration.make`. Postpone fetch of unhashable items #1505
+    - Improve get_recording efficiency #1522
+    - Raise error if `FigURLCurationSelection` finds no curation label #1531
+    - Allow `CurationV1` to save without any spikes #1533
+    - Trigger recompute in `CurationV1.get_recording` when necessary #1561
+    - Drop spike sample indices that exceed the recording length in
+        `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
+        SpikeInterface `ValueError` caused by floating-point round-trip
+        in the seconds-to-samples conversion #1564
+
 
 ## [0.5.5] (Aug 6, 2025)
 
@@ -213,6 +251,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove outdated code comments #1304
 - Add code coverage badge, and increase position coverage #1305, #1315
 - Force `TableChain` to follow shortest path #1356
+- Avoid database connections in import of `spyglass.settings` #1563
 
 ### Documentation
 

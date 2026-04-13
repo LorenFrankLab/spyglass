@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: Python 3 (ipykernel)
 #     language: python
@@ -52,12 +52,6 @@
 import os
 import datajoint as dj
 import matplotlib.pyplot as plt
-
-# change to the upper level folder to detect dj_local_conf.json
-if os.path.basename(os.getcwd()) == "notebooks":
-    os.chdir("..")
-dj.config.load("dj_local_conf.json")  # load config for database connection info
-
 import spyglass.common as sgc
 import spyglass.position as sgp
 
@@ -222,7 +216,7 @@ sgp.v1.TrodesPosV1.populate(trodes_key)
 sgp.v1.TrodesPosV1 & trodes_key
 
 # When we populatethe `TrodesPosV1` table, we automatically create an entry in the `PositionOutput` merge table.
-# Since this table supports position information from multiple methods, it's best practive to access data through here.
+# Since this table supports position information from multiple methods, it's best practice to access data through here.
 #
 # We can view the entry in this table:
 

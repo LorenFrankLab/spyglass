@@ -14,7 +14,7 @@ import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
 
-from spyglass.common.common_interval import IntervalList
+from spyglass.common.common_interval import IntervalLike, IntervalList
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.settings import temp_dir
 from spyglass.spikesorting.v1.recording import (  # noqa: F401
@@ -25,6 +25,59 @@ from spyglass.spikesorting.v1.recording import (  # noqa: F401
 from spyglass.utils import SpyglassMixin, logger
 
 schema = dj.schema("spikesorting_v1_sorting")
+
+
+def spike_times_to_valid_samples(
+    recording_times: np.ndarray,
+    spike_times: np.ndarray,
+    n_samples: int,
+    unit_id,
+) -> np.ndarray:
+    """Convert spike times (seconds) to sample indices within recording bounds.
+
+    Spike times are persisted in absolute seconds in NWB. On readback,
+    floating-point rounding in the seconds-to-samples round-trip can cause
+    ``np.searchsorted`` to return an index equal to ``n_samples`` (one past
+    the last valid sample) for spikes at or near the end of the recording.
+    SpikeInterface rejects such a sorting with ``ValueError: "The sorting
+    object has spikes exceeding the recording duration"``. This helper drops
+    those out-of-bounds indices and emits a warning identifying the affected
+    unit and the count removed.
+
+    ``np.searchsorted`` is called with the default ``side='left'``: a spike
+    that exactly equals ``recording_times[-1]`` maps to index ``n_samples - 1``
+    (valid). Switching to ``side='right'`` would map the same spike to
+    ``n_samples`` and reintroduce the bug.
+
+    Parameters
+    ----------
+    recording_times : np.ndarray, shape (n_samples,)
+        Recording timestamps in seconds, monotonically increasing.
+    spike_times : np.ndarray, shape (n_spikes,)
+        Spike times for a single unit in seconds.
+    n_samples : int
+        Total number of samples in the recording.
+    unit_id : int or str
+        Identifier of the unit, used only in the warning message.
+
+    Returns
+    -------
+    spike_samples : np.ndarray, shape (n_valid_spikes,)
+        Sample indices in ``[0, n_samples)`` corresponding to ``spike_times``,
+        with any out-of-bounds indices removed. ``n_valid_spikes <= n_spikes``.
+    """
+    spike_samples = np.searchsorted(recording_times, spike_times)
+    excess_mask = spike_samples >= n_samples
+    n_excess = int(excess_mask.sum())
+    if n_excess > 0:
+        logger.warning(
+            f"Unit {unit_id} has {n_excess} spike(s) exceeding the "
+            "recording duration. Removing excess spikes. This may be "
+            "caused by floating-point rounding during the seconds-to-"
+            "samples conversion."
+        )
+        spike_samples = spike_samples[~excess_mask]
+    return spike_samples
 
 
 @schema
@@ -187,14 +240,13 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
     time_of_sort: int               # in Unix time, to the nearest second
     """
 
-    _use_transaction, _allow_insert = False, True
     _parallel_make = True  # True if n_workers > 1
 
-    def make(self, key: dict):
+    def make_fetch(self, key: dict) -> list:
         """Runs spike sorting on the data and parameters specified by the
         SpikeSortingSelection table and inserts a new entry to SpikeSorting table.
         """
-        # FETCH (Spyglass logic - always tested):
+        # FETCH
         # - information about the recording
         # - artifact free intervals
         # - spike sorter and sorter params
@@ -202,25 +254,42 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         recording_key = (
             SpikeSortingRecording * SpikeSortingSelection & key
         ).fetch1()
+
+        nwb_file_name = recording_key["nwb_file_name"]
+
         artifact_removed_intervals = (
             IntervalList
             & {
-                "nwb_file_name": (SpikeSortingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-                "interval_list_name": (SpikeSortingSelection & key).fetch1(
-                    "interval_list_name"
-                ),
+                "nwb_file_name": nwb_file_name,
+                "interval_list_name": recording_key["interval_list_name"],
             }
         ).fetch1("valid_times")
+
         sorter, sorter_params = (
             SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
+
         recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
             recording_key["analysis_file_name"]
         )
 
-        # External dependency - MOCKABLE in tests
+        return [
+            nwb_file_name,
+            artifact_removed_intervals,
+            sorter,
+            sorter_params,
+            recording_analysis_nwb_file_abs_path,
+        ]
+
+    def make_compute(
+        self,
+        key: dict,
+        nwb_file_name: str,
+        artifact_removed_intervals: IntervalLike,
+        sorter: str,
+        sorter_params: dict,
+        recording_analysis_nwb_file_abs_path: str,
+    ):
         sorting, timestamps = self._run_spike_sorter(
             recording_analysis_nwb_file_abs_path=recording_analysis_nwb_file_abs_path,
             artifact_removed_intervals=artifact_removed_intervals,
@@ -228,25 +297,34 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             sorter_params=sorter_params,
         )
 
-        # External I/O - MOCKABLE in tests
-        key["time_of_sort"] = int(time.time())
-        key["analysis_file_name"], key["object_id"] = (
-            self._save_sorting_results(
-                sorting=sorting,
-                timestamps=timestamps,
-                artifact_removed_intervals=artifact_removed_intervals,
-                nwb_file_name=(SpikeSortingSelection & key).fetch1(
-                    "nwb_file_name"
-                ),
-            )
+        time_of_sort = int(time.time())
+        analysis_file_name, object_id = self._save_sorting_results(
+            sorting=sorting,
+            timestamps=timestamps,
+            artifact_removed_intervals=artifact_removed_intervals,
+            nwb_file_name=nwb_file_name,
         )
 
-        # Database operations (Spyglass logic - always tested)
-        AnalysisNwbfile().add(
-            (SpikeSortingSelection & key).fetch1("nwb_file_name"),
-            key["analysis_file_name"],
+        return [nwb_file_name, time_of_sort, analysis_file_name, object_id]
+
+    def make_insert(
+        self,
+        key: dict,
+        nwb_file_name: str,
+        time_of_sort: int,
+        analysis_file_name: str,
+        object_id: str,
+    ):
+        AnalysisNwbfile().add(nwb_file_name, analysis_file_name)
+        self.insert1(
+            dict(
+                key,
+                time_of_sort=time_of_sort,
+                analysis_file_name=analysis_file_name,
+                object_id=object_id,
+            ),
+            skip_duplicates=True,
         )
-        self.insert1(key, skip_duplicates=True)
 
     def _run_spike_sorter(
         self,
@@ -455,17 +533,18 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
-        units_dict_list = [
-            {
-                unit_id: np.searchsorted(recording.get_times(), spike_times)
-                for unit_id, spike_times in zip(
-                    units.index, units["spike_times"]
-                )
-            }
-        ]
+
+        recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
+        units_dict = {
+            unit_id: spike_times_to_valid_samples(
+                recording_times, spike_times, n_samples, unit_id
+            )
+            for unit_id, spike_times in zip(units.index, units["spike_times"])
+        }
 
         sorting = si.NumpySorting.from_unit_dict(
-            units_dict_list, sampling_frequency=sampling_frequency
+            [units_dict], sampling_frequency=sampling_frequency
         )
 
         return sorting

@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.17.0
+#       jupytext_version: 1.17.2
 #   kernelspec:
 #     display_name: spy
 #     language: python
@@ -46,6 +46,26 @@
 #
 # Skip this for now, but refer back if you hit issues.
 #
+# ### Connection
+#
+# Prompted for your username when you thought you saved your config? Find your settings with:
+# ```python
+# print(dj.config) # Usually ./dj_local_conf.json or ~/.datajoint_config.json
+# ```
+#
+# If you have successfully connected to the database before but your config appears empty,
+# You may not have saved it in a globally-accessible location. To fix, return to the
+# functioning notebook and run:
+# ```python
+# dj.config.save_global()
+# ```
+#
+# Alternatively, to manually connect without a config run:
+# ```python
+# dj.conn(user="youruser", password="yourpass", host="yourhost")
+# ```
+#
+# If you think you may be having connection issues, try the above or contact admin to reset your password.
 #
 # ### Integrity
 #

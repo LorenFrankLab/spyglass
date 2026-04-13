@@ -1,5 +1,5 @@
 import pytest
-from ndx_optogenetics import OptogeneticVirusInjection
+from ndx_ophys_devices import ViralVectorInjection
 
 
 @pytest.mark.slow
@@ -20,8 +20,8 @@ def test_virus_injection(
     ), "Expected exactly one VirusInjection for the test file."
     assert isinstance(
         (injection_query).fetch_nwb()[0]["injection"],
-        OptogeneticVirusInjection,
-    ), "VirusInjection did not fetch OptogeneticVirusInjection object as expected."
+        ViralVectorInjection,
+    ), "VirusInjection did not fetch ViralVectorInjection object as expected."
     assert (common.Virus & (injection_query).proj("virus_name")).fetch1(
         "construct_name"
     ) == virus_dict[
@@ -48,7 +48,7 @@ def test_optical_fiber(
     assert (common.OpticalFiberDevice() & implant_query).fetch1(
         "model"
     ) == fiber_model_dict[
-        "fiber_model"
+        "model_number"
     ], "OpticalFiberDevice did not fetch the expected fiber model."
 
 

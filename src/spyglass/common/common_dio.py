@@ -104,7 +104,7 @@ class DIOEvents(SpyglassIngestion, dj.Imported):
         from spyglass.common.common_usage import ActivityLog
 
         ActivityLog().deprecate_log(
-            self, "DIOEvents.make", alt="insert_from_nwbfile"
+            name="DIOEvents.make", alt="insert_from_nwbfile"
         )
 
         # Call the new SpyglassIngestion method

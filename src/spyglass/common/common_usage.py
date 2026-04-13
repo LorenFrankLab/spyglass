@@ -141,7 +141,7 @@ class ExportSelection(SpyglassMixin, dj.Manual):
         if query := (Export & export_key):
             safemode = False if test_mode else None  # No prompt in tests
             query.super_delete(warn=False, safemode=safemode)
-        logger.info(f"{status} {export_key}")
+        self._info_msg(f"{status} {export_key}")
         return export_id
 
     def start_export(self, paper_id, analysis_id) -> None:
@@ -567,7 +567,11 @@ class Export(SpyglassMixin, dj.Computed):
 
         unlinked_files = set()
         if self._n_file_link_processes == 1:
-            for file in tqdm(file_paths, desc="Checking linked nwb files"):
+            for file in tqdm(
+                file_paths,
+                desc="Checking linked nwb files",
+                disable=test_mode,
+            ):
                 unlinked_files.update(get_unlinked_files(file))
         else:
             with Pool(processes=self._n_file_link_processes) as pool:
@@ -669,3 +673,35 @@ def get_unlinked_files(file_path):
         + f" and including {links} instead"
     )
     return set(links)
+
+
+error_schema = dj.schema("common_export_error_log")
+
+
+@error_schema
+class ExportErrorLog(dj.Manual):
+    definition = """
+    file: varchar(255)  # file being processed
+    source: varchar(255)  # source of the error (e.g., table name or function)
+    ---
+    """
+
+    @staticmethod
+    def _logger_warning(key):
+        logger.warning(
+            f"Logging export error for file: {key.get('file', 'unknown')}"
+            + f" from source: {key.get('source', 'unknown')}"
+        )
+
+    def insert1(self, key, **kwargs):
+        """Insert a new entry into the ExportErrorLog table.
+
+        Parameters
+        ----------
+        key : dict
+            Dictionary containing the primary key fields for the table.
+        **kwargs : dict
+            Additional keyword arguments for non-primary key fields.
+        """
+        self._logger_warning(key)
+        super().insert1(key, **kwargs)

@@ -4,7 +4,7 @@ import os
 import os.path
 from itertools import groupby
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import pynwb
@@ -177,11 +177,12 @@ def get_config(nwb_file_path: str, calling_table: str = None) -> dict:
         obj_path.stem[:-1] + "_spyglass_config.yaml"
     )
     if not os.path.exists(config_path):
-        from spyglass.settings import base_dir  # noqa: F401
+        from spyglass.settings import base_dir, test_mode  # noqa: F401
 
         rel_path = obj_path.relative_to(base_dir)
         table = f"{calling_table}: " if calling_table else ""
-        logger.info(f"{table}No config found at {rel_path}")
+        if not test_mode:
+            logger.info(f"{table}No config found at {rel_path}")
         ret = dict()
         __configs[nwb_file_path] = ret  # cache to avoid repeated null lookups
         return ret
@@ -368,7 +369,7 @@ def estimate_sampling_rate(
 
 
 def get_valid_intervals(
-    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0
+    timestamps, sampling_rate, gap_proportion=2.5, min_valid_len=0, warn=True
 ):
     """Finds the set of all valid intervals in a list of timestamps.
 
@@ -388,6 +389,9 @@ def get_valid_intervals(
     min_valid_len : float, optional
         Length of smallest valid interval. Default to 0. If greater
         than interval duration, log warning and use half the total time.
+    warn : bool, optional
+        Whether to log a warning if the minimum valid interval length is greater
+        than the total time of the timestamps. Default, True.
 
     Returns
     -------
@@ -489,17 +493,45 @@ def get_electrode_indices(nwb_object, electrode_ids):
     ]
 
 
-def _get_epoch_groups(position: pynwb.behavior.Position):
+def _get_epoch_groups(position: pynwb.behavior.Position) -> dict:
+    """Group spatial series indices by their epoch start time.
+
+    Supports both NWB timing conventions: explicit timestamps and
+    starting_time + rate.
+
+    Parameters
+    ----------
+    position : pynwb.behavior.Position
+        Position interface containing one or more SpatialSeries.
+
+    Returns
+    -------
+    dict
+        Mapping from epoch start time (float, seconds) to a list of
+        spatial series indices sharing that start time.
+    """
     epoch_start_time = {}
     for pos_epoch, spatial_series in enumerate(
         position.spatial_series.values()
     ):
-        epoch_start_time[pos_epoch] = spatial_series.timestamps[0]
+        timestamps = spatial_series.timestamps
+        start = (
+            timestamps[0]
+            if timestamps is not None
+            else spatial_series.starting_time
+        )
+        if start is None:
+            raise ValueError(
+                f"SpatialSeries '{spatial_series.name}' has neither "
+                "timestamps nor starting_time; cannot determine epoch start."
+            )
+        epoch_start_time[pos_epoch] = start
 
     return {
-        i: [j[0] for j in j]
-        for i, j in groupby(
-            sorted(epoch_start_time.items(), key=lambda x: x[1]), lambda x: x[1]
+        start_time: [item[0] for item in group]
+        for start_time, group in groupby(
+            sorted(epoch_start_time.items(), key=lambda x: x[1]),
+            lambda x: x[1],
         )
     }
 
@@ -636,3 +668,30 @@ def change_group_permissions(
         os.system(f"chgrp -R {set_group_name} {target_content}")
         # Give read, write, execute permissions to group
         os.system(f"chmod -R g+rwx {target_content}")
+
+
+def is_nwb_obj_type(
+    nwb_object: pynwb.NWBContainer, target_type: Union[type, str]
+) -> bool:
+    """Check if an NWB object is of a specified type.
+
+    Note: This function will be moved to a method of the IngestionMixin class
+    pending completed migration of ingestion tables (see #1326)
+
+    Parameters
+    ----------
+    nwb_object : pynwb.NWBContainer
+        The NWB object to check.
+    target_type : type or str
+        The target type to check against. Can be a class type or a string
+        representing the class name.
+
+    Returns
+    -------
+    bool
+        True if the NWB object is of the target type, False otherwise.
+    """
+    if isinstance(target_type, type):
+        return isinstance(nwb_object, target_type)
+
+    return nwb_object.__class__.__name__ == target_type
