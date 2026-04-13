@@ -169,18 +169,13 @@ class CurationV1(SpyglassMixin, dj.Manual):
         key : dict
             primary key of CurationV1 table
         """
-
-        analysis_file_name = (
+        recording_id = (
             SpikeSortingRecording * SpikeSortingSelection & key
-        ).fetch1("analysis_file_name")
-        analysis_file_abs_path = AnalysisNwbfile.get_abs_path(
-            analysis_file_name
-        )
-        recording = se.read_nwb_recording(
-            analysis_file_abs_path, load_time_vector=True
+        ).fetch1("recording_id")
+        recording = SpikeSortingRecording.get_recording(
+            {"recording_id": recording_id}
         )
         recording.annotate(is_filtered=True)
-
         return recording
 
     @classmethod
