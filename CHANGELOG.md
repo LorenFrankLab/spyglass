@@ -151,6 +151,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
     `starting_time + rate` (no timestamps) #1567
 - Parallelize `AnalysisFileIssues` checks #1557
+- Tests update config sooner to avoid false-negative `test_mode` errors #15XX
 
 ### Pipelines
 
@@ -226,9 +227,8 @@ for label, interval_data in results.groupby("interval_labels"):
     - Trigger recompute in `CurationV1.get_recording` when necessary #1561
     - Drop spike sample indices that exceed the recording length in
         `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
-        SpikeInterface `ValueError` caused by floating-point round-trip
-        in the seconds-to-samples conversion #1564
-
+        SpikeInterface `ValueError` caused by floating-point round-trip in the
+        seconds-to-samples conversion #1564
 
 ## [0.5.5] (Aug 6, 2025)
 
