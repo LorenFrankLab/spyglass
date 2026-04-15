@@ -259,7 +259,9 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # --base-dir (e.g. --base-dir ./tests/_data/).
 
 --use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
-# when --base-dir is not supplied. Off by default.
+# when --base-dir is not supplied. Off by default. If the flag is
+# passed but SPYGLASS_BASE_DIR is unset, a warning is printed and the
+# default temp-dir fallback is used.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns

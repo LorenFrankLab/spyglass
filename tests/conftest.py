@@ -36,6 +36,7 @@ if _rw_filter not in _existing:
 
 # ---------------------------------------------------------------------------
 
+import json
 import sys
 import tempfile
 import warnings
@@ -203,7 +204,8 @@ _sklearn_parallel.warnings = _ModuleWarningsProxy(
 )
 
 # globals in pytest_configure:
-#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOAD, NO_DLC
+#     BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS,
+#     NO_DLC, TMP_BASE_DIR
 
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.simplefilter("ignore", category=ResourceWarning)
@@ -349,6 +351,28 @@ def pytest_addoption(parser):
     )
 
 
+def _derive_dir_env_vars():
+    """Return every `{PREFIX}_{KEY}_DIR` env var listed in directory_schema.json.
+
+    Kept in sync with ``SpyglassConfig.dir_to_var`` (settings.py) by reading the
+    same schema file. Used to scrub stale env vars before tests run, so a
+    shell-exported `DLC_VIDEO_DIR=/shared/prod/video` (or similar) cannot leak
+    into spyglass.settings after we override SPYGLASS_BASE_DIR.
+    """
+    schema_path = (
+        Path(__file__).resolve().parents[1]
+        / "src"
+        / "spyglass"
+        / "directory_schema.json"
+    )
+    schema = json.loads(schema_path.read_text())["directory_schema"]
+    return [
+        f"{prefix.upper()}_{key.upper()}_DIR"
+        for prefix, dirs in schema.items()
+        for key in dirs
+    ]
+
+
 def pytest_configure(config):
     global BASE_DIR, RAW_DIR, SERVER, TEARDOWN, VERBOSE, TEST_FILE, DOWNLOADS
     global NO_DLC, TMP_BASE_DIR
@@ -375,7 +399,13 @@ def pytest_configure(config):
     elif config.option.use_env_base_dir and env_base:
         _base_dir = env_base
     else:
-        if env_base:
+        if config.option.use_env_base_dir and not env_base:
+            print(
+                "[conftest] --use-env-base-dir was passed but "
+                "SPYGLASS_BASE_DIR is not set; falling back to a temp dir.",
+                file=sys.stderr,
+            )
+        elif env_base:
             print(
                 f"[conftest] Ignoring SPYGLASS_BASE_DIR={env_base!r}; pass "
                 "--use-env-base-dir to honor it, or --base-dir to set an "
@@ -393,23 +423,19 @@ def pytest_configure(config):
     BASE_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR = BASE_DIR / "raw"
 
-    # Scrub any derived SPYGLASS_* / DLC / MOSEQ dir overrides so downstream
-    # code (spyglass.settings) doesn't mix a safe BASE_DIR with stale
-    # subdirectory pointers from the user's shell.
-    for _stale in (
-        "SPYGLASS_RAW_DIR",
-        "SPYGLASS_ANALYSIS_DIR",
-        "SPYGLASS_RECORDING_DIR",
-        "SPYGLASS_SORTING_DIR",
-        "SPYGLASS_WAVEFORMS_DIR",
-        "SPYGLASS_TEMP_DIR",
-        "SPYGLASS_VIDEO_DIR",
+    # Scrub every SPYGLASS_* / DLC_* / MOSEQ_* / KACHERY_* env var that
+    # spyglass.settings reads, so a user's shell can't mix stale subdir
+    # pointers into the resolved BASE_DIR. The list is derived from
+    # directory_schema.json (canonical source) plus the extras that
+    # settings.py reads by name (DLC_BASE_DIR, DLC_PROJECT_PATH,
+    # MOSEQ_BASE_DIR, KACHERY_ZONE).
+    _scrub_vars = set(_derive_dir_env_vars()) | {
         "DLC_BASE_DIR",
         "DLC_PROJECT_PATH",
         "MOSEQ_BASE_DIR",
-        "KACHERY_CLOUD_DIR",
-        "KACHERY_TEMP_DIR",
-    ):
+        "KACHERY_ZONE",
+    }
+    for _stale in _scrub_vars:
         os.environ.pop(_stale, None)
 
     os.environ["SPYGLASS_BASE_DIR"] = str(BASE_DIR)
@@ -443,15 +469,25 @@ def pytest_unconfigure(config):
     close_nwb_files()
     if TEARDOWN:
         SERVER.stop()
-        analysis_dir = BASE_DIR / "analysis"
-        for file in analysis_dir.glob("*.nwb"):
-            file.unlink()
-        for subdir in ["export", "moseq", "recording", "spikesorting", "tmp"]:
-            shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
-        # If we allocated a temp base_dir for this session, remove it wholesale.
-        # Safe because BASE_DIR is under $TMPDIR and was created by this run.
-        if TMP_BASE_DIR is not None:
-            shutil_rmtree(TMP_BASE_DIR, ignore_errors=True)
+        if TMP_BASE_DIR is None:
+            # Selective cleanup only for user-supplied base_dirs; a temp dir
+            # gets removed wholesale below, making per-subdir rmtree redundant.
+            analysis_dir = BASE_DIR / "analysis"
+            for file in analysis_dir.glob("*.nwb"):
+                file.unlink()
+            for subdir in [
+                "export",
+                "moseq",
+                "recording",
+                "spikesorting",
+                "tmp",
+            ]:
+                shutil_rmtree(str(BASE_DIR / subdir), ignore_errors=True)
+
+    # Always remove a temp base_dir we allocated, even with --no-teardown.
+    # It's under $TMPDIR, was created by this run, and has no reuse value.
+    if TMP_BASE_DIR is not None:
+        shutil_rmtree(TMP_BASE_DIR, ignore_errors=True)
 
 
 # ---------------------------- FIXTURES, TEST ENV ----------------------------
