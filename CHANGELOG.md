@@ -159,6 +159,7 @@ for label, interval_data in results.groupby("interval_labels"):
 
     - Add methods for calling moseq visualization functions #1374
     - Ensure latent moseq dimension is compatible with dataset #1511
+    - Add option to normalize keypoint spacing by body length #1569
 
 - Common
 
