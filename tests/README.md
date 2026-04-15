@@ -249,8 +249,17 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 ### Data and Database Options
 
 ```bash
---base_dir PATH     # Where to store downloaded/created files
-# Default: ./tests/_data/
+--base-dir PATH     # Where to store downloaded/created files
+# Default: per-session temp directory (created by tempfile.mkdtemp).
+# SPYGLASS_BASE_DIR is IGNORED by default — pass --use-env-base-dir to
+# honor it. See issue #1573: a shell-exported SPYGLASS_BASE_DIR pointing
+# at shared/production storage would otherwise let destructive tests
+# (e.g. AnalysisNwbfile.cleanup) scan and delete real data.
+# Local developers who want reuse across runs should pass an explicit
+# --base-dir (e.g. --base-dir ./tests/_data/).
+
+--use-env-base-dir  # Opt back in to the SPYGLASS_BASE_DIR env var
+# when --base-dir is not supplied. Off by default.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
 # Useful for: inspecting database state, faster reruns
