@@ -9,10 +9,21 @@ from spyglass.utils import logger
 try:
     import keypoint_moseq as kpms
 except ImportError:
+    kpms = None
     logger.warning(
         "keypoint_moseq not found. This package is necessary to "
         + "populate the MoseqModel table"
     )
+
+
+def _require_keypoint_moseq():
+    if kpms is None:
+        raise ImportError(
+            "keypoint_moseq is required for MoSeq operations but is not "
+            "installed. Install the `keypoint_moseq` package to use "
+            "MoseqModel-related functionality."
+        )
+
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.position.position_merge import PositionOutput

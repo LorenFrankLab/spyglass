@@ -100,6 +100,17 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         query = self & key
         bodyparts = query.fetch1("bodyparts")
         datasets = {}
+        if normalize:
+            if (
+                anterior_bodyparts is None
+                or posterior_bodyparts is None
+                or len(anterior_bodyparts) == 0
+                or len(posterior_bodyparts) == 0
+            ):
+                raise ValueError(
+                    "anterior_bodyparts and posterior_bodyparts must be "
+                    + "provided as non-empty lists for normalization"
+                )
         for merge_key in (self.Pose & query).proj(merge_id="pose_merge_id"):
             video_name = Path(
                 (PositionOutput & merge_key).fetch_video_path()
@@ -110,13 +121,22 @@ class PoseGroup(SpyglassMixin, dj.Manual):
                     bodyparts_df.keys().get_level_values(0).unique().values
                 )
             bodyparts_df = bodyparts_df[bodyparts]
+            if normalize:
+                available_bodyparts = set(
+                    bodyparts_df.keys().get_level_values(0).unique().values
+                )
+                missing_bodyparts = sorted(
+                    set(anterior_bodyparts).union(
+                        posterior_bodyparts
+                    ).difference(available_bodyparts)
+                )
+                if missing_bodyparts:
+                    raise ValueError(
+                        "Requested normalization bodyparts are missing from "
+                        f"dataset '{video_name}': {missing_bodyparts}"
+                    )
             datasets[video_name] = bodyparts_df
         if normalize:
-            if anterior_bodyparts is None or posterior_bodyparts is None:
-                raise ValueError(
-                    "anterior_bodyparts and posterior_bodyparts must be "
-                    + "provided for normalization"
-                )
             datasets = normalize_pose_dataset(
                 datasets, anterior_bodyparts, posterior_bodyparts
             )
@@ -164,6 +184,8 @@ def _normalize_1_pose_dataset(
     posterior_bodyparts : List[str]
         list of posterior body parts to use for normalization
     """
+    dataset = dataset.copy()
+
     anterior_x = np.array(
         [dataset[bp, "x"].values for bp in anterior_bodyparts]
     ).mean(axis=0)
@@ -183,7 +205,12 @@ def _normalize_1_pose_dataset(
     length_t = np.sqrt(
         (anterior_x - posterior_x) ** 2 + (anterior_y - posterior_y) ** 2
     )
-    mean_length = length_t.mean()
+    mean_length = np.nanmean(length_t)
+    if not np.isfinite(mean_length) or mean_length <= 0:
+        raise ValueError(
+            "Cannot normalize pose dataset: mean anterior/posterior length "
+            "must be finite and greater than zero."
+        )
 
     for key in dataset.keys():
         if key[1] == "x":
