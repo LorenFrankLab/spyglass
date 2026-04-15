@@ -275,7 +275,10 @@ def pytest_addoption(parser):
     Parameters
     ----------
     --quiet-spy (bool):  Default False. Allow print statements from Spyglass.
-    --base-dir (str): Default './tests/test_data/'. Dir for local input file.
+    --base-dir (str): Default None. Dir for local input files. When unset,
+        a fresh per-session temp dir is used (see #1573).
+    --use-env-base-dir (bool): Default False. Honor SPYGLASS_BASE_DIR env
+        var when --base-dir is not supplied. Off by default for safety.
     --no-teardown (bool): Default False. Delete pipeline on close.
     --no-docker (bool): Default False. Run datajoint mysql server in Docker.
     --no-dlc (bool): Default False. Skip DLC tests. Also skip video downloads.
