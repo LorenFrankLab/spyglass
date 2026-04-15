@@ -193,7 +193,10 @@ pytest -m "not slow and not very_slow"
 **Preserve database between runs:**
 
 ```bash
-pytest --no-teardown  # Avoid container restart overhead
+# --no-teardown requires an explicit --base-dir, since the default
+# temp-dir base is created fresh each session — preserving the DB
+# without a stable filesystem leaves orphaned rows (#1573).
+pytest --no-teardown --base-dir ./tests/_data/
 ```
 
 **Run specific test files:**
@@ -264,7 +267,9 @@ All tests run with default parameters from `pyproject.toml`. To customize:
 # default temp-dir fallback is used.
 
 --no-teardown       # Preserve Docker database on exit (default: False)
-# Useful for: inspecting database state, faster reruns
+# Useful for: inspecting database state, faster reruns.
+# Must be combined with --base-dir (or --use-env-base-dir) so the
+# preserved DB points at a stable filesystem path.
 
 --no-docker         # Don't launch Docker, connect to existing container
 # Useful for: GitHub Actions, manual Docker management

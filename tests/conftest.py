@@ -399,6 +399,20 @@ def pytest_configure(config):
     elif config.option.use_env_base_dir and env_base:
         _base_dir = env_base
     else:
+        # --no-teardown is meaningless with the temp-dir default: a fresh
+        # mkdtemp() is allocated each session, so DB rows from a previous
+        # run would point at a temp path that no longer exists on the next
+        # run. Require an explicit --base-dir (or --use-env-base-dir with
+        # SPYGLASS_BASE_DIR set) for persistent-state workflows.
+        if not TEARDOWN:
+            raise pytest.UsageError(
+                "--no-teardown requires an explicit --base-dir (or "
+                "--use-env-base-dir with SPYGLASS_BASE_DIR set). The "
+                "default temp-dir base is created fresh each session, so "
+                "the preserved database would point at files that no "
+                "longer exist. Try: pytest --no-teardown --base-dir "
+                "./tests/_data/"
+            )
         if config.option.use_env_base_dir and not env_base:
             print(
                 "[conftest] --use-env-base-dir was passed but "
@@ -455,6 +469,19 @@ def pytest_configure(config):
     # the module-level `config` dict; if credentials arrive later the dict is
     # frozen with test_mode=False.
     dj.config.update(SERVER.credentials)
+
+    # Scrub dj.config custom dir overrides from any globally saved config
+    # (e.g. ~/.datajoint_config.json or dj_local_conf.json in cwd). Without
+    # this, SpyglassConfig.load_config reads dj_custom.dlc_dirs / moseq_dirs
+    # / kachery_dirs before any env var and would pull in production paths
+    # saved by the user — defeating the BASE_DIR override (#1573, review
+    # finding). Reset spyglass_dirs to our resolved BASE_DIR too, so the
+    # dj.config path (line 177 in settings.py) agrees with the env-var
+    # fallback (line 178).
+    dj_custom = dj.config.setdefault("custom", {})
+    for _k in ("dlc_dirs", "moseq_dirs", "kachery_dirs"):
+        dj_custom.pop(_k, None)
+    dj_custom["spyglass_dirs"] = {"base": str(BASE_DIR)}
 
     DOWNLOADS = DataDownloader(
         base_dir=BASE_DIR,
