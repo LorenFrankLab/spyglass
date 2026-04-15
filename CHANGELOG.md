@@ -153,6 +153,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix `_get_pos_dict` raising `TypeError` for `SpatialSeries` with
     `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
+- Tests update config sooner to avoid false-negative `test_mode` errors #1572
 
 ### Pipelines
 
