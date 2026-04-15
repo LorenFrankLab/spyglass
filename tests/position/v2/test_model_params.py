@@ -96,7 +96,7 @@ class TestModelParamsSLEAP:
             "skeleton_id": skeleton_key["skeleton_id"],
         }
 
-        with pytest.raises(ValueError, match="Missing required params"):
+        with pytest.raises(ValueError, match="missing required parameters"):
             ModelParams().insert1(params_key, accept_default=True)
 
     def test_sleap_param_aliases(self, pv2_train, skeleton):

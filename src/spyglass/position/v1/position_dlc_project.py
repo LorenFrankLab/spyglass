@@ -10,6 +10,7 @@ from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
 from spyglass.position.utils import sanitize_filename
+from spyglass.position.utils.dlc_io import parse_dlc_h5_output
 from spyglass.position.utils_dlc import test_mode_suppress
 from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
@@ -381,6 +382,47 @@ class DLCProject(SpyglassMixin, dj.Manual):
         return videos  # pragma: no cover
 
     @classmethod
+    def _patch_collected_data_paths(cls, vid_label_dir: Path, video_name: str):
+        """Fix video stem in CollectedData CSVs/h5s that reference a stale path.
+
+        When labeled-data annotation files are copied from a generic location
+        into a project-specific labeled-data directory, the internal MultiIndex
+        paths may reference a different video stem. DLC's create_training_dataset
+        will fail if the paths don't match the actual directory structure.
+
+        Rewrites the second level of the MultiIndex in-place in any
+        ``CollectedData_*.csv`` (and matching ``.h5``) found in *vid_label_dir*
+        when the stem does not match *video_name*.
+        """
+        for csv_path in vid_label_dir.glob("CollectedData_*.csv"):
+            try:
+                df = pd.read_csv(
+                    csv_path, header=[0, 1, 2], index_col=[0, 1, 2]
+                )
+            except Exception:
+                continue
+
+            stems = df.index.get_level_values(1).unique()
+            wrong = [s for s in stems if s != video_name]
+            if not wrong:
+                continue  # paths are already correct
+
+            logger.warning(
+                f"CollectedData path mismatch in {csv_path.name}: "
+                f"expected '{video_name}', found {wrong}. Patching."
+            )
+            new_index = pd.MultiIndex.from_tuples(
+                [(lvl0, video_name, lvl2) for lvl0, _, lvl2 in df.index],
+                names=df.index.names,
+            )
+            df.index = new_index
+            df.to_csv(csv_path)
+
+            h5_path = csv_path.with_suffix(".h5")
+            if h5_path.exists():
+                df.to_hdf(h5_path, key="df_with_missing")
+
+    @classmethod
     def add_training_files(cls, key, **kwargs):
         """Add training videos and labeled frames .h5
         and .csv to DLCProject.File"""
@@ -413,7 +455,9 @@ class DLCProject(SpyglassMixin, dj.Manual):
         for video in video_names:
             vid_path_obj = Path(video)
             video_name = vid_path_obj.stem
-            training_files.extend((label_dir / video_name).glob("*Collected*"))
+            vid_label_dir = label_dir / video_name
+            cls._patch_collected_data_paths(vid_label_dir, video_name)
+            training_files.extend(vid_label_dir.glob("*Collected*"))
             video_inserts.append(
                 {
                     **key,
@@ -453,8 +497,28 @@ class DLCProject(SpyglassMixin, dj.Manual):
         Must be run on local machine to access GUI,
         cannot be run through ssh tunnel
         """
-        config_path = (cls & key).fetch1("config_path")
         from deeplabcut import extract_frames
+        from deeplabcut.utils.auxiliaryfunctions import read_config
+
+        config_path = (cls & key).fetch1("config_path")
+
+        with test_mode_suppress():
+            cfg = read_config(config_path)
+
+        # Clear any previously extracted PNG files so DLC always picks fresh
+        # frames. Without this, DLC skips frames that already exist on disk,
+        # which breaks idempotent re-runs (e.g. tests with --no-teardown).
+        label_dir = Path(cfg["project_path"]) / "labeled-data"
+        for video in cfg.get("video_sets", {}):
+            vid_label_dir = label_dir / Path(video).stem
+            if vid_label_dir.exists():
+                for png in vid_label_dir.glob("*.png"):
+                    png.unlink()
+
+        # Default to uniform sampling so frame indices are predictable and
+        # avoid frame 0 (img000) or frame 1 (img001) which are reserved for
+        # base test data in labeled-data directories.
+        kwargs.setdefault("algo", "uniform")
 
         with test_mode_suppress():
             extract_frames(config_path, **kwargs)
@@ -525,7 +589,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
         )
         for video_file in videos:  # pragma: no cover
             h5_file = next((new_data_path / video_file).glob("*h5"))
-            dlc_df = pd.read_hdf(h5_file)
+            dlc_df = parse_dlc_h5_output(h5_file, return_metadata=False)
             dlc_df.columns = dlc_df.columns.set_levels([team_name], level=0)
             new_video_path = this_data_path / video_file
             new_video_path.mkdir(exist_ok=True)

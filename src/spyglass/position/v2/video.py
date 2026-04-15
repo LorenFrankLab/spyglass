@@ -1,11 +1,25 @@
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Union
+from typing import List, Optional, Union
 
 import datajoint as dj
 from datajoint.hash import key_hash
 
 from spyglass.common import Session, TaskEpoch, VideoFile
 from spyglass.utils import SpyglassMixin
+
+
+# Parameter dataclasses for methods with 5+ parameters
+@dataclass
+class VideoGroupParams:
+    """Parameter object for video group creation from directory."""
+
+    directory: Union[str, Path]
+    description: str
+    vid_group_id: Optional[str] = None
+    pattern: str = "*.mp4"
+    recursive: bool = False
+
 
 schema = dj.schema("cbroz_position_v2_video")
 
@@ -185,19 +199,43 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         return group_key
 
     @classmethod
-    def create_from_directory(
-        cls,
-        directory: Union[str, Path],
-        description: str,
-        vid_group_id: Union[str, None] = None,
-        pattern: str = "*.mp4",
-        recursive: bool = False,
-    ) -> dict:
+    def create_from_directory(cls, params: VideoGroupParams) -> dict:
         """Create a video group from all videos in a directory.
 
         Parameters
         ----------
-        directory : Union[str, Path]
+        params : VideoGroupParams
+            Consolidated parameters for video group creation
+
+        Returns
+        -------
+        dict
+            Dictionary with 'vid_group_id' key
+
+        Raises
+        ------
+        ValueError
+            If directory doesn't exist or no videos found
+
+        Examples
+        --------
+        >>> # Create group from directory with defaults
+        >>> group_key = VidFileGroup.create_from_directory(
+        ...     VideoGroupParams(
+        ...         directory="/path/to/videos",
+        ...         description="All training videos"
+        ...     )
+        ... )
+        >>>
+        >>> # Create with custom pattern and recursive search
+        >>> group_key = VidFileGroup.create_from_directory(
+        ...     VideoGroupParams(
+        ...         directory="/path/to/videos",
+        ...         description="AVI files recursively",
+        ...         pattern="*.avi",
+        ...         recursive=True
+        ...     )
+        ... )
             Directory containing video files
         description : str
             Description of the video group
@@ -238,7 +276,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         ...     recursive=True
         ... )
         """
-        directory = Path(directory)
+        directory = Path(params.directory)
         if not directory.exists():
             raise FileNotFoundError(f"Directory not found: {directory}")
 
@@ -246,26 +284,50 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             raise ValueError(f"Path is not a directory: {directory}")
 
         # Find video files
-        if recursive:
-            video_files = list(directory.rglob(pattern))
+        if params.recursive:
+            video_files = list(directory.rglob(params.pattern))
         else:
-            video_files = list(directory.glob(pattern))
+            video_files = list(directory.glob(params.pattern))
 
         if not video_files:
             raise ValueError(
-                f"No video files found matching pattern '{pattern}' "
+                f"No video files found matching pattern '{params.pattern}' "
                 f"in {directory}"
             )
 
         cls()._info_msg(
             f"Found {len(video_files)} video files in {directory} "
-            f"matching '{pattern}'"
+            f"matching '{params.pattern}'"
         )
 
         return cls.create_from_files(
             video_files=video_files,
-            description=description,
-            vid_group_id=vid_group_id,
+            description=params.description,
+            vid_group_id=params.vid_group_id,
+        )
+
+    @classmethod
+    def create_from_directory_legacy(
+        cls,
+        directory: Union[str, Path],
+        description: str,
+        vid_group_id: Union[str, None] = None,
+        pattern: str = "*.mp4",
+        recursive: bool = False,
+    ) -> dict:
+        """Legacy interface for create_from_directory (backward compatibility).
+
+        This method provides the original multi-parameter interface while
+        internally using the optimized VideoGroupParams approach.
+        """
+        return cls.create_from_directory(
+            VideoGroupParams(
+                directory=directory,
+                description=description,
+                vid_group_id=vid_group_id,
+                pattern=pattern,
+                recursive=recursive,
+            )
         )
 
     @classmethod

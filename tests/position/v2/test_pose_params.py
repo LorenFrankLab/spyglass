@@ -163,7 +163,9 @@ class TestPoseParamsValidation:
         """Test that invalid orient method raises error."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="Invalid orient method"):
+        with pytest.raises(
+            KeyError, match="Unknown orientation method.*invalid_method"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "invalid_method"},
@@ -182,7 +184,10 @@ class TestPoseParamsValidation:
         """Test two_pt requires bodypart1 and bodypart2."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="two_pt orientation requires"):
+        with pytest.raises(
+            ValueError,
+            match="orientation params missing required keys.*bodypart2",
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={
@@ -205,7 +210,9 @@ class TestPoseParamsValidation:
         """Test bisector requires led1, led2, led3."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="bisector orientation requires"):
+        with pytest.raises(
+            ValueError, match="orientation params missing required keys.*led3"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={
@@ -229,7 +236,7 @@ class TestPoseParamsValidation:
         """Test centroid requires method."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="must include 'method'"):
+        with pytest.raises(ValueError, match="Centroid params must specify"):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -245,7 +252,9 @@ class TestPoseParamsValidation:
         """Test centroid method validation."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="Invalid centroid method"):
+        with pytest.raises(
+            KeyError, match="Unknown centroid method.*5pt.*Available options"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -264,7 +273,9 @@ class TestPoseParamsValidation:
         """Test 2pt centroid requires max_LED_separation."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="requires max_LED_separation"):
+        with pytest.raises(
+            ValueError, match="2pt centroid requires exactly 2.*got 1"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -284,7 +295,9 @@ class TestPoseParamsValidation:
         """Test 4pt centroid requires specific point keys."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="4pt centroid requires points"):
+        with pytest.raises(
+            ValueError, match="4pt centroid requires exactly 4.*got 1"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -310,7 +323,8 @@ class TestPoseParamsValidation:
         from spyglass.position.v2.estim import PoseParams
 
         with pytest.raises(
-            ValueError, match="must include 'likelihood_thresh'"
+            ValueError,
+            match="Smoothing params must include 'likelihood_thresh'",
         ):
             PoseParams.insert_custom(
                 params_name="invalid",
@@ -330,7 +344,9 @@ class TestPoseParamsValidation:
         """Test interpolate=True requires interp_params."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="requires interp_params"):
+        with pytest.raises(
+            ValueError, match="interpolate=True requires 'interp_params'"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -350,7 +366,9 @@ class TestPoseParamsValidation:
         """Test smooth=True requires smoothing_params."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="requires smoothing_params"):
+        with pytest.raises(
+            ValueError, match="smooth=True requires 'smoothing_params' key"
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},
@@ -370,7 +388,10 @@ class TestPoseParamsValidation:
         """Test smoothing_params method validation."""
         from spyglass.position.v2.estim import PoseParams
 
-        with pytest.raises(ValueError, match="Invalid smoothing method"):
+        with pytest.raises(
+            KeyError,
+            match="Unknown smoothing method.*invalid_method.*Available options",
+        ):
             PoseParams.insert_custom(
                 params_name="invalid",
                 orient={"method": "none"},

@@ -8,9 +8,8 @@ import pytest
 class TestTwoPointOrientation:
     """Test two_pt_orientation function."""
 
-    def test_two_pt_orientation_basic(self):
+    def test_two_pt_orientation_basic(self, two_pt_orientation):
         """Test basic two-point orientation calculation."""
-        from spyglass.position.utils.orientation import two_pt_orientation
 
         # Create test data: point1 at (1, 1), point2 at (0, 0)
         # Should give orientation of 45 degrees (π/4)
@@ -92,9 +91,8 @@ class TestTwoPointOrientation:
 class TestNoOrientation:
     """Test no_orientation function."""
 
-    def test_no_orientation_default(self):
+    def test_no_orientation_default(self, no_orientation):
         """Test no_orientation returns NaN by default."""
-        from spyglass.position.utils.orientation import no_orientation
 
         pos_df = pd.DataFrame(
             {
@@ -109,9 +107,8 @@ class TestNoOrientation:
         assert orientation.shape == (3,)
         assert np.all(np.isnan(orientation))
 
-    def test_no_orientation_custom_fill(self):
-        """Test no_orientation with custom fill value."""
-        from spyglass.position.utils.orientation import no_orientation
+    def test_no_orientation_custom_fill(self, no_orientation):
+        """Test no_orientation with custom fill angle."""
 
         pos_df = pd.DataFrame(
             {
@@ -130,11 +127,9 @@ class TestNoOrientation:
 class TestBisectorOrientation:
     """Test bisector_orientation function."""
 
-    def test_bisector_orientation_pointing_up(self):
+    def test_bisector_orientation_pointing_up(self, bisector_orientation):
         """Test bisector with head pointing up."""
-        from spyglass.position.utils.orientation import (
-            bisector_orientation,
-        )
+        from spyglass.position.utils.orientation import bisector_orientation
 
         # led1 and led2 horizontally aligned, led3 above
         # Should point up (π/2)
@@ -154,11 +149,9 @@ class TestBisectorOrientation:
 
         assert np.isclose(orientation[0], np.pi / 2)
 
-    def test_bisector_orientation_pointing_down(self):
+    def test_bisector_orientation_pointing_down(self, bisector_orientation):
         """Test bisector with head pointing down."""
-        from spyglass.position.utils.orientation import (
-            bisector_orientation,
-        )
+        from spyglass.position.utils.orientation import bisector_orientation
 
         # led1 and led2 horizontally aligned, led3 below
         # Should point down (-π/2)
@@ -178,11 +171,9 @@ class TestBisectorOrientation:
 
         assert np.isclose(orientation[0], -np.pi / 2)
 
-    def test_bisector_orientation_collinear_error(self):
+    def test_bisector_orientation_collinear_error(self, bisector_orientation):
         """Test that collinear points raise error."""
-        from spyglass.position.utils.orientation import (
-            bisector_orientation,
-        )
+        from spyglass.position.utils.orientation import bisector_orientation
 
         # All three points on horizontal line
         pos_df = pd.DataFrame(
@@ -204,11 +195,9 @@ class TestBisectorOrientation:
 class TestGetSpanStartStop:
     """Test get_span_start_stop function."""
 
-    def test_get_span_single_span(self):
+    def test_get_span_single_span(self, get_span_start_stop):
         """Test single consecutive span."""
-        from spyglass.position.utils.orientation import (
-            get_span_start_stop,
-        )
+        from spyglass.position.utils.orientation import get_span_start_stop
 
         indices = np.array([5, 6, 7, 8])
         spans = get_span_start_stop(indices)
@@ -216,11 +205,9 @@ class TestGetSpanStartStop:
         assert len(spans) == 1
         assert spans[0] == (5, 8)
 
-    def test_get_span_multiple_spans(self):
+    def test_get_span_multiple_spans(self, get_span_start_stop):
         """Test multiple non-consecutive spans."""
-        from spyglass.position.utils.orientation import (
-            get_span_start_stop,
-        )
+        from spyglass.position.utils.orientation import get_span_start_stop
 
         indices = np.array([0, 1, 2, 5, 6, 10])
         spans = get_span_start_stop(indices)
@@ -230,11 +217,9 @@ class TestGetSpanStartStop:
         assert spans[1] == (5, 6)
         assert spans[2] == (10, 10)
 
-    def test_get_span_single_indices(self):
+    def test_get_span_single_indices(self, get_span_start_stop):
         """Test isolated single indices."""
-        from spyglass.position.utils.orientation import (
-            get_span_start_stop,
-        )
+        from spyglass.position.utils.orientation import get_span_start_stop
 
         indices = np.array([1, 3, 5, 7])
         spans = get_span_start_stop(indices)
@@ -246,7 +231,7 @@ class TestGetSpanStartStop:
 class TestInterpOrientation:
     """Test interp_orientation function."""
 
-    def test_interp_orientation_basic(self):
+    def test_interp_orientation_basic(self, interp_orientation):
         """Test basic orientation interpolation."""
         from spyglass.position.utils.orientation import interp_orientation
 
@@ -266,7 +251,7 @@ class TestInterpOrientation:
         assert ~np.isnan(result["orientation"].iloc[2])
         assert np.isclose(result["orientation"].iloc[2], 1.0)
 
-    def test_interp_orientation_edge_spans(self):
+    def test_interp_orientation_edge_spans(self, interp_orientation):
         """Test that spans at edges are left as NaN."""
         from spyglass.position.utils.orientation import interp_orientation
 

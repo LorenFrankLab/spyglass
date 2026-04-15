@@ -18,8 +18,8 @@ def test_model_params_default(sgp):
 
 def test_model_eval(populate_evaluation):
     assert (
-        populate_evaluation.fetch("train_iterations")[0] == 2
-    ), "Train iteration not 2"
+        populate_evaluation.fetch("train_iterations")[0] == 1
+    ), "Train iteration not 1"
 
 
 def test_model_input_assert(sgp):

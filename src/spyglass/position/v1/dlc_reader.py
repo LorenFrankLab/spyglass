@@ -8,6 +8,10 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.position.utils.dlc_io import (
+    parse_dlc_h5_output,
+    reformat_dlc_data,
+)
 from spyglass.settings import test_mode
 
 
@@ -90,14 +94,18 @@ class PoseEstimation:  # Note: simplifying to require only project path
     def rawdata(self):
         """Pandas dataframe of the DLC output from the h5 file."""
         if self._rawdata is None:
-            self._rawdata = pd.read_hdf(self.h5_path)
+            self._rawdata = parse_dlc_h5_output(
+                self.h5_path, return_metadata=False
+            )
         return self._rawdata
 
     @property
     def data(self) -> dict:
         """Dictionary of the bodyparts and corresponding dataframe data."""
         if self._data is None:
-            self._data = self.reformat_rawdata()
+            self._data = reformat_dlc_data(
+                self.rawdata, bodyparts=self.body_parts
+            )
         return self._data
 
     @property
@@ -112,21 +120,12 @@ class PoseEstimation:  # Note: simplifying to require only project path
         return self.df.columns.levels[0]
 
     def reformat_rawdata(self) -> dict:
-        """Reformat the rawdata from the h5 file to a more useful dictionary."""
-        if not len(self.rawdata) == self.pkl["nframes"]:  # pragma: no cover
-            raise ValueError(
-                f"Total frames from .h5 file ({len(self.rawdata)}) differs "
-                + f'from .pickle ({self.pkl["nframes"]})'
-            )
+        """Reformat rawdata using shared utility (DEPRECATED - use .data property).
 
-        body_parts_position = {}
-        for body_part in self.body_parts:
-            body_parts_position[body_part] = {
-                c: self.df.get(body_part).get(c).values
-                for c in self.df.get(body_part).columns
-            }
-
-        return body_parts_position
+        This method is kept for backwards compatibility but now delegates
+        to the shared reformat_dlc_data utility function.
+        """
+        return reformat_dlc_data(self.rawdata, bodyparts=self.body_parts)
 
 
 def read_yaml(fullpath, filename="*"):

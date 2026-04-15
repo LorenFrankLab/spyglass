@@ -15,8 +15,14 @@ from .centroid import (
     get_2pt_centroid,
     get_4pt_centroid,
 )
+from .dlc_io import (
+    get_dlc_bodyparts,
+    get_dlc_scorer,
+    parse_dlc_h5_output,
+    reformat_dlc_data,
+    validate_dlc_file,
+)
 from .general import get_most_recent_file, get_param_names, sanitize_filename
-from .make_video import VideoMaker, make_video
 from .interpolation import (
     SMOOTHING_METHODS,
     get_smoothing_function,
@@ -25,12 +31,28 @@ from .interpolation import (
     smooth_moving_avg,
     smooth_savgol,
 )
+from .make_video import VideoMaker, make_video
 from .orientation import (
     bisector_orientation,
     interp_orientation,
     no_orientation,
     smooth_orientation,
     two_pt_orientation,
+)
+from .tool_strategies import (
+    DLCStrategy,
+    NDXPoseStrategy,
+    PoseToolStrategy,
+    SLEAPStrategy,
+    ToolStrategyFactory,
+)
+from .validation import (
+    validate_centroid_params,
+    validate_interpolation_params,
+    validate_option,
+    validate_orientation_params,
+    validate_required_keys,
+    validate_smoothing_params,
 )
 
 __all__ = [
@@ -39,6 +61,12 @@ __all__ = [
     "get_1pt_centroid",
     "get_2pt_centroid",
     "get_4pt_centroid",
+    # DLC I/O
+    "parse_dlc_h5_output",
+    "get_dlc_bodyparts",
+    "get_dlc_scorer",
+    "reformat_dlc_data",
+    "validate_dlc_file",
     # Interpolation & Smoothing
     "interp_position",
     "smooth_moving_avg",
@@ -52,6 +80,19 @@ __all__ = [
     "no_orientation",
     "interp_orientation",
     "smooth_orientation",
+    # Tool Strategies
+    "PoseToolStrategy",
+    "DLCStrategy",
+    "SLEAPStrategy",
+    "NDXPoseStrategy",
+    "ToolStrategyFactory",
+    # Validation
+    "validate_option",
+    "validate_required_keys",
+    "validate_smoothing_params",
+    "validate_orientation_params",
+    "validate_centroid_params",
+    "validate_interpolation_params",
     # General utilities
     "get_most_recent_file",
     "get_param_names",

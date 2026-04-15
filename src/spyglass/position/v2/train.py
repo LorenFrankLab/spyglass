@@ -9,10 +9,11 @@ inefficient.
 
 import re
 import warnings
+from dataclasses import dataclass
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, Union
+from typing import TYPE_CHECKING, List, Optional, Tuple, Union
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -26,10 +27,27 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
 from spyglass.position.utils import get_most_recent_file, get_param_names
+from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import dlc_project_dir
 from spyglass.utils import SpyglassMixin
+
+
+# Parameter dataclasses for methods with 5+ parameters
+@dataclass
+class ModelMetadata:
+    """Parameter object for _register_model_metadata method."""
+
+    model_id: str
+    model_path: str
+    project_path: Path
+    config_path: Path
+    params: dict
+    config: dict
+    latest_model: dict
+    skeleton_id: str
+    parent_id: Optional[str] = None
 
 
 def resolve_model_path(stored_path: str) -> Path:
@@ -526,145 +544,128 @@ class ModelParams(SpyglassMixin, dj.Lookup):
     unique index (tool, params_hash)
     """
 
-    tool_info = {  # Dict[tool-name, Dict[required, skipped, accepted, aliases]]
-        "DLC": {
-            "required": [
-                "net_type",
-            ],
-            "skipped": ["project_path", "video_sets"],
-            "accepted": set(
-                [
-                    *get_param_names(train_network),
-                    *get_param_names(create_training_dataset),
-                ]
-            ),
-            "aliases": {  # alternate names for same param
-                "net_type": ["default_net_type"]
-            },
+    # Strategy pattern replaced the tool_info structure
+    # Use ToolStrategyFactory to get tool-specific parameters and validation
+
+    default_entries_data = [
+        {
+            "model_params_id": "dlc_default",
+            "tool": "DLC",
+            "params": {"shuffle": 1, "trainingsetindex": 0, "model_prefix": ""},
+            "skeleton_id": None,
         },
-        "ndx-pose": {
-            "required": [
-                "source_software",
-                "model_name",
-            ],
-            "skipped": [],
-            "accepted": {
-                "source_software",
-                "source_software_version",
-                "model_name",
-                "nwb_file",
-                "description",
-                "original_videos",
-                "labeled_videos",
-                "dimensions",
-                "scorer",
-                "nodes",
-                "edges",
+        {
+            "model_params_id": "sleap_default",
+            "tool": "SLEAP",
+            "params": {
+                "model_type": "single_instance",
+                "backbone": "unet",
+                "max_epochs": 200,
+                "batch_size": 4,
             },
-            "aliases": {},
+            "skeleton_id": None,
         },
-        "SLEAP": {
-            "required": [
-                "model_type",  # single_instance, centroid, etc.
-            ],
-            "skipped": ["training_job_path", "labels_path"],
-            "accepted": {
-                # Model architecture
-                "model_type",
-                "backbone",
-                "max_stride",
-                "output_stride",
-                # Training parameters
-                "max_epochs",
-                "batch_size",
-                "learning_rate",
-                "save_freq",
-                "val_size",
-                # Data augmentation
-                "augmentation_config",
-                "rotation",
-                "scale",
-                "translate",
-                # Optimization
-                "optimizer",
-                "lr_schedule",
-                "early_stopping",
-                # Model-specific
-                "sigma",  # for confidence maps
-                "peak_threshold",
-                "integral_patch_size",
-                # Paths (for reference only)
-                "model_name",
-                "run_name",
-                "initial_config",
-                # SLEAP version info
-                "sleap_version",
-                "training_labels",
-            },
-            "aliases": {
-                "model_type": ["approach"],  # alternate name
-                "backbone": ["backbone_type"],
-            },
-        },
-    }
-    default_dlc_params = {
-        "params": {},
-        "shuffle": 1,
-        "trainingsetindex": 0,
-        "model_prefix": "",
-    }
-    default_sleap_params = {
-        "model_type": "single_instance",
-        "backbone": "unet",
-        "max_epochs": 200,
-        "batch_size": 4,
-    }
-    contents = [
-        (
-            "dlc_default",
-            "DLC",
-            default_dlc_params,
-            None,
-            dj.hash.key_hash(default_dlc_params),
-        ),
-        (
-            "sleap_default",
-            "SLEAP",
-            default_sleap_params,
-            None,
-            dj.hash.key_hash(default_sleap_params),
-        ),
     ]
 
-    def get_accepted_params(self, tool):
-        """Return all accepted parameters for DLC model training."""
-        if tool not in self.tool_info:
-            raise ValueError(f"Tool {tool} not supported")
-        return self.tool_info[tool]["accepted"]
+    contents = [
+        (
+            entry["model_params_id"],
+            entry["tool"],
+            entry["params"],
+            entry["skeleton_id"],
+            dj.hash.key_hash(entry["params"]),
+        )
+        for entry in default_entries_data
+    ]
 
-    def _append_aliases(self, tool, params):
-        """Append any parameter aliases to the params dictionary.
+    @classmethod
+    @property
+    def tool_info(cls) -> dict:
+        """Return tool information using strategy pattern for backward compatibility.
 
-        Handles bidirectional aliasing:
-        - If primary key exists, add aliases
-        - If alias exists, add primary key
+        Returns
+        -------
+        dict
+            Tool information with structure:
+            {tool_name: {"required": set, "accepted": set, "skipped": set, "aliases": dict}}
         """
-        if tool not in self.tool_info:
-            raise ValueError(f"Tool {tool} not supported")
-        aliases = self.tool_info[tool].get("aliases", {})
-        for primary, alias_list in aliases.items():
-            # If primary exists, add aliases
-            if primary in params:
-                for alias in alias_list:
-                    if alias not in params:
-                        params[alias] = params[primary]
-            # If alias exists, add primary
-            else:
-                for alias in alias_list:
-                    if alias in params and primary not in params:
-                        params[primary] = params[alias]
-                        break
-        return params
+        from ..utils.tool_strategies import ToolStrategyFactory
+
+        tool_info = {}
+
+        # Define skipped params per tool (params handled by Spyglass, not tool)
+        # These are typically paths, project settings, and metadata that
+        # Spyglass manages rather than passing to the tool
+        skipped_params = {
+            "DLC": {
+                "video_sets",
+                "model_path",
+                "analysis_file_id",
+            },
+            "SLEAP": {
+                "project_path",
+                "video_sets",
+                "model_path",
+                "analysis_file_id",
+            },
+            "ndx-pose": {"model_path", "analysis_file_id", "nwb_file_path"},
+        }
+
+        # Build tool_info for each registered strategy
+        for tool_name in ToolStrategyFactory._strategies:
+            try:
+                strategy = ToolStrategyFactory.create_strategy(tool_name)
+                tool_info[tool_name] = {
+                    "required": strategy.get_required_params(),
+                    "accepted": strategy.get_accepted_params(),
+                    "skipped": skipped_params.get(tool_name, set()),
+                    "aliases": strategy.get_parameter_aliases(),
+                }
+            except Exception as e:
+                # Skip tools that fail to initialize
+                # Use warnings instead of self._warn_msg since this is a class method
+                import warnings
+
+                warnings.warn(
+                    f"Could not initialize strategy for {tool_name}: {e}"
+                )
+                continue
+
+        return tool_info
+
+    def get_accepted_params(self, tool: str) -> set:
+        """Return all accepted parameters for specified tool using strategy pattern.
+
+        Parameters
+        ----------
+        tool : str
+            Tool name ("DLC", "SLEAP", "ndx-pose")
+
+        Returns
+        -------
+        set
+            Set of accepted parameter names
+        """
+        strategy = ToolStrategyFactory.create_strategy(tool)
+        return strategy.get_accepted_params()
+
+    def _append_aliases(self, tool: str, params: dict) -> dict:
+        """Append parameter aliases using strategy pattern.
+
+        Parameters
+        ----------
+        tool : str
+            Tool name
+        params : dict
+            Original parameters
+
+        Returns
+        -------
+        dict
+            Parameters with aliases added
+        """
+        strategy = ToolStrategyFactory.create_strategy(tool)
+        return strategy.append_aliases(params)
 
     def insert1(self, key, accept_default=False, **kwargs):
         """Insert model parameters into the database.
@@ -678,24 +679,27 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             raise TypeError("Key must be a dictionary")
 
         this_tool = key.get("tool", "UNSPECIFIED").strip()
-        if this_tool not in self.tool_info:
-            raise ValueError(f"Tool not supported {this_tool}")
+        try:
+            strategy = ToolStrategyFactory.create_strategy(this_tool)
+        except ValueError as e:
+            raise ValueError(f"Tool not supported: {this_tool}") from e
 
-        tool_info = self.tool_info[this_tool]
-        params = {  # Drop skipped params
-            k: v
-            for k, v in key["params"].items()
-            if k not in tool_info["skipped"]
-        }
+        # Remove any skipped params (strategy pattern doesn't use skipped params)
+        params = key["params"].copy()
 
+        # Filter out skipped parameters using tool_info
+        tool_info = self.tool_info
+        if this_tool in tool_info:
+            skipped = tool_info[this_tool]["skipped"]
+            params = {k: v for k, v in params.items() if k not in skipped}
+
+        # Append aliases using strategy
         params = self._append_aliases(this_tool, params)
 
-        tool_required = tool_info["required"]  # Ensure all required params
-        if not all(r in params for r in tool_required):
-            raise ValueError(
-                f"Missing required params: {tool_required - params.keys()}"
-            )
+        # Validate required parameters using strategy
+        strategy.validate_params(params)
 
+        # Check for existing entry with same params hash
         params_hash_dict = dict(params_hash=dj.hash.key_hash(params))
         if dupe := (self & params_hash_dict & dict(tool=key["tool"])):
             dupe_key = dupe.fetch1("KEY")
@@ -799,97 +803,39 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Training {tool} model with params: {params_key}")
 
-        # Dispatch to tool-specific training method
-        if tool == "DLC":
-            model_result = self._make_dlc_model(
-                key, params, skeleton_id, vid_group, sel_entry
+        # Dispatch to tool-specific training method using strategy pattern
+        strategy = ToolStrategyFactory.create_strategy(tool)
+
+        try:
+            model_result = strategy.train_model(
+                key, params, skeleton_id, vid_group, sel_entry, self
             )
-        else:  # TODO: Add support for SLEAP here
+        except NotImplementedError as e:
             raise NotImplementedError(
-                f"Training not implemented for tool: {tool}"
+                f"Training not implemented for {tool}: {e}"
             )
 
         # Insert into Model table
         self.insert1(model_result)
         self._info_msg(f"Model training complete: {model_result['model_id']}")
 
-    def _make_dlc_model(
-        self,
-        key: dict,
-        params: dict,
-        skeleton_id: str,
-        vid_group: dict,
-        sel_entry: dict,
-    ) -> dict:
-        """Train a DLC model.
+    def _prepare_training_dataset(
+        self, config_path: Path, params: dict, config: dict
+    ) -> None:
+        """Create DLC training dataset if needed.
 
         Parameters
         ----------
-        key : dict
-            ModelSelection key
+        config_path : Path
+            Path to DLC config.yaml file
         params : dict
-            Training parameters from ModelParams
-        skeleton_id : str
-            Skeleton ID for this model
-        vid_group : dict
-            VidFileGroup entry
-        sel_entry : dict
-            Full ModelSelection entry
-
-        Returns
-        -------
-        dict
-            Model table entry with model_id, model_path, analysis_file_name
+            Training parameters
+        config : dict
+            Loaded DLC config dictionary
         """
-        if create_training_dataset is None or train_network is None:
-            raise ImportError(
-                "DeepLabCut is required for training. "
-                "Install with: pip install deeplabcut>=3.0"
-            )
-
-        # Get project path from params or raise error
-        if "project_path" not in params:
-            raise ValueError(
-                "DLC training requires 'project_path' in ModelParams. "
-                "Please specify the DLC project directory."
-            )
-
-        project_path = Path(params["project_path"])
-        if not project_path.exists():
-            raise FileNotFoundError(f"DLC project not found: {project_path}")
-
-        config_path = project_path / "config.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"DLC config.yaml not found in: {project_path}"
-            )
-
-        self._info_msg(f"Using DLC project: {project_path}")
-
-        # Load config to check training dataset
-        with open(config_path, "r") as f:
-            config = yaml.safe_load(f)
-
-        # Get training parameters
         shuffle = params.get("shuffle", 1)
-        trainingsetindex = params.get("trainingsetindex", 0)
-        maxiters = params.get("maxiters", None)  # Use DLC default if None
-        displayiters = params.get("displayiters", None)
-        saveiters = params.get("saveiters", None)
-        task = config.get("Task", "DLCTask")
-        date = config.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
-
-        # Check if this is continued training
-        parent_id = sel_entry.get("parent_id")
-        if parent_id:
-            self._info_msg(
-                f"Continuing training from parent model: {parent_id}"
-            )
-            # For continued training, we assume dataset already exists
-
-        # Step 1: Create training dataset if needed
         training_dataset_path = (
-            project_path
+            config_path.parent
             / "training-datasets"
             / f"iteration-{config.get('iteration', 0)}"
         )
@@ -916,20 +862,29 @@ class Model(SpyglassMixin, dj.Computed):
                 )
                 # May already exist, continue
 
-        # Step 2: Train the network
-        self._info_msg("Starting model training...")
+    def _execute_training(self, config_path: Path, params: dict) -> None:
+        """Execute DLC network training.
+
+        Parameters
+        ----------
+        config_path : Path
+            Path to DLC config.yaml file
+        params : dict
+            Training parameters
+        """
         train_params = {
             "config": str(config_path),
-            "shuffle": shuffle,
-            "trainingsetindex": trainingsetindex,
-            "displayiters": displayiters,
-            "saveiters": saveiters,
-            "maxiters": maxiters,
+            "shuffle": params.get("shuffle", 1),
+            "trainingsetindex": params.get("trainingsetindex", 0),
+            "displayiters": params.get("displayiters"),
+            "saveiters": params.get("saveiters"),
+            "maxiters": params.get("maxiters"),
         }
 
         # Remove None values
         train_params = {k: v for k, v in train_params.items() if v is not None}
 
+        self._info_msg("Starting model training...")
         self._info_msg(f"Training parameters: {train_params}")
 
         try:
@@ -941,8 +896,19 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg("Training completed successfully")
 
-        # Step 3: Find the trained model
-        # Get latest model info
+    def _localize_trained_model(self, config: dict) -> tuple[str, str]:
+        """Find and validate the trained model.
+
+        Parameters
+        ----------
+        config : dict
+            Loaded DLC config dictionary
+
+        Returns
+        -------
+        tuple[str, str]
+            Model path and generated model_id
+        """
         latest_model = self._get_latest_dlc_model_info(config)
         if not latest_model:
             raise ValueError(
@@ -952,47 +918,62 @@ class Model(SpyglassMixin, dj.Computed):
         model_path = latest_model["path"]
         self._info_msg(f"Trained model path: {model_path}")
 
-        # Step 4: Generate model_id
+        # Generate model_id
+        task = config.get("Task", "DLCTask")
+        date = config.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
+
         model_id = default_pk_name(
             f"DLC-{task}-{date}",
             dict(
                 tool="DLC",
-                shuffle=shuffle,
+                shuffle=latest_model["shuffle"],
                 iteration=latest_model["iteration"],
                 trainFraction=latest_model["trainFraction"],
             ),
         )
 
-        # Step 5: Create NWB file with model metadata
-        # For now, we'll create a simple NWB file
-        # In future, this should include training history, loss curves, etc.
-        nwb_file_name = f"{model_id}_model.nwb"
-        nwb_path = project_path / nwb_file_name
+        return model_path, model_id
 
-        # Create basic NWB file
+    def _register_model_metadata(self, metadata: ModelMetadata) -> str:
+        """Create NWB file with model metadata and register in AnalysisNwbfile.
+
+        Parameters
+        ----------
+        metadata : ModelMetadata
+            Consolidated metadata for model registration
+
+        Returns
+        -------
+        str
+            NWB file name for AnalysisNwbfile
+        """
         from pynwb import NWBHDF5IO, NWBFile
 
+        nwb_file_name = f"{metadata.model_id}_model.nwb"
+        nwb_path = metadata.project_path / nwb_file_name
+
+        # Create basic NWB file
         nwbfile = NWBFile(
-            session_description=f"DLC model training: {model_id}",
+            session_description=f"DLC model training: {metadata.model_id}",
             identifier=f"model_{datetime.utcnow():%Y%m%d%H%M%S}",
             session_start_time=datetime.utcnow(),
         )
 
         # Store training metadata in scratch space
         training_metadata = {
-            "model_id": model_id,
+            "model_id": metadata.model_id,
             "tool": "DLC",
-            "project_path": str(project_path),
-            "config_path": str(config_path),
-            "model_path": _to_stored_path(model_path),
-            "shuffle": shuffle,
-            "trainingsetindex": trainingsetindex,
-            "iteration": latest_model["iteration"],
-            "trainFraction": latest_model["trainFraction"],
-            "snapshot": latest_model.get("snapshot"),
-            "trained_date": latest_model["date_trained"].isoformat(),
-            "parent_id": parent_id,
-            "skeleton_id": skeleton_id,
+            "project_path": str(metadata.project_path),
+            "config_path": str(metadata.config_path),
+            "model_path": _to_stored_path(metadata.model_path),
+            "shuffle": metadata.params.get("shuffle", 1),
+            "trainingsetindex": metadata.params.get("trainingsetindex", 0),
+            "iteration": metadata.latest_model["iteration"],
+            "trainFraction": metadata.latest_model["trainFraction"],
+            "snapshot": metadata.latest_model.get("snapshot"),
+            "trained_date": metadata.latest_model["date_trained"].isoformat(),
+            "parent_id": metadata.parent_id,
+            "skeleton_id": metadata.skeleton_id,
         }
 
         nwbfile.add_scratch(training_metadata, name="model_training_metadata")
@@ -1003,14 +984,101 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Model metadata saved to NWB: {nwb_path}")
 
-        # Step 6: Register NWB file in AnalysisNwbfile
-        # Note: This may need to be adjusted based on Spyglass conventions
+        # Register NWB file in AnalysisNwbfile
         analysis_key = AnalysisNwbfile().create(nwb_file_name)
         if not analysis_key:
             # File may already be registered
             analysis_key = (
                 AnalysisNwbfile() & {"analysis_file_name": nwb_file_name}
             ).fetch1("KEY")
+
+        return nwb_file_name
+
+    def _make_dlc_model(
+        self,
+        key: dict,
+        params: dict,
+        skeleton_id: str,
+        vid_group: dict,
+        sel_entry: dict,
+    ) -> dict:
+        """Train a DLC model using focused helper methods.
+
+        Parameters
+        ----------
+        key : dict
+            ModelSelection key
+        params : dict
+            Training parameters from ModelParams
+        skeleton_id : str
+            Skeleton ID for this model
+        vid_group : dict
+            VidFileGroup entry
+        sel_entry : dict
+            Full ModelSelection entry
+
+        Returns
+        -------
+        dict
+            Model table entry with model_id, model_path, analysis_file_name
+        """
+        if create_training_dataset is None or train_network is None:
+            raise ImportError(
+                "DeepLabCut is required for training. "
+                "Install with: pip install deeplabcut>=3.0"
+            )
+
+        # Validate project configuration
+        if "project_path" not in params:
+            raise ValueError(
+                "DLC training requires 'project_path' in ModelParams. "
+                "Please specify the DLC project directory."
+            )
+
+        project_path = Path(params["project_path"])
+        if not project_path.exists():
+            raise FileNotFoundError(f"DLC project not found: {project_path}")
+
+        config_path = project_path / "config.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"DLC config.yaml not found in: {project_path}"
+            )
+
+        self._info_msg(f"Using DLC project: {project_path}")
+
+        # Load config
+        with open(config_path, "r") as f:
+            config = yaml.safe_load(f)
+
+        # Check for continued training
+        parent_id = sel_entry.get("parent_id")
+        if parent_id:
+            self._info_msg(
+                f"Continuing training from parent model: {parent_id}"
+            )
+
+        # Execute training pipeline
+        self._prepare_training_dataset(config_path, params, config)
+        self._execute_training(config_path, params)
+
+        # Localize and register trained model
+        model_path, model_id = self._localize_trained_model(config)
+        latest_model = self._get_latest_dlc_model_info(config)
+
+        nwb_file_name = self._register_model_metadata(
+            ModelMetadata(
+                model_id=model_id,
+                model_path=model_path,
+                project_path=project_path,
+                config_path=config_path,
+                params=params,
+                config=config,
+                latest_model=latest_model,
+                skeleton_id=skeleton_id,
+                parent_id=parent_id,
+            )
+        )
 
         # Return Model entry
         return dict(
@@ -1822,8 +1890,10 @@ class Model(SpyglassMixin, dj.Computed):
                 ).tolist()
 
             # Add default required params for DLC if importing from DLC
-            if tool == "DLC" and "net_type" not in params:
-                params["net_type"] = "unknown"  # Required by ModelParams
+            if tool == "DLC" and "project_path" not in params:
+                params["project_path"] = str(
+                    model_path.parent
+                )  # Use model directory
 
         # Step 8: Create skeleton config dict for Skeleton.insert1()
         skeleton_config = {
@@ -2116,12 +2186,18 @@ class Model(SpyglassMixin, dj.Computed):
             params = params_entry["params"]
 
             if tool == "DLC":
-                required = ["net_type"]  # Minimal requirement
-                missing = [p for p in required if p not in params]
-                if missing:
-                    errors.append(f"Missing required DLC params: {missing}")
-                else:
+                # Check if this is an NDX-pose import (has nwb_file param)
+                if "nwb_file" in params:
+                    # NDX-pose imports don't need traditional DLC config params
                     checks["params_valid"] = True
+                else:
+                    # Traditional DLC model - check for required config params
+                    required = ["net_type"]  # Minimal requirement
+                    missing = [p for p in required if p not in params]
+                    if missing:
+                        errors.append(f"Missing required DLC params: {missing}")
+                    else:
+                        checks["params_valid"] = True
             else:
                 # For non-DLC tools, just check params exist
                 if params and isinstance(params, dict):

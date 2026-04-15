@@ -584,9 +584,9 @@ def mini_insert(
 ):
     from spyglass.common import LabMember, Nwbfile, Session  # noqa: E402
     from spyglass.data_import import insert_sessions  # noqa: E402
-    from spyglass.spikesorting.spikesorting_merge import (
+    from spyglass.spikesorting.spikesorting_merge import (  # noqa: E402
         SpikeSortingOutput,
-    )  # noqa: E402
+    )
     from spyglass.utils.nwb_helper_fn import close_nwb_files  # noqa: E402
 
     _ = SpikeSortingOutput()
@@ -1555,6 +1555,7 @@ def centroid_key(sgp, centroid_selection):
 @pytest.fixture(scope="session")
 def populate_centroid(sgp, centroid_selection):
     sgp.v1.DLCCentroid.populate(centroid_selection)
+    yield centroid_selection
 
 
 @pytest.fixture(scope="session")
@@ -1638,8 +1639,31 @@ def dlc_key(sgp, dlc_selection):
 
 
 @pytest.fixture(scope="session")
-def populate_dlc(sgp, dlc_key):
+def populate_dlc(sgp, dlc_key, pos_merge):
+    # Populate upstream DLC table
     sgp.v1.DLCPosV1().populate(dlc_key)
+
+    # Instead of merging all entries blindly, only merge for specific keys to avoid ambiguity
+    # Check if entry already exists before trying to merge
+    existing_merge_entries = pos_merge.DLCPosV1() & dlc_key
+    if not existing_merge_entries:
+        try:
+            # Try to merge with a more specific restriction to avoid ambiguity
+            restricted_dlc_key = dlc_key.copy()
+            pos_merge.merge_populate("DLCPosV1", restricted_dlc_key)
+        except ValueError as e:
+            if "Ambiguous entry" in str(e):
+                # If merge fails due to ambiguity, manually insert the DLC entry
+                # without trying to merge with TrodesPos entries
+                dlc_entry = (sgp.v1.DLCPosV1() & dlc_key).fetch1()
+                merge_entry = dict(dlc_entry)
+                merge_entry["merge_id"] = pos_merge._hash_merge_id(
+                    merge_entry, "DLCPosV1"
+                )
+                merge_entry["source"] = "DLCPosV1"
+                pos_merge.DLCPosV1().insert1(merge_entry, skip_duplicates=True)
+            else:
+                raise
     yield
 
 

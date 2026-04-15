@@ -52,6 +52,182 @@
 #
 
 # %% [markdown]
+# <details>
+# <summary><b>SLEAP Support Status</b> (Click to expand)</summary>
+#
+# ### SLEAP Integration Roadmap
+#
+# Position V2 includes preliminary SLEAP support architecture but **SLEAP training is not yet functional**. Here's the current status:
+#
+# #### ✅ **Available Now**
+#
+# - **Parameter Validation**: Full parameter specification and validation for SLEAP models
+# - **Strategy Pattern**: `SLEAPStrategy` class ready for integration
+# - **Import Support**: Can import pre-trained SLEAP models via `Model.import_model()`
+# - **Data Loading**: Can load existing SLEAP NWB files using `PoseEstim.load_from_nwb()`
+#
+# #### 🔄 **In Development**
+#
+# - **Training Pipeline**: The `SLEAPStrategy.train_model()` method raises `NotImplementedError`
+# - **Inference Integration**: SLEAP analysis integration with Position V2 workflows
+#
+# #### 📋 **Planned Parameters**
+#
+# SLEAP models will support these parameters when training becomes available:
+#
+# ```python
+# sleap_params = {
+#     # Model architecture
+#     "model_type": "single_instance",  # single_instance, centroid, topdown
+#     "backbone": "unet",              # unet, hourglass, resnet
+#     "max_stride": 16,
+#
+#     # Training parameters
+#     "max_epochs": 200,
+#     "batch_size": 4,
+#     "learning_rate": 1e-4,
+#     "val_size": 0.1,
+#
+#     # Data augmentation
+#     "rotation": 15.0,
+#     "scale": 0.1,
+#     "translate": 0.02,
+# }
+# ```
+#
+# #### 🚀 **Using SLEAP Today**
+#
+# Until native training is implemented, you can:
+#
+# 1. **Train externally**: Use SLEAP GUI or CLI to train models
+# 2. **Export to NWB**: Use SLEAP's NWB export functionality
+# 3. **Import to Spyglass**: Load via `PoseEstim.load_from_nwb("sleap_output.nwb")`
+#
+# ```python
+# # Import pre-trained SLEAP model (when available)
+# model_key = Model.import_model(
+#     model_path="/path/to/sleap_model.json",
+#     tool="SLEAP"
+# )
+#
+# # Load existing SLEAP results
+# pose_key = PoseEstim.load_from_nwb("sleap_analysis.nwb")
+# ```
+#
+# **Timeline**: Native SLEAP training support is targeted for Q3 2026.
+#
+# </details>
+#
+# ---
+
+# %% [markdown]
+# <details>
+# <summary><b>V1 → V2 Migration Guide</b> (Click to expand)</summary>
+#
+# ### Table and Naming Changes
+#
+# Position V2 significantly streamlines the table structure compared to V1. Here's a comprehensive migration mapping:
+#
+# #### 📊 **Main Tables**
+#
+# | V1 Tables | V2 Equivalent | Notes |
+# |-----------|---------------|--------|
+# | `DLCModel` | `Model` | Unified model table for all tools |
+# | `DLCModelParams` | `ModelParams` | Tool-agnostic parameter storage |
+# | `DLCModelSelection` | `ModelSelection` | Simplified selection interface |
+# | `DLCPoseEstimation` | `PoseEstim` | Unified pose estimation |
+# | `DLCPoseEstimationParams` | `PoseEstimParams` | Inference parameters |
+# | `DLCPoseEstimationSelection` | `PoseEstimSelection` | Selection for inference tasks |
+# | `DLCSmoothInterpParams` | `PoseParams` | Processing parameters |
+# | `DLCSmoothInterpCohort` | `PoseSelection` | Processing selection |
+# | `DLCSmoothInterp` | `PoseV2` | **Main output table** |
+#
+# #### 🔧 **Key Field Changes**
+#
+# | V1 Field | V2 Field | Type Change |
+# |----------|----------|-------------|
+# | `dlc_model_name` | `model_id` | More generic naming |
+# | `dlc_model_params_name` | `model_params_id` | Consistent ID pattern |
+# | `pose_estimation_task` | `task_mode` | Clearer terminology |
+# | `pose_estimation_output_dir` | `output_dir` | Simplified naming |
+# | `smooth_interp_params_name` | `pose_params_id` | Unified parameter naming |
+#
+# #### 📁 **File Organization**
+#
+# ```
+# V1 Structure:
+# src/spyglass/position/v1/
+# ├── position_dlc_project.py      # Project management
+# ├── position_dlc_training.py     # Model training
+# ├── position_dlc_pose_estimation.py  # Inference
+# ├── position_dlc_cohort.py       # Batch processing
+# ├── dlc_utils.py                 # Utilities
+# └── dlc_reader.py                # File I/O
+#
+# V2 Structure:
+# src/spyglass/position/v2/
+# ├── train.py                     # Model training & management
+# ├── estim.py                     # Pose estimation & processing
+# ├── video.py                     # Video file management
+# └── ../utils/                    # Shared utilities
+#     ├── dlc_io.py               # DLC file parsing
+#     ├── validation.py           # Parameter validation
+#     └── tool_strategies.py      # Multi-tool support
+# ```
+#
+# #### 🔍 **Method Equivalents**
+#
+# | V1 Method | V2 Method | Notes |
+# |-----------|-----------|-------|
+# | `DLCModel.create_dlc_model()` | `Model.train_model()` | Unified training interface |
+# | `DLCModel.import_dlc_model()` | `Model.import_model()` | Tool-agnostic import |
+# | `DLCPoseEstimation.run_estimation()` | `PoseEstim.run_inference()` | Simplified execution |
+# | `DLCSmoothInterp.get_position()` | `PoseV2.fetch1_dataframe()` | Direct DataFrame access |
+#
+# #### 🚀 **Migration Checklist**
+#
+# When migrating from V1 to V2:
+#
+# 1. **Update imports**:
+#    ```python
+#    # V1
+#    from spyglass.position.v1 import DLCModel, DLCPoseEstimation
+#
+#    # V2
+#    from spyglass.position.v2 import Model, PoseEstim
+#    ```
+#
+# 2. **Update table references**: Replace all `DLC*` table names with V2 equivalents
+#
+# 3. **Update field names**: Use new field naming convention (`model_id` vs `dlc_model_name`)
+#
+# 4. **Simplify workflows**: V2 reduces the number of required tables and steps
+#
+# 5. **Leverage new features**:
+#    - Multi-tool support (DLC + planned SLEAP)
+#    - Unified processing pipeline
+#    - Improved error handling
+#    - Better documentation
+#
+# #### ⚠️ **Breaking Changes**
+#
+# - **No backward compatibility**: V1 and V2 use separate schemas
+# - **Different output formats**: V2 uses ndx-pose standardization
+# - **Schema changes**: Field names and types may differ
+# - **Workflow differences**: Simplified but non-interchangeable processes
+#
+# #### 📖 **Best Practices**
+#
+# - **Parallel usage**: Keep V1 for existing pipelines, V2 for new projects
+# - **Data migration**: Use export/import for moving processed data
+# - **Testing**: Validate results when switching between versions
+# - **Documentation**: Update analysis scripts to use V2 conventions
+#
+# </details>
+#
+# ---
+
+# %% [markdown]
 # ### Imports
 #
 

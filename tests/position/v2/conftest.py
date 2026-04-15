@@ -2,11 +2,22 @@
 
 from datetime import datetime
 
+import datajoint as dj
 import ndx_pose
 import numpy as np
 import pytest
 from pynwb import NWBHDF5IO, NWBFile
 from pynwb.file import Subject
+
+# ----------------------------- Database Setup ---------------------------------
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_database_config():
+    """Load database configuration before any tests run."""
+    dj.config.load("/home/cb/wrk/spyglass/pv2/dj_local_conf_pv2.json")
+    yield
+
 
 # ----------------------------- Class Fixtures ---------------------------------
 
@@ -52,6 +63,72 @@ def model_sel(pv2_train):
 def model(pv2_train):
     """Fixture for Model class."""
     yield pv2_train.Model()
+
+
+@pytest.fixture(scope="session")
+def pv2_estim(position_v2):
+    """Fixture for position.v2.estim module."""
+    yield position_v2.estim
+
+
+@pytest.fixture(scope="session")
+def PoseV2(pv2_estim):
+    """Fixture for PoseV2 class."""
+    yield pv2_estim.PoseV2
+
+
+@pytest.fixture(scope="session")
+def pose_v2_instance(pv2_estim):
+    """Fixture for PoseV2 instance."""
+    yield pv2_estim.PoseV2()
+
+
+@pytest.fixture(scope="session")
+def PoseParams(pv2_estim):
+    """Fixture for PoseParams class."""
+    yield pv2_estim.PoseParams
+
+
+@pytest.fixture(scope="session")
+def PoseEstim(pv2_estim):
+    """Fixture for PoseEstim class."""
+    yield pv2_estim.PoseEstim
+
+
+@pytest.fixture(scope="session")
+def PoseEstimParams(pv2_estim):
+    """Fixture for PoseEstimParams class."""
+    yield pv2_estim.PoseEstimParams
+
+
+@pytest.fixture(scope="session")
+def PoseEstimSelection(pv2_estim):
+    """Fixture for PoseEstimSelection class."""
+    yield pv2_estim.PoseEstimSelection
+
+
+@pytest.fixture(scope="session")
+def PoseSelection(pv2_estim):
+    """Fixture for PoseSelection class."""
+    yield pv2_estim.PoseSelection
+
+
+@pytest.fixture(scope="session")
+def pv2_video(position_v2):
+    """Fixture for position.v2.video module."""
+    yield position_v2.video
+
+
+@pytest.fixture(scope="session")
+def VidFileGroup(pv2_video):
+    """Fixture for VidFileGroup class."""
+    yield pv2_video.VidFileGroup
+
+
+@pytest.fixture(scope="session")
+def VideoGroupParams(pv2_video):
+    """Fixture for VideoGroupParams class."""
+    yield pv2_video.VideoGroupParams
 
 
 # ----------------------------- NWB Fixtures -----------------------------------

@@ -40,7 +40,9 @@ class TestVidFileGroupHelpers:
 
         with pytest.raises(FileNotFoundError):
             VidFileGroup.create_from_directory(
-                directory="/nonexistent/path", description="Test group"
+                position_v2.video.VideoGroupParams(
+                    directory="/nonexistent/path", description="Test group"
+                )
             )
 
     def test_create_from_directory_basic(self, position_v2, tmp_path):
@@ -54,7 +56,11 @@ class TestVidFileGroupHelpers:
 
         # Create group (videos won't be added since not in VideoFile table)
         group_key = VidFileGroup.create_from_directory(
-            directory=tmp_path, description="Test video group", pattern="*.mp4"
+            position_v2.video.VideoGroupParams(
+                directory=tmp_path,
+                description="Test video group",
+                pattern="*.mp4",
+            )
         )
 
         # Group should be created
@@ -68,7 +74,11 @@ class TestVidFileGroupHelpers:
         # Empty directory
         with pytest.raises(ValueError, match="No video files found"):
             VidFileGroup.create_from_directory(
-                directory=tmp_path, description="Empty group", pattern="*.mp4"
+                position_v2.video.VideoGroupParams(
+                    directory=tmp_path,
+                    description="Empty group",
+                    pattern="*.mp4",
+                )
             )
 
     def test_create_from_directory_recursive(self, position_v2, tmp_path):
@@ -83,10 +93,34 @@ class TestVidFileGroupHelpers:
 
         # Test that recursive finds files in subdirectories
         group_key = VidFileGroup.create_from_directory(
+            position_v2.video.VideoGroupParams(
+                directory=tmp_path,
+                description="Recursive group",
+                pattern="*.mp4",
+                recursive=True,
+            )
+        )
+
+        # Group should be created
+        assert "vid_group_id" in group_key
+        assert isinstance(group_key["vid_group_id"], str)
+
+    def test_create_from_directory_legacy_interface(
+        self, position_v2, tmp_path
+    ):
+        """Test backward compatibility with legacy parameter interface."""
+        VidFileGroup = position_v2.video.VidFileGroup
+
+        # Create some mock video files
+        (tmp_path / "video1.mp4").touch()
+        (tmp_path / "video2.mp4").touch()
+
+        # Test legacy interface still works
+        group_key = VidFileGroup.create_from_directory_legacy(
             directory=tmp_path,
-            description="Recursive group",
+            description="Legacy test group",
             pattern="*.mp4",
-            recursive=True,
+            recursive=False,
         )
 
         # Group should be created
@@ -170,13 +204,20 @@ class TestVidFileGroupGetNwbFile:
 
         VidFileGroup = position_v2.video.VidFileGroup
 
-        video_entries = VideoFile().fetch(as_dict=True, limit=1)
+        # Get videos from the same session only to avoid multiple NWB files
+        target_nwb = mini_dict["nwb_file_name"]
+        video_entries = (VideoFile & {"nwb_file_name": target_nwb}).fetch(
+            as_dict=True, limit=1
+        )
         if not video_entries:
-            pytest.skip("No VideoFile entries in mini session")
+            pytest.skip("No VideoFile entries in target session")
+
+        # Use a unique group ID based on the session to avoid conflicts
+        test_group_id = f"gnf_linked_test_{target_nwb.replace('.nwb', '').replace('.', '_')}"
 
         VidFileGroup().insert1(
             {
-                "vid_group_id": "gnf_linked_group_test",
+                "vid_group_id": test_group_id,
                 "description": "get_nwb_file session-linked group",
             },
             skip_duplicates=True,
@@ -189,10 +230,10 @@ class TestVidFileGroupGetNwbFile:
             if k in ("nwb_file_name", "epoch", "video_file_num")
         }
         VidFileGroup.File().insert1(
-            {"vid_group_id": "gnf_linked_group_test", **video_pk},
+            {"vid_group_id": test_group_id, **video_pk},
             skip_duplicates=True,
         )
 
-        result = VidFileGroup().get_nwb_file("gnf_linked_group_test")
+        result = VidFileGroup().get_nwb_file(test_group_id)
         assert "nwb_file_name" in result
         assert result["nwb_file_name"] == mini_dict["nwb_file_name"]

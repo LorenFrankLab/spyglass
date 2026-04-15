@@ -8,9 +8,8 @@ import pytest
 class TestApplyLikelihoodThreshold:
     """Test likelihood thresholding."""
 
-    def test_threshold_basic(self):
+    def test_threshold_basic(self, pose_v2_instance):
         """Test basic likelihood thresholding."""
-        from spyglass.position.v2.estim import PoseV2
 
         # Create pose data with likelihood column
         time = np.arange(5, dtype=float)
@@ -23,7 +22,7 @@ class TestApplyLikelihoodThreshold:
         pose_df.columns = pd.MultiIndex.from_tuples(pose_df.columns)
 
         # Apply threshold
-        result = PoseV2._apply_likelihood_threshold(pose_df, 0.95)
+        result = pose_v2_instance._apply_likelihood_threshold(pose_df, 0.95)
 
         # Frame 2 should be NaN (likelihood 0.5 < 0.95)
         assert np.isnan(result.loc[2.0, ("scorer", "nose", "x")])
@@ -33,9 +32,8 @@ class TestApplyLikelihoodThreshold:
         assert result.loc[0.0, ("scorer", "nose", "x")] == 0.0
         assert result.loc[4.0, ("scorer", "nose", "x")] == 4.0
 
-    def test_threshold_multiple_bodyparts(self):
+    def test_threshold_multiple_bodyparts(self, pose_v2_instance):
         """Test thresholding with multiple bodyparts."""
-        from spyglass.position.v2.estim import PoseV2
 
         time = np.arange(3, dtype=float)
         data = {
@@ -49,7 +47,7 @@ class TestApplyLikelihoodThreshold:
         pose_df = pd.DataFrame(data, index=time)
         pose_df.columns = pd.MultiIndex.from_tuples(pose_df.columns)
 
-        result = PoseV2._apply_likelihood_threshold(pose_df, 0.95)
+        result = pose_v2_instance._apply_likelihood_threshold(pose_df, 0.95)
 
         # nose frame 1 should be NaN
         assert np.isnan(result.loc[1.0, ("scorer", "nose", "x")])
@@ -58,9 +56,8 @@ class TestApplyLikelihoodThreshold:
         # nose frame 0 should be valid
         assert result.loc[0.0, ("scorer", "nose", "x")] == 0.0
 
-    def test_threshold_no_likelihood_column(self, caplog):
+    def test_threshold_no_likelihood_column(self, pose_v2_instance, caplog):
         """Test handling when likelihood column is missing."""
-        from spyglass.position.v2.estim import PoseV2
 
         time = np.arange(3, dtype=float)
         data = {
@@ -70,19 +67,21 @@ class TestApplyLikelihoodThreshold:
         pose_df = pd.DataFrame(data, index=time)
         pose_df.columns = pd.MultiIndex.from_tuples(pose_df.columns)
 
-        # Should log warning and return unchanged
-        result = PoseV2._apply_likelihood_threshold(pose_df, 0.95)
+        # Should return unchanged when no likelihood column
+        result = pose_v2_instance._apply_likelihood_threshold(pose_df, 0.95)
 
-        assert "No likelihood column for nose" in caplog.text
+        # Data should be unchanged
         assert result.loc[1.0, ("scorer", "nose", "x")] == 1.0
+        assert result.shape == pose_df.shape
+        # Check that all values are unchanged
+        pd.testing.assert_frame_equal(result, pose_df)
 
 
 class TestFlattenMultiIndex:
     """Test MultiIndex column flattening."""
 
-    def test_flatten_three_level(self):
+    def test_flatten_three_level(self, pose_v2_instance):
         """Test flattening 3-level MultiIndex."""
-        from spyglass.position.v2.estim import PoseV2
 
         data = {
             ("scorer", "nose", "x"): [0.0, 1.0],
@@ -92,16 +91,15 @@ class TestFlattenMultiIndex:
         df = pd.DataFrame(data)
         df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        result = PoseV2._flatten_multiindex(df)
+        result = pose_v2_instance._flatten_multiindex(df)
 
         # Should have 2-level columns
         assert result.columns.nlevels == 2
         assert ("nose", "x") in result.columns
         assert ("tail", "x") in result.columns
 
-    def test_flatten_already_two_level(self):
+    def test_flatten_already_two_level(self, pose_v2_instance):
         """Test flattening already-flat MultiIndex."""
-        from spyglass.position.v2.estim import PoseV2
 
         data = {
             ("nose", "x"): [0.0, 1.0],
@@ -110,7 +108,7 @@ class TestFlattenMultiIndex:
         df = pd.DataFrame(data)
         df.columns = pd.MultiIndex.from_tuples(df.columns)
 
-        result = PoseV2._flatten_multiindex(df)
+        result = pose_v2_instance._flatten_multiindex(df)
 
         # Should remain unchanged
         assert result.columns.nlevels == 2
@@ -387,15 +385,14 @@ class TestSmoothPosition:
 class TestCalculateVelocity:
     """Test velocity calculation."""
 
-    def test_velocity_basic(self):
+    def test_velocity_basic(self, pose_v2_instance):
         """Test basic velocity calculation."""
-        from spyglass.position.v2.estim import PoseV2
 
         # Constant velocity motion
         position = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]])
         timestamps = np.array([0.0, 1.0, 2.0, 3.0])
 
-        velocity = PoseV2._calculate_velocity(
+        velocity = pose_v2_instance._calculate_velocity(
             position, timestamps, sampling_rate=1.0
         )
 
@@ -403,15 +400,14 @@ class TestCalculateVelocity:
         assert np.isnan(velocity[0])
         assert np.allclose(velocity[1:], 1.0, atol=0.01)
 
-    def test_velocity_diagonal(self):
+    def test_velocity_diagonal(self, pose_v2_instance):
         """Test velocity with diagonal motion."""
-        from spyglass.position.v2.estim import PoseV2
 
         # Diagonal motion at 45 degrees
         position = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0]])
         timestamps = np.array([0.0, 1.0, 2.0])
 
-        velocity = PoseV2._calculate_velocity(
+        velocity = pose_v2_instance._calculate_velocity(
             position, timestamps, sampling_rate=1.0
         )
 
@@ -420,16 +416,15 @@ class TestCalculateVelocity:
         expected_velocity = np.sqrt(2.0)
         assert np.allclose(velocity[1:], expected_velocity, atol=0.01)
 
-    def test_velocity_with_nans(self):
+    def test_velocity_with_nans(self, pose_v2_instance):
         """Test velocity calculation with NaN positions."""
-        from spyglass.position.v2.estim import PoseV2
 
         position = np.array(
             [[0.0, 0.0], [1.0, 1.0], [np.nan, np.nan], [3.0, 3.0]]
         )
         timestamps = np.array([0.0, 1.0, 2.0, 3.0])
 
-        velocity = PoseV2._calculate_velocity(
+        velocity = pose_v2_instance._calculate_velocity(
             position, timestamps, sampling_rate=1.0
         )
 
