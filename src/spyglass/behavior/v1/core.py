@@ -126,9 +126,9 @@ class PoseGroup(SpyglassMixin, dj.Manual):
                     bodyparts_df.keys().get_level_values(0).unique().values
                 )
                 missing_bodyparts = sorted(
-                    set(anterior_bodyparts).union(
-                        posterior_bodyparts
-                    ).difference(available_bodyparts)
+                    set(anterior_bodyparts)
+                    .union(posterior_bodyparts)
+                    .difference(available_bodyparts)
                 )
                 if missing_bodyparts:
                     raise ValueError(
