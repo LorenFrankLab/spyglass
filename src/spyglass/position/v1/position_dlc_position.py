@@ -218,13 +218,13 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
             inds_to_span=params["num_inds_to_span"],
         )
 
-        nan_spans = get_span_start_stop(np.where(bad_inds)[0])
-
         if params.get("if_bounds"):
             df_w_nans = check_bounds_all_bodyparts(
                 df_w_nans, params.get("bounds")
             )
 
+        nan_mask = df_w_nans.isna().any(axis=1).to_numpy()
+        nan_spans = get_span_start_stop(np.where(nan_mask)[0])
         if params.get("interpolate"):
             interp_params = params.get("interp_params", dict())
             self._info_msg("interpolating across low likelihood times")
