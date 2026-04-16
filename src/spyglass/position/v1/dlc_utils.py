@@ -641,7 +641,7 @@ def check_bounds_single(xy_loc, bounds):
 
 
 def check_bounds_all_bodyparts(df, bounds):
-    inside_dict = {}
+  """Checks if (x,y) position of each labeled body part in ROI """
     df_copy = df.copy()
 
     xy_loc = df_copy[["x", "y"]].to_numpy()
