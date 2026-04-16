@@ -121,3 +121,61 @@ def test_get_pos_dict_with_rate():
         np.array([[-1e-7, 3.3 + 1e-7]]),
         atol=1e-9,
     )
+
+
+def test_get_pos_dict_with_timestamps():
+    """_get_pos_dict handles SpatialSeries that provide explicit timestamps."""
+    spatial_series = pynwb.behavior.SpatialSeries(
+        name="series_0",
+        data=np.zeros((100, 2)),
+        timestamps=np.linspace(0.0, 99.0 / 30.0, 100),
+        reference_frame="unknown",
+    )
+    position = pynwb.behavior.Position(spatial_series=spatial_series)
+    epoch_groups = _get_epoch_groups(position)
+
+    pos_dict = _get_pos_dict(position.spatial_series, epoch_groups)
+
+    assert list(pos_dict.keys()) == [0]
+    assert len(pos_dict[0]) == 1
+    assert pos_dict[0][0]["raw_position_object_id"] == spatial_series.object_id
+    assert pos_dict[0][0]["name"] == "series_0"
+    np.testing.assert_allclose(
+        pos_dict[0][0]["valid_times"],
+        np.array([[-1e-7, 3.3 + 1e-7]]),
+        atol=1e-9,
+    )
+
+
+def test_get_pos_dict_with_missing_starting_time_raises_value_error():
+    """_get_pos_dict raises a clear error when starting_time is missing."""
+    spatial_series = pynwb.behavior.SpatialSeries(
+        name="series_0",
+        data=np.zeros((100, 2)),
+        timestamps=None,
+        starting_time=0.0,
+        rate=30.0,
+        reference_frame="unknown",
+    )
+    spatial_series.starting_time = None
+    position = pynwb.behavior.Position(spatial_series=spatial_series)
+    epoch_groups = {0.0: [0]}
+
+    with pytest.raises(ValueError, match="missing starting_time"):
+        _get_pos_dict(position.spatial_series, epoch_groups)
+
+
+def test_get_pos_dict_with_invalid_rate_raises_value_error():
+    """_get_pos_dict raises a clear error when rate is invalid."""
+    spatial_series = pynwb.behavior.SpatialSeries(
+        name="series_0",
+        data=np.zeros((100, 2)),
+        starting_time=0.0,
+        rate=0.0,
+        reference_frame="unknown",
+    )
+    position = pynwb.behavior.Position(spatial_series=spatial_series)
+    epoch_groups = _get_epoch_groups(position)
+
+    with pytest.raises(ValueError, match="invalid rate"):
+        _get_pos_dict(position.spatial_series, epoch_groups)
