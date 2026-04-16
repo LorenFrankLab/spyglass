@@ -149,7 +149,11 @@ jobs:
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        pytest --no-docker --no-dlc \
+        # --base-dir pins tests to the cached tests/_data/ path (see
+        # Cache test data step above). Without it, conftest.py now defaults
+        # to a per-session temp directory for safety (issue #1573), which
+        # would bypass the cache and re-download the NWB + video fixtures.
+        pytest --no-docker --no-dlc --base-dir ./tests/_data/ \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/
