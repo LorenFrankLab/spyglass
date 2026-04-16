@@ -150,6 +150,8 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix update bug in `_resolve_external_tables` #1536
 - Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
     `starting_time + rate` (no timestamps) #1567
+- Fix `_get_pos_dict` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1571
 - Parallelize `AnalysisFileIssues` checks #1557
 - Tests update config sooner to avoid false-negative `test_mode` errors #1572
 - Tests default to a per-session temp `base_dir` and ignore an exported
