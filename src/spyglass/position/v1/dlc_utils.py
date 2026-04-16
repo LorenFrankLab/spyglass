@@ -589,6 +589,70 @@ def get_span_start_stop(indices):
     return span_inds
 
 
+# ROI/bounds filtering helpers for DLC position
+
+
+def cross_product(a, b):
+    if np.isnan(a).any() or np.isnan(b).any():
+        return np.nan
+    return a[0] * b[1] - a[1] * b[0]
+
+
+# To check if only one bodypart's points are within bounds
+def check_bounds_single(xy_loc, bounds):
+    """Return a mask of points inside a convex polygon.
+
+    `bounds` must define a convex polygon. Vertex winding may be either
+    clockwise or counterclockwise.
+    """
+    inside = np.ones(
+        len(xy_loc), dtype=bool
+    )  # Set all points as inside initially
+
+    for j in range(len(xy_loc)):
+        has_positive_cp = False
+        has_negative_cp = False
+
+        for i in range(len(bounds)):
+            A = bounds[i]
+            B = bounds[
+                (i + 1) % len(bounds)
+            ]  # Loop around the boundary, A->B, B->C, C->D, D->A
+            edge = B - A  # computes the vector around boundary points
+            vector = xy_loc[j] - A  # Vector from A to animal's position
+
+            # Compute the cross product for the current animal's position
+            cp = cross_product(edge, vector)
+
+            if cp is None:
+                inside[j] = False
+                break
+            if cp > 0:
+                has_positive_cp = True
+            elif cp < 0:
+                has_negative_cp = True
+
+            # For a convex polygon, points inside have cross products with a
+            # consistent sign for every edge, regardless of vertex winding.
+            if has_positive_cp and has_negative_cp:
+                inside[j] = False
+                break
+    return inside
+
+
+def check_bounds_all_bodyparts(df, bounds):
+  """Checks if (x,y) position of each labeled body part in ROI """
+    df_copy = df.copy()
+
+    xy_loc = df_copy[["x", "y"]].to_numpy()
+    inside = check_bounds_single(xy_loc, bounds)
+    logger.debug("Inside bounds mask: %s", inside)
+    outside = ~inside
+    df_copy.loc[outside, ("x")] = np.nan
+    df_copy.loc[outside, ("y")] = np.nan
+    return df_copy
+
+
 def interp_pos(dlc_df, spans_to_interp, **kwargs):
     """Interpolate x and y positions in DLC dataframe"""
     idx = pd.IndexSlice
