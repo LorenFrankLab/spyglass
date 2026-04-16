@@ -219,9 +219,22 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         )
 
         if params.get("if_bounds"):
-            df_w_nans = check_bounds_all_bodyparts(
-                df_w_nans, params.get("bounds")
-            )
+            bounds = params.get("bounds")
+            if bounds is None:
+                raise ValueError(
+                    "Parameter 'bounds' must be provided when 'if_bounds' is True."
+                )
+            try:
+                bounds = np.asarray(bounds, dtype=float)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "Parameter 'bounds' must be a numeric array-like with shape (N, 2)."
+                ) from exc
+            if bounds.ndim != 2 or bounds.shape[1] != 2:
+                raise ValueError(
+                    f"Parameter 'bounds' must have shape (N, 2); got {bounds.shape}."
+                )
+            df_w_nans = check_bounds_all_bodyparts(df_w_nans, bounds)
 
         nan_mask = df_w_nans.isna().any(axis=1).to_numpy()
         nan_spans = get_span_start_stop(np.where(nan_mask)[0])
