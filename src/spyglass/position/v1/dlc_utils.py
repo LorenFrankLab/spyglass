@@ -589,7 +589,7 @@ def get_span_start_stop(indices):
     return span_inds
 
 
-# SONA ADDING CODE...
+# ROI/bounds filtering helpers for DLC position
 
 
 def cross_product(a, b):
