@@ -1,6 +1,6 @@
 import pytest
 
-from tests.conftest import skip_if_no_dlc
+from tests.conftest import skip_if_no_pose
 
 
 def test_existing_params(
@@ -36,8 +36,8 @@ def test_insert_params_error(dlc_training_params):
         )
 
 
-@skip_if_no_dlc
-def test_get_params(no_dlc, verbose_context, dlc_training_params):
+@skip_if_no_pose
+def test_get_params(no_pose, verbose_context, dlc_training_params):
     params_tbl, _ = dlc_training_params
     with verbose_context:
         accepted_params = params_tbl.get_accepted_params()

@@ -157,8 +157,9 @@ DeepLabCut.
 
 See [pyproject.toml](pyproject.toml),
 [environment.yml](environments/environment.yml), or
-[environment_dlc.yml](environments/environment_dlc.yml) for software
-dependencies.
+[environment_position.yml](environments/environment_position.yml) for software
+dependencies. Legacy DLC 2.x users: see
+[environment_dlc.yml](environments/environment_dlc.yml) (deprecated).
 
 See
 [spec-file.txt](https://github.com/LorenFrankLab/spyglass-demo/blob/main/spec-file/spec-file.txt)

@@ -278,7 +278,7 @@ def test_check1_file_filenotfound_error(
     issue_entry = (analysis_file_issues & key).fetch1()
     assert not issue_entry["on_disk"]
     assert not issue_entry["can_read"]
-    assert error_msg in issue_entry["issue"]
+    assert error_msg in issue_entry["issue"]  # TODO: Brittle to DB state?
 
     # Cleanup
     if teardown:

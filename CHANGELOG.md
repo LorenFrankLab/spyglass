@@ -8,7 +8,14 @@ Running draft to be removed immediately prior to release. When altering tables,
 import all foreign key references.
 
 ```python
+# Position V2 #1317
+from spyglass.common.common_behav import VideoFile
+
+VideoFile().alter()
+VideoFile.update_entries()
+
 # Alter Decoding v1 table
+
 from spyglass.common.common_filter import FirFilterParameters
 from spyglass.decoding.v1.core import DecodingParameters
 
@@ -182,11 +189,11 @@ for label, interval_data in results.groupby("interval_labels"):
     - Reduce lock conflicts between users during ingestion #1483
     - Add the table `RawCompassDirection` for importing orientation data from NWB
         files #1466
+    - Improve error transparency on duplicate `Electrode` ids #1454
+    - Add position v2 #1317
     - Allow ingestion of nwb files without behavior module #1441
     - Warn when ingesting ImageSeries without TaskEpoch #1461
     - Support ingestion of multi-epoch video files #1548
-    - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
-        available #1546
     - Fix bug with sgc.LabTeam().create_new_team when google_user_name is not
         available #1546
     - Fix bug from overlapping intervals in interval union #1520

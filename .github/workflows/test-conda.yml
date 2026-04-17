@@ -149,7 +149,7 @@ jobs:
         fi
     - name: Run tests (${{ steps.test_mode.outputs.description }})
       run: |
-        pytest --no-docker --no-dlc \
+        pytest --no-docker --no-pose \
           --cov-config=.coveragerc --cov=spyglass-neuro --cov-report=xml \
           ${{ steps.test_mode.outputs.marker_args }} \
           tests/

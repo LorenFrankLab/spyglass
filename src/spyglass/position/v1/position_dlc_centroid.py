@@ -8,17 +8,46 @@ from position_tools import get_distance, get_velocity
 
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import (
-    Centroid,
-    _key_to_smooth_func_dict,
-    file_log,
-    get_span_start_stop,
-    infer_output_dir,
-    interp_pos,
-    validate_list,
-    validate_option,
-    validate_smooth_params,
+from spyglass.position.utils import validate_option
+from spyglass.position.utils.centroid import Centroid
+from spyglass.position.utils.general import file_log, infer_output_dir
+from spyglass.position.utils.interpolation import _key_to_smooth_func_dict
+from spyglass.position.utils.interpolation import interp_position as interp_pos
+from spyglass.position.utils.orientation import get_span_start_stop
+from spyglass.position.utils.validation import validate_list
+from spyglass.position.utils.validation import (
+    validate_smoothing_params as _validate_smoothing_params,
 )
+
+
+def validate_smoothing_params(params: dict) -> None:
+    """V1-compatible wrapper for shared validation function.
+
+    Converts V1 parameter format to standardized format before validation.
+    """
+    if params is None:
+        return
+
+    # Create a copy to avoid modifying original
+    adapted_params = params.copy()
+
+    # Convert V1 'smooth_method' -> 'method' in smoothing_params if needed
+    if (
+        "smoothing_params" in adapted_params
+        and adapted_params["smoothing_params"]
+    ):
+        sp = adapted_params["smoothing_params"].copy()
+        if "smooth_method" in sp:
+            sp["method"] = sp.pop("smooth_method")
+        # Extract likelihood_thresh to top level for shared validation
+        if "likelihood_thresh" in sp:
+            adapted_params["likelihood_thresh"] = sp["likelihood_thresh"]
+        adapted_params["smoothing_params"] = sp
+
+    # Call shared validation with adapted parameters
+    _validate_smoothing_params(adapted_params)
+
+
 from spyglass.position.v1.position_dlc_cohort import DLCSmoothInterpCohort
 from spyglass.position.v1.position_dlc_position import DLCSmoothInterpParams
 from spyglass.utils import SpyglassMixin, logger
@@ -79,6 +108,7 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
             "interpolate": True,
             "interp_params": {"max_cm_to_interp": 15},
             "smooth": True,
+            "likelihood_thresh": 0.4,
             "smoothing_params": {
                 "smoothing_duration": 0.05,
                 "smooth_method": "moving_avg",
@@ -128,7 +158,7 @@ class DLCCentroidParams(SpyglassMixin, dj.Manual):
             permit_none=True,
         )
 
-        validate_smooth_params(params)
+        validate_smoothing_params(params)
 
         super().insert1(key, **kwargs)
 
@@ -210,7 +240,7 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
 
         # Handle the null centroid case
         if centroid_method == "null":
-            logger.warning("Null centroid method selected")
+            self._warn_msg("Null centroid method selected")
             analysis_file_name = AnalysisNwbfile().create(key["nwb_file_name"])
             null_obj_id = AnalysisNwbfile().add_nwb_object(
                 analysis_file_name, pd.DataFrame()
@@ -284,8 +314,17 @@ class DLCCentroid(SpyglassMixin, dj.Computed):
             self._info_msg(
                 f"Smoothing using method: {smooth_func.__name__}",
             )
+
+            # Only pass parameters that smooth_moving_avg accepts
+            smooth_func_params = {
+                "smoothing_duration": smooth_params.get("smoothing_duration"),
+            }
+            # Add coord_cols if specified
+            if "coord_cols" in smooth_params:
+                smooth_func_params["coord_cols"] = smooth_params["coord_cols"]
+
             final_df = smooth_func(
-                interp_df, sampling_rate=sampling_rate, **smooth_params
+                interp_df, sampling_rate=sampling_rate, **smooth_func_params
             )
         else:
             final_df = interp_df.copy()

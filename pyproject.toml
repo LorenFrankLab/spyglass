@@ -71,8 +71,9 @@ dependencies = [
 ]
 
 optional-dependencies.dlc = [
-  "deeplabcut[tf]", # removing dlc pin removes need to pin tf/numba
+  "deeplabcut>=3", # 3.0+ drops TF and uses PyTorch backend
   "ffmpeg",
+  "ndx-pose>=0.2",
 ]
 optional-dependencies.docs = [
   "hatch",                  # Get version from env
@@ -152,7 +153,7 @@ addopts = [
   "-p no:warnings",
   # "--no-teardown",  # don't teardown the database after tests
   # "--quiet-spy",   # don't show logging from spyglass
-  # "--no-dlc",      # don't run DLC tests
+  # "--no-pose",      # don't run DLC tests
   "--show-capture=no",
   "--pdbcls=IPython.terminal.debugger:TerminalPdb", # use ipython debugger
   "--doctest-modules",                              # run doctests in all modules

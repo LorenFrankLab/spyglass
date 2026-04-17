@@ -11,7 +11,7 @@ from spyglass.common import get_position_interval_epoch
 from spyglass.common.common_behav import RawPosition
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.common.common_position import IntervalPositionInfo, _fix_col_names
-from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
+from spyglass.position.utils.general import find_mp4, get_video_info
 from spyglass.position.v1.dlc_utils_makevid import make_video
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
@@ -262,7 +262,7 @@ class TrodesPosV1(SpyglassMixin, dj.Computed):
                 TrodesPosParams & {"trodes_pos_params_name": pos_params}
             ).fetch1("params")["is_upsampled"]
         ):
-            logger.warning(
+            logger.warn_msg(
                 "Upsampled position data, frame indices are invalid. "
                 + "Setting add_frame_ind=False"
             )

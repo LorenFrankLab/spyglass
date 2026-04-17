@@ -1,7 +1,7 @@
-import pathlib
 import re
 from collections import defaultdict
 from functools import reduce
+from pathlib import Path
 from typing import Dict, List, Union
 
 import datajoint as dj
@@ -469,6 +469,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
     ---
     camera_name: varchar(80)
     video_file_object_id: varchar(40)  # the object id of the file object
+    path = NULL: varchar(512)  # path to video file (if extracted)
+    unique index (path)
     """
 
     _nwb_table = Nwbfile
@@ -515,11 +517,21 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 f"expected pattern '{cam_device_regex}'"
             )
 
+        # Resolve the on-disk path: prefer external_file (actual filename) over
+        # the NWB object name, which is often a generic label like "video_files".
+        ext_files = getattr(video_obj, "external_file", None) or []
+        if ext_files:
+            first_ext = Path(ext_files[0])
+            video_filename = first_ext.name
+        else:
+            video_filename = video_obj.name
+
         return dict(
             key,
             video_file_num=int(match[1]),
             camera_name=camera_name,
             video_file_object_id=video_obj.object_id,
+            path=(Path(video_dir) / video_filename).as_posix(),
         )
 
     def _validate_video_timestamps(self, video_obj, valid_times, key):
@@ -799,16 +811,29 @@ class VideoFile(SpyglassMixin, dj.Imported):
     @classmethod
     def update_entries(cls, restrict=True):
         """Update the camera_name field for all entries in the table."""
-        existing_entries = (cls & restrict).fetch("KEY")
+        query = cls & restrict & "camera_name IS NULL OR path IS NULL"
+        existing_entries = query.fetch("KEY")
+
         for row in existing_entries:
-            if (cls & row).fetch1("camera_name"):
+            if row.get("camera_name"):
                 continue
-            video_nwb = (cls & row).fetch_nwb()[0]
+            video_nwb = (cls & row).fetch_nwb()
             if len(video_nwb) != 1:
                 raise ValueError(
                     f"Expecting 1 video file per entry. {len(video_nwb)} found"
                 )
             row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
+            cls.update1(row=row)
+
+        for row in existing_entries:
+            if row.get("path"):
+                continue
+            try:
+                abs_path = cls.get_abs_path(row)
+            except FileNotFoundError as e:
+                logger.warning(f"Skipping path update for {row}: {e}")
+                continue
+            row["path"] = abs_path
             cls.update1(row=row)
 
     @classmethod
@@ -828,21 +853,88 @@ class VideoFile(SpyglassMixin, dj.Imported):
         nwb_video_file_abspath : str
             The absolute path for the given file name.
         """
-        video_path_obj = pathlib.Path(video_dir)
+        video_path_obj = Path(video_dir)
         video_info = (cls & key).fetch1()
+
+        # If the path was stored during make(), use it directly.
+        if stored_path := video_info.get("path"):
+            stored = Path(stored_path)
+            if stored.exists():
+                return stored.as_posix()
+
         nwb_path = Nwbfile.get_abs_path(key["nwb_file_name"])
         nwbf = get_nwb_file(nwb_path)
         nwb_video = nwbf.objects[video_info["video_file_object_id"]]
+
+        # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
+        # reference to a ProcessingModule), search the NWB for ImageSeries.
+        import pynwb as _pynwb
+
+        if not isinstance(nwb_video, _pynwb.image.ImageSeries):
+            image_series = [
+                obj
+                for obj in nwbf.objects.values()
+                if isinstance(obj, _pynwb.image.ImageSeries)
+            ]
+            if not image_series:
+                raise FileNotFoundError(
+                    f"No ImageSeries found in {key['nwb_file_name']}"
+                )
+            nwb_video = image_series[0]
+
         video_filename = nwb_video.name
-        # see if the file exists and is stored in the base analysis dir
-        nwb_video_file_abspath = pathlib.Path(video_path_obj / video_filename)
+
+        # Try the NWB object name first (often equals the real filename)
+        nwb_video_file_abspath = Path(video_path_obj / video_filename)
         if nwb_video_file_abspath.exists():
             return nwb_video_file_abspath.as_posix()
-        else:
-            raise FileNotFoundError(
-                f"video file with filename: {video_filename} "
-                f"does not exist in {video_path_obj}/"
+
+        # Fallback: check external_file entries (actual on-disk video paths)
+        for ext_file in getattr(nwb_video, "external_file", None) or []:
+            ext = Path(ext_file)
+            if ext.is_absolute() and ext.exists():
+                return ext.as_posix()
+            abs_ext = video_path_obj / ext.name
+            if abs_ext.exists():
+                return abs_ext.as_posix()
+
+        raise FileNotFoundError(
+            f"video file with filename: {video_filename} "
+            f"does not exist in {video_path_obj}/"
+        )
+
+    def fetch_key_from_path(
+        self, video_file_path: str, insert: bool = False
+    ) -> Dict:
+        """Return the primary key for a given video file path.
+
+        Parameters
+        ----------
+        video_file_path : str
+            The path to the video file.
+        insert : bool
+            Whether to insert the key if not found. Defaults to False.
+
+        Returns
+        -------
+        key : dict
+            The primary key for the given video file path.
+        """
+        video_path = Path(video_file_path).resolve()
+
+        if not video_path.exists():
+            raise FileNotFoundError(f"File {video_path} does not exist.")
+
+        _ = self.update_entries()  # ensure paths are updated
+
+        query = self & f"path='{video_path.as_posix()}'"
+
+        if len(query) != 1:
+            raise ValueError(
+                f"No unique entry in VideoFile for {video_path}: \n{query}"
             )
+
+        return query.fetch1("KEY")
 
 
 @schema
@@ -856,10 +948,6 @@ class PositionIntervalMap(SpyglassMixin, dj.Computed):
     # #849 - Insert null to avoid rerun
 
     def make(self, key):
-        """Make without transaction"""
-        self._no_transaction_make(key)
-
-    def _no_transaction_make(self, key):
         # Find correspondence between pos valid times names and epochs. Use
         # epsilon to tolerate small differences in epoch boundaries across
         # epoch/pos intervals
@@ -985,7 +1073,7 @@ def convert_epoch_interval_name_to_position_interval_name(
     if populate_missing and (no_entries or null_entry):
         if null_entry:
             pos_query.delete(safemode=False)  # no prompt
-        PositionIntervalMap()._no_transaction_make(key)
+        PositionIntervalMap().make(key)
         pos_query = PositionIntervalMap & key
 
     if pos_query.fetch(pos_str)[0] == "":

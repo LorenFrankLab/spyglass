@@ -7,15 +7,48 @@ import pandas as pd
 import pynwb
 
 from spyglass.common.common_nwbfile import AnalysisNwbfile
-from spyglass.position.v1.dlc_utils import (
-    _key_to_smooth_func_dict,
-    file_log,
-    get_span_start_stop,
-    infer_output_dir,
-    interp_pos,
-    validate_option,
-    validate_smooth_params,
+from spyglass.position.utils import validate_option
+from spyglass.position.utils.general import file_log, infer_output_dir
+from spyglass.position.utils.interpolation import _key_to_smooth_func_dict
+from spyglass.position.utils.interpolation import interp_position as interp_pos
+from spyglass.position.utils.orientation import get_span_start_stop
+from spyglass.position.utils.validation import (
+    validate_smoothing_params as _validate_smoothing_params,
 )
+
+
+def validate_smoothing_params(params: dict) -> None:
+    """V1-compatible wrapper for shared validation function.
+
+    Converts V1 parameter format to standardized format before validation.
+    """
+    if params is None:
+        return
+
+    # Create a copy to avoid modifying original
+    adapted_params = params.copy()
+
+    # Convert V1 interpolation format: interpolate=dict(...) -> interpolate=True, interp_params=dict(...)
+    if "interpolate" in adapted_params and isinstance(
+        adapted_params["interpolate"], dict
+    ):
+        adapted_params["interp_params"] = adapted_params["interpolate"]
+        adapted_params["interpolate"] = True
+
+    # Convert V1 'smooth_method' -> 'method' in smoothing_params if needed
+    if (
+        "smoothing_params" in adapted_params
+        and adapted_params["smoothing_params"]
+    ):
+        sp = adapted_params["smoothing_params"].copy()
+        if "smooth_method" in sp:
+            sp["method"] = sp.pop("smooth_method")
+            adapted_params["smoothing_params"] = sp
+
+    # Call shared validation with adapted parameters
+    _validate_smoothing_params(adapted_params)
+
+
 from spyglass.position.v1.position_dlc_pose_estimation import DLCPoseEstimation
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
@@ -137,7 +170,7 @@ class DLCSmoothInterpParams(SpyglassMixin, dj.Manual):
         validate_option(
             option=params.get("max_cm_between_pts"), name="max_cm_between_pts"
         )
-        validate_smooth_params(params)
+        validate_smoothing_params(params)
 
         validate_option(
             params.get("likelihood_thresh"),
@@ -528,4 +561,12 @@ def get_subthresh_inds(
 
     if ret_sub_thresh:
         return all_nan_inds, sub_thresh_percent
+    return all_nan_inds
+    if ret_sub_thresh:
+        return all_nan_inds, sub_thresh_percent
+    return all_nan_inds
+    if ret_sub_thresh:
+        return all_nan_inds, sub_thresh_percent
+    return all_nan_inds
+    return all_nan_inds
     return all_nan_inds
