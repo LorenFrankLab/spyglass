@@ -485,7 +485,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
             raise ValueError(
                 f"Session '{matched_nwb}' matched the DLC config but has no "
                 "VideoFile entries. Ensure videos are registered (via "
-                "insert_sessions()) before calling import_model().\n"
+                "insert_sessions()) before calling load().\n"
                 f"  config: {config_path}\n"
                 f"  video paths: {video_paths}"
             )

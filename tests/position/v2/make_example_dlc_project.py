@@ -2,7 +2,7 @@
 
 The project is designed to exercise:
   - Model._get_latest_dlc_model_info() (fake trained-model layout)
-  - Model.import_model() via DLC config.yaml
+  - Model.load() via DLC config.yaml
   - VidFileGroup.create_from_dlc_config() (session matching)
   - Model.get_training_history() (fake learning_stats.csv)
 

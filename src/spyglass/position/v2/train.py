@@ -159,8 +159,8 @@ def default_pk_name(
     # TODO: Migrate this to general utils for use with other params tables?
 
     when = datetime.utcnow()
-    h = dj.hash.key_hash(params or dict()) if include_hash else ""
-    return f"{prefix}-{when:%Y%m%d}-{h}"[:limit]
+    h = "-" + dj.hash.key_hash(params or dict()) if include_hash else ""
+    return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
 
 
 def prompt_default(primary_key: str, default: str) -> str:
@@ -531,8 +531,249 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         return insert_pk
 
-    def get_centroid_method(self):
-        raise NotImplementedError("Return func based graph")
+    def show_skeleton(self, skeleton_id: str = None):
+        """Display skeleton graph visualization similar to datajoint.Diagram.
+
+        This method visualizes the skeleton structure showing bodyparts as nodes
+        and their connections as edges, similar to how DataJoint's Diagram shows
+        table relationships.
+
+        Parameters
+        ----------
+        skeleton_id : str, optional
+            Skeleton ID to visualize. If None, uses current restriction.
+            If multiple skeletons match, shows the first one.
+
+        Returns
+        -------
+        matplotlib figure
+            Interactive plot showing the skeleton graph structure.
+
+        Examples
+        --------
+        >>> # Show a specific skeleton
+        >>> Skeleton().show_skeleton("4LED")
+
+        >>> # Show skeleton from current restriction
+        >>> (Skeleton & {"skeleton_id": "4LED"}).show_skeleton()
+        """
+        try:
+            import matplotlib.patches as patches
+            import matplotlib.pyplot as plt
+            import networkx as nx
+        except ImportError:
+            raise ImportError(
+                "Skeleton visualization requires matplotlib and networkx. "
+                "Install with: pip install matplotlib networkx"
+            )
+
+        # Get skeleton data
+        if skeleton_id:
+            skeleton_data = (self & {"skeleton_id": skeleton_id}).fetch1()
+        else:
+            skeleton_data = self.fetch1() if len(self) == 1 else self.fetch()[0]
+
+        skeleton_id = skeleton_data["skeleton_id"]
+        bodyparts = skeleton_data["bodyparts"]
+        edges = skeleton_data["edges"] or []
+
+        if not bodyparts:
+            # Use existing method to get bodyparts
+            bodyparts = self.get_bodyparts(skeleton_id)
+
+        if not bodyparts:
+            print(f"No bodyparts found for skeleton '{skeleton_id}'")
+            return None
+
+        # Use existing method to build graph for positioning
+        G = self._build_labeled_graph(bodyparts, edges)
+
+        # Create figure with better sizing for zoomed-out view
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ax.set_aspect("equal")
+
+        # Calculate positions with expanded coordinate space
+        if len(bodyparts) == 1:
+            pos = {self._normalize_label(bodyparts[0]): (0, 0)}
+        else:
+            # Spring layout with larger separation (k parameter)
+            pos = nx.spring_layout(G, k=3, iterations=150, seed=42)
+
+        # Create mapping from normalized labels back to original labels
+        label_map = {self._normalize_label(bp): bp for bp in bodyparts}
+
+        # Style settings for zoomed-out view
+        node_color = "#E8F4FD"  # Light blue like DataJoint tables
+        edge_color = "#2E86AB"  # DataJoint blue
+        circle_radius = 0.25  # Smaller circles for better proportions
+
+        # Draw edges first (behind nodes)
+        for u, v in G.edges():  # G has normalized node names
+            if u in pos and v in pos:
+                x1, y1 = pos[u]
+                x2, y2 = pos[v]
+                ax.plot(
+                    [x1, x2],
+                    [y1, y2],
+                    color=edge_color,
+                    linewidth=2,
+                    alpha=0.7,
+                    zorder=1,
+                )
+
+        # Draw bodypart nodes using original names for display
+        for norm_label, (x, y) in pos.items():
+            original_label = label_map[norm_label]
+
+            # Draw circle
+            circle = patches.Circle(
+                (x, y),
+                circle_radius,
+                facecolor=node_color,
+                edgecolor=edge_color,
+                linewidth=1.5,
+                zorder=3,
+            )
+            ax.add_patch(circle)
+
+            # Add label with appropriate font size
+            fontsize = max(8, min(11, int(100 / max(len(original_label), 1))))
+            ax.text(
+                x,
+                y,
+                original_label,
+                horizontalalignment="center",
+                verticalalignment="center",
+                fontsize=fontsize,
+                fontweight="bold",
+                zorder=4,
+            )
+
+        # Set plot limits with margins for better zoom
+        if pos:
+            x_coords = [pos[node][0] for node in pos]
+            y_coords = [pos[node][1] for node in pos]
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+
+            # Add margins around the skeleton
+            x_margin = max(0.5, (x_max - x_min) * 0.2)
+            y_margin = max(0.5, (y_max - y_min) * 0.2)
+            ax.set_xlim(x_min - x_margin, x_max + x_margin)
+            ax.set_ylim(y_min - y_margin, y_max + y_margin)
+        else:
+            ax.set_xlim(-2, 2)
+            ax.set_ylim(-2, 2)
+        ax.set_title(
+            f"Skeleton: {skeleton_id}\n{len(bodyparts)} bodyparts, {len(edges)} connections",
+            fontsize=14,
+            fontweight="bold",
+            pad=20,
+        )
+        ax.axis("off")
+
+        # Add legend with appropriately sized elements
+        legend_elements = [
+            patches.Circle(
+                (0, 0),
+                0.05,  # Smaller legend circle
+                facecolor=node_color,
+                edgecolor=edge_color,
+                label="Bodypart",
+            ),
+        ]
+        if edges:
+            legend_elements.append(
+                plt.Line2D(
+                    [0], [0], color=edge_color, linewidth=2, label="Connection"
+                )
+            )
+        ax.legend(handles=legend_elements, loc="upper right")
+
+        # Add bodypart list as simple text box at bottom
+        bodypart_text = f"Bodyparts: {', '.join(sorted(bodyparts))}"
+        ax.text(
+            0.02,
+            0.02,
+            bodypart_text,
+            transform=ax.transAxes,
+            fontsize=8,
+            verticalalignment="bottom",
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.9),
+        )
+
+        plt.tight_layout()
+        # Don't call plt.show() to avoid double display in notebooks
+        return fig
+
+    def get_centroid_method(self, skeleton_id: str = None) -> str:
+        """Suggest appropriate centroid method for this skeleton.
+
+        Analyzes the bodyparts in the skeleton to recommend the best
+        centroid calculation method for position estimation.
+
+        Parameters
+        ----------
+        skeleton_id : str, optional
+            Skeleton ID to analyze. If None, uses current restriction.
+
+        Returns
+        -------
+        str
+            Recommended centroid method ('1pt', '2pt', or '4pt')
+
+        Examples
+        --------
+        >>> # Get centroid method suggestion
+        >>> method = (Skeleton & {"skeleton_id": "4LED"}).get_centroid_method()
+        >>> print(f"Recommended method: {method}")
+        """
+        # Get skeleton data
+        if skeleton_id:
+            skeleton_data = (self & {"skeleton_id": skeleton_id}).fetch1()
+        else:
+            skeleton_data = self.fetch1() if len(self) == 1 else self.fetch()[0]
+
+        bodyparts = skeleton_data["bodyparts"]
+
+        if not bodyparts:
+            bodyparts = self.get_bodyparts(skeleton_data["skeleton_id"])
+
+        if not bodyparts:
+            raise ValueError("No bodyparts found for skeleton")
+
+        # Normalize bodypart names for consistent matching
+        normalized_bodyparts = {self._normalize_label(bp) for bp in bodyparts}
+
+        # Required bodyparts for 4-point Frank Lab method
+        frank_lab_parts = {
+            self._normalize_label("greenLED"),
+            self._normalize_label("redLED_C"),
+            self._normalize_label("redLED_L"),
+            self._normalize_label("redLED_R"),
+        }
+
+        # Check if we have all Frank Lab LEDs (4pt method)
+        if frank_lab_parts.issubset(normalized_bodyparts):
+            return "4pt"
+
+        # Check for minimal LED setup (2pt method)
+        led_keywords = ["led", "green", "red", "marker", "point"]
+        led_count = 0
+        for bp in normalized_bodyparts:
+            if any(keyword in bp.lower() for keyword in led_keywords):
+                led_count += 1
+
+        # If we have 2+ LED-like bodyparts, suggest 2pt
+        if led_count >= 2:
+            return "2pt"
+
+        # If we have multiple bodyparts but not LED-like, still suggest 2pt
+        if len(bodyparts) >= 2:
+            return "2pt"
+
+        # Single bodypart - use 1pt method
+        return "1pt"
 
 
 @schema
@@ -1580,7 +1821,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         return fig
 
-    def import_model(
+    def load(
         self,
         model_path: Union[Path, str],
         tool: str = None,
@@ -1658,7 +1899,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Use strategy pattern for tool-specific imports
         strategy = ToolStrategyFactory.create_strategy(tool)
-        return strategy.import_model(model_path, self, **kwargs)
+        return strategy.load(model_path, self, **kwargs)
 
     def _import_dlc_model(self, model_path: Path, **kwargs):
         if model_path.suffix not in [".yml", ".yaml"]:
@@ -1697,7 +1938,7 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Step 3: Create VidFileGroup linked to registered Spyglass session.
         # Raises ValueError if no session matches the DLC config's video paths.
-        # Register the session with insert_sessions() before calling import_model().
+        # Register the session with insert_sessions() before calling load().
         vid_group_key = VidFileGroup.create_from_dlc_config(model_path)
         self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
 
@@ -2073,7 +2314,7 @@ class Model(SpyglassMixin, dj.Computed):
         if not (self & model_key):
             errors.append(
                 f"Model not found in database: {model_key}. "
-                "Use Model.import_model() to import a model first."
+                "Use Model.load() to import a model first."
             )
             return {
                 "valid": False,

@@ -1,4 +1,4 @@
-"""Tests for Model.import_model() with ndx-pose NWB files."""
+"""Tests for Model.load() with ndx-pose NWB files."""
 
 import pytest
 from pynwb import NWBHDF5IO
@@ -18,7 +18,7 @@ class TestNdxPoseImport:
     ):
         """Test complete ndx-pose NWB import with all components verified."""
         # Import model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
             nwb_file_name=mock_nwb_file_for_parent.name,
         )
@@ -46,6 +46,6 @@ class TestNdxPoseEdgeCases:
     def test_invalid_file_path(self, model, skeleton, model_params, bodypart):
         """Test error for non-existent file."""
         with pytest.raises(FileNotFoundError):
-            model.import_model(
+            model.load(
                 model_path="/nonexistent/file.nwb", nwb_file_name="test.nwb"
             )

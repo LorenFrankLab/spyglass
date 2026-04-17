@@ -320,12 +320,17 @@ def validate_centroid_params(params: dict, method: str = None) -> None:
 
     spec = method_specs[method]
 
-    # Validate point count
-    points = {
-        k: v
-        for k, v in params.items()
-        if k not in ["method"] + spec["extra_required"]
-    }
+    # Validate point count - handle both flat and nested "points" dict formats
+    if "points" in params and isinstance(params["points"], dict):
+        # Nested format: {"method": "2pt", "points": {"point1": "led1", "point2": "led2"}}
+        points = params["points"]
+    else:
+        # Flat format: {"method": "2pt", "point1": "led1", "point2": "led2"}
+        points = {
+            k: v
+            for k, v in params.items()
+            if k not in ["method", "points"] + spec["extra_required"]
+        }
 
     if len(points) != spec["n_points"]:
         raise ValueError(
@@ -335,10 +340,15 @@ def validate_centroid_params(params: dict, method: str = None) -> None:
 
     # Validate specific point keys if required
     if spec["required_point_keys"] is not None:
-        if set(points.keys()) != spec["required_point_keys"]:
+        # For nested format, check the values in the points dict
+        # For flat format, check the keys
+        point_identifiers = (
+            set(points.values()) if "points" in params else set(points.keys())
+        )
+        if point_identifiers != spec["required_point_keys"]:
             raise ValueError(
                 f"{method} centroid requires points: {spec['required_point_keys']}. "
-                f"Got: {set(points.keys())}"
+                f"Got: {point_identifiers}"
             )
 
     # Validate extra required parameters

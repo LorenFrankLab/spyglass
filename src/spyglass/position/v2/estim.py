@@ -23,6 +23,7 @@ from spyglass.position.utils.validation import (
 from spyglass.position.v2.train import (
     Model,
     ModelParams,
+    ModelSelection,
     Skeleton,
     default_pk_name,
     resolve_model_path,
@@ -213,7 +214,7 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
             "params_hash": params_hash,
         }
         cls.insert1(key, skip_duplicates=skip_duplicates)
-        cls._info_msg(msg=f"Inserted PoseEstimParams: {params_id}")
+        logger.info_msg(msg=f"Inserted PoseEstimParams: {params_id}")
         return {"pose_estim_params_id": params_id}
 
 
@@ -438,12 +439,25 @@ class PoseInferenceRunner(BaseMixin):
         output_paths = []
         for vid_path in videos:
             vid_path = Path(vid_path)
+            # DLC saves to destfolder if specified, otherwise to video directory
             output_dir = output_folder if output_folder else vid_path.parent
+
+            # Look for DLC output files for this specific video
             output_files = list(output_dir.glob(f"{vid_path.stem}DLC_*.h5"))
             if output_files:
-                output_paths.append(
-                    str(max(output_files, key=lambda p: p.stat().st_mtime))
+                # Use most recent file if multiple exist
+                latest_output = max(
+                    output_files, key=lambda p: p.stat().st_mtime
                 )
+                output_paths.append(str(latest_output))
+                self._info_msg(f"DLC created: {latest_output}")
+            else:
+                self._warning_msg(
+                    f"No DLC output found for {vid_path.stem} in {output_dir}"
+                )
+
+        if not output_paths:
+            self._err_msg(f"No output files created for videos: {videos}")
 
         self._info_msg(f"Inference complete. Output files: {output_paths}")
         return output_paths if len(output_paths) != 1 else output_paths[0]
@@ -460,6 +474,7 @@ class NDXPoseBuilder(BaseMixin):
         model_id: str,
         skeleton_edges: list = None,
         description: str = None,
+        original_videos: list = None,
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
 
@@ -477,6 +492,8 @@ class NDXPoseBuilder(BaseMixin):
             List of [bodypart1, bodypart2] edge pairs
         description : str, optional
             Description for PoseEstimation object
+        original_videos : list, optional
+            List of original video identifiers
 
         Returns
         -------
@@ -538,7 +555,8 @@ class NDXPoseBuilder(BaseMixin):
             name="PoseEstimation",
             pose_estimation_series=pose_series_list,
             description=description or f"Pose estimation from model {model_id}",
-            original_videos=[],  # Populated by caller
+            original_videos=original_videos
+            or [],  # Use provided videos or empty list
             source_software="DeepLabCut",
             skeleton=skeleton,
             scorer=scorer,
@@ -1082,12 +1100,22 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             "task_mode", "output_dir"
         )
 
+        # Fetch model info to determine tool type (use only model_id)
+        model_key = {"model_id": key["model_id"]}
+        model_info = (Model() & model_key).fetch1()
+        model_params_key = {
+            "model_params_id": model_info["model_params_id"],
+            "tool": model_info["tool"],
+        }
+        tool_info = (ModelParams() & model_params_key).fetch1()
+        tool = tool_info["tool"]
+
         # Fetch inference params from PoseEstimParams
         inference_params = (PoseEstimParams & key).fetch1("params")
         inference_params = inference_params or {}
 
         self._info_msg(
-            f"PoseEstim.make: mode={task_mode}, " f"output_dir={output_dir}"
+            f"PoseEstim.make: tool={tool}, mode={task_mode}, output_dir={output_dir}"
         )
 
         # Resolve video paths (needed for trigger mode inference)
@@ -1107,7 +1135,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         except ValueError:
             pass
 
-        # Step 1: Trigger inference if needed
+        # Step 1: Trigger inference if needed and get output file info
+        output_file_info = None
         if task_mode == "trigger":
             if not video_paths:
                 raise ValueError(
@@ -1118,36 +1147,33 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             self._info_msg("Triggering inference...")
             model_key = {"model_id": key["model_id"]}
             destfolder = output_dir if output_dir else None
-            self.run_inference(
+            output_file_info = self.run_inference(
                 model_key,
                 video_paths if len(video_paths) > 1 else video_paths[0],
                 destfolder=destfolder,
                 **inference_params,
             )
 
-        # Step 2: Find and load DLC output file
-        output_path = Path(output_dir)
-        if not output_path.exists():
+        # Step 2: Find output files using tool-specific logic
+        output_files = self._find_output_files(
+            tool, video_paths, output_dir, output_file_info
+        )
+
+        if not output_files:
             raise FileNotFoundError(
-                f"Output directory not found: {output_dir}. "
-                "Ensure inference has been run or output_dir is correct."
+                f"No output files found for {tool} inference. "
+                f"Video paths: {video_paths}, output_dir: {output_dir}"
             )
 
-        h5_files = sorted(output_path.glob("*DLC*.h5"))
-        if not h5_files:
-            h5_files = sorted(output_path.glob("*.h5"))
-        if not h5_files:
-            raise FileNotFoundError(
-                f"No h5 output files found in {output_dir}. "
-                "Expected DLC output (.h5) files."
-            )
+        # Use the most recent output file
+        primary_output_file = max(
+            output_files, key=lambda p: Path(p).stat().st_mtime
+        )
+        self._info_msg(f"Loading {tool} output: {primary_output_file}")
 
-        dlc_output_path = max(h5_files, key=lambda p: p.stat().st_mtime)
-        self._info_msg(f"Loading DLC output: {dlc_output_path}")
-
-        # Load DLC data using shared utility function
-        pose_df, scorer, bodyparts = parse_dlc_h5_output(
-            dlc_output_path, return_metadata=True
+        # Load pose data using tool-specific loader
+        pose_df, scorer, bodyparts = self._load_pose_data(
+            tool, primary_output_file
         )
         self._info_msg(
             f"DLC data: {len(bodyparts)} bodyparts, {len(pose_df)} frames, "
@@ -1169,6 +1195,70 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         )
         self.insert1({**key, "analysis_file_name": analysis_file_name})
         self._info_msg("PoseEstim entry inserted.")
+
+    def _find_output_files(
+        self,
+        tool: str,
+        video_paths: list,
+        output_dir: str,
+        output_file_info: Union[str, list, None] = None,
+    ) -> list:
+        """Find output files using tool-specific strategy pattern.
+
+        Parameters
+        ----------
+        tool : str
+            Tool name (e.g., 'DLC')
+        video_paths : list
+            List of video file paths that were analyzed
+        output_dir : str
+            User-specified output directory (may be empty)
+        output_file_info : Union[str, list, None]
+            Output from run_inference (actual paths created)
+
+        Returns
+        -------
+        list
+            List of output file paths
+        """
+        # Import strategy factory
+        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
+
+        # Get strategy for this tool
+        try:
+            strategy = ToolStrategyFactory.create_strategy(tool)
+        except ValueError as e:
+            available_tools = ToolStrategyFactory.get_available_tools()
+            raise ValueError(
+                f"Tool '{tool}' not supported. Available: {available_tools}"
+            ) from e
+
+        # Use strategy's output file discovery
+        return strategy.find_output_files(
+            video_paths=video_paths,
+            output_dir=output_dir,
+            output_file_info=output_file_info,
+        )
+
+    def _load_pose_data(self, tool: str, output_file: str):
+        """Load pose data using tool-specific loaders.
+
+        Parameters
+        ----------
+        tool : str
+            Tool name (e.g., 'DLC')
+        output_file : str
+            Path to output file
+
+        Returns
+        -------
+        tuple
+            (pose_df, scorer, bodyparts)
+        """
+        if tool == "DLC":
+            return parse_dlc_h5_output(output_file, return_metadata=True)
+        else:
+            raise ValueError(f"Unsupported tool for data loading: {tool}")
 
     def run_inference(
         self,
@@ -1201,7 +1291,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if not (Model() & model_key):
             raise ValueError(
                 f"Model not found in database: {model_key}. "
-                "Please import model first using Model.import_model()"
+                "Please import model first using Model.load()"
             )
 
         model_info = (Model() & model_key).fetch1()
@@ -1269,6 +1359,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         skeleton_entry = (Skeleton & skeleton_key).fetch1()
         skeleton_edges = skeleton_entry.get("edges", [])
 
+        # Get video information for pose estimation
+        video_keys = [str(p) for p in (VidFileGroup.File & key).fetch("KEY")]
+
         # Build pose estimation using helper class
         builder = NDXPoseBuilder()
         pose_estimation, nwb_skeleton = builder.build_pose_estimation(
@@ -1278,12 +1371,10 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             model_id=key["model_id"],
             skeleton_edges=skeleton_edges,
             description=f"Pose estimation from model {key['model_id']}",
+            original_videos=video_keys,  # Pass video info to builder
         )
 
-        # Update original_videos with actual video file info
-        pose_estimation.original_videos = [
-            str(p) for p in (VidFileGroup.File & key).fetch("KEY")
-        ]
+        # original_videos now set in builder, no need to set again here
 
         # Store to NWB using helper class
         analysis_abs_path = nwb_analysis_file.get_abs_path(analysis_file_name)
@@ -1520,100 +1611,109 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         }
         cls.insert1(params_raw, **kwargs)
 
-    @classmethod
-    def insert_custom(cls, parameter_set: PoseParameterSet, **kwargs):
-        """Insert custom parameter set using structured dataclass.
+    def insert1(self, key, **kwargs):
+        """Insert pose parameters with validation.
+
+        Standard DataJoint insert1 interface with added parameter validation.
+        Validates orientation, centroid, and smoothing parameters before insertion.
 
         Parameters
         ----------
-        parameter_set : PoseParameterSet
-            Complete parameter configuration with proper validation
+        key : dict
+            Parameter dictionary with:
+            - pose_params: str (name for parameter set)
+            - orient: dict (orientation parameters)
+            - centroid: dict (centroid parameters)
+            - smoothing: dict (smoothing parameters)
         **kwargs
             Additional DataJoint insertion options
 
-        Raises
-        ------
-        ValueError
-            If parameter validation fails
-
         Examples
         --------
-        >>> from spyglass.position.v2.estim import (
-        ...     PoseParameterSet, OrientationParams,
-        ...     CentroidParams, SmoothingParams
-        ... )
-        >>>
-        >>> params = PoseParameterSet(
-        ...     params_name="my_config",
-        ...     orient=OrientationParams(
-        ...         method="two_pt",
-        ...         bodypart1="nose",
-        ...         bodypart2="tail_base"
-        ...     ),
-        ...     centroid=CentroidParams(
-        ...         method="1pt",
-        ...         points={"point1": "nose"}
-        ...     ),
-        ...     smoothing=SmoothingParams(
-        ...         interpolate=True,
-        ...         smooth=True,
-        ...         likelihood_thresh=0.9
-        ...     )
-        ... )
-        >>> PoseParams.insert_custom(params)
+        >>> # Standard DataJoint interface
+        >>> PoseParams().insert1({
+        ...     "pose_params": "my_config",
+        ...     "orient": {"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
+        ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
+        ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ... })
+
+        >>> # Or use class method
+        >>> PoseParams.insert1({
+        ...     "pose_params": "my_config",
+        ...     "orient": {"method": "none"},
+        ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
+        ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ... })
         """
-        # Validate parameters using dataclass validation
-        parameter_set.validate()
+        # Validate parameter structure
+        required_keys = {"pose_params", "orient", "centroid", "smoothing"}
+        missing_keys = required_keys - set(key.keys())
+        if missing_keys:
+            raise ValueError(f"Missing required keys: {missing_keys}")
 
-        # Convert to database format
-        params_dict = parameter_set.to_params_dict()
+        # Extract and validate each component using validation.py functions
+        orient = key["orient"]
+        centroid = key["centroid"]
+        smoothing = key["smoothing"]
 
-        kwargs.setdefault("skip_duplicates", True)
-        cls.insert1(params_dict, **kwargs)
+        if orient is not None:
+            validate_orientation_params(orient)
+        if centroid is not None:
+            validate_centroid_params(centroid)
+        if smoothing is not None:
+            validate_smoothing_params(smoothing)
+
+        # Call parent insert1 with validated parameters
+        # Use the DataJoint Table base class directly
+        return dj.Table.insert1(self, key, **kwargs)
 
     @classmethod
-    def insert_custom_dict(
-        cls,
-        params_name: str,
-        orient: dict,
-        centroid: dict,
-        smoothing: dict,
-        **kwargs,
-    ):
-        """DEPRECATED: Insert custom parameter set using dictionary format.
+    def insert_custom(cls, params_name, orient, centroid, smoothing, **kwargs):
+        """Convenience method for parameter insertion with individual arguments.
 
-        Use insert_custom() with PoseParameterSet dataclass instead.
-        This method is maintained for backward compatibility.
+        This method provides a more explicit way to insert parameters without
+        nested dictionaries, while maintaining backward compatibility with tests.
 
         Parameters
         ----------
         params_name : str
-            Name for this parameter set (max 32 chars)
+            Name for this parameter set
         orient : dict
-            Orientation parameters dict
+            Orientation calculation parameters
         centroid : dict
-            Centroid parameters dict
+            Centroid calculation parameters
         smoothing : dict
-            Smoothing parameters dict
+            Smoothing and interpolation parameters
         **kwargs
             Additional DataJoint insertion options
-        """
-        # Validate parameters using shared validators
-        if orient is not None:
-            validate_orientation_params(orient)
-        if centroid:
-            validate_centroid_params(centroid)
-        if smoothing:
-            validate_smoothing_params(smoothing)
 
-        params = {
+        Examples
+        --------
+        >>> PoseParams.insert_custom(
+        ...     params_name="my_config",
+        ...     orient={"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
+        ...     centroid={"method": "1pt", "points": {"point1": "nose"}},
+        ...     smoothing={"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ... )
+        """
+        params_dict = {
             "pose_params": params_name,
             "orient": orient,
             "centroid": centroid,
             "smoothing": smoothing,
         }
         kwargs.setdefault("skip_duplicates", True)
-        cls.insert1(params, **kwargs)
+        cls.insert1(params_dict, **kwargs)
+
+    @classmethod
+    def insert_custom_dict(
+        cls, params_name, orient, centroid, smoothing, **kwargs
+    ):
+        """Alias for insert_custom for test compatibility."""
+        return cls.insert_custom(
+            params_name, orient, centroid, smoothing, **kwargs
+        )
 
 
 @schema
@@ -1622,6 +1722,100 @@ class PoseSelection(SpyglassMixin, dj.Manual):
     -> PoseEstim
     -> PoseParams
     """
+
+    def insert1(self, key, **kwargs):
+        """Insert pose selection with automatic centroid method validation.
+
+        Validates that the centroid method in PoseParams is appropriate
+        for the skeleton associated with the PoseEstim's model.
+
+        Parameters
+        ----------
+        key : dict
+            Primary key with pose_estim_id and pose_params entries
+        **kwargs
+            Additional DataJoint insertion options
+        """
+        # Validate centroid method against skeleton
+        self._validate_centroid_method(key)
+
+        # Proceed with normal insertion
+        super().insert1(key, **kwargs)
+
+    def _validate_centroid_method(self, key):
+        """Validate centroid method against associated skeleton.
+
+        Parameters
+        ----------
+        key : dict
+            Contains pose_estim_id and pose_params for validation
+        """
+        try:
+            # Get skeleton_id by joining through the pipeline:
+            # PoseEstim -> PoseEstimSelection -> Model -> ModelSelection -> ModelParams -> skeleton_id
+            # Use projection to avoid analysis_file_name conflicts
+            pose_estim_key = {
+                k: v for k, v in key.items() if k in ["pose_estim_id"]
+            }
+
+            # First get the model_id from PoseEstimSelection (avoiding analysis_file_name in PoseEstim)
+            selection_info = (PoseEstimSelection & pose_estim_key).fetch1()
+            model_id = selection_info["model_id"]
+
+            # Then get skeleton_id from Model -> ModelSelection -> ModelParams
+            model_info = (Model & {"model_id": model_id}).fetch1()
+            model_selection_key = {
+                k: v
+                for k, v in model_info.items()
+                if k in ModelSelection.heading.names
+            }
+
+            # Get skeleton_id from ModelParams via ModelSelection
+            params_info = (
+                ModelParams & (ModelSelection & model_selection_key)
+            ).fetch1()
+            skeleton_id = params_info["skeleton_id"]
+
+            # Get centroid params from PoseParams
+            pose_params_key = {
+                k: v for k, v in key.items() if k in ["pose_params"]
+            }
+            params_info = (PoseParams & pose_params_key).fetch1()
+            centroid_params = params_info["centroid"]
+
+            if not centroid_params:
+                return  # No centroid params to validate
+
+            # Check if skeleton exists and get suggestion
+            skeleton_entry = Skeleton & {"skeleton_id": skeleton_id}
+            if len(skeleton_entry) == 0:
+                logger.warning(
+                    f"Skeleton '{skeleton_id}' not found. Skipping validation."
+                )
+                return
+
+            suggested_method = skeleton_entry.get_centroid_method()
+            actual_method = centroid_params.get("method")
+
+            if actual_method is None:
+                logger.warning(
+                    f"No centroid method specified in '{pose_params_key['pose_params']}'. "
+                    f"Skeleton '{skeleton_id}' suggests: '{suggested_method}'"
+                )
+            elif actual_method != suggested_method:
+                bodyparts = skeleton_entry.get_bodyparts()
+                logger.warning(
+                    f"Centroid method '{actual_method}' in '{pose_params_key['pose_params']}' "
+                    f"may not be optimal for skeleton '{skeleton_id}' (bodyparts: {bodyparts}). "
+                    f"Suggested method: '{suggested_method}'"
+                )
+            else:
+                logger.info(
+                    f"Centroid method '{actual_method}' matches skeleton '{skeleton_id}' suggestion ✓"
+                )
+
+        except Exception as e:
+            logger.warning(f"Could not validate centroid method: {e}")
 
 
 @schema

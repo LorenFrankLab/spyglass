@@ -704,7 +704,7 @@ class TestPoseV2MakeValidation:
         VidFileGroup = position_v2.video.VidFileGroup
 
         # 1. Import model (no DLC weights needed)
-        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+        model_key = model.load(str(mock_ndx_pose_nwb_file))
 
         # 2. Create a VidFileGroup with no session link
         vg_id = "pv2_validate_no_anlys_8920"

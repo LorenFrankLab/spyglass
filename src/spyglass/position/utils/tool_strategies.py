@@ -131,7 +131,66 @@ class PoseToolStrategy(ABC):
             Evaluation results
         """
 
-    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+    @abstractmethod
+    def find_output_files(
+        self,
+        video_paths: list,
+        output_dir: str = "",
+        output_file_info: Any = None,
+    ) -> list:
+        """Find tool output files using tool-specific naming patterns.
+
+        Parameters
+        ----------
+        video_paths : list
+            List of video file paths that were analyzed
+        output_dir : str, optional
+            User-specified output directory (may be empty)
+        output_file_info : Any, optional
+            Direct output from inference run (paths or metadata)
+
+        Returns
+        -------
+        list
+            List of output file paths found
+        """
+
+    @abstractmethod
+    def get_output_file_patterns(self) -> Dict[str, str]:
+        """Get tool-specific output file naming patterns.
+
+        Returns
+        -------
+        Dict[str, str]
+            Dictionary mapping pattern types to glob patterns
+            e.g., {"primary": "*DLC_*.h5", "fallback": "*.h5"}
+        """
+
+    def get_default_output_location(
+        self, video_path: str, output_dir: str = ""
+    ) -> str:
+        """Get default output location for this tool.
+
+        Parameters
+        ----------
+        video_path : str
+            Path to input video
+        output_dir : str, optional
+            User-specified output directory
+
+        Returns
+        -------
+        str
+            Default output directory path
+        """
+        # Default behavior: use output_dir if provided, else video directory
+        from pathlib import Path
+
+        if output_dir:
+            return output_dir
+        return str(Path(video_path).parent)
+
+    def load(self, model_path: Path, model_instance, **kwargs) -> dict:
         """Import a pre-trained model (default: not supported).
 
         Parameters
@@ -370,7 +429,67 @@ class DLCStrategy(PoseToolStrategy):
             model_entry, params_entry, plotting, show_errors, **kwargs
         )
 
-    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+    def find_output_files(
+        self,
+        video_paths: list,
+        output_dir: str = "",
+        output_file_info: Any = None,
+    ) -> list:
+        """Find DLC output files using DLC naming conventions.
+
+        DLC saves files as: {video_stem}DLC_{network}_{shuffle}_{snapshot}.h5
+        If no destfolder specified, saves to video directory.
+        """
+        # If we got direct file info from inference, use it
+        if output_file_info:
+            if isinstance(output_file_info, str):
+                return [output_file_info]
+            return output_file_info
+
+        from pathlib import Path
+
+        output_files = []
+
+        for video_path in video_paths:
+            video_path = Path(video_path)
+
+            # Determine search directory using tool's default logic
+            search_dir = Path(
+                self.get_default_output_location(str(video_path), output_dir)
+            )
+
+            if not search_dir.exists():
+                continue
+
+            # Look for DLC output files for this video
+            patterns = self.get_output_file_patterns()
+            dlc_pattern = patterns["primary"].format(video_stem=video_path.stem)
+            matching_files = list(search_dir.glob(dlc_pattern))
+
+            if matching_files:
+                # Use most recent if multiple files
+                latest_file = max(
+                    matching_files, key=lambda p: p.stat().st_mtime
+                )
+                output_files.append(str(latest_file))
+            else:
+                # Fallback: look for any h5 files
+                fallback_pattern = patterns["fallback"]
+                h5_files = list(search_dir.glob(fallback_pattern))
+                if h5_files:
+                    latest_h5 = max(h5_files, key=lambda p: p.stat().st_mtime)
+                    output_files.append(str(latest_h5))
+
+        return output_files
+
+    def get_output_file_patterns(self) -> Dict[str, str]:
+        """Get DLC-specific output file naming patterns."""
+        return {
+            "primary": "{video_stem}DLC_*.h5",  # Standard DLC output pattern
+            "fallback": "*.h5",  # Any H5 file as last resort
+        }
+
+    def load(self, model_path: Path, model_instance, **kwargs) -> dict:
         """Import DLC model using existing _import_dlc_model method."""
         return model_instance._import_dlc_model(model_path, **kwargs)
 
@@ -538,7 +657,7 @@ class SLEAPStrategy(PoseToolStrategy):
         """Train SLEAP model (not yet implemented)."""
         raise NotImplementedError(
             "SLEAP training not yet implemented. "
-            "Please use DLC or import pre-trained SLEAP models via import_model()."
+            "Please use DLC or import pre-trained SLEAP models via load()."
         )
 
     def evaluate_model(
@@ -552,6 +671,44 @@ class SLEAPStrategy(PoseToolStrategy):
     ) -> dict:
         """Evaluate SLEAP model (not yet implemented)."""
         raise NotImplementedError("SLEAP evaluation not yet implemented.")
+
+    def find_output_files(
+        self,
+        video_paths: list,
+        output_dir: str = "",
+        output_file_info: Any = None,
+    ) -> list:
+        """Find SLEAP output files (placeholder implementation)."""
+        # TODO: Implement SLEAP-specific output discovery
+        from pathlib import Path
+
+        output_files = []
+
+        for video_path in video_paths:
+            video_path = Path(video_path)
+            search_dir = Path(
+                self.get_default_output_location(str(video_path), output_dir)
+            )
+
+            if search_dir.exists():
+                # Look for SLEAP output files (.slp files)
+                patterns = self.get_output_file_patterns()
+                sleap_files = list(search_dir.glob(patterns["primary"]))
+                if sleap_files:
+                    latest_file = max(
+                        sleap_files, key=lambda p: p.stat().st_mtime
+                    )
+                    output_files.append(str(latest_file))
+
+        return output_files
+
+    def get_output_file_patterns(self) -> Dict[str, str]:
+        """Get SLEAP-specific output file patterns."""
+        return {
+            "primary": "*.slp",  # SLEAP project files
+            "predictions": "*.h5",  # SLEAP prediction files
+            "fallback": "*.slp",
+        }
 
 
 class NDXPoseStrategy(PoseToolStrategy):
@@ -624,7 +781,7 @@ class NDXPoseStrategy(PoseToolStrategy):
         """Import model from NDX-Pose NWB (training not applicable)."""
         raise NotImplementedError(
             "NDX-Pose strategy is for importing existing models, not training. "
-            "Use Model.import_model() for NDX-Pose NWB files."
+            "Use Model.load() for NDX-Pose NWB files."
         )
 
     def evaluate_model(
@@ -642,7 +799,7 @@ class NDXPoseStrategy(PoseToolStrategy):
             "Evaluation should be done in the original training environment."
         )
 
-    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+    def load(self, model_path: Path, model_instance, **kwargs) -> dict:
         """Import NDX-Pose model using existing _import_ndx_pose_model method."""
         return model_instance._import_ndx_pose_model(model_path, **kwargs)
 
@@ -660,6 +817,25 @@ class NDXPoseStrategy(PoseToolStrategy):
             )
 
         return checks, warnings
+
+    def find_output_files(
+        self,
+        video_paths: list,
+        output_dir: str = "",
+        output_file_info: Any = None,
+    ) -> list:
+        """Find NDX-Pose output files (not applicable for imports)."""
+        # NDX-Pose models are imported from existing NWB files, not generated
+        raise NotImplementedError(
+            "NDX-Pose models are imported from NWB files, not generated from inference"
+        )
+
+    def get_output_file_patterns(self) -> Dict[str, str]:
+        """Get NDX-Pose output patterns (not applicable)."""
+        return {
+            "primary": "*.nwb",  # NWB files contain the pose data
+            "fallback": "*.nwb",
+        }
 
 
 class ToolStrategyFactory:

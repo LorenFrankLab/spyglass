@@ -369,14 +369,23 @@ class VideoMaker:
             x, y = self._get_centroid_data(pos_ind)
             return (orient_list(x), orient_list(y, axis="y"))
 
-    def _generate_single_frame(self, frame_ind):  # pragma: no cover
+    def _generate_single_frame(
+        self, frame_ind, batch_index=None
+    ):  # pragma: no cover
         """Generate a single frame and save it as an image."""
-        padded = self._pad(frame_ind)
+        if batch_index is not None:
+            # Use batch-relative index for ffmpeg
+            padded = self._pad(batch_index)
+        else:
+            # Fallback to original behavior
+            padded = self._pad(frame_ind)
+
         frame_out_path = self.temp_dir / f"plot_{padded}.png"
         if frame_out_path.exists() and not self.debug:
             return frame_ind
 
-        frame_file = self.temp_dir / f"orig_{padded}.png"
+        orig_padded = self._pad(frame_ind)
+        frame_file = self.temp_dir / f"orig_{orig_padded}.png"
         if not frame_file.exists():
             self.dropped_frames.add(frame_ind)
             self._debug_print(f"Frame not found: {frame_file}", end="")
@@ -402,6 +411,11 @@ class VideoMaker:
         likelihood_inds = pos_ind + self.window_ind
         neg_inds = np.where(likelihood_inds < 0)[0]
         likelihood_inds[neg_inds] = 0 if len(neg_inds) > 0 else -1
+
+        # Handle indices that are too large
+        max_likelihood_ind = len(list(self.likelihoods.values())[0]) - 1
+        large_inds = np.where(likelihood_inds > max_likelihood_ind)[0]
+        likelihood_inds[large_inds] = max_likelihood_ind
 
         dlc_centroid_data = self._get_centroid_data(pos_ind)
 
@@ -455,6 +469,7 @@ class VideoMaker:
             self.plot_frames(start_frame, end_frame, progress_bar)
             self.ffmpeg_stitch_partial(start_frame, str(output_partial_video))
 
+            # Clean up PNG files AFTER stitching
             for frame_file in self.temp_dir.glob("*.png"):
                 frame_file.unlink()
 
@@ -468,28 +483,32 @@ class VideoMaker:
             print(f"\r{msg}", end=end)  # pragma: no cover
 
     def plot_frames(
-        self, start_frame, end_frame, progress_bar=None, process_pool=True
+        self,
+        start_frame,
+        end_frame,
+        progress_bar=None,
+        process_pool=True,  # Re-enable pool
     ):
         logger.debug(f"Plotting   frames: {start_frame} - {end_frame}")
 
         if not process_pool:  # pragma: no cover
-            for frame_ind in range(start_frame, end_frame):
-                self._generate_single_frame(frame_ind)
+            for i, frame_ind in enumerate(range(start_frame, end_frame)):
+                self._generate_single_frame(frame_ind, batch_index=i)
                 progress_bar.update()
             return
 
         with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
             jobs = {}
             frames_left = end_frame - start_frame
-            frames_iter = iter(range(start_frame, end_frame))
+            frames_iter = enumerate(range(start_frame, end_frame))
 
             while frames_left:
                 while len(jobs) < self.max_jobs_in_queue:
                     try:
-                        this_frame = next(frames_iter)
+                        batch_index, this_frame = next(frames_iter)
                         self._debug_print(f"Submit: {self._pad(this_frame)}")
                         job = executor.submit(
-                            self._generate_single_frame, this_frame
+                            self._generate_single_frame, this_frame, batch_index
                         )
                         jobs[job] = this_frame
                     except StopIteration:
@@ -556,7 +575,6 @@ class VideoMaker:
 
     def ffmpeg_stitch_partial(self, start_frame, output_partial_video):
         """Stitch a partial movie from processed frames."""
-        logger.debug(f"Stitch part vid  : {start_frame}")
         frame_pattern = str(self.temp_dir / f"plot_%0{self.pad_len}d.png")
 
         ffmpeg_cmd = [
@@ -565,13 +583,14 @@ class VideoMaker:
             "-r",
             str(self.fps),
             "-start_number",
-            str(start_frame),
+            "0",  # Start from frame 0 since we use batch indexing
             "-i",
             frame_pattern,
             *self.ffmpeg_fmt_args,
             output_partial_video,
             *self.ffmpeg_log_args,
         ]
+
         try:
             subprocess.run(
                 ffmpeg_cmd,

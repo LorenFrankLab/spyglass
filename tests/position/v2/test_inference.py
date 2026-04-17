@@ -23,7 +23,7 @@ class TestModelInference:
     ):
         """Test that inference on ndx-pose models raises appropriate error."""
         # Import a model from ndx-pose (doesn't have DLC weights)
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -39,7 +39,7 @@ class TestModelInference:
         skip_if_no_dlc,
     ):
         """Test that inference options are validated properly."""
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -70,7 +70,7 @@ class TestModelInference:
         mock_ndx_pose_nwb_file,
     ):
         """Test error when video doesn't exist."""
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -132,7 +132,7 @@ class TestPoseEstimPopulation:
         VidFileGroup = position_v2.video.VidFileGroup
 
         # Import model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -331,7 +331,7 @@ class TestEndToEndInference:
         VidFileGroup = position_v2.video.VidFileGroup
 
         # Step 1: Import model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -411,7 +411,7 @@ class TestPoseEstimMakeValidation:
         VidFileGroup = position_v2.video.VidFileGroup
 
         # 1. Import model (ndx-pose path, no DLC weights needed)
-        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+        model_key = model.load(str(mock_ndx_pose_nwb_file))
 
         # 2. Create a VidFileGroup with no File entries (no session link)
         vg_id = "pem_validate_no_nwb_8910"

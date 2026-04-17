@@ -4,8 +4,8 @@ Covers:
 - Path resolution utilities (resolve_model_path, _to_stored_path)
 - Model._get_latest_dlc_model_info() using the synthetic test project
 - Model.get_training_history() using the synthetic test project
-- Model.import_model() via DLC config.yaml with bootstrapped session
-- Model.import_model() error cases
+- Model.load() via DLC config.yaml with bootstrapped session
+- Model.load() error cases
 
 ``TestResolveModelPath`` and ``TestToStoredPath`` have no external
 dependencies and always run in CI.
@@ -201,7 +201,7 @@ class TestGetLatestDLCModelInfo:
 class TestGetTrainingHistory:
     """Test Model.get_training_history() with the synthetic DLC project.
 
-    After a successful import_model() the stored model_path is the
+    After a successful load() the stored model_path is the
     config.yaml, so get_training_history() returns None (expected for
     imported models — only trained models have a learning_stats.csv
     in the stored path).
@@ -240,13 +240,13 @@ class TestGetTrainingHistory:
 
     def test_imported_model_returns_none(self, model, mock_ndx_pose_nwb_file):
         """ndx-pose imported model has no training CSV → returns None."""
-        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+        model_key = model.load(str(mock_ndx_pose_nwb_file))
         result = model.get_training_history(model_key)
         assert result is None
 
     def test_plot_raises_when_no_history(self, model, mock_ndx_pose_nwb_file):
         """plot_training_history raises ValueError when no CSV is found."""
-        model_key = model.import_model(str(mock_ndx_pose_nwb_file))
+        model_key = model.load(str(mock_ndx_pose_nwb_file))
         with pytest.raises(ValueError, match="No training history"):
             model.plot_training_history(model_key)
 
@@ -257,7 +257,7 @@ class TestGetTrainingHistory:
 
 
 class TestDLCFullImport:
-    """Test Model.import_model() with a real config.yaml and session.
+    """Test Model.load() with a real config.yaml and session.
 
     ``dlc_bootstrapped_session`` inserts the minimal Spyglass DB entries
     (Nwbfile, Session, VideoFile) so that create_from_dlc_config() succeeds.
@@ -274,8 +274,8 @@ class TestDLCFullImport:
     def test_import_succeeds_with_bootstrapped_session(
         self, model, dlc_project_config, dlc_bootstrapped_session
     ):
-        """import_model(config.yaml) returns a valid model_key dict."""
-        model_key = model.import_model(str(dlc_project_config))
+        """load(config.yaml) returns a valid model_key dict."""
+        model_key = model.load(str(dlc_project_config))
         assert "model_id" in model_key
         assert model & model_key
 
@@ -289,7 +289,7 @@ class TestDLCFullImport:
         """
         from spyglass.position.v2.train import ModelParams, Skeleton
 
-        model_key = model.import_model(str(dlc_project_config))
+        model_key = model.load(str(dlc_project_config))
         params_entry = (
             ModelParams() & {"model_params_id": model_key["model_params_id"]}
         ).fetch1()
@@ -300,38 +300,38 @@ class TestDLCFullImport:
         self, model, dlc_project_config, dlc_bootstrapped_session
     ):
         """Importing the same config twice returns the same model_id."""
-        key1 = model.import_model(str(dlc_project_config))
-        key2 = model.import_model(str(dlc_project_config))
+        key1 = model.load(str(dlc_project_config))
+        key2 = model.load(str(dlc_project_config))
         assert key1["model_id"] == key2["model_id"]
 
-    def test_import_model_path_stored(
+    def test_load_model_path_stored(
         self, model, dlc_project_config, dlc_bootstrapped_session
     ):
         """Imported model stores a non-empty model_path."""
-        model_key = model.import_model(str(dlc_project_config))
+        model_key = model.load(str(dlc_project_config))
         stored_path = (model & model_key).fetch1("model_path")
         assert stored_path  # non-empty string
 
 
 # ---------------------------------------------------------------------------
-# import_model() error cases — DB required, no DLC or session needed
+# load() error cases — DB required, no DLC or session needed
 # ---------------------------------------------------------------------------
 
 
 class TestImportModelErrors:
-    """Error-path tests for Model.import_model() raised before DB access."""
+    """Error-path tests for Model.load() raised before DB access."""
 
     def test_nonexistent_path_raises_file_not_found(self, model):
         """FileNotFoundError when model_path does not exist."""
         with pytest.raises(FileNotFoundError, match="does not exist"):
-            model.import_model("/nonexistent/path/config.yaml")
+            model.load("/nonexistent/path/config.yaml")
 
     def test_unrecognised_extension_raises_value_error(self, model, tmp_path):
         """ValueError when file extension cannot be mapped to a known tool."""
         bad_file = tmp_path / "weights.h5"
         bad_file.write_text("dummy weights")
         with pytest.raises(ValueError, match="Cannot auto-detect tool"):
-            model.import_model(str(bad_file))
+            model.load(str(bad_file))
 
     def test_explicit_unsupported_tool_raises_not_implemented(
         self, model, tmp_path
@@ -340,12 +340,12 @@ class TestImportModelErrors:
         cfg = tmp_path / "config.yaml"
         cfg.write_text("dummy: true")
         with pytest.raises(ValueError):
-            model.import_model(str(cfg), tool="SLEAP_future")
+            model.load(str(cfg), tool="SLEAP_future")
 
     def test_import_dlc_no_session_raises_value_error(
         self, model, dlc_project_config
     ):
-        """import_model(config.yaml) raises ValueError when no session matches.
+        """load(config.yaml) raises ValueError when no session matches.
 
         Uses the dlc_project_config without bootstrapping a session, so
         create_from_dlc_config() must raise ValueError.
@@ -372,4 +372,4 @@ class TestImportModelErrors:
             )
 
         with pytest.raises(ValueError, match="No Spyglass Session"):
-            model.import_model(str(dlc_project_config))
+            model.load(str(dlc_project_config))

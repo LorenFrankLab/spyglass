@@ -13,7 +13,7 @@ class TestModelVerification:
     ):
         """Test verification of a valid model."""
         # Import a model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -45,7 +45,7 @@ class TestModelVerification:
     ):
         """Test verification when model file doesn't exist."""
         # Import a model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -68,7 +68,7 @@ class TestModelVerification:
     ):
         """Test verification with inference readiness check."""
         # Import a model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 
@@ -88,7 +88,7 @@ class TestModelVerification:
     ):
         """Test that verification results have correct structure."""
         # Import a model
-        model_key = model.import_model(
+        model_key = model.load(
             model_path=str(mock_ndx_pose_nwb_file),
         )
 

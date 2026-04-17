@@ -20,7 +20,7 @@ from pynwb.file import Subject
 
 
 def make_ndx_pose_nwb(output_path, n_frames=100, overwrite=False):
-    """Write a minimal ndx-pose NWB file suitable for import via Model.import_model.
+    """Write a minimal ndx-pose NWB file suitable for import via Model.load.
 
     Parameters
     ----------
