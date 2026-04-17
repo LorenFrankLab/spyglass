@@ -1447,7 +1447,10 @@ def si_params_name(sgp, populate_pose_estimation):
             "max_cm_between_pts": 100,
             "num_inds_to_span": 50,
             # Smoothing and Interpolation added later - must check
-            "smoothing_params": {"smoothing_duration": 0.05},
+            "smoothing_params": {
+                "smoothing_duration": 0.05,
+                "likelihood_thresh": 0.4,
+            },
             "interp_params": {"max_cm_to_interp": 100},
         }
     )
@@ -1531,6 +1534,7 @@ def centroid_params(sgp):
                     "smoothing_params": {
                         "smoothing_duration": 0.05,
                         "smooth_method": "moving_avg",
+                        "likelihood_thresh": 0.4,
                     },
                     "max_LED_separation": 50,
                     "speed_smoothing_std_dev": 0.100,

@@ -401,3 +401,163 @@ def get_4pt_centroid(
     centroid[only_center] = coords[red_C][only_center]
 
     return centroid
+
+
+# === Legacy V1 Compatibility Class ===
+
+
+class Centroid:
+    """Legacy V1 Centroid calculation class.
+
+    This class provides backward compatibility for V1 code that expects the
+    object-oriented Centroid interface. New code should use the functional
+    approach with calculate_centroid().
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position dataframe with MultiIndex columns: (bodypart, coord)
+    points : dict
+        Dictionary mapping point roles to bodypart names
+    max_LED_separation : float, optional
+        Maximum allowed separation between LEDs (pixels)
+    """
+
+    def __init__(self, pos_df, points, max_LED_separation=None):
+        if max_LED_separation is None and len(points) != 1:
+            raise ValueError("max_LED_separation must be provided")
+        if len(points) not in [1, 2, 4]:
+            raise ValueError("Invalid number of points")
+
+        self.pos_df = pos_df
+        self.max_LED_separation = max_LED_separation
+        self.points_dict = points
+        self.point_names = list(points.values())
+        self.idx = pd.IndexSlice
+        self.centroid = np.zeros(shape=(len(pos_df), 2))
+        self.coords = {
+            p: pos_df.loc[:, self.idx[p, ("x", "y")]].to_numpy()
+            for p in self.point_names
+        }
+        self.nans = {
+            p: np.isnan(coord).any(axis=1) for p, coord in self.coords.items()
+        }
+
+        if len(points) == 1:
+            self.get_1pt_centroid()
+            return
+        if len(points) in [2, 4]:  # 4 also requires 2
+            self.get_2pt_centroid()
+        if len(points) == 4:
+            self.get_4pt_centroid()
+
+    def calc_centroid(
+        self,
+        mask: tuple,
+        points: list = None,
+        replace: bool = False,
+        midpoint: bool = False,
+        logical_or: bool = False,
+    ):
+        """Calculate the centroid of the points in the mask"""
+        from functools import reduce
+        from itertools import combinations
+
+        if isinstance(mask, list):
+            mask = [reduce(np.logical_and, m) for m in mask]
+
+        # Check that combinations of points close enough
+        if points is not None and len(points) > 1:
+            for pair in combinations(points, 2):
+                mask = (*mask, ~self.too_sep(pair[0], pair[1]))
+
+        func = np.logical_or if logical_or else np.logical_and
+        mask = reduce(func, mask)
+
+        if not np.any(mask):
+            return
+        if replace:
+            self.centroid[mask] = np.nan
+            return
+
+        coords = [self.coords[p][mask] for p in (points or self.point_names)]
+        self.centroid[mask] = np.nanmean(coords, axis=0)
+
+    def get_1pt_centroid(self):
+        """Calculate centroid for a single point"""
+        point = self.point_names[0]
+        self.centroid = self.coords[point].copy()
+
+    def get_2pt_centroid(self):
+        """Calculate centroid for two points"""
+        self.calc_centroid(  # Good points
+            points=self.point_names,
+            mask=tuple(~self.nans[p] for p in self.point_names),
+        )
+        self.calc_centroid(
+            mask=tuple(self.nans.values()), replace=True
+        )  # All bad
+        for point in self.point_names:  # only one point
+            self.calc_centroid(
+                points=[point],
+                mask=(
+                    ~self.nans[point],
+                    *[self.nans[p] for p in self.point_names if p != point],
+                ),
+            )
+
+    def get_4pt_centroid(self):
+        """Calculate centroid for four points"""
+        green = self.points_dict.get("greenLED", None)
+        red_C = self.points_dict.get("redLED_C", None)
+        red_L = self.points_dict.get("redLED_L", None)
+        red_R = self.points_dict.get("redLED_R", None)
+
+        self.calc_centroid(  # Good green and center
+            points=[green, red_C],
+            mask=(~self.nans[green], ~self.nans[red_C]),
+        )
+
+        self.calc_centroid(  # green, left/right - average left/right
+            points=[red_L, red_R, green],
+            mask=(
+                ~self.nans[green],
+                self.nans[red_C],
+                ~self.nans[red_L],
+                ~self.nans[red_R],
+            ),
+        )
+
+        self.calc_centroid(  # only left/right
+            points=[red_L, red_R],
+            mask=(
+                self.nans[green],
+                self.nans[red_C],
+                ~self.nans[red_L],
+                ~self.nans[red_R],
+            ),
+        )
+
+        for side, other in [(red_L, red_R), (red_R, red_L)]:
+            self.calc_centroid(  # green and one side are good, others are NaN
+                points=[side, green],
+                mask=(
+                    ~self.nans[green],
+                    self.nans[red_C],
+                    ~self.nans[side],
+                    self.nans[other],
+                ),
+            )
+
+        self.calc_centroid(  # green is NaN, red center is good
+            points=[red_C],
+            mask=(self.nans[green], ~self.nans[red_C]),
+        )
+
+    def too_sep(self, p1, p2):
+        """Check if two points are too far apart"""
+        if self.max_LED_separation is None or get_distance is None:
+            return np.zeros(len(self.pos_df), dtype=bool)
+
+        dist = get_distance(self.coords[p1], self.coords[p2])
+        return dist > self.max_LED_separation

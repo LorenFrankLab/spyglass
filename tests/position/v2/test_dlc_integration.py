@@ -339,7 +339,7 @@ class TestImportModelErrors:
         """NotImplementedError when an unsupported tool name is given."""
         cfg = tmp_path / "config.yaml"
         cfg.write_text("dummy: true")
-        with pytest.raises(NotImplementedError):
+        with pytest.raises(ValueError):
             model.import_model(str(cfg), tool="SLEAP_future")
 
     def test_import_dlc_no_session_raises_value_error(

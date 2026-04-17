@@ -9,10 +9,9 @@ import pandas as pd
 from ruamel.yaml import YAML
 
 from spyglass.common.common_lab import LabTeam
-from spyglass.position.utils import sanitize_filename
+from spyglass.position.utils import sanitize_filename, test_mode_suppress
 from spyglass.position.utils.dlc_io import parse_dlc_h5_output
-from spyglass.position.utils_dlc import test_mode_suppress
-from spyglass.position.v1.dlc_utils import find_mp4, get_video_info
+from spyglass.position.utils.general import find_mp4, get_video_info
 from spyglass.settings import dlc_project_dir, dlc_video_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.dj_helper_fn import sanitize_unix_name
@@ -104,7 +103,7 @@ class DLCProject(SpyglassMixin, dj.Manual):
 
     def _existing_project(self, project_name):
         if project_name in self.fetch("project_name"):
-            logger.warning(f"project name: {project_name} is already in use.")
+            self._warn_msg(f"project name '{project_name}' is already in use.")
             return (self & {"project_name": project_name}).fetch(
                 "project_name", "config_path", as_dict=True
             )[0]

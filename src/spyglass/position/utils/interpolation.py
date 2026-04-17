@@ -116,13 +116,13 @@ def interp_position(
         # Can't interpolate if span extends to end
         if (span_stop + 1) >= len(pos_df):
             pos_df.loc[idx_span, idx[[x_col, y_col]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="end"))
+            logger.info_msg(no_x_msg.format(ind=ind, coord="end"))
             continue
 
         # Can't interpolate if span starts at beginning
         if span_start < 1:
             pos_df.loc[idx_span, idx[[x_col, y_col]]] = np.nan
-            logger.info(no_x_msg.format(ind=ind, coord="start"))
+            logger.info_msg(no_x_msg.format(ind=ind, coord="start"))
             continue
 
         # Get bounding coordinate values
@@ -143,7 +143,9 @@ def interp_position(
 
         if span_len > max_pts_to_interp or distance > max_cm_to_interp:
             pos_df.loc[idx_span, idx[[x_col, y_col]]] = np.nan
-            logger.info(no_interp_msg.format(start=span_start, stop=span_stop))
+            logger.info_msg(
+                no_interp_msg.format(start=span_start, stop=span_stop)
+            )
             continue
 
         # Use timestamps BEFORE and AFTER the span for interpolation
@@ -440,4 +442,11 @@ def get_smoothing_function(method: str) -> Callable:
             f"Unknown smoothing method: {method}. "
             f"Available methods: {list(SMOOTHING_METHODS.keys())}"
         )
+
     return SMOOTHING_METHODS[method]
+
+
+# V1 Compatibility alias
+_key_to_smooth_func_dict = {
+    "moving_avg": smooth_moving_avg,
+}

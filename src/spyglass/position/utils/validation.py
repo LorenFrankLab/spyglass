@@ -101,6 +101,52 @@ def validate_required_keys(
         )
 
 
+def validate_list(
+    required_items: list,
+    option_list: list = None,
+    name: str = "List",
+    condition: str = "",
+    permit_none: bool = False,
+) -> None:
+    """Validate that option_list contains all items in required_items.
+
+    Parameters
+    ----------
+    required_items : list
+        Items that must be present in option_list
+    option_list : list, optional
+        List to validate. If provided, must contain all items in required_items.
+    name : str, optional
+        Name for error messages, by default "List"
+    condition : str, optional
+        Additional context for error messages, by default ""
+    permit_none : bool, optional
+        If True, allow option_list to be None, by default False
+
+    Raises
+    ------
+    ValueError
+        If option_list is None when permit_none is False
+    KeyError
+        If option_list is missing required items
+    """
+    if option_list is None:
+        if permit_none:
+            return
+        else:
+            raise ValueError(f"{name} cannot be None")
+
+    if condition:
+        condition = f" when using {condition}"
+
+    missing_items = [x for x in option_list if x not in required_items]
+    if missing_items:
+        raise KeyError(
+            f"{name} must contain all items in {required_items}{condition}. "
+            f"Missing: {missing_items}"
+        )
+
+
 def validate_smoothing_params(params: dict) -> None:
     """Validate smoothing parameters for pose processing.
 
@@ -121,8 +167,15 @@ def validate_smoothing_params(params: dict) -> None:
     if params is None:
         return  # No smoothing params provided (None)
 
-    # Check for required likelihood_thresh - always required when smoothing dict is provided
-    if "likelihood_thresh" not in params:
+    # Only require likelihood_thresh if smoothing or interpolation is happening
+    has_smoothing = params.get("smooth", False) or "smoothing_params" in params
+    has_interpolation = (
+        params.get("interpolate", False) or "interp_params" in params
+    )
+
+    if (
+        has_smoothing or has_interpolation
+    ) and "likelihood_thresh" not in params:
         raise ValueError("Smoothing params must include 'likelihood_thresh'")
 
     # Check interpolation requirements
@@ -159,19 +212,19 @@ def validate_smoothing_params(params: dict) -> None:
         validate_option(method, options=valid_methods, name="smoothing method")
 
         # Validate duration/window parameter for method
-        duration_key = smooth_params.get(
-            "smoothing_duration", smooth_params.get("window_length")
-        )
-        if duration_key is not None:
+        if "smoothing_duration" in smooth_params:
             validate_option(
-                duration_key,
+                smooth_params["smoothing_duration"],
                 types=(int, float),
-                name="smoothing duration/window",
-                val_range=(
-                    (1, None)
-                    if isinstance(duration_key, (int, float))
-                    else None
-                ),
+                name="smoothing_duration",
+                val_range=(0.001, None),  # Minimum 1ms
+            )
+        elif "window_length" in smooth_params:
+            validate_option(
+                smooth_params["window_length"],
+                types=int,
+                name="window_length",
+                val_range=(1, None),  # Minimum 1 sample
             )
 
 

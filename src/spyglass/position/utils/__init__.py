@@ -16,13 +16,21 @@ from .centroid import (
     get_4pt_centroid,
 )
 from .dlc_io import (
+    DLCProjectReader,
+    do_pose_estimation,
     get_dlc_bodyparts,
+    get_dlc_model_eval,
     get_dlc_scorer,
+    get_most_recent_file,
     parse_dlc_h5_output,
+    read_yaml,
     reformat_dlc_data,
+    save_yaml,
+    suppress_print_from_package,
+    test_mode_suppress,
     validate_dlc_file,
 )
-from .general import get_most_recent_file, get_param_names, sanitize_filename
+from .general import get_param_names, sanitize_filename
 from .interpolation import (
     SMOOTHING_METHODS,
     get_smoothing_function,
@@ -34,6 +42,7 @@ from .interpolation import (
 from .make_video import VideoMaker, make_video
 from .orientation import (
     bisector_orientation,
+    get_span_start_stop,
     interp_orientation,
     no_orientation,
     smooth_orientation,
@@ -62,10 +71,18 @@ __all__ = [
     "get_2pt_centroid",
     "get_4pt_centroid",
     # DLC I/O
-    "parse_dlc_h5_output",
+    "DLCProjectReader",
+    "do_pose_estimation",
     "get_dlc_bodyparts",
+    "get_dlc_model_eval",
     "get_dlc_scorer",
+    "get_most_recent_file",
+    "parse_dlc_h5_output",
+    "read_yaml",
     "reformat_dlc_data",
+    "save_yaml",
+    "suppress_print_from_package",
+    "test_mode_suppress",
     "validate_dlc_file",
     # Interpolation & Smoothing
     "interp_position",
@@ -80,6 +97,7 @@ __all__ = [
     "no_orientation",
     "interp_orientation",
     "smooth_orientation",
+    "get_span_start_stop",
     # Tool Strategies
     "PoseToolStrategy",
     "DLCStrategy",

@@ -3,8 +3,12 @@ from pathlib import Path
 import datajoint as dj
 import ruamel.yaml as yaml
 
-from spyglass.position import utils_dlc
-from spyglass.position.utils import get_most_recent_file
+from spyglass.position.utils import (
+    get_dlc_model_eval,
+    get_most_recent_file,
+    read_yaml,
+    save_yaml,
+)
 from spyglass.position.v1.position_dlc_project import BodyPart, DLCProject
 from spyglass.position.v1.position_dlc_training import DLCModelTraining
 from spyglass.utils import SpyglassMixin, logger
@@ -99,7 +103,7 @@ class DLCModelSource(SpyglassMixin, dj.Manual):
 
         n_found = len(table_query)
         if n_found != 1:
-            logger.warning(  # pragma: no cover
+            logger.warn_msg(  # pragma: no cover
                 f"Found {len(table_query)} entries for project "
                 + f"{project_name}:\n{table_query}"
             )
@@ -214,7 +218,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         SourceTable = getattr(DLCModelSource, table_source)
         query = SourceTable & key
         if not query:
-            logger.error(  # pragma: no cover
+            self._err_msg(  # pragma: no cover
                 f"Key not in {SourceTable.__name__} table: {key}"
             )
             return  # pragma: no cover
@@ -290,7 +294,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
                 f"DLC_{dlc_config['Task']}_{dlc_config['scorer']}"
                 f"_shuffle{shuffle}"
             )
-            logger.warning(
+            self._warn_msg(
                 f"GetScorerName failed (DLC 3.x compat): {e}. "
                 f"Using synthetic scorer: {dlc_scorer}"
             )
@@ -314,7 +318,7 @@ class DLCModel(SpyglassMixin, dj.Computed):
         part_key = key.copy()
         key.update(model_dict)
         # ---- Save DJ-managed config ----
-        _ = utils_dlc.save_yaml(project_path, dlc_config)
+        _ = save_yaml(project_path, dlc_config)
 
         # --- Insert into table ----
         self.insert1(key)
@@ -353,8 +357,8 @@ class DLCModelEvaluation(SpyglassMixin, dj.Computed):
             "trainingsetindex",
         )
 
-        results = utils_dlc.get_dlc_model_eval(
-            yml_path=utils_dlc.read_yaml(project_path)[0],
+        results = get_dlc_model_eval(
+            yml_path=read_yaml(project_path)[0],
             model_prefix=model_prefix,
             shuffle=shuffle,
             trainingsetindex=trainingsetindex,

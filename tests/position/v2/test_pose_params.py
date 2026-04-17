@@ -88,7 +88,7 @@ class TestPoseParamsCustom:
         """Test inserting valid custom params."""
         from spyglass.position.v2.estim import PoseParams
 
-        PoseParams.insert_custom(
+        PoseParams.insert_custom_dict(
             params_name="my_custom",
             orient={
                 "method": "two_pt",
@@ -114,7 +114,7 @@ class TestPoseParamsCustom:
         """Test custom params with Gaussian smoothing."""
         from spyglass.position.v2.estim import PoseParams
 
-        PoseParams.insert_custom(
+        PoseParams.insert_custom_dict(
             params_name="gaussian_smooth",
             orient={"method": "none"},
             centroid={
@@ -145,7 +145,7 @@ class TestPoseParamsValidation:
         from spyglass.position.v2.estim import PoseParams
 
         with pytest.raises(ValueError, match="must include 'method'"):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={},  # Missing method
                 centroid={
@@ -166,7 +166,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             KeyError, match="Unknown orientation method.*invalid_method"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "invalid_method"},
                 centroid={
@@ -188,7 +188,7 @@ class TestPoseParamsValidation:
             ValueError,
             match="orientation params missing required keys.*bodypart2",
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={
                     "method": "two_pt",
@@ -213,7 +213,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             ValueError, match="orientation params missing required keys.*led3"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={
                     "method": "bisector",
@@ -237,7 +237,7 @@ class TestPoseParamsValidation:
         from spyglass.position.v2.estim import PoseParams
 
         with pytest.raises(ValueError, match="Centroid params must specify"):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={"points": {"point1": "nose"}},  # Missing method
@@ -255,7 +255,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             KeyError, match="Unknown centroid method.*5pt.*Available options"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={
@@ -276,7 +276,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             ValueError, match="2pt centroid requires exactly 2.*got 1"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={
@@ -298,7 +298,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             ValueError, match="4pt centroid requires exactly 4.*got 1"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={
@@ -319,22 +319,39 @@ class TestPoseParamsValidation:
             )
 
     def test_validate_smoothing_missing_likelihood(self, mini_insert):
-        """Test smoothing requires likelihood_thresh."""
+        """Test smoothing requires likelihood_thresh when enabled."""
         from spyglass.position.v2.estim import PoseParams
 
+        # Should succeed: No smoothing/interpolation enabled, no likelihood_thresh required
+        PoseParams.insert_custom_dict(
+            params_name="no_smooth_valid",
+            orient={"method": "none"},
+            centroid={
+                "method": "1pt",
+                "points": {"point1": "nose"},
+            },
+            smoothing={
+                "interpolate": False,
+                "smooth": False,
+                # No likelihood_thresh needed when both are false
+            },
+        )
+
+        # Should fail: interpolation enabled but likelihood_thresh missing
         with pytest.raises(
             ValueError,
             match="Smoothing params must include 'likelihood_thresh'",
         ):
-            PoseParams.insert_custom(
-                params_name="invalid",
+            PoseParams.insert_custom_dict(
+                params_name="interp_missing_thresh",
                 orient={"method": "none"},
                 centroid={
                     "method": "1pt",
                     "points": {"point1": "nose"},
                 },
                 smoothing={
-                    "interpolate": False,
+                    "interpolate": True,  # Enabled, so needs likelihood_thresh
+                    "interp_params": {"max_cm_to_interp": 10.0},
                     "smooth": False,
                     # Missing likelihood_thresh
                 },
@@ -347,7 +364,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             ValueError, match="interpolate=True requires 'interp_params'"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={
@@ -369,7 +386,7 @@ class TestPoseParamsValidation:
         with pytest.raises(
             ValueError, match="smooth=True requires 'smoothing_params' key"
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={
@@ -392,7 +409,7 @@ class TestPoseParamsValidation:
             KeyError,
             match="Unknown smoothing method.*invalid_method.*Available options",
         ):
-            PoseParams.insert_custom(
+            PoseParams.insert_custom_dict(
                 params_name="invalid",
                 orient={"method": "none"},
                 centroid={

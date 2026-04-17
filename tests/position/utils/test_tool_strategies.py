@@ -215,6 +215,9 @@ class TestToolStrategyFactory:
             def validate_params(self, params: dict) -> None:
                 pass
 
+            def get_skipped_params(self) -> Set[str]:
+                return {"analysis_file_id", "model_path"}
+
             def train_model(
                 self,
                 key,
@@ -225,6 +228,17 @@ class TestToolStrategyFactory:
                 model_instance,
             ):
                 return {"test": "result"}
+
+            def evaluate_model(
+                self,
+                model_entry,
+                params_entry,
+                model_instance,
+                plotting: bool = True,
+                show_errors: bool = True,
+                **kwargs,
+            ):
+                return {"evaluation": "result"}
 
         # Register the strategy
         factory.register_strategy("test", TestStrategy)

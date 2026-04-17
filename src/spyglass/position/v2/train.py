@@ -26,9 +26,12 @@ from datajoint.errors import DuplicateError
 from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
-from spyglass.position.utils import get_most_recent_file, get_param_names
+from spyglass.position.utils import (
+    get_most_recent_file,
+    get_param_names,
+    suppress_print_from_package,
+)
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
-from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import dlc_project_dir
 from spyglass.utils import SpyglassMixin
@@ -80,7 +83,7 @@ def _to_stored_path(path: Path) -> str:
 
     If ``path`` falls under ``dlc_project_dir``, the relative portion is
     returned so that entries remain portable across base-directory changes.
-    Otherwise the absolute path is stored unchanged (same as V1 behaviour).
+    Otherwise the absolute path is stored unchanged (same as V1 behavior).
 
     Parameters
     ----------
@@ -538,9 +541,9 @@ class ModelParams(SpyglassMixin, dj.Lookup):
     model_params_id: varchar(32)
     tool: varchar(32)
     ---
-    params: blob
+    params: json
     -> [nullable] Skeleton
-    params_hash: varchar(64) # hash of params
+    params_hash: varchar(64) # hash of parameters
     unique index (tool, params_hash)
     """
 
@@ -581,7 +584,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
     @classmethod
     @property
     def tool_info(cls) -> dict:
-        """Return tool information using strategy pattern for backward compatibility.
+        """Return tool information using strategy pattern.
 
         Returns
         -------
@@ -589,44 +592,22 @@ class ModelParams(SpyglassMixin, dj.Lookup):
             Tool information with structure:
             {tool_name: {"required": set, "accepted": set, "skipped": set, "aliases": dict}}
         """
-        from ..utils.tool_strategies import ToolStrategyFactory
-
         tool_info = {}
 
-        # Define skipped params per tool (params handled by Spyglass, not tool)
-        # These are typically paths, project settings, and metadata that
-        # Spyglass manages rather than passing to the tool
-        skipped_params = {
-            "DLC": {
-                "video_sets",
-                "model_path",
-                "analysis_file_id",
-            },
-            "SLEAP": {
-                "project_path",
-                "video_sets",
-                "model_path",
-                "analysis_file_id",
-            },
-            "ndx-pose": {"model_path", "analysis_file_id", "nwb_file_path"},
-        }
-
         # Build tool_info for each registered strategy
-        for tool_name in ToolStrategyFactory._strategies:
+        for tool_name in ToolStrategyFactory.get_available_tools():
             try:
                 strategy = ToolStrategyFactory.create_strategy(tool_name)
                 tool_info[tool_name] = {
                     "required": strategy.get_required_params(),
                     "accepted": strategy.get_accepted_params(),
-                    "skipped": skipped_params.get(tool_name, set()),
+                    "skipped": strategy.get_skipped_params(),
                     "aliases": strategy.get_parameter_aliases(),
                 }
             except Exception as e:
                 # Skip tools that fail to initialize
-                # Use warnings instead of self._warn_msg since this is a class method
-                import warnings
-
-                warnings.warn(
+                # Use logger warnings instead of warnings module
+                cls._warn_msg(
                     f"Could not initialize strategy for {tool_name}: {e}"
                 )
                 continue
@@ -667,13 +648,14 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.append_aliases(params)
 
-    def insert1(self, key, accept_default=False, **kwargs):
-        """Insert model parameters into the database.
+    def insert1(self, key, **kwargs):
+        """Insert model parameters with auto-generated name.
 
         1. Check if key is a dictionary
         2. Check if tool is supported
         3. Check if all required parameters are present, remove skipped
         4. Check if params already exist
+        5. Always use default_pk_name for consistent naming
         """
         if not isinstance(key, dict):
             raise TypeError("Key must be a dictionary")
@@ -708,13 +690,10 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
         model_params_id: str = (key.get("model_params_id") or "").strip()
         if not model_params_id:
+            # Always use default_pk_name for consistent naming
             model_params_id = default_pk_name(
                 "mp", dict(tool=key["tool"], params=params)
             )
-            if not accept_default and not self._test_mode:
-                model_params_id = prompt_default(
-                    "model_params_id", model_params_id
-                )
         key["model_params_id"] = model_params_id
 
         if "skeleton_id" in key and not (
@@ -724,7 +703,13 @@ class ModelParams(SpyglassMixin, dj.Lookup):
                 f"Skeleton ID not in the Skeleton table: {key['skeleton_id']}"
             )
 
-        super().insert1(dict(key, params=params, **params_hash_dict), **kwargs)
+        # Filter out unsupported kwargs for DataJoint insert
+        insert_kwargs = {
+            k: v for k, v in kwargs.items() if k != "accept_default"
+        }
+        super().insert1(
+            dict(key, params=params, **params_hash_dict), **insert_kwargs
+        )
 
         return dict(model_params_id=key["model_params_id"], tool=key["tool"])
 
@@ -753,7 +738,8 @@ class Model(SpyglassMixin, dj.Computed):
     ---
     -> ModelSelection
     -> [nullable] AnalysisNwbfile
-    model_path    : varchar(255)
+    model_path         : varchar(255)
+    evaluation=NULL    : json          # tool-specific evaluation metrics dict
     """
 
     key_source = ModelSelection  # one entry per selection, ensures unique id
@@ -1297,15 +1283,18 @@ class Model(SpyglassMixin, dj.Computed):
 
         self._info_msg(f"Evaluating model: {model_key['model_id']}")
 
-        # Dispatch to tool-specific evaluation
-        if tool == "DLC":
-            return self._evaluate_dlc_model(
-                model_entry, params_entry, plotting, show_errors, **kwargs
+        # Use strategy pattern for tool-specific evaluation
+        strategy = ToolStrategyFactory.create_strategy(tool)
+        results = strategy.evaluate_model(
+            model_entry, params_entry, self, plotting, show_errors, **kwargs
+        )
+
+        if results:
+            (self & model_key).update1(
+                {"model_id": model_key["model_id"], "evaluation": results}
             )
-        else:
-            raise NotImplementedError(
-                f"Evaluation not implemented for tool: {tool}"
-            )
+
+        return results
 
     def _evaluate_dlc_model(
         self,
@@ -1667,15 +1656,9 @@ class Model(SpyglassMixin, dj.Computed):
                     "Please specify 'tool' parameter."
                 )
 
-        # Dispatch to appropriate import method
-        if tool == "DLC":
-            return self._import_dlc_model(model_path, **kwargs)
-        elif tool == "ndx-pose":
-            return self._import_ndx_pose_model(model_path, **kwargs)
-        else:
-            raise NotImplementedError(
-                f"Model import not implemented for {tool}"
-            )
+        # Use strategy pattern for tool-specific imports
+        strategy = ToolStrategyFactory.create_strategy(tool)
+        return strategy.import_model(model_path, self, **kwargs)
 
     def _import_dlc_model(self, model_path: Path, **kwargs):
         if model_path.suffix not in [".yml", ".yaml"]:
@@ -1709,7 +1692,6 @@ class Model(SpyglassMixin, dj.Computed):
                 skeleton_id=skeleton_key["skeleton_id"],
             ),
             skip_duplicates=True,
-            accept_default=True,
         )
         self._info_msg(f"ModelParams: {model_params_key['model_params_id']}")
 
@@ -1889,11 +1871,9 @@ class Model(SpyglassMixin, dj.Computed):
                     pose_estimation.dimensions
                 ).tolist()
 
-            # Add default required params for DLC if importing from DLC
-            if tool == "DLC" and "project_path" not in params:
-                params["project_path"] = str(
-                    model_path.parent
-                )  # Use model directory
+            # Apply tool-specific import defaults using strategy
+            strategy = ToolStrategyFactory.create_strategy(tool)
+            params = strategy.apply_import_defaults(params, model_path)
 
         # Step 8: Create skeleton config dict for Skeleton.insert1()
         skeleton_config = {
@@ -1922,7 +1902,6 @@ class Model(SpyglassMixin, dj.Computed):
                 skeleton_id=skeleton_key["skeleton_id"],
             ),
             skip_duplicates=True,
-            accept_default=True,
         )
 
         if not model_params_key:
@@ -2208,39 +2187,17 @@ class Model(SpyglassMixin, dj.Computed):
         except Exception as e:
             errors.append(f"Error validating ModelParams: {e}")
 
-        # Check 5: (Optional) Inference readiness
+        # Check 5: (Optional) Inference readiness using strategy pattern
         if check_inference and checks["model_path_exists"]:
             tool = model_entry["tool"]
-
-            # TODO: Separate into `_verify_dlc`
-            if tool == "DLC":
-                # Check if DLC is available
-                if create_training_dataset is None or train_network is None:
-                    warnings.append(
-                        "DeepLabCut not installed - cannot verify inference readiness"
-                    )
-                else:
-                    # Verify model directory structure
-                    if model_path.suffix in [".yaml", ".yml"]:
-                        model_dir = model_path.parent
-                        # Look for trained model directories
-                        train_dirs = list(model_dir.rglob("**/train")) + list(
-                            model_dir.rglob("**/dlc-models")
-                        )
-                        if train_dirs:
-                            checks["inference_ready"] = True
-                        else:
-                            warnings.append(
-                                "No trained model directories found - "
-                                "model may not be trained yet"
-                            )
-            elif tool == "ndx-pose":
-                # For ndx-pose models, they're stored in NWB so can't run inference
-                warnings.append(
-                    "ndx-pose models cannot run inference directly - "
-                    "use original DLC/SLEAP project"
+            try:
+                strategy = ToolStrategyFactory.create_strategy(tool)
+                tool_checks, tool_warnings = strategy.verify_model(
+                    model_path, check_inference=True
                 )
-            else:
+                checks.update(tool_checks)
+                warnings.extend(tool_warnings)
+            except ValueError:
                 warnings.append(
                     f"Inference check not supported for tool: {tool}"
                 )
@@ -2377,6 +2334,12 @@ class Model(SpyglassMixin, dj.Computed):
 
         from spyglass.position.v2.estim import PoseEstim
 
+        return PoseEstim().run_inference(
+            model_key, video_path, save_as_csv, destfolder, **kwargs
+        )
+        return PoseEstim().run_inference(
+            model_key, video_path, save_as_csv, destfolder, **kwargs
+        )
         return PoseEstim().run_inference(
             model_key, video_path, save_as_csv, destfolder, **kwargs
         )

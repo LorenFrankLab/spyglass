@@ -3,12 +3,12 @@ from pathlib import Path
 
 import datajoint as dj
 
-from spyglass.position.utils import get_param_names
-from spyglass.position.utils_dlc import (
+from spyglass.position.utils import (
+    get_param_names,
     suppress_print_from_package,
     test_mode_suppress,
 )
-from spyglass.position.v1.dlc_utils import file_log
+from spyglass.position.utils.general import file_log
 from spyglass.position.v1.position_dlc_project import DLCProject
 from spyglass.settings import test_mode
 from spyglass.utils import SpyglassMixin, logger
@@ -71,7 +71,7 @@ class DLCModelTrainingParams(SpyglassMixin, dj.Lookup):
         param_query = cls & param_pk
 
         if param_query:
-            logger.info(
+            cls()._info_msg(
                 f"New param set not added\n"
                 f"A param set with name: {paramset_name} already exists"
             )
@@ -167,7 +167,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         from deeplabcut import create_training_dataset, train_network
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        from spyglass.position import utils_dlc
+        from spyglass.position.utils import read_yaml, save_yaml
 
         try:
             from deeplabcut.utils.auxiliaryfunctions import get_model_folder
@@ -180,9 +180,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         project_path = dlc_config["project_path"]
 
         # ---- Build and save DLC configuration (yaml) file ----
-        dlc_config = utils_dlc.read_yaml(project_path)[1] or read_config(
-            config_path
-        )
+        dlc_config = read_yaml(project_path)[1] or read_config(config_path)
         dlc_config.update(
             {
                 **params,
@@ -196,7 +194,7 @@ class DLCModelTraining(SpyglassMixin, dj.Computed):
         )
 
         # Write dlc config file to base project folder
-        dlc_cfg_filepath = utils_dlc.save_yaml(project_path, dlc_config)
+        dlc_cfg_filepath = save_yaml(project_path, dlc_config)
 
         # DLC 3.x requires Engine enum, not a raw string. Convert if needed.
         try:

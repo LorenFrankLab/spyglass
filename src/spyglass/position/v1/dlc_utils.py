@@ -7,11 +7,10 @@ import pwd
 import subprocess
 import sys
 from collections.abc import Sequence
-from functools import reduce
 from itertools import combinations, groupby
 from operator import itemgetter
 from pathlib import Path, PosixPath
-from typing import Iterable, Union
+from typing import Union
 
 import datajoint as dj
 import numpy as np
@@ -20,108 +19,13 @@ from position_tools import get_distance
 
 from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
+
+# Import validation functions from utils module
+from spyglass.position.utils.validation import validate_list, validate_option
 from spyglass.settings import dlc_output_dir, dlc_video_dir, raw_dir, test_mode
 from spyglass.utils.logging import logger, stream_handler
 
-
-def validate_option(
-    option=None,
-    options: list = None,
-    name="option",
-    types: tuple = None,
-    val_range: tuple = None,
-    permit_none=False,
-):
-    """Validate that option is in a list options or a list of types.
-
-    Parameters
-    ----------
-    option : str, optional
-        If none, runs no checks.
-    options : lis, optional
-        If provided, option must be in options.
-    name : st, optional
-        If provided, name of option to use in error message.
-    types : tuple, optional
-        If provided, option must be an instance of one of the types in types.
-    val_range : tuple, optional
-        If provided, option must be in range (min, max)
-    permit_none : bool, optional
-        If True, permit option to be None. Default False.
-
-    Raises
-    ------
-    ValueError
-        If option is not in options.
-    """
-    if option is None and not permit_none:
-        raise ValueError(f"{name} cannot be None")
-
-    if options and option not in options:
-        raise KeyError(
-            f"Unknown {name}: {option} " f"Available options: {options}"
-        )
-
-    if types is not None and not isinstance(types, Iterable):
-        types = (types,)
-
-    if types is not None and not isinstance(option, types):
-        raise TypeError(f"{name} is {type(option)}. Available types {types}")
-
-    if val_range and not (val_range[0] <= option <= val_range[1]):
-        raise ValueError(f"{name} must be in range {val_range}")
-
-
-def validate_list(
-    required_items: list,
-    option_list: list = None,
-    name="List",
-    condition="",
-    permit_none=False,
-):
-    """Validate that option_list contains all items in required_items.
-
-    Parameters
-    ---------
-    required_items : list
-    option_list : list, optional
-        If provided, option_list must contain all items in required_items.
-    name : str, optional
-        If provided, name of option_list to use in error message.
-    condition : str, optional
-        If provided, condition in error message as 'when using X'.
-    permit_none : bool, optional
-        If True, permit option_list to be None. Default False.
-    """
-    if option_list is None:
-        if permit_none:
-            return
-        else:
-            raise ValueError(f"{name} cannot be None")
-    if condition:
-        condition = f" when using {condition}"
-    if any(x not in required_items for x in option_list):
-        raise KeyError(
-            f"{name} must contain all items in {required_items}{condition}."
-        )
-
-
-def validate_smooth_params(params):
-    """If params['smooth'], validate method is in list and duration type"""
-    if not params.get("smooth"):
-        return
-    smoothing_params = params.get("smoothing_params")
-    validate_option(option=smoothing_params, name="smoothing_params")
-    validate_option(
-        option=smoothing_params.get("smooth_method"),
-        name="smooth_method",
-        options=_key_to_smooth_func_dict,
-    )
-    validate_option(
-        option=smoothing_params.get("smoothing_duration"),
-        name="smoothing_duration",
-        types=(int, float),
-    )
+# validate_smooth_params functionality moved to utils.validation module
 
 
 def _set_permissions(directory, mode, username: str, groupname: str = None):
@@ -593,99 +497,114 @@ def get_span_start_stop(indices):
     return span_inds
 
 
-def interp_pos(dlc_df, spans_to_interp, **kwargs):
-    """Interpolate x and y positions in DLC dataframe"""
-    idx = pd.IndexSlice
+# smooth_moving_avg moved to utils.interpolation module
+# Use compatibility wrapper below for V1 API
+from spyglass.position.utils.interpolation import smooth_moving_avg
 
-    no_x_msg = "Index {ind} has no {coord}point with which to interpolate"
-    no_interp_msg = "Index {start} to {stop} not interpolated"
-    max_pts_to_interp = kwargs.get("max_pts_to_interp", float("inf"))
-    max_cm_to_interp = kwargs.get("max_cm_to_interp", float("inf"))
+# Import function mapping for backward compatibility
+_key_to_smooth_func_dict = {
+    "moving_avg": smooth_moving_avg,
+}
 
-    def _get_new_dim(dim, span_start, span_stop, start_time, stop_time):
-        return np.interp(
-            x=dlc_df.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[dim[0], dim[-1]],
+
+# Centroid class moved to utils.centroid module for reusability
+# Import for V1 backward compatibility
+from spyglass.position.utils.centroid import Centroid
+
+# orientation functions moved to utils.orientation module
+# Import them for V1 compatibility
+from spyglass.position.utils.interpolation import interp_position
+from spyglass.position.utils.orientation import (
+    bisector_orientation,
+    interp_orientation,
+    no_orientation,
+    two_pt_orientation,
+)
+
+# Add new functions for orientation calculation here
+
+
+# === V1 Compatibility Layer ===
+# These functions maintain V1's legacy API while using shared utils internally
+
+
+def interp_pos(dlc_df: pd.DataFrame, spans_to_interp, **kwargs) -> pd.DataFrame:
+    """V1-compatible wrapper for interp_position function.
+
+    This function provides backward compatibility for V1 code that expects
+    the old interp_pos signature and behavior.
+
+    Parameters
+    ----------
+    dlc_df : pd.DataFrame
+        Position dataframe with x,y columns
+    spans_to_interp : list of tuples
+        List of (start, stop) index pairs for interpolation spans
+    **kwargs
+        Additional interpolation parameters
+
+    Returns
+    -------
+    pd.DataFrame
+        Dataframe with interpolated positions
+
+    Notes
+    -----
+    This is a compatibility wrapper around the newer interp_position function.
+    New code should use interp_position directly for better performance and
+    more flexible column specification.
+    """
+    # Use the newer function with default x,y columns
+    return interp_position(
+        pos_df=dlc_df,
+        spans_to_interp=spans_to_interp,
+        coord_cols=("x", "y"),
+        **{
+            k: v
+            for k, v in kwargs.items()
+            if k in ["max_pts_to_interp", "max_cm_to_interp"]
+        },
+    )
+
+
+def smooth_moving_avg_v1(
+    interp_df: pd.DataFrame,
+    smoothing_duration: float,
+    sampling_rate: int,
+    **kwargs,
+) -> pd.DataFrame:
+    """V1-compatible moving average smoothing function.
+
+    This function provides backward compatibility for V1 code that expects
+    specific MultiIndex column handling.
+
+    Parameters
+    ----------
+    interp_df : pd.DataFrame
+        Position dataframe with MultiIndex columns for x,y coordinates
+    smoothing_duration : float
+        Duration of smoothing window in seconds
+    sampling_rate : int
+        Sampling rate in Hz
+    **kwargs
+        Additional arguments (for compatibility)
+
+    Returns
+    -------
+    pd.DataFrame
+        Smoothed position dataframe
+
+    Examples
+    --------
+    >>> smoothed_df = smooth_moving_avg_v1(pos_df, 0.5, 30)  # 0.5s window at 30Hz
+    """
+    try:
+        import bottleneck as bn
+    except ImportError:
+        raise ImportError(
+            "bottleneck is required for moving average smoothing. "
+            "Install with: pip install bottleneck"
         )
-
-    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
-        idx_span = idx[span_start:span_stop]
-
-        if (span_stop + 1) >= len(dlc_df):
-            dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            if not test_mode:
-                logger.info(no_x_msg.format(ind=ind, coord="end"))
-            continue
-        if span_start < 1:
-            dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            if not test_mode:
-                logger.info(no_x_msg.format(ind=ind, coord="start"))
-            continue
-
-        x = [dlc_df["x"].iloc[span_start - 1], dlc_df["x"].iloc[span_stop + 1]]
-        y = [dlc_df["y"].iloc[span_start - 1], dlc_df["y"].iloc[span_stop + 1]]
-
-        span_len = int(span_stop - span_start + 1)
-        start_time = dlc_df.index[span_start]
-        stop_time = dlc_df.index[span_stop]
-        change = np.linalg.norm(np.array([x[0], y[0]]) - np.array([x[1], y[1]]))
-
-        if span_len > max_pts_to_interp or change > max_cm_to_interp:
-            dlc_df.loc[idx_span, idx[["x", "y"]]] = np.nan
-            if not test_mode:
-                logger.info(
-                    no_interp_msg.format(start=span_start, stop=span_stop)
-                )
-            if change > max_cm_to_interp:
-                continue
-
-        xnew = _get_new_dim(x, span_start, span_stop, start_time, stop_time)
-        ynew = _get_new_dim(y, span_start, span_stop, start_time, stop_time)
-
-        dlc_df.loc[idx[start_time:stop_time], idx["x"]] = xnew
-        dlc_df.loc[idx[start_time:stop_time], idx["y"]] = ynew
-
-    return dlc_df
-
-
-def interp_orientation(df, spans_to_interp, **kwargs):
-    """Interpolate orientation in DLC dataframe"""
-    idx = pd.IndexSlice
-    no_x_msg = "Index {ind} has no {x}point with which to interpolate"
-    df_orient = df["orientation"]
-
-    for ind, (span_start, span_stop) in enumerate(spans_to_interp):
-        idx_span = idx[span_start:span_stop]
-        if (span_stop + 1) >= len(df):
-            df.loc[idx_span, idx["orientation"]] = np.nan
-            if not test_mode:
-                logger.info(no_x_msg.format(ind=ind, x="stop"))
-            continue
-        if span_start < 1:
-            df.loc[idx_span, idx["orientation"]] = np.nan
-            if not test_mode:
-                logger.info(no_x_msg.format(ind=ind, x="start"))
-            continue
-
-        orient = [df_orient.iloc[span_start - 1], df_orient.iloc[span_stop + 1]]
-
-        start_time = df.index[span_start]
-        stop_time = df.index[span_stop]
-        orientnew = np.interp(
-            x=df.index[span_start : span_stop + 1],
-            xp=[start_time, stop_time],
-            fp=[orient[0], orient[-1]],
-        )
-        df.loc[idx[start_time:stop_time], idx["orientation"]] = orientnew
-    return df
-
-
-def smooth_moving_avg(
-    interp_df, smoothing_duration: float, sampling_rate: int, **kwargs
-):
-    """Smooths x and y positions in DLC dataframe"""
-    import bottleneck as bn
 
     idx = pd.IndexSlice
     moving_avg_window = int(np.round(smoothing_duration * sampling_rate))
@@ -700,232 +619,74 @@ def smooth_moving_avg(
     return interp_df
 
 
-_key_to_smooth_func_dict = {
-    "moving_avg": smooth_moving_avg,
-}
-
-
 def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on vector between two points"""
+    """V1-compatible two-point orientation calculation.
+
+    This function provides backward compatibility for V1 code that uses
+    params.pop() to extract bodypart names.
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position dataframe with MultiIndex columns
+    **params
+        V1-style parameters with bodypart1 and bodypart2 keys
+
+    Returns
+    -------
+    np.ndarray
+        Orientation in radians
+    """
+
     BP1 = params.pop("bodypart1", None)
     BP2 = params.pop("bodypart2", None)
-    orientation = np.arctan2(
-        (pos_df[BP1]["y"] - pos_df[BP2]["y"]),
-        (pos_df[BP1]["x"] - pos_df[BP2]["x"]),
-    )
-    return orientation
 
+    if BP1 is None or BP2 is None:
+        raise ValueError("bodypart1 and bodypart2 must be specified")
 
-def no_orientation(pos_df: pd.DataFrame, **params):
-    """Returns an array of NaNs for orientation"""
-    fill_value = params.pop("fill_with", np.nan)
-    n_frames = len(pos_df)
-    orientation = np.full(
-        shape=(n_frames), fill_value=fill_value, dtype=np.float16
-    )
-    return orientation
+    # Use the modern function with proper parameter mapping
+    return two_pt_orientation(pos_df, point1=BP1, point2=BP2)
 
 
 def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
-    """Determines orientation based on 2 equally-spaced identifiers
+    """V1-compatible bisector orientation calculation.
 
-    Identifiers are assumed to be perpendicular to the orientation direction.
-    A third object is needed to determine forward/backward
-    """  # timeit reported 3500x improvement for vectorized implementation
+    Determines orientation based on 2 equally-spaced identifiers
+    (red/green LEDs). Identifiers are assumed to be perpendicular to the
+    orientation direction. A third object is needed to determine forward/backward.
+
+    Parameters
+    ----------
+    pos_df : pd.DataFrame
+        Position dataframe with MultiIndex columns
+    **params
+        V1-style parameters with led1, led2, and led3 keys
+
+    Returns
+    -------
+    np.ndarray
+        Orientation in radians
+    """
     LED1 = params.pop("led1", None)
     LED2 = params.pop("led2", None)
     LED3 = params.pop("led3", None)
 
-    orient = np.full(len(pos_df), np.nan)  # Initialize with NaNs
-    x_vec = pos_df[LED1]["x"] - pos_df[LED2]["x"]
-    y_vec = pos_df[LED1]["y"] - pos_df[LED2]["y"]
-    y_eq0 = np.isclose(y_vec, 0)
+    if any(x is None for x in [LED1, LED2, LED3]):
+        raise ValueError("led1, led2, and led3 must be specified")
 
-    # when y_vec is zero, 1&2 are equal. Compare to 3, determine if up or down
-    orient[y_eq0 & pos_df[LED3]["y"].gt(pos_df[LED1]["y"])] = np.pi / 2
-    orient[y_eq0 & pos_df[LED3]["y"].lt(pos_df[LED1]["y"])] = -np.pi / 2
-
-    # Handling error case where y_vec is zero and all Ys are the same
-    y_1, y_2, y_3 = pos_df[LED1]["y"], pos_df[LED2]["y"], pos_df[LED3]["y"]
-    if np.any(y_eq0 & np.isclose(y_1, y_2) & np.isclose(y_2, y_3)):
-        raise Exception(  # pragma: no cover
-            "Cannot determine head direction from bisector"
-        )
-
-    # General case where y_vec is not zero. Use arctan2 to determine orientation
-    length = np.sqrt(x_vec**2 + y_vec**2)
-    norm_x = (-y_vec / length)[~y_eq0]
-    norm_y = (x_vec / length)[~y_eq0]
-    orient[~y_eq0] = np.arctan2(norm_y, norm_x)
-
-    return orient
+    # Use the modern bisector function with proper parameter mapping
+    return bisector_orientation(pos_df, led1=LED1, led2=LED2, led3=LED3)
 
 
-# Add new functions for orientation calculation here
+# V1 compatibility constants
+_key_to_smooth_func_dict = {
+    "moving_avg": smooth_moving_avg_v1,
+}
 
+
+# Orientation function lookup dictionary
 _key_to_func_dict = {
     "none": no_orientation,
     "red_green_orientation": two_pt_head_orientation,
     "red_led_bisector": red_led_bisector_orientation,
 }
-
-
-class Centroid:
-    def __init__(self, pos_df, points, max_LED_separation=None):
-        if max_LED_separation is None and len(points) != 1:
-            raise ValueError("max_LED_separation must be provided")
-        if len(points) not in [1, 2, 4]:
-            raise ValueError("Invalid number of points")
-
-        self.pos_df = pos_df
-        self.max_LED_separation = max_LED_separation
-        self.points_dict = points
-        self.point_names = list(points.values())
-        self.idx = pd.IndexSlice
-        self.centroid = np.zeros(shape=(len(pos_df), 2))
-        self.coords = {
-            p: pos_df.loc[:, self.idx[p, ("x", "y")]].to_numpy()
-            for p in self.point_names
-        }
-        self.nans = {
-            p: np.isnan(coord).any(axis=1) for p, coord in self.coords.items()
-        }
-
-        if len(points) == 1:
-            self.get_1pt_centroid()
-            return
-        if len(points) in [2, 4]:  # 4 also requires 2
-            self.get_2pt_centroid()
-        if len(points) == 4:
-            self.get_4pt_centroid()
-
-    def calc_centroid(
-        self,
-        mask: tuple,
-        points: list = None,
-        replace: bool = False,
-        midpoint: bool = False,
-        logical_or: bool = False,
-    ):
-        """Calculate the centroid of the points in the mask
-
-        Parameters
-        ----------
-        mask : Union[tuple, list]
-            Tuple of masks to apply to the points. Default is np.logical_and
-            over a tuple. If a list is passed, then np.logical_or is used.
-            List cannoot be used with logical_or=True
-        points : list, optional
-            List of points to calculate the centroid of. For replace, not needed
-        replace : bool, optional
-            Special case for replacing mask with nans, by default False
-        logical_or : bool, optional
-            Whether to use logical_and or logical_or to combine mask tuple.
-        """
-        if isinstance(mask, list):  # pragma: no cover
-            mask = [reduce(np.logical_and, m) for m in mask]
-
-        # Check that combinations of points close enough
-        if points is not None and len(points) > 1:
-            for pair in combinations(points, 2):
-                mask = (*mask, ~self.too_sep(pair[0], pair[1]))
-
-        func = np.logical_or if logical_or else np.logical_and
-        mask = reduce(func, mask)
-
-        if not np.any(mask):  # pragma: no cover
-            return
-        if replace:
-            self.centroid[mask] = np.nan
-            return
-        if len(points) == 3:
-            self.coords["midpoint"] = (
-                self.coords[points[0]] + self.coords[points[1]]
-            ) / 2
-            points = ["midpoint", points[2]]
-        coord_arrays = np.array([self.coords[point][mask] for point in points])
-        self.centroid[mask] = np.nanmean(coord_arrays, axis=0)
-
-    def too_sep(self, point1, point2):
-        """Check if points are too far apart"""
-        return (
-            get_distance(self.coords[point1], self.coords[point2])
-            >= self.max_LED_separation
-        )
-
-    def get_1pt_centroid(self):
-        """Passthrough. If point is NaN, then centroid is NaN."""
-        PT1 = self.points_dict.get("point1", None)
-        mask = ~self.nans[PT1]  # For good points, centroid is the point
-        self.centroid[mask] = self.coords[PT1][mask]
-        self.centroid[~mask] = np.nan  # For bad points, centroid is NaN
-
-    def get_2pt_centroid(self):
-        """Calculate centroid for two points"""
-        self.calc_centroid(  # Good points
-            points=self.point_names,
-            mask=(~self.nans[p] for p in self.point_names),
-        )
-        self.calc_centroid(mask=self.nans.values(), replace=True)  # All bad
-        for point in self.point_names:  # only one point
-            self.calc_centroid(
-                points=[point],
-                mask=(
-                    ~self.nans[point],
-                    *[self.nans[p] for p in self.point_names if p != point],
-                ),
-            )
-
-    def get_4pt_centroid(self):
-        """Calculate centroid for four points.
-
-        If green and center are good, then centroid is average.
-        If green and left/right are good, then centroid is average.
-        If only left/right are good, then centroid is the average of left/right.
-        If only the center is good, then centroid is the center.
-        """
-        green = self.points_dict.get("greenLED", None)
-        red_C = self.points_dict.get("redLED_C", None)
-        red_L = self.points_dict.get("redLED_L", None)
-        red_R = self.points_dict.get("redLED_R", None)
-
-        self.calc_centroid(  # Good green and center
-            points=[green, red_C],
-            mask=(~self.nans[green], ~self.nans[red_C]),
-        )
-
-        self.calc_centroid(  # green, left/right - average left/right
-            points=[red_L, red_R, green],
-            mask=(
-                ~self.nans[green],
-                self.nans[red_C],
-                ~self.nans[red_L],
-                ~self.nans[red_R],
-            ),
-        )
-
-        self.calc_centroid(  # only left/right
-            points=[red_L, red_R],
-            mask=(
-                self.nans[green],
-                self.nans[red_C],
-                ~self.nans[red_L],
-                ~self.nans[red_R],
-            ),
-        )
-
-        for side, other in [red_L, red_R], [red_R, red_L]:
-            self.calc_centroid(  # green and one side are good, others are NaN
-                points=[side, green],
-                mask=(
-                    ~self.nans[green],
-                    self.nans[red_C],
-                    ~self.nans[side],
-                    self.nans[other],
-                ),
-            )
-
-        self.calc_centroid(  # green is NaN, red center is good
-            points=[red_C],
-            mask=(self.nans[green], ~self.nans[red_C]),
-        )

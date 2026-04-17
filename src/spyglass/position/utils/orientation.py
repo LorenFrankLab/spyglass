@@ -25,6 +25,8 @@ from typing import List, Tuple
 import numpy as np
 import pandas as pd
 
+from spyglass.utils import logger
+
 try:
     from position_tools.core import gaussian_smooth
 except ImportError:
@@ -267,13 +269,13 @@ def interp_orientation(
         # Can't interpolate if span extends to end
         if (span_stop + 1) >= len(df):
             df.loc[idx_span, idx["orientation"]] = np.nan
-            print(no_x_msg.format(ind=ind, x="stop"))
+            logger.info_msg(no_x_msg.format(ind=ind, x="stop"))
             continue
 
         # Can't interpolate if span starts at beginning
         if span_start < 1:
             df.loc[idx_span, idx["orientation"]] = np.nan
-            print(no_x_msg.format(ind=ind, x="start"))
+            logger.info_msg(no_x_msg.format(ind=ind, x="start"))
             continue
 
         # Get bounding orientation values and timestamps

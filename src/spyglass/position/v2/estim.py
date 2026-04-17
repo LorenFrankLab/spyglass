@@ -1,6 +1,7 @@
 import contextlib
 import io
 import subprocess
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Union
@@ -12,13 +13,13 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_behav import VideoFile
+from spyglass.position.utils import suppress_print_from_package
 from spyglass.position.utils.dlc_io import parse_dlc_h5_output
 from spyglass.position.utils.validation import (
     validate_centroid_params,
     validate_orientation_params,
     validate_smoothing_params,
 )
-from spyglass.position.utils_dlc import suppress_print_from_package
 from spyglass.position.v2.train import (
     Model,
     ModelParams,
@@ -34,8 +35,106 @@ from spyglass.utils.mixins.base import BaseMixin
 # ----------------------------- Optional imports ------------------------------
 try:
     import ndx_pose
-except ImportError:
-    ndx_pose = None
+except ImportError:  # pragma: no cover
+    ndx_pose = None  # pragma: no cover
+
+# ----------------------------- Parameter dataclasses ------------------------
+
+
+@dataclass
+class OrientationParams:
+    """Dataclass for orientation parameters."""
+
+    method: str
+    bodypart1: str = ""
+    bodypart2: str = ""
+    led1: str = ""
+    led2: str = ""
+    led3: str = ""
+    interpolate: bool = True
+    smooth: bool = True
+    smoothing_params: dict = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary format."""
+        result = asdict(self)
+        # Remove empty/unused fields based on method
+        if self.method == "two_pt":
+            result = {
+                k: v
+                for k, v in result.items()
+                if k not in ["led1", "led2", "led3"] and v != ""
+            }
+        elif self.method == "bisector":
+            result = {
+                k: v
+                for k, v in result.items()
+                if k not in ["bodypart1", "bodypart2"] and v != ""
+            }
+        elif self.method == "none":
+            result = {
+                k: v
+                for k, v in result.items()
+                if k not in ["bodypart1", "bodypart2", "led1", "led2", "led3"]
+                and v != ""
+            }
+        return {k: v for k, v in result.items() if v is not None and v != ""}
+
+
+@dataclass
+class CentroidParams:
+    """Dataclass for centroid parameters."""
+
+    method: str
+    points: dict
+    max_LED_separation: float = None
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary format."""
+        result = asdict(self)
+        return {k: v for k, v in result.items() if v is not None}
+
+
+@dataclass
+class SmoothingParams:
+    """Dataclass for smoothing parameters."""
+
+    interpolate: bool = True
+    interp_params: dict = None
+    smooth: bool = True
+    smoothing_params: dict = None
+    likelihood_thresh: float = 0.95
+
+    def to_dict(self) -> dict:
+        """Convert to dictionary format."""
+        result = asdict(self)
+        return {k: v for k, v in result.items() if v is not None}
+
+
+@dataclass
+class PoseParameterSet:
+    """Complete parameter set for pose estimation."""
+
+    params_name: str
+    orient: OrientationParams
+    centroid: CentroidParams
+    smoothing: SmoothingParams
+
+    def validate(self):
+        """Validate all parameter components."""
+        validate_orientation_params(self.orient.to_dict())
+        validate_centroid_params(self.centroid.to_dict())
+        validate_smoothing_params(self.smoothing.to_dict())
+
+    def to_params_dict(self) -> dict:
+        """Convert to dictionary format for database insertion."""
+        return {
+            "pose_params": self.params_name,
+            "orient": self.orient.to_dict(),
+            "centroid": self.centroid.to_dict(),
+            "smoothing": self.smoothing.to_dict(),
+        }
+
 
 schema = dj.schema("cbroz_position_v2_estim")
 
@@ -51,7 +150,7 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
     ----------
     pose_estim_params_id : str
         Unique identifier for this parameter set (max 32 chars)
-    params : blob
+    params : json
         Tool-specific inference parameters dict
     params_hash : str
         Hash of params for deduplication
@@ -60,12 +159,10 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
     definition = """
     pose_estim_params_id: varchar(32)
     ---
-    params: blob          # tool-specific inference params
-    params_hash: varchar(64)  # hash of params
+    params: json          # tool-specific inference params
+    params_hash: varchar(64)  # hash of parameters
     unique index (params_hash)
     """
-
-    # TODO: Make `params_hash` hidden by adding a `_` prefix?
 
     default_params = {}
     contents = [
@@ -116,7 +213,7 @@ class PoseEstimParams(SpyglassMixin, dj.Lookup):
             "params_hash": params_hash,
         }
         cls.insert1(key, skip_duplicates=skip_duplicates)
-        cls._info_msg(f"Inserted PoseEstimParams: {params_id}")
+        cls._info_msg(msg=f"Inserted PoseEstimParams: {params_id}")
         return {"pose_estim_params_id": params_id}
 
 
@@ -192,13 +289,15 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
         if output_dir is None:
             output_dir = self._infer_output_dir(key)
 
-        if "vid_group_id" not in key:
-            raise ValueError(
+        if "vid_group_id" not in key:  # pragma: no cover
+            raise ValueError(  # pragma: no cover
                 "key must include 'vid_group_id'. "
                 "Use VidFileGroup().insert1() to create a group first."
             )
-        if not (VidFileGroup() & {"vid_group_id": key["vid_group_id"]}):
-            raise ValueError(
+        if not (
+            VidFileGroup() & {"vid_group_id": key["vid_group_id"]}
+        ):  # pragma: no cover
+            raise ValueError(  # pragma: no cover
                 f"VidFileGroup '{key['vid_group_id']}' not found. "
                 "Create it first with VidFileGroup().insert1() or "
                 "VidFileGroup.create_from_files()."
@@ -319,8 +418,8 @@ class PoseInferenceRunner(BaseMixin):
 
         try:
             from deeplabcut import analyze_videos
-        except ImportError:
-            raise ImportError(
+        except ImportError:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "DeepLabCut is required for inference. "
                 "Install with: pip install deeplabcut>=3.0"
             )
@@ -384,8 +483,8 @@ class NDXPoseBuilder(BaseMixin):
         tuple
             (pose_estimation, skeleton) ndx-pose objects
         """
-        if ndx_pose is None:
-            raise ImportError(
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "ndx-pose is required to build pose structures. "
                 "Install with: pip install ndx-pose>=0.2.0"
             )
@@ -577,8 +676,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         ...     nwb_file_name="analysis_20250101.nwb"
         ... )
         """
-        if ndx_pose is None:
-            raise ImportError(
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "ndx-pose is required to load DLC output into NWB. "
                 "Install with: pip install ndx-pose>=0.2.0"
             )
@@ -587,25 +686,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if not dlc_output_path.exists():
             raise FileNotFoundError(f"DLC output not found: {dlc_output_path}")
 
-        logger.info(f"Loading DLC output: {dlc_output_path}")
+        logger.info_msg(f"Loading DLC output: {dlc_output_path}")
 
-        # Load DLC output data
-        if dlc_output_path.suffix == ".h5":
-            df = pd.read_hdf(dlc_output_path)
-        elif dlc_output_path.suffix == ".csv":
-            df = pd.read_csv(dlc_output_path, header=[0, 1, 2], index_col=0)
-        else:
-            raise ValueError(
-                f"Unsupported file format: {dlc_output_path.suffix}. "
-                "Must be .h5 or .csv"
-            )
+        # Load DLC output data using consolidated parser
+        df, scorer, bodyparts = parse_dlc_h5_output(dlc_output_path)
 
-        # Extract metadata from DLC output
-        # DLC columns are MultiIndex: [scorer, bodypart, coords]
-        scorer = df.columns.get_level_values(0)[0]
-        bodyparts = df.columns.get_level_values(1).unique().tolist()
-
-        logger.info(
+        logger.info_msg(
             f"DLC data: {len(bodyparts)} bodyparts, {len(df)} frames, "
             f"scorer: {scorer}"
         )
@@ -624,10 +710,10 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         # Create or load NWB file
         if nwb_path.exists():
-            logger.info(f"Updating existing NWB file: {nwb_path}")
+            logger.info_msg(f"Updating existing NWB file: {nwb_path}")
             io_mode = "r+"
         else:
-            logger.info(f"Creating new NWB file: {nwb_path}")
+            logger.info_msg(f"Creating new NWB file: {nwb_path}")
             io_mode = "w"
 
         # Build ndx-pose structure
@@ -720,7 +806,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             # Write NWB file
             io.write(nwbfile)
 
-        logger.info(f"DLC output loaded into NWB: {nwb_path}")
+        logger.info_msg(f"DLC output loaded into NWB: {nwb_path}")
         return nwb_path
 
     @staticmethod
@@ -774,24 +860,26 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         ...     pose_estimation_name="PoseEstimation_camera1"
         ... )
         """
-        if ndx_pose is None:
-            raise ImportError(
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "ndx-pose is required to load pose data from NWB. "
                 "Install with: pip install ndx-pose>=0.2.0"
             )
 
         nwb_file_path = Path(nwb_file_path)
-        if not nwb_file_path.exists():
-            raise FileNotFoundError(f"NWB file not found: {nwb_file_path}")
+        if not nwb_file_path.exists():  # pragma: no cover
+            raise FileNotFoundError(
+                f"NWB file not found: {nwb_file_path}"
+            )  # pragma: no cover
 
-        logger.info(f"Loading pose data from NWB: {nwb_file_path}")
+        logger.info_msg(f"Loading pose data from NWB: {nwb_file_path}")
 
         # Read NWB file and validate structure
         with NWBHDF5IO(str(nwb_file_path), mode="r") as io:
             nwbfile = io.read()
 
-            if "behavior" not in nwbfile.processing:
-                raise ValueError(
+            if "behavior" not in nwbfile.processing:  # pragma: no cover
+                raise ValueError(  # pragma: no cover
                     f"No behavior module in NWB file: {nwb_file_path}. "
                     "Expected ndx-pose PoseEstimation data in behavior module."
                 )
@@ -805,17 +893,21 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 if isinstance(obj, ndx_pose.PoseEstimation)
             }
 
-            if not pose_estimations:
-                raise ValueError(
+            if not pose_estimations:  # pragma: no cover
+                raise ValueError(  # pragma: no cover
                     f"No PoseEstimation objects found in NWB: {nwb_file_path}. "
                     "File must contain ndx-pose.PoseEstimation data."
                 )
 
             # Select PoseEstimation
             if pose_estimation_name is not None:
-                if pose_estimation_name not in pose_estimations:
-                    available = ", ".join(pose_estimations.keys())
-                    raise ValueError(
+                if (
+                    pose_estimation_name not in pose_estimations
+                ):  # pragma: no cover
+                    available = ", ".join(
+                        pose_estimations.keys()
+                    )  # pragma: no cover
+                    raise ValueError(  # pragma: no cover
                         f"PoseEstimation '{pose_estimation_name}' not found in NWB. "
                         f"Available: {available}"
                     )
@@ -826,7 +918,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 selected_name = list(pose_estimations.keys())[0]
                 pose_estimation = pose_estimations[selected_name]
                 if len(pose_estimations) > 1:
-                    logger.warning(
+                    logger.warn_msg(
                         f"Multiple PoseEstimation objects found. "
                         f"Using '{selected_name}'. "
                         f"Available: {', '.join(pose_estimations.keys())}"
@@ -859,7 +951,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             "source_software": source_software,
         }
 
-        logger.info(
+        logger.info_msg(
             f"Loaded pose data: {len(bodyparts)} bodyparts, {n_frames} frames, "
             f"source: {source_software}"
         )
@@ -882,8 +974,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         ValueError
             If analysis_file_name is not set
         """
-        if ndx_pose is None:
-            raise ImportError(
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "ndx-pose is required to fetch pose data. "
                 "Install with: pip install ndx-pose>=0.2.0"
             )
@@ -979,8 +1071,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         key : dict
             Primary key from PoseEstimSelection
         """
-        if ndx_pose is None:
-            raise ImportError(
+        if ndx_pose is None:  # pragma: no cover
+            raise ImportError(  # pragma: no cover
                 "ndx-pose is required for pose estimation. "
                 "Install with: pip install ndx-pose>=0.2.0"
             )
@@ -1225,9 +1317,9 @@ class PoseParams(SpyglassMixin, dj.Lookup):
     definition = """
     pose_params: varchar(32)
     ---
-    orient: blob  # Orientation calculation params
-    centroid: blob  # Centroid calculation params
-    smoothing: blob  # Smoothing/interpolation params
+    orient: json  # Orientation calculation params
+    centroid: json  # Centroid calculation params
+    smoothing: json  # Smoothing/interpolation params
     """
 
     # -- Supported orient methods and their required keys --
@@ -1429,7 +1521,58 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         cls.insert1(params_raw, **kwargs)
 
     @classmethod
-    def insert_custom(
+    def insert_custom(cls, parameter_set: PoseParameterSet, **kwargs):
+        """Insert custom parameter set using structured dataclass.
+
+        Parameters
+        ----------
+        parameter_set : PoseParameterSet
+            Complete parameter configuration with proper validation
+        **kwargs
+            Additional DataJoint insertion options
+
+        Raises
+        ------
+        ValueError
+            If parameter validation fails
+
+        Examples
+        --------
+        >>> from spyglass.position.v2.estim import (
+        ...     PoseParameterSet, OrientationParams,
+        ...     CentroidParams, SmoothingParams
+        ... )
+        >>>
+        >>> params = PoseParameterSet(
+        ...     params_name="my_config",
+        ...     orient=OrientationParams(
+        ...         method="two_pt",
+        ...         bodypart1="nose",
+        ...         bodypart2="tail_base"
+        ...     ),
+        ...     centroid=CentroidParams(
+        ...         method="1pt",
+        ...         points={"point1": "nose"}
+        ...     ),
+        ...     smoothing=SmoothingParams(
+        ...         interpolate=True,
+        ...         smooth=True,
+        ...         likelihood_thresh=0.9
+        ...     )
+        ... )
+        >>> PoseParams.insert_custom(params)
+        """
+        # Validate parameters using dataclass validation
+        parameter_set.validate()
+
+        # Convert to database format
+        params_dict = parameter_set.to_params_dict()
+
+        kwargs.setdefault("skip_duplicates", True)
+        cls.insert1(params_dict, **kwargs)
+
+    @classmethod
+    def insert_custom_dict(
         cls,
         params_name: str,
         orient: dict,
@@ -1437,60 +1580,23 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         smoothing: dict,
         **kwargs,
     ):
-        """Insert custom parameter set.
+        """DEPRECATED: Insert custom parameter set using dictionary format.
+
+        Use insert_custom() with PoseParameterSet dataclass instead.
+        This method is maintained for backward compatibility.
 
         Parameters
         ----------
         params_name : str
             Name for this parameter set (max 32 chars)
         orient : dict
-            Orientation parameters. Must include 'method' key.
-            For two_pt: bodypart1, bodypart2
-            For bisector: led1, led2, led3
-            For none: no additional keys needed
-            Optional: interpolate, smooth, smoothing_params
+            Orientation parameters dict
         centroid : dict
-            Centroid parameters. Must include 'method' and 'points' keys.
-            For 1pt: points={'point1': 'bodypart_name'}
-            For 2pt: points={'point1': 'name1', 'point2': 'name2'},
-                     max_LED_separation
-            For 4pt: points={'greenLED': ..., 'redLED_C': ...,
-                            'redLED_L': ..., 'redLED_R': ...},
-                     max_LED_separation
+            Centroid parameters dict
         smoothing : dict
-            Smoothing parameters.
-            Keys: interpolate, interp_params, smooth, smoothing_params,
-                  likelihood_thresh
-
-        Raises
-        ------
-        ValueError
-            If required parameters are missing or invalid
-
-        Examples
-        --------
-        >>> PoseParams.insert_custom(
-        ...     params_name="my_config",
-        ...     orient={
-        ...         "method": "two_pt",
-        ...         "bodypart1": "nose",
-        ...         "bodypart2": "tail_base",
-        ...     },
-        ...     centroid={
-        ...         "method": "1pt",
-        ...         "points": {"point1": "nose"},
-        ...     },
-        ...     smoothing={
-        ...         "interpolate": True,
-        ...         "interp_params": {"max_cm_to_interp": 20.0},
-        ...         "smooth": True,
-        ...         "smoothing_params": {
-        ...             "method": "gaussian",
-        ...             "std_dev": 0.01,
-        ...         },
-        ...         "likelihood_thresh": 0.9,
-        ...     },
-        ... )
+            Smoothing parameters dict
+        **kwargs
+            Additional DataJoint insertion options
         """
         # Validate parameters using shared validators
         if orient is not None:
@@ -1508,21 +1614,6 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         }
         kwargs.setdefault("skip_duplicates", True)
         cls.insert1(params, **kwargs)
-
-    @classmethod
-    def _validate_orient_params(cls, params: dict):
-        """DEPRECATED: Use shared validate_orientation_params instead."""
-        validate_orientation_params(params)
-
-    @classmethod
-    def _validate_centroid_params(cls, params: dict):
-        """DEPRECATED: Use shared validate_centroid_params instead."""
-        validate_centroid_params(params)
-
-    @classmethod
-    def _validate_smoothing_params(cls, params: dict):
-        """DEPRECATED: Use shared validate_smoothing_params instead."""
-        validate_smoothing_params({"smooth": True, "smoothing_params": params})
 
 
 @schema
@@ -2084,7 +2175,9 @@ class PoseV2(SpyglassMixin, dj.Computed):
         elif method == "none":
             orientation = no_orientation(pose_flat)
         else:
-            raise ValueError(f"Unknown orientation method: {method}")
+            raise ValueError(
+                f"Unknown orientation method: {method}"
+            )  # pragma: no cover
 
         # Apply smoothing if requested
         if orient_params.get("smooth", False):

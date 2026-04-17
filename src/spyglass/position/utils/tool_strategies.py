@@ -55,6 +55,17 @@ class PoseToolStrategy(ABC):
         """
 
     @abstractmethod
+    def get_skipped_params(self) -> Set[str]:
+        """Get parameters that Spyglass handles internally (not passed to tool).
+
+        Returns
+        -------
+        Set[str]
+            Set of parameter names that are handled by Spyglass infrastructure
+            rather than being passed directly to the tool (e.g. paths, analysis_file_id)
+        """
+
+    @abstractmethod
     def train_model(
         self,
         key: dict,
@@ -86,6 +97,109 @@ class PoseToolStrategy(ABC):
         dict
             Model table entry with model_id, analysis_file_name, model_path
         """
+
+    @abstractmethod
+    def evaluate_model(
+        self,
+        model_entry: dict,
+        params_entry: dict,
+        model_instance,
+        plotting: bool = True,
+        show_errors: bool = True,
+        **kwargs,
+    ) -> dict:
+        """Evaluate a trained model.
+
+        Parameters
+        ----------
+        model_entry : dict
+            Model table entry
+        params_entry : dict
+            ModelParams entry
+        model_instance
+            Model table instance for utilities
+        plotting : bool
+            Whether to generate evaluation plots
+        show_errors : bool
+            Whether to display error information
+        **kwargs
+            Additional tool-specific options
+
+        Returns
+        -------
+        dict
+            Evaluation results
+        """
+
+    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+        """Import a pre-trained model (default: not supported).
+
+        Parameters
+        ----------
+        model_path : Path
+            Path to the model files
+        model_instance
+            Model table instance for utilities
+        **kwargs
+            Additional import options
+
+        Returns
+        -------
+        dict
+            Model entry information
+
+        Raises
+        ------
+        NotImplementedError
+            If tool doesn't support model import
+        """
+        raise NotImplementedError(
+            f"Model import not implemented for {self.tool_name}"
+        )
+
+    def verify_model(
+        self, model_path: Path, check_inference: bool = True
+    ) -> tuple[dict, list]:
+        """Verify model integrity and readiness (default: basic checks).
+
+        Parameters
+        ----------
+        model_path : Path
+            Path to the model files
+        check_inference : bool
+            Whether to check inference readiness
+
+        Returns
+        -------
+        tuple[dict, list]
+            Checks results dict and warnings list
+        """
+        checks = {}
+        warnings = []
+
+        # Basic existence check (all tools)
+        checks["model_exists"] = model_path.exists()
+        if not checks["model_exists"]:
+            warnings.append(f"Model path does not exist: {model_path}")
+
+        return checks, warnings
+
+    def apply_import_defaults(self, params: dict, model_path: Path) -> dict:
+        """Apply tool-specific defaults during model import.
+
+        Parameters
+        ----------
+        params : dict
+            Current parameters
+        model_path : Path
+            Path to model being imported
+
+        Returns
+        -------
+        dict
+            Parameters with tool-specific defaults applied
+        """
+        return params
 
     def append_aliases(self, params: dict) -> dict:
         """Append parameter aliases to params dictionary.
@@ -131,6 +245,13 @@ class DLCStrategy(PoseToolStrategy):
 
     def get_required_params(self) -> Set[str]:
         return {"project_path"}  # project_path required for DLC training
+
+    def get_skipped_params(self) -> Set[str]:
+        return {
+            "video_sets",
+            "model_path",
+            "analysis_file_id",
+        }
 
     def get_accepted_params(self) -> Set[str]:
         return {
@@ -235,6 +356,74 @@ class DLCStrategy(PoseToolStrategy):
             key, params, skeleton_id, vid_group, sel_entry
         )
 
+    def evaluate_model(
+        self,
+        model_entry: dict,
+        params_entry: dict,
+        model_instance,
+        plotting: bool = True,
+        show_errors: bool = True,
+        **kwargs,
+    ) -> dict:
+        """Evaluate DLC model using existing _evaluate_dlc_model method."""
+        return model_instance._evaluate_dlc_model(
+            model_entry, params_entry, plotting, show_errors, **kwargs
+        )
+
+    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+        """Import DLC model using existing _import_dlc_model method."""
+        return model_instance._import_dlc_model(model_path, **kwargs)
+
+    def verify_model(
+        self, model_path: Path, check_inference: bool = True
+    ) -> tuple[dict, list]:
+        """Verify DLC model integrity and readiness."""
+        checks, warnings = super().verify_model(model_path, check_inference)
+
+        if not checks["model_exists"]:
+            return checks, warnings
+
+        # DLC-specific checks
+        if check_inference:
+            try:
+                # Import DLC dynamically to avoid circular dependencies
+                from deeplabcut import create_training_dataset, train_network
+
+                # Verify model directory structure for trained models
+                if model_path.suffix in [".yaml", ".yml"]:
+                    model_dir = model_path.parent
+                    # Look for trained model directories
+                    train_dirs = list(model_dir.rglob("**/train")) + list(
+                        model_dir.rglob("**/dlc-models")
+                    )
+                    if train_dirs:
+                        checks["inference_ready"] = True
+                    else:
+                        warnings.append(
+                            "No trained model directories found - "
+                            "model may not be trained yet"
+                        )
+                else:
+                    warnings.append(
+                        "DLC model path should be a .yaml/.yml file"
+                    )
+            except ImportError:
+                warnings.append(
+                    "DeepLabCut not installed - cannot verify inference readiness"
+                )
+
+        return checks, warnings
+
+    def apply_import_defaults(self, params: dict, model_path: Path) -> dict:
+        """Apply DLC-specific defaults during import."""
+        result_params = params.copy()
+
+        # Add default project_path if importing from DLC and not provided
+        if "project_path" not in result_params:
+            result_params["project_path"] = str(model_path.parent)
+
+        return result_params
+
 
 class SLEAPStrategy(PoseToolStrategy):
     """SLEAP tool strategy implementation (placeholder/future)."""
@@ -246,6 +435,14 @@ class SLEAPStrategy(PoseToolStrategy):
     def get_required_params(self) -> Set[str]:
         return {
             "model_type",  # single_instance, centroid, etc.
+        }
+
+    def get_skipped_params(self) -> Set[str]:
+        return {
+            "project_path",
+            "video_sets",
+            "model_path",
+            "analysis_file_id",
         }
 
     def get_accepted_params(self) -> Set[str]:
@@ -344,6 +541,18 @@ class SLEAPStrategy(PoseToolStrategy):
             "Please use DLC or import pre-trained SLEAP models via import_model()."
         )
 
+    def evaluate_model(
+        self,
+        model_entry: dict,
+        params_entry: dict,
+        model_instance,
+        plotting: bool = True,
+        show_errors: bool = True,
+        **kwargs,
+    ) -> dict:
+        """Evaluate SLEAP model (not yet implemented)."""
+        raise NotImplementedError("SLEAP evaluation not yet implemented.")
+
 
 class NDXPoseStrategy(PoseToolStrategy):
     """NDX-Pose import strategy for pre-trained models."""
@@ -354,6 +563,13 @@ class NDXPoseStrategy(PoseToolStrategy):
 
     def get_required_params(self) -> Set[str]:
         return {"nwb_file", "model_name"}  # Required for NDX-Pose import
+
+    def get_skipped_params(self) -> Set[str]:
+        return {
+            "model_path",
+            "analysis_file_id",
+            "nwb_file_path",
+        }
 
     def get_accepted_params(self) -> Set[str]:
         return {
@@ -410,6 +626,40 @@ class NDXPoseStrategy(PoseToolStrategy):
             "NDX-Pose strategy is for importing existing models, not training. "
             "Use Model.import_model() for NDX-Pose NWB files."
         )
+
+    def evaluate_model(
+        self,
+        model_entry: dict,
+        params_entry: dict,
+        model_instance,
+        plotting: bool = True,
+        show_errors: bool = True,
+        **kwargs,
+    ) -> dict:
+        """Evaluate NDX-Pose model (not applicable for imported models)."""
+        raise NotImplementedError(
+            "NDX-Pose models are pre-trained imports and cannot be evaluated. "
+            "Evaluation should be done in the original training environment."
+        )
+
+    def import_model(self, model_path: Path, model_instance, **kwargs) -> dict:
+        """Import NDX-Pose model using existing _import_ndx_pose_model method."""
+        return model_instance._import_ndx_pose_model(model_path, **kwargs)
+
+    def verify_model(
+        self, model_path: Path, check_inference: bool = True
+    ) -> tuple[dict, list]:
+        """Verify NDX-Pose model integrity."""
+        checks, warnings = super().verify_model(model_path, check_inference)
+
+        if check_inference and checks.get("model_exists"):
+            # ndx-pose models cannot run inference directly
+            warnings.append(
+                "ndx-pose models cannot run inference directly - "
+                "use original DLC/SLEAP project"
+            )
+
+        return checks, warnings
 
 
 class ToolStrategyFactory:
