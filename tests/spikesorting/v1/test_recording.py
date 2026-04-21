@@ -30,27 +30,30 @@ def test_nonmonotonic_timestamp_correction():
     timestamps = np.arange(n_samples) * sample_period
 
     # Introduce non-monotonic values (simulating raw-file artifacts)
-    timestamps[5000] = timestamps[4999] - 1e-7   # tiny backward jump
-    timestamps[9000] = timestamps[8999] - 0.01   # larger backward jump (300 samples)
+    timestamps[5000] = timestamps[4999] - 1e-7   # tiny backward jump at sample 5000
+    timestamps[9000] = timestamps[8999] - 0.01   # larger backward jump at sample 9000
 
     assert np.any(np.diff(timestamps) <= 0), "Test setup: timestamps should be non-monotonic"
 
-    # Apply the same correction logic used in _get_preprocessed_recording
+    # Apply the same vectorized correction logic used in _get_preprocessed_recording
+    diffs = np.diff(timestamps)
     corrected = timestamps.copy()
-    for i in range(1, len(corrected)):
-        if corrected[i] <= corrected[i - 1]:
-            corrected[i] = corrected[i - 1] + sample_period
+    bad_indices = np.where(diffs <= 0)[0] + 1
+    for i in bad_indices:
+        correction = corrected[i - 1] + sample_period - corrected[i]
+        if correction > 0:
+            corrected[i:] += correction
 
-    diffs = np.diff(corrected)
-    assert np.all(diffs > 0), (
+    result_diffs = np.diff(corrected)
+    assert np.all(result_diffs > 0), (
         "Corrected timestamps should be strictly increasing; "
-        f"found {np.sum(diffs <= 0)} non-positive diff(s)"
+        f"found {np.sum(result_diffs <= 0)} non-positive diff(s)"
     )
-    # Correction should only change the affected samples, not earlier ones
+    # Timestamps before the first non-monotonic point should be unchanged
     assert np.allclose(corrected[:5000], timestamps[:5000]), (
         "Timestamps before first bad sample should be unchanged"
     )
-    # Verify the correction propagates forward correctly at a boundary
+    # The correction should be applied exactly at the boundary
     assert corrected[5000] == corrected[4999] + sample_period, (
         "First corrected timestamp should be exactly one period after its predecessor"
     )
