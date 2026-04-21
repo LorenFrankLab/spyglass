@@ -39,6 +39,14 @@ def test_nonmonotonic_timestamp_correction():
     diffs = np.diff(timestamps)
     corrected = timestamps.copy()
     bad_indices = np.where(diffs <= 0)[0] + 1
+
+    # Both non-monotonic points must be detected (corrections are independent
+    # because shifting ts[5000:] shifts both ts[8999] and ts[9000] by the
+    # same amount, so the diff at 8999 is unchanged and 9000 is still bad)
+    assert len(bad_indices) == 2, (
+        f"Expected 2 bad indices (at 5000 and 9000), got {bad_indices}"
+    )
+
     for i in bad_indices:
         correction = corrected[i - 1] + sample_period - corrected[i]
         if correction > 0:
