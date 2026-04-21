@@ -117,7 +117,7 @@ class SpyglassConfig:
             "FIGURL_CHANNEL": "franklab2",
             "DJ_SUPPORT_FILEPATH_MANAGEMENT": "TRUE",
             "KACHERY_CLOUD_EPHEMERAL": "TRUE",
-            "HD5_USE_FILE_LOCKING": "FALSE",
+            "HDF5_USE_FILE_LOCKING": "FALSE",
         }
 
     def load_config(
