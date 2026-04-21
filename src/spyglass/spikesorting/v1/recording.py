@@ -553,6 +553,26 @@ class SpikeSortingRecording(SpyglassMixin, dj.Computed):
         )
         all_timestamps = recording.get_times()
 
+        # Check for non-monotonic timestamps, which can occur due to floating-
+        # point precision or epoch-stitching in the raw NWB file.
+        # np.searchsorted (used in _consolidate_intervals) requires sorted input,
+        # so non-monotonic timestamps must be corrected before use.
+        diffs = np.diff(all_timestamps)
+        if np.any(diffs <= 0):
+            n_issues = int(np.sum(diffs <= 0))
+            logger.warning(
+                f"Source recording '{nwb_file_abs_path}' has {n_issues} "
+                "non-monotonic timestamp(s). This may be caused by floating-"
+                "point precision or epoch-stitching artifacts in the raw NWB "
+                "file. Timestamps will be adjusted to be strictly increasing. "
+                "Consider checking the quality of the source recording."
+            )
+            all_timestamps = all_timestamps.copy()
+            sample_period = 1.0 / recording.get_sampling_frequency()
+            for i in range(1, len(all_timestamps)):
+                if all_timestamps[i] <= all_timestamps[i - 1]:
+                    all_timestamps[i] = all_timestamps[i - 1] + sample_period
+
         # Note: _consolidate_intervals is only used in spike sorting.v1
         valid_sort_times = self._get_sort_interval_valid_times(key).times
         valid_sort_times_indices = _consolidate_intervals(
