@@ -739,7 +739,13 @@ class VideoFile(SpyglassMixin, dj.Imported):
         total_videos = len(videos)
         imported_count = len(video_inserts)
 
-        if total_videos > imported_count:
+        # Only report genuine failures (missing camera, unexpected errors).
+        # Timestamp mismatches are expected when a video belongs to a different
+        # epoch and will be imported when make() runs for that epoch.
+        has_genuine_failures = bool(
+            failed_videos["missing_camera"] or failed_videos["other"]
+        )
+        if has_genuine_failures:
             self._report_partial_import(
                 nwb_file_name, failed_videos, total_videos, imported_count
             )
