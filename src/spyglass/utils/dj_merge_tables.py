@@ -1313,7 +1313,7 @@ class Merge(ExportMixin, dj.Manual):
         """
         if not len(self):
             return
-        super().delete(*args, **kwargs)
+        super().delete(force_permission=force_permission, *args, **kwargs)
 
     def super_delete(self, warn=True, *args, **kwargs):
         """Alias for datajoint.table.Table.delete.
@@ -1381,7 +1381,7 @@ def delete_downstream_merge(
 ) -> list:
     """Given a table/restriction, id or delete relevant downstream merge entries
 
-    Passthrough to SpyglassMixin.delete_downstream_parts
+    Passthrough to DataJoint delete. Maintained for backward compatibility
     """
     from spyglass.common.common_usage import ActivityLog
     from spyglass.utils.dj_mixin import SpyglassMixin

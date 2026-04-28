@@ -53,9 +53,6 @@
 # %%
 import datajoint as dj
 
-dj.config.load("../dj_local_conf_1335.json")
-dj.conn()
-
 import warnings
 
 warnings.simplefilter("ignore", category=DeprecationWarning)
