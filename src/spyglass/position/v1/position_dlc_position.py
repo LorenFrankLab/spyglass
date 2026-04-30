@@ -219,7 +219,7 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
         )
 
         if params.get("set_boundary"):
-            if bounds:=params.get("boundary") is None:
+            if bounds := params.get("boundary") is None:
                 raise ValueError(
                     "Parameter 'boundary' must be provided when 'set_boundary' is True."
                 )
