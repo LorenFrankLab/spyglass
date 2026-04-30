@@ -497,8 +497,8 @@ si_params_name = "just_nan"  # could also use "default"
 # )
 # ```
 #
-# __Note__ The `set_boundary` option alows you to restrict inferred points to a bounded region of the video.  This region is defined by
-# `boundary`, an arrray composed of a list of 2-d coordinates of the regions corners, ordered in a clockwise manner.
+# __Note__ The `set_boundary` option allows you to restrict inferred points to a bounded region of the video.  This region is defined by
+# `boundary`, an array composed of a list of 2-d coordinates of the regions corners, ordered in a clockwise manner.
 #
 #
 
