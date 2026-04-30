@@ -206,12 +206,20 @@ def bisector_orientation(
     # Vector from led2 to led1
     x_vec = pos_df[led1]["x"] - pos_df[led2]["x"]
     y_vec = pos_df[led1]["y"] - pos_df[led2]["y"]
+    length = np.sqrt(x_vec**2 + y_vec**2)
     y_eq0 = np.isclose(y_vec, 0)
+    zero_length = np.isclose(length, 0)  # led1 == led2 → leave as NaN
 
-    # Special case: when y_vec is zero, led1 and led2 are horizontally aligned
-    # Compare to led3 to determine if pointing up or down
-    orient[y_eq0 & pos_df[led3]["y"].gt(pos_df[led1]["y"])] = np.pi / 2
-    orient[y_eq0 & pos_df[led3]["y"].lt(pos_df[led1]["y"])] = -np.pi / 2
+    # Forward direction: led3 relative to midpoint of led1/led2
+    mid_x = (pos_df[led1]["x"] + pos_df[led2]["x"]) / 2
+    mid_y = (pos_df[led1]["y"] + pos_df[led2]["y"]) / 2
+    fwd_x = pos_df[led3]["x"] - mid_x
+    fwd_y = pos_df[led3]["y"] - mid_y
+
+    # Special case: led1 and led2 are horizontally aligned; perpendicular is vertical
+    horiz = y_eq0 & ~zero_length
+    orient[horiz & (fwd_y.values > 0)] = np.pi / 2
+    orient[horiz & (fwd_y.values < 0)] = -np.pi / 2
 
     # Error case: all three markers collinear
     y_1, y_2, y_3 = pos_df[led1]["y"], pos_df[led2]["y"], pos_df[led3]["y"]
@@ -222,12 +230,15 @@ def bisector_orientation(
             f"Markers: {led1}, {led2}, {led3}"
         )
 
-    # General case: compute perpendicular bisector
-    # Perpendicular to (x_vec, y_vec) is (-y_vec, x_vec)
-    length = np.sqrt(x_vec**2 + y_vec**2)
-    norm_x = (-y_vec / length)[~y_eq0]
-    norm_y = (x_vec / length)[~y_eq0]
-    orient[~y_eq0] = np.arctan2(norm_y, norm_x)
+    # Dot of candidate perpendicular (-y_vec, x_vec) with forward vector;
+    # negative dot → flip sign so orientation points toward led3.
+    # NaN dot (led3 unknown) → keep default sign=1 (preserves pre-fix behavior).
+    gen_mask = ~y_eq0 & ~zero_length
+    dot = (-y_vec * fwd_x + x_vec * fwd_y).values[gen_mask]
+    sign = np.where(np.isnan(dot) | (dot >= 0), 1.0, -1.0)
+    norm_x = sign * (-y_vec.values[gen_mask]) / length.values[gen_mask]
+    norm_y = sign * x_vec.values[gen_mask] / length.values[gen_mask]
+    orient[gen_mask] = np.arctan2(norm_y, norm_x)
 
     return orient
 

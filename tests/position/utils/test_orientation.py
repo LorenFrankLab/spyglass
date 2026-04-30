@@ -191,6 +191,71 @@ class TestBisectorOrientation:
         with pytest.raises(ValueError, match="collinear"):
             bisector_orientation(pos_df, "led1", "led2", "led3")
 
+    def test_bisector_orientation_diagonal_led3_right(self):
+        """Test general case: diagonal led1/led2, led3 to the right."""
+        from spyglass.position.utils.orientation import bisector_orientation
+
+        # led1=(0,1), led2=(0,-1) → vertical pair; led3=(1,0) → to the right
+        # Perpendicular bisector pointing right → orientation = 0
+        pos_df = pd.DataFrame(
+            {
+                ("led1", "x"): [0.0],
+                ("led1", "y"): [1.0],
+                ("led2", "x"): [0.0],
+                ("led2", "y"): [-1.0],
+                ("led3", "x"): [1.0],
+                ("led3", "y"): [0.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        orientation = bisector_orientation(pos_df, "led1", "led2", "led3")
+
+        assert np.isclose(orientation[0], 0.0, atol=1e-10)
+
+    def test_bisector_orientation_diagonal_led3_left(self):
+        """Test general case: diagonal led1/led2, led3 to the left."""
+        from spyglass.position.utils.orientation import bisector_orientation
+
+        # led1=(0,1), led2=(0,-1) → vertical pair; led3=(-1,0) → to the left
+        # Perpendicular bisector pointing left → orientation = π
+        pos_df = pd.DataFrame(
+            {
+                ("led1", "x"): [0.0],
+                ("led1", "y"): [1.0],
+                ("led2", "x"): [0.0],
+                ("led2", "y"): [-1.0],
+                ("led3", "x"): [-1.0],
+                ("led3", "y"): [0.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        orientation = bisector_orientation(pos_df, "led1", "led2", "led3")
+
+        assert np.isclose(abs(orientation[0]), np.pi, atol=1e-10)
+
+    def test_bisector_orientation_zero_length(self):
+        """Test that led1 == led2 yields NaN orientation."""
+        from spyglass.position.utils.orientation import bisector_orientation
+
+        # led1 and led2 at same position → can't determine orientation
+        pos_df = pd.DataFrame(
+            {
+                ("led1", "x"): [1.0],
+                ("led1", "y"): [1.0],
+                ("led2", "x"): [1.0],
+                ("led2", "y"): [1.0],
+                ("led3", "x"): [0.0],
+                ("led3", "y"): [0.0],
+            }
+        )
+        pos_df.columns = pd.MultiIndex.from_tuples(pos_df.columns)
+
+        orientation = bisector_orientation(pos_df, "led1", "led2", "led3")
+
+        assert np.isnan(orientation[0])
+
 
 class TestGetSpanStartStop:
     """Test get_span_start_stop function."""
