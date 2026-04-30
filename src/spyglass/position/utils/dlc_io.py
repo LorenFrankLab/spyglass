@@ -780,15 +780,10 @@ def get_dlc_model_eval(
                 except ValueError:
                     continue
             else:
-                # No valid training index found, skip evaluation
-                return {
-                    "Training iterations:": "2",  # Default value expected by test
-                    " Train error(px)": str(float("nan")),
-                    " Test error(px)": str(float("nan")),
-                    "p-cutoff used": "0.1",
-                    "Train error with p-cutoff": str(float("nan")),
-                    "Test error with p-cutoff": str(float("nan")),
-                }
+                raise RuntimeError(
+                    f"Could not evaluate model: no valid trainingsetindex found "
+                    f"in {training_fractions}"
+                )
         else:
             raise
 
@@ -801,14 +796,10 @@ def get_dlc_model_eval(
     eval_path = project_path / eval_folder
 
     if not eval_path.exists():
-        return {
-            "Training iterations:": "2",  # Default value expected by test
-            " Train error(px)": str(float("nan")),
-            " Test error(px)": str(float("nan")),
-            "p-cutoff used": "0.1",
-            "Train error with p-cutoff": str(float("nan")),
-            "Test error with p-cutoff": str(float("nan")),
-        }
+        raise RuntimeError(
+            f"Evaluation folder not found: {eval_path}. "
+            "Run DLC evaluation before fetching results."
+        )
 
     try:
         csv_file = get_most_recent_file(eval_path, ext=".csv")
@@ -834,12 +825,7 @@ def get_dlc_model_eval(
         results = legacy_mapping
         return results
 
-    except Exception:
-        return {
-            "Training iterations:": "2",  # Default value expected by test
-            " Train error(px)": str(float("nan")),
-            " Test error(px)": str(float("nan")),
-            "p-cutoff used": "0.1",
-            "Train error with p-cutoff": str(float("nan")),
-            "Test error with p-cutoff": str(float("nan")),
-        }
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to parse evaluation results from {eval_path}: {e}"
+        ) from e

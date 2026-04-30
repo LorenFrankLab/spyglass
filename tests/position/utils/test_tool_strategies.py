@@ -261,3 +261,41 @@ class TestToolStrategyFactory:
         # Test it appears in listings
         strategies = factory.get_available_tools()
         assert "test" in strategies
+
+    def test_register_strategy_idempotent(self, factory, PoseToolStrategy):
+        """Registering the same strategy twice keeps exactly one entry."""
+
+        class IdempotentStrategy(PoseToolStrategy):
+            @property
+            def tool_name(self):
+                return "idempotent"
+
+            @property
+            def supports_training(self):
+                return False
+
+            def get_required_params(self):
+                return set()
+
+            def get_accepted_params(self):
+                return set()
+
+            def get_default_params(self):
+                return {}
+
+            def validate_params(self, params, *args, **kwargs):
+                pass
+
+            def train_model(self, *args, **kwargs):
+                return {}
+
+            def run_inference(self, *args, **kwargs):
+                return {}
+
+            def evaluate_model(self, *args, **kwargs):
+                return {}
+
+        before = len(factory.get_available_tools())
+        factory.register_strategy("idempotent", IdempotentStrategy)
+        factory.register_strategy("idempotent", IdempotentStrategy)
+        assert len(factory.get_available_tools()) == before + 1

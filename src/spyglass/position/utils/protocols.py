@@ -155,17 +155,23 @@ class NWBWriterProtocol(Protocol):
     """Protocol for writing NWB files.
 
     Enables dependency injection of NWB file writing operations.
+    Implementations must return a context manager compatible with pynwb.NWBHDF5IO.
     """
 
-    def write(self, path: Union[str, Path], nwb_file) -> None:
-        """Write an NWB file to disk.
+    def write(self, path: Union[str, Path], mode: str = "w"):
+        """Create an NWB writer context manager.
 
         Parameters
         ----------
         path : Union[str, Path]
             Destination file path
-        nwb_file : pynwb.NWBFile
-            The NWB file object to write
+        mode : str, optional
+            File mode ("w" for write, "a"/"r+" for append/read), by default "w"
+
+        Returns
+        -------
+        context manager
+            An IO object usable as ``with writer.write(path) as io:``
         """
         ...
 

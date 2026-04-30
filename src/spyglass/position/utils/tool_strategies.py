@@ -1336,5 +1336,3 @@ class ToolStrategyFactory:
                 "Strategy class must implement PoseToolStrategy interface"
             )
         cls._strategies[tool] = strategy_class
-        cls._strategies[tool] = strategy_class
-        cls._strategies[tool] = strategy_class

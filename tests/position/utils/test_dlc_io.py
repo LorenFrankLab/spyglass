@@ -15,6 +15,19 @@ skip_if_no_pytables = pytest.mark.skipif(
     not pytables_available, reason="pytables not available"
 )
 
+# Check for DLC availability
+dlc_available = True
+try:
+    import deeplabcut  # noqa: F401
+except ImportError:
+    dlc_available = False
+
+
+@pytest.fixture
+def skip_if_no_dlc():
+    if not dlc_available:
+        pytest.skip("deeplabcut not installed")
+
 
 class TestDLCOutputParsing:
     """Test DLC output file parsing utilities."""
@@ -288,3 +301,67 @@ class TestDLCFileHandling:
             parse_dlc_h5_output(
                 h5_path, bodyparts=nonexistent_bodyparts, return_metadata=True
             )
+
+
+class TestGetDLCModelEval:
+    """Tests for get_dlc_model_eval error handling."""
+
+    def test_missing_eval_folder_raises(self, tmp_path, skip_if_no_dlc):
+        """RuntimeError when evaluation folder does not exist."""
+        from unittest.mock import patch
+
+        from spyglass.position.utils.dlc_io import get_dlc_model_eval
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        yml_path = project_path / "config.yaml"
+        yml_path.touch()
+
+        dlc_config = {"TrainingFraction": [0.95]}
+
+        with (
+            patch(
+                "spyglass.position.utils.dlc_io.evaluate_network",
+                return_value=None,
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.get_evaluation_folder",
+                return_value="dlc-models/eval-nonexistent",
+            ),
+            pytest.raises(RuntimeError, match="Evaluation folder not found"),
+        ):
+            get_dlc_model_eval(str(yml_path), "", 1, 0, dlc_config)
+
+    def test_parse_failure_raises(self, tmp_path, skip_if_no_dlc):
+        """RuntimeError when eval CSV cannot be parsed."""
+        from unittest.mock import patch
+
+        from spyglass.position.utils.dlc_io import get_dlc_model_eval
+
+        project_path = tmp_path / "project"
+        project_path.mkdir()
+        yml_path = project_path / "config.yaml"
+        yml_path.touch()
+        eval_dir = project_path / "eval"
+        eval_dir.mkdir()
+        # Put a non-CSV file there so get_most_recent_file fails or CSV parse fails
+        (eval_dir / "results.txt").write_text("not a csv")
+
+        dlc_config = {"TrainingFraction": [0.95]}
+
+        with (
+            patch(
+                "spyglass.position.utils.dlc_io.evaluate_network",
+                return_value=None,
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.get_evaluation_folder",
+                return_value="eval",
+            ),
+            patch(
+                "spyglass.position.utils.dlc_io.get_most_recent_file",
+                side_effect=FileNotFoundError("no csv"),
+            ),
+            pytest.raises(RuntimeError, match="Failed to parse evaluation"),
+        ):
+            get_dlc_model_eval(str(yml_path), "", 1, 0, dlc_config)
