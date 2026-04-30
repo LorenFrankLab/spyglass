@@ -186,18 +186,14 @@ def _normalize_1_pose_dataset(
     """
     dataset = dataset.copy()
 
-    anterior_x = np.array(
-        [dataset[bp, "x"].values for bp in anterior_bodyparts]
-    ).mean(axis=0)
-    anterior_y = np.array(
-        [dataset[bp, "y"].values for bp in anterior_bodyparts]
-    ).mean(axis=0)
-    posterior_x = np.array(
-        [dataset[bp, "x"].values for bp in posterior_bodyparts]
-    ).mean(axis=0)
-    posterior_y = np.array(
-        [dataset[bp, "y"].values for bp in posterior_bodyparts]
-    ).mean(axis=0)
+   def parse_dataset(bps: list, dim: str) -> np.ndarray:
+        """Parse the dataset for the given bodyparts and dimension."""
+        return np.array([dataset[bp, dim].values for bp in bps]).mean(axis=0)
+
+    anterior_x = parse_dataset(anterior_bodyparts, "x")
+    anterior_y = parse_dataset(anterior_bodyparts, "y")
+    posterior_x = parse_dataset(posterior_bodyparts, "x")
+    posterior_y = parse_dataset(posterior_bodyparts, "y")
 
     mean_x_t = (anterior_x + posterior_x) / 2
     mean_y_t = (anterior_y + posterior_y) / 2
