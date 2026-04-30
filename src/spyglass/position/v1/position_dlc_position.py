@@ -220,9 +220,9 @@ class DLCSmoothInterp(SpyglassMixin, dj.Computed):
 
         nan_spans = get_span_start_stop(np.where(bad_inds)[0])
 
-        if params.get("if_bounds"):
+        if params.get("set_boundary"):
             df_w_nans = check_bounds_all_bodyparts(
-                df_w_nans, params.get("bounds")
+                df_w_nans, params.get("boundary")
             )
 
         if params.get("interpolate"):
