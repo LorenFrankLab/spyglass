@@ -56,8 +56,8 @@ class TestApplyLikelihoodThreshold:
         # nose frame 0 should be valid
         assert result.loc[0.0, ("scorer", "nose", "x")] == 0.0
 
-    def test_threshold_no_likelihood_column(self, pose_v2_instance, caplog):
-        """Test handling when likelihood column is missing."""
+    def test_threshold_no_likelihood_column_raises(self, pose_v2_instance):
+        """Test that missing likelihood column raises KeyError."""
 
         time = np.arange(3, dtype=float)
         data = {
@@ -67,14 +67,8 @@ class TestApplyLikelihoodThreshold:
         pose_df = pd.DataFrame(data, index=time)
         pose_df.columns = pd.MultiIndex.from_tuples(pose_df.columns)
 
-        # Should return unchanged when no likelihood column
-        result = pose_v2_instance._apply_likelihood_threshold(pose_df, 0.95)
-
-        # Data should be unchanged
-        assert result.loc[1.0, ("scorer", "nose", "x")] == 1.0
-        assert result.shape == pose_df.shape
-        # Check that all values are unchanged
-        pd.testing.assert_frame_equal(result, pose_df)
+        with pytest.raises(KeyError):
+            pose_v2_instance._apply_likelihood_threshold(pose_df, 0.95)
 
 
 class TestFlattenMultiIndex:

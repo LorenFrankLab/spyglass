@@ -7,8 +7,6 @@ DataJoint connection.
 import numpy as np
 import pandas as pd
 
-from spyglass.utils.logging import logger
-
 
 def apply_likelihood_threshold(
     pose_df: pd.DataFrame,
@@ -20,14 +18,21 @@ def apply_likelihood_threshold(
     ----------
     pose_df : pd.DataFrame
         DataFrame with MultiIndex columns (scorer, bodypart, coord) where
-        coord includes 'x', 'y', and optionally 'likelihood'.
+        coord must include 'x', 'y', and 'likelihood'.
     likelihood_thresh : float
-        Threshold in [0, 1].  Frames with likelihood < threshold are masked.
+        Threshold in [0, 1].  Frames where ``likelihood < threshold`` or
+        likelihood is NaN are masked (treated as low-confidence).
 
     Returns
     -------
     pd.DataFrame
         Copy of pose_df with low-likelihood positions set to NaN.
+
+    Raises
+    ------
+    KeyError
+        If any bodypart is missing a 'likelihood' column.  Callers must
+        ensure pose data contains likelihood before applying this threshold.
     """
     pose_df = pose_df.copy()
     idx = pd.IndexSlice
@@ -36,28 +41,23 @@ def apply_likelihood_threshold(
         isinstance(pose_df.columns, pd.MultiIndex)
         and pose_df.columns.nlevels >= 2
     ):
-        # Works for both 2-level (bodypart, coord) and 3-level (scorer, bodypart, coord)
         coord_level = pose_df.columns.nlevels - 1
         bodypart_level = coord_level - 1
         bodyparts = pose_df.columns.get_level_values(bodypart_level).unique()
 
         for bodypart in bodyparts:
-            try:
-                if pose_df.columns.nlevels == 3:
-                    likelihood = pose_df.loc[:, idx[:, bodypart, "likelihood"]]
-                    if isinstance(likelihood, pd.DataFrame):
-                        likelihood = likelihood.min(axis=1)
-                else:
-                    likelihood = pose_df.loc[:, idx[bodypart, "likelihood"]]
-                low = likelihood < likelihood_thresh
-                if pose_df.columns.nlevels == 3:
-                    pose_df.loc[low, idx[:, bodypart, ["x", "y"]]] = np.nan
-                else:
-                    pose_df.loc[low, idx[bodypart, ["x", "y"]]] = np.nan
-            except KeyError:
-                logger.warning(
-                    f"No likelihood column for bodypart '{bodypart}', skipping threshold"
-                )
+            if pose_df.columns.nlevels == 3:
+                likelihood = pose_df.loc[:, idx[:, bodypart, "likelihood"]]
+                if isinstance(likelihood, pd.DataFrame):
+                    likelihood = likelihood.min(axis=1)
+            else:
+                likelihood = pose_df.loc[:, idx[bodypart, "likelihood"]]
+            # ~(>= thresh) treats NaN as low-confidence (NaN >= thresh is False)
+            low = ~(likelihood >= likelihood_thresh)
+            if pose_df.columns.nlevels == 3:
+                pose_df.loc[low, idx[:, bodypart, ["x", "y"]]] = np.nan
+            else:
+                pose_df.loc[low, idx[bodypart, ["x", "y"]]] = np.nan
 
     return pose_df
 
@@ -111,6 +111,7 @@ def compute_pose_outputs(
     sampling_rate = float(1 / np.median(np.diff(timestamps)))
 
     # --- likelihood threshold -------------------------------------------------
+    # Default 0.95 matches PoseParams default; pass explicitly to override.
     likelihood_thresh = smooth_params.get("likelihood_thresh", 0.95)
     pose_df = apply_likelihood_threshold(pose_df, likelihood_thresh)
 

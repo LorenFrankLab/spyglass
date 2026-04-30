@@ -77,13 +77,22 @@ class TestApplyLikelihoodThreshold:
         assert np.isnan(result[(s, "nose", "x")].iloc[0])
         assert not np.isnan(result[(s, "nose", "x")].iloc[2])
 
-    def test_missing_likelihood_column_does_not_raise(self):
+    def test_missing_likelihood_column_raises(self):
         columns = pd.MultiIndex.from_product(
             [["scorer"], ["nose"], ["x", "y"]],
             names=["scorer", "bodypart", "coords"],
         )
         df = pd.DataFrame(np.ones((5, 2)), columns=columns)
-        assert self.fn(df, 0.95) is not None
+        with pytest.raises(KeyError):
+            self.fn(df, 0.95)
+
+    def test_nan_likelihood_masked(self):
+        df = _make_3level_df(bodyparts=("nose",))
+        s = df.columns.get_level_values(0)[0]
+        df.loc[0, (s, "nose", "likelihood")] = np.nan
+        result = self.fn(df, 0.95)
+        assert np.isnan(result[(s, "nose", "x")].iloc[0])
+        assert not np.isnan(result[(s, "nose", "x")].iloc[1])
 
     def test_multiple_bodyparts_masked_independently(self):
         df = _make_3level_df(bodyparts=("nose", "tail"))
