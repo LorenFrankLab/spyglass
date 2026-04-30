@@ -100,17 +100,18 @@ class PoseGroup(SpyglassMixin, dj.Manual):
         query = self & key
         bodyparts = query.fetch1("bodyparts")
         datasets = {}
-        if normalize:
-            if (
-                anterior_bodyparts is None
-                or posterior_bodyparts is None
-                or len(anterior_bodyparts) == 0
-                or len(posterior_bodyparts) == 0
-            ):
-                raise ValueError(
-                    "anterior_bodyparts and posterior_bodyparts must be "
-                    + "provided as non-empty lists for normalization"
-                )
+
+        empty_parts = []
+        if anterior_bodyparts is None or len(anterior_bodyparts) == 0:
+            empty_parts.append("anterior")
+        if posterior_bodyparts is None or len(posterior_bodyparts) == 0:
+            empty_parts.append("posterior")
+        if normalize and empty_parts:
+            raise ValueError(
+                f"Both anterior_bodyparts and posterior_bodyparts must be provided "
+                f"as non-empty lists for normalization. Missing: {', '.join(empty_parts)}"
+            )
+
         for merge_key in (self.Pose & query).proj(merge_id="pose_merge_id"):
             video_name = Path(
                 (PositionOutput & merge_key).fetch_video_path()
