@@ -187,7 +187,7 @@ def _normalize_1_pose_dataset(
     """
     dataset = dataset.copy()
 
-   def parse_dataset(bps: list, dim: str) -> np.ndarray:
+    def parse_dataset(bps: list, dim: str) -> np.ndarray:
         """Parse the dataset for the given bodyparts and dimension."""
         return np.array([dataset[bp, dim].values for bp in bps]).mean(axis=0)
 
