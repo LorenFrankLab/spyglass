@@ -161,48 +161,49 @@ class TestModelMethods:
     def test_train_method_basic(
         self, model, dlc_project_config, skip_if_no_dlc
     ):
-        """Test basic Model.train() functionality using real DLC training with minimal params."""
-        # Mock existing model entry instead of fetching from empty database
+        """Test basic Model.train() functionality."""
         model_key = {"model_id": "existing_model_123"}
+        original_params = {
+            "shuffle": 1,
+            "trainingsetindex": 0,
+            "maxiters": 10000,
+        }
 
-        # Override training parameters to minimal values for fast testing
-        from deeplabcut.utils.auxiliaryfunctions import (
-            read_config,
-            write_config,
-        )
-
-        cfg = read_config(str(dlc_project_config))
-        cfg.update(
-            {
-                "maxiters": 2,  # Minimal iterations for continued training
-                "batch_size": 2,
-            }
-        )
-        write_config(str(dlc_project_config), cfg)
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "existing_model_123",
+            "model_params_id": "dlc_default",
+            "tool": "DLC",
+            "vid_group_id": "test_group",
+        }
 
         with (
-            patch.object(model, "_info_msg"),
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
             patch.object(model, "populate") as mock_populate,
+            patch.object(model, "_info_msg"),
         ):
-            # Mock the Model query that train() does to find existing model first
-            with patch.object(model, "__and__") as mock_and:
-                mock_model_query = MagicMock()
-                mock_model_query.fetch1.return_value = {
-                    "model_id": "existing_model_123",
-                    "model_params_id": "dlc_default",
-                    "tool": "DLC",
-                    "vid_group_id": "test_group",
-                }
-                mock_and.return_value = mock_model_query
+            mock_params.return_value.__and__.return_value.fetch1.return_value = {
+                "tool": "DLC",
+                "params": original_params,
+                "skeleton_id": None,
+                "model_params_id": "dlc_default",
+            }
+            mock_params.return_value.get_accepted_params.return_value = {
+                "shuffle",
+                "maxiters",
+                "trainingsetindex",
+            }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "new_params",
+                "tool": "DLC",
+            }
 
-                # Also mock the existence check (self & model_key) to return True
-                mock_model_query.__bool__ = MagicMock(return_value=True)
+            _ = model.train(model_key, maxiters=2, shuffle=2)
 
-                # Test train method with real DLC continued training
-                _ = model.train(model_key, maxiters=2, shuffle=2)
-
-                # Verify populate was called (train() calls self.populate())
-                mock_populate.assert_called_once()
+            mock_sel.return_value.insert1.assert_called_once()
+            mock_populate.assert_called_once()
 
     def test_get_accepted_params_dlc(self, model_params):
         """Test get_accepted_params for DLC tool."""

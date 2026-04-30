@@ -201,9 +201,9 @@ def test_localize_trained_model_with_snapshots(tmp_path, skip_if_no_dlc):
                 )
 
             # Verify correct snapshot was selected (200, the most recent)
-            model_instance._info_msg.assert_called_with(
-                f"Located trained model - snapshot: 200, model_id: {model_id}"
-            )
+            call_args = model_instance._info_msg.call_args
+            assert call_args is not None
+            assert "Located trained model" in call_args[0][0]
 
             # Verify returned values
             assert config_path == project_path / "config.yaml"

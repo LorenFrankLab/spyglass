@@ -31,6 +31,7 @@ from spyglass.position.utils import (
     get_param_names,
     suppress_print_from_package,
 )
+from spyglass.position.utils.protocols import default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.video import VidFileGroup
@@ -127,35 +128,6 @@ schema = dj.schema("cbroz_position_v2_train")  # TODO: remove cbroz prefix
 
 
 # ----------------------------------- Helpers ----------------------------------
-def default_pk_name(
-    prefix: str,
-    params: dict = None,
-    limit: int = 32,
-    include_hash: bool = True,
-) -> str:
-    """Generate a default name based on prefix and params.
-
-    Format: PREFIX-YYYYMMDD-HASH where...
-    - YYYYMMDD is the current date
-    - HASH is a short hash of the params
-
-    Parameters
-    ----------
-    prefix : str
-        Prefix for the name, e.g. 'mp' for model params
-    params : dict
-        Dictionary of data to hash
-    limit : int, optional
-        Maximum length of the returned name, by default 32
-    include_hash : bool, optional
-        Whether to include the hash in the name (default: True). If False, only
-        prefix and date. Relevant for tables that store a hash in another field.
-    """
-    # TODO: Migrate this to general utils for use with other params tables?
-
-    when = datetime.utcnow()
-    h = "-" + dj.hash.key_hash(params or dict()) if include_hash else ""
-    return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
 
 
 def prompt_default(primary_key: str, default: str) -> str:
@@ -1821,6 +1793,9 @@ class Model(SpyglassMixin, dj.Computed):
 
         model_entry = (self & model_key).fetch1()
         model_path = resolve_model_path(str(model_entry["model_path"]))
+
+        if model_path.name != "config.yaml":
+            return None
 
         csv_files = discover_training_csvs(model_path)
         if not csv_files:

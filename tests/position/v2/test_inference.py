@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 
@@ -456,3 +457,85 @@ class TestPoseEstimMakeValidation:
         # 6. make() should fail at the NWB storage step
         with pytest.raises(ValueError, match="Cannot store pose estimation"):
             PoseEstim().make(selection_key)
+
+
+class TestLoadDLCOutputTimestamps:
+    """load_dlc_output must refuse frame-index fallback."""
+
+    def test_raises_when_no_time_index_and_no_timestamps(
+        self, position_v2, tmp_path
+    ):
+        """load_dlc_output raises ValueError when DLC h5 has no named time
+        index and no timestamps are provided."""
+        import pandas as pd
+
+        PoseEstim = position_v2.estim.PoseEstim
+
+        scorer = "DLC_resnet50_test"
+        bodyparts = ["nose"]
+        cols = pd.MultiIndex.from_product(
+            [[scorer], bodyparts, ["x", "y", "likelihood"]],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        df = pd.DataFrame([[1.0, 2.0, 0.99]], columns=cols)
+        h5_path = tmp_path / "no_timestamps.h5"
+        df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+
+        with pytest.raises(ValueError, match="[Tt]imestamp"):
+            PoseEstim.load_dlc_output(
+                dlc_output_path=str(h5_path),
+                nwb_file_name=str(tmp_path / "out.nwb"),
+            )
+
+    def test_uses_provided_timestamps(self, position_v2, tmp_path):
+        """load_dlc_output uses explicitly-provided timestamps."""
+        import pandas as pd
+
+        PoseEstim = position_v2.estim.PoseEstim
+
+        n = 5
+        scorer = "DLC_resnet50_test"
+        bodyparts = ["nose"]
+        cols = pd.MultiIndex.from_product(
+            [[scorer], bodyparts, ["x", "y", "likelihood"]],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        df = pd.DataFrame(
+            [[float(i), float(i), 0.99] for i in range(n)], columns=cols
+        )
+        h5_path = tmp_path / "with_external_ts.h5"
+        df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+
+        ts = np.linspace(0.0, 1.0, n)
+        nwb_path = PoseEstim.load_dlc_output(
+            dlc_output_path=str(h5_path),
+            nwb_file_name=str(tmp_path / "with_ts.nwb"),
+            timestamps=ts,
+        )
+        assert Path(nwb_path).exists()
+
+    def test_uses_named_time_index(self, position_v2, tmp_path):
+        """load_dlc_output uses df.index when it is named 'time'."""
+        import pandas as pd
+
+        PoseEstim = position_v2.estim.PoseEstim
+
+        n = 5
+        scorer = "DLC_resnet50_test"
+        bodyparts = ["nose"]
+        cols = pd.MultiIndex.from_product(
+            [[scorer], bodyparts, ["x", "y", "likelihood"]],
+            names=["scorer", "bodyparts", "coords"],
+        )
+        df = pd.DataFrame(
+            [[float(i), float(i), 0.99] for i in range(n)], columns=cols
+        )
+        df.index = pd.Index(np.linspace(0.0, 1.0, n), name="time")
+        h5_path = tmp_path / "with_time_index.h5"
+        df.to_hdf(str(h5_path), key="df_with_missing", mode="w")
+
+        nwb_path = PoseEstim.load_dlc_output(
+            dlc_output_path=str(h5_path),
+            nwb_file_name=str(tmp_path / "with_time_idx.nwb"),
+        )
+        assert Path(nwb_path).exists()

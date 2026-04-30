@@ -78,69 +78,48 @@ class TestModelMethods:
         self, pv2_train, model, model_sel, model_params, skip_if_no_dlc
     ):
         """Test basic Model.make() functionality."""
-        # Mock the strategy pattern components
-        with patch(
-            "spyglass.position.utils.tool_strategies.ToolStrategyFactory"
-        ) as mock_factory:
-            mock_strategy = MagicMock()
-            mock_strategy.train_model.return_value = {
-                "model_id": "test_model_123",
-                "model_path": "/path/to/model",
-                "evaluation": {"loss": 0.05},
-            }
-            mock_factory.create_strategy.return_value = mock_strategy
+        sel_key = {
+            "model_params_id": "dlc_default",
+            "tool": "DLC",
+            "vid_group_id": "test_group",
+        }
+        mock_strategy = MagicMock()
+        mock_strategy.train_model.return_value = {
+            "model_id": "test_model_123",
+            "model_path": "/path/to/model",
+            "evaluation": {"loss": 0.05},
+        }
 
-            # Create test selection entry
-            sel_key = {
+        with (
+            patch(
+                "spyglass.position.v2.train.ToolStrategyFactory"
+            ) as mock_factory,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_ms,
+            patch("spyglass.position.v2.train.ModelParams") as mock_mp,
+            patch("spyglass.position.v2.train.VidFileGroup") as mock_vfg,
+            patch.object(model, "insert1") as mock_insert,
+            patch.object(model, "_info_msg"),
+        ):
+            mock_factory.create_strategy.return_value = mock_strategy
+            mock_ms.return_value.__and__.return_value.fetch1.return_value = {
                 "model_params_id": "dlc_default",
                 "tool": "DLC",
                 "vid_group_id": "test_group",
             }
+            mock_mp.return_value.__and__.return_value.fetch1.return_value = {
+                "tool": "DLC",
+                "params": {"shuffle": 1, "trainingsetindex": 0},
+                "skeleton_id": "test_skeleton",
+            }
+            mock_vfg.return_value.__and__.return_value.fetch1.return_value = {
+                "vid_group_id": "test_group",
+                "video_files": ["test1.mp4", "test2.mp4"],
+            }
 
-            # Mock ModelSelection fetch to return our test data
-            with patch(
-                "spyglass.position.v2.train.ModelSelection"
-            ) as mock_model_selection:
-                mock_selection_instance = MagicMock()
-                mock_selection_instance.fetch1.return_value = {
-                    "model_params_id": "dlc_default",
-                    "tool": "DLC",
-                    "vid_group_id": "test_group",
-                }
-                mock_model_selection.return_value = mock_selection_instance
+            model.make(sel_key)
 
-                # Mock ModelParams fetch
-                with patch(
-                    "spyglass.position.v2.train.ModelParams"
-                ) as mock_model_params:
-                    mock_params_instance = MagicMock()
-                    mock_params_instance.fetch1.return_value = {
-                        "tool": "DLC",
-                        "params": {"shuffle": 1, "trainingsetindex": 0},
-                        "skeleton_id": "test_skeleton",
-                    }
-                    mock_model_params.return_value = mock_params_instance
-
-                    # Mock VidFileGroup
-                    with patch(
-                        "spyglass.position.v2.train.VidFileGroup"
-                    ) as mock_vfg:
-                        mock_vfg_instance = MagicMock()
-                        mock_vfg_instance.fetch1.return_value = {
-                            "vid_group_id": "test_group",
-                            "video_files": ["test1.mp4", "test2.mp4"],
-                        }
-                        mock_vfg.return_value = mock_vfg_instance
-
-                        # Mock the insert operation
-                        with patch.object(model, "insert1") as mock_insert:
-                            with patch.object(model, "_info_msg"):
-                                # Test make method
-                                model.make(sel_key)
-
-                                # Verify strategy was called
-                                mock_strategy.train_model.assert_called_once()
-                                mock_insert.assert_called_once()
+            mock_strategy.train_model.assert_called_once()
+            mock_insert.assert_called_once()
         # Create mock metadata object
         metadata = MagicMock()
         metadata.model_id = "test_metadata"
@@ -169,8 +148,7 @@ class TestModelMethods:
             patch("spyglass.common.Nwbfile") as mock_base_nwb,
         ):
 
-            # Mock parent NWB files available (use empty list for simpler test)
-            mock_base_nwb.return_value.fetch.return_value = []
+            mock_base_nwb.return_value.fetch.return_value = ["test_parent.nwb"]
             mock_analysis.return_value.add.return_value = None
 
             with patch.object(model, "_info_msg"):
@@ -183,36 +161,49 @@ class TestModelMethods:
 
     def test_train_method_basic(self, pv2_train, model, skip_if_no_dlc):
         """Test basic Model.train() functionality."""
-        # Get an existing model from the database
-        existing_models = model.fetch("KEY")
-        if not existing_models:
-            pytest.skip("No Model entries available for testing")
+        model_key = {"model_id": "test_model_unit"}
+        original_params = {
+            "shuffle": 1,
+            "trainingsetindex": 0,
+            "maxiters": 10000,
+        }
 
-        model_key = existing_models[0]
-        initial_count = len(model)
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "test_model_unit",
+            "model_params_id": "test_params",
+            "tool": "DLC",
+            "vid_group_id": "test_videos",
+        }
 
-        # Mock strategy to avoid actual training
-        with patch(
-            "spyglass.position.utils.tool_strategies.ToolStrategyFactory"
-        ) as mock_factory:
-            mock_strategy = MagicMock()
-            mock_strategy.train_model.return_value = {
-                "model_id": "continued_model_123",
-                "model_path": "/tmp/continued_model.pkl",
-                "evaluation": {"loss": 0.03},
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ToolStrategyFactory"),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+            patch.object(model, "populate") as mock_populate,
+            patch.object(model, "_info_msg"),
+        ):
+            mock_params.return_value.__and__.return_value.fetch1.return_value = {
+                "tool": "DLC",
+                "params": original_params,
+                "skeleton_id": None,
+                "model_params_id": "test_params",
             }
-            mock_factory.create_strategy.return_value = mock_strategy
+            mock_params.return_value.get_accepted_params.return_value = {
+                "shuffle",
+                "maxiters",
+                "trainingsetindex",
+            }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "new_params",
+                "tool": "DLC",
+            }
 
-            with patch.object(model, "_info_msg"):
-                # Test train method
-                result = model.train(model_key, maxiters=1000, shuffle=2)
+            model.train(model_key, maxiters=1000, shuffle=2)
 
-                # Verify result is a valid key
-                assert isinstance(result, dict)
-                assert "model_id" in result
-
-                # Verify a new model was created
-                assert len(model) == initial_count + 1
+            mock_sel.return_value.insert1.assert_called_once()
+            mock_populate.assert_called_once()
 
 
 class TestModelParams:
@@ -220,31 +211,29 @@ class TestModelParams:
 
     def test_insert1_basic(self, pv2_train, model_params, skip_if_no_dlc):
         """Test basic ModelParams.insert1() functionality."""
+        # project_path is required by DLC validate_params; no skeleton_id since
+        # "test_skeleton" doesn't exist in the DB fixture.
         test_params = {
-            "model_params_name": "unit_test_params",
             "tool": "DLC",
-            "params": {"shuffle": 1, "trainingsetindex": 0, "maxiters": 1000},
-            "skeleton_id": "test_skeleton",
+            "params": {
+                "shuffle": 1,
+                "trainingsetindex": 0,
+                "maxiters": 1000,
+                "project_path": "/tmp/unit_test_project",
+            },
         }
 
-        # Check if params already exist and delete if so
-        existing = model_params & {
-            "model_params_name": test_params["model_params_name"]
-        }
-        if existing:
-            existing.delete(safemode=False)
-
-        # Test insert - this will validate against real strategy
         initial_count = len(model_params)
-        result = model_params.insert1(test_params)
+        result = model_params.insert1(test_params, skip_duplicates=True)
 
-        # Verify insertion worked
         assert len(model_params) == initial_count + 1
         assert result["tool"] == "DLC"
-        assert result["model_params_name"] == "unit_test_params"
+        assert "model_params_id" in result
 
         # Cleanup
-        (model_params & {"model_params_name": "unit_test_params"}).delete()
+        (model_params & {"model_params_id": result["model_params_id"]}).delete(
+            safemode=False
+        )
 
     def test_insert1_unsupported_tool(self, pv2_train, model_params):
         """Test insert1() with unsupported tool."""

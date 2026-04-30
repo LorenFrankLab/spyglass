@@ -5,10 +5,45 @@ that would otherwise be hard-coded. Tests can provide stub implementations
 rather than using unittest.mock.patch().
 """
 
+import hashlib
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Protocol, Union
 
+import numpy as np
 import pandas as pd
+
+
+def default_pk_name(
+    prefix: str,
+    params: dict = None,
+    limit: int = 32,
+    include_hash: bool = True,
+) -> str:
+    """Generate a default primary-key name from prefix and params.
+
+    Format: ``PREFIX-YYYYMMDD-HASH`` where YYYYMMDD is today (UTC) and HASH
+    is an 8-character hex digest of *params* (or empty dict when omitted).
+
+    Parameters
+    ----------
+    prefix : str
+        Short label, e.g. ``'mdl'`` or ``'mp'``.
+    params : dict, optional
+        Data to hash. Defaults to ``{}``.
+    limit : int, optional
+        Maximum length of the returned string, by default 32.
+    include_hash : bool, optional
+        Append the hash component when True (default).
+    """
+    when = datetime.utcnow()
+    if include_hash:
+        raw = json.dumps(params or {}, sort_keys=True, default=str)
+        h = "-" + hashlib.md5(raw.encode()).hexdigest()[:8]
+    else:
+        h = ""
+    return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
 
 
 class InferenceRunnerProtocol(Protocol):
@@ -65,6 +100,7 @@ class NWBBuilderProtocol(Protocol):
         skeleton_edges: List,
         description: str = "Pose estimation",
         original_videos: Optional[List[str]] = None,
+        timestamps: Optional[np.ndarray] = None,
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton objects.
 

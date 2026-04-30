@@ -475,6 +475,7 @@ class NDXPoseBuilder(BaseMixin):
         skeleton_edges: list = None,
         description: str = None,
         original_videos: list = None,
+        timestamps: np.ndarray = None,
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
 
@@ -528,8 +529,20 @@ class NDXPoseBuilder(BaseMixin):
             edges=edge_array,
         )
 
+        # Validate timestamps — real video timestamps are required
+        if timestamps is None:
+            raise ValueError(
+                "Real video timestamps are required for build_pose_estimation. "
+                "Pass timestamps fetched from VideoFile.fetch_nwb()[0]"
+                "['video_file'].timestamps."
+            )
+        if len(timestamps) != len(pose_df):
+            raise ValueError(
+                f"Timestamp length {len(timestamps)} does not match pose "
+                f"frame count {len(pose_df)}; check video/pose alignment."
+            )
+
         # Build PoseEstimationSeries for each bodypart
-        timestamps = np.arange(len(pose_df), dtype=float)
         pose_series_list = []
 
         for bodypart in bodyparts:
@@ -695,6 +708,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         nwb_file_name: Union[Path, str, None] = None,
         pose_estimation_name: str = "PoseEstimation",
         nwb_writer_cls=None,
+        timestamps: np.ndarray = None,
     ) -> Path:
         """Load DLC inference output (h5 or csv) into NWB file with ndx-pose.
 
@@ -826,12 +840,19 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             # Create PoseEstimationSeries for each bodypart
             pose_series_list = []
 
-            # Get timestamps (frame indices if not provided)
-            if "time" in df.columns:
-                timestamps = df["time"].values
+            # Resolve timestamps — prefer named index "time", then
+            # caller-provided; never silently fall back to frame indices.
+            if df.index.name == "time":
+                _timestamps = df.index.values
+            elif timestamps is not None:
+                _timestamps = timestamps
             else:
-                # Use frame indices as timestamps
-                timestamps = np.arange(len(df), dtype=float)
+                raise ValueError(
+                    "No 'time' index in DLC output and no timestamps "
+                    "provided to load_dlc_output; refusing to fall back to "
+                    "frame indices. Pass timestamps fetched from the "
+                    "registered VideoFile NWB."
+                )
 
             for bodypart in bodyparts:
                 # Extract x, y, likelihood for this bodypart
@@ -849,7 +870,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     data=pose_data,
                     unit="pixels",
                     reference_frame="(0,0) is top-left corner",
-                    timestamps=timestamps,
+                    timestamps=_timestamps,
                     confidence=likelihood,
                     confidence_definition="DLC likelihood score",
                 )
@@ -1192,7 +1213,17 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         except ValueError:
             pass
 
-        # Step 1: Trigger inference if needed and get output file info
+        # Step 1: Fail fast if no NWB parent (before any expensive I/O)
+        if nwb_file_name is None:
+            raise ValueError(
+                "Cannot store pose estimation: no registered Nwbfile linked "
+                f"to VidFileGroup '{key['vid_group_id']}'. Ensure the video "
+                "files in this group are registered in VideoFile and linked "
+                "to a Session via TaskEpoch. Use "
+                "VidFileGroup().get_nwb_file() to verify before populating."
+            )
+
+        # Step 2: Trigger inference if needed and get output file info
         output_file_info = None
         if task_mode == "trigger":
             if not video_paths:
@@ -1211,7 +1242,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 **inference_params,
             )
 
-        # Step 2: Find output files using tool-specific logic
+        # Step 3: Find output files using tool-specific logic
         output_files = self._find_output_files(
             tool, video_paths, output_dir, output_file_info
         )
@@ -1237,16 +1268,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             f"scorer: {scorer}"
         )
 
-        # Step 3: Store data in AnalysisNwbfile
-        if nwb_file_name is None:
-            raise ValueError(
-                "Cannot store pose estimation: no registered Nwbfile linked "
-                f"to VidFileGroup '{key['vid_group_id']}'. Ensure the video "
-                "files in this group are registered in VideoFile and linked "
-                "to a Session via TaskEpoch. Use "
-                "VidFileGroup().get_nwb_file() to verify before populating."
-            )
-
+        # Step 5: Store data in AnalysisNwbfile
         analysis_file_name = self._store_estimation_nwb(
             key, pose_df, bodyparts, scorer, nwb_file_name
         )
@@ -1376,6 +1398,46 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 f"Inference not supported for tool: {tool}"
             )
 
+    @staticmethod
+    def _fetch_video_timestamps(key: dict) -> np.ndarray:
+        """Fetch per-frame timestamps from the first VideoFile in the group.
+
+        Parameters
+        ----------
+        key : dict
+            Must include vid_group_id.
+
+        Returns
+        -------
+        np.ndarray
+            Per-frame timestamps in seconds.
+
+        Raises
+        ------
+        ValueError
+            If no VideoFile entries exist or timestamps cannot be retrieved.
+        """
+        vf_keys = (VidFileGroup.File & key).fetch("KEY", as_dict=True)
+        if not vf_keys:
+            raise ValueError(
+                f"No VideoFile entries found for vid_group_id="
+                f"'{key['vid_group_id']}'. Cannot fetch real timestamps."
+            )
+        try:
+            nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
+            ts = np.asarray(nwb_data["video_file"].timestamps)
+        except Exception as exc:
+            raise ValueError(
+                f"Could not fetch timestamps from VideoFile for "
+                f"vid_group_id='{key['vid_group_id']}': {exc}"
+            ) from exc
+        if ts is None or len(ts) == 0:
+            raise ValueError(
+                f"VideoFile for vid_group_id='{key['vid_group_id']}' has "
+                "empty or null timestamps."
+            )
+        return ts
+
     def _store_estimation_nwb(
         self,
         key: dict,
@@ -1420,6 +1482,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         video_keys = [str(p) for p in (VidFileGroup.File & key).fetch("KEY")]
 
         # Build pose estimation using helper class
+        vid_timestamps = self._fetch_video_timestamps(key)
         builder = self._get_nwb_builder_cls()()
         pose_estimation, nwb_skeleton = builder.build_pose_estimation(
             pose_df=pose_df,
@@ -1428,7 +1491,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             model_id=key["model_id"],
             skeleton_edges=skeleton_edges,
             description=f"Pose estimation from model {key['model_id']}",
-            original_videos=video_keys,  # Pass video info to builder
+            original_videos=video_keys,
+            timestamps=vid_timestamps,
         )
 
         # original_videos now set in builder, no need to set again here

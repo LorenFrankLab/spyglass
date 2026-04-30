@@ -400,6 +400,7 @@ def mock_dlc_inference_output(tmp_path):
         data[:, col_idx] = np.random.rand(n_frames) * 0.3 + 0.7
 
     df = pd.DataFrame(data, columns=columns)
+    df.index = pd.Index(np.arange(n_frames) / 30.0, name="time")
 
     # Save as h5 and csv
     h5_path = tmp_path / "test_video_dlc_output.h5"

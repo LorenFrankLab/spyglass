@@ -97,73 +97,61 @@ class TestModelMake:
         tmp_path,
     ):
         """Test basic DLC model training via make()."""
-        # Mock the strategy pattern components
-        with patch(
-            "spyglass.position.utils.tool_strategies.ToolStrategyFactory"
-        ) as mock_factory:
-            mock_strategy = MagicMock()
-            mock_strategy.train_model.return_value = {
-                "model_id": "test_model_123",
-                "model_path": "/path/to/model",
-                "evaluation": {"loss": 0.05},
-            }
+        sel_key = {
+            "model_params_id": "dlc_default",
+            "tool": "DLC",
+            "vid_group_id": "test_group",
+        }
+        sel_data = {
+            "model_params_id": "dlc_default",
+            "tool": "DLC",
+            "vid_group_id": "test_group",
+        }
+        params_data = {
+            "tool": "DLC",
+            "params": {"shuffle": 1, "trainingsetindex": 0},
+            "skeleton_id": "test_skeleton",
+        }
+        vid_group_data = {
+            "vid_group_id": "test_group",
+            "video_files": ["test1.mp4", "test2.mp4"],
+        }
+        train_result = {
+            "model_id": "test_model_123",
+            "model_path": "/path/to/model",
+            "evaluation": {"loss": 0.05},
+        }
+
+        mock_strategy = MagicMock()
+        mock_strategy.train_model.return_value = train_result
+
+        # Patch class references as used inside train.py so that
+        # (Cls() & key).fetch1() chains resolve to the expected dicts.
+        with (
+            patch(
+                "spyglass.position.v2.train.ToolStrategyFactory"
+            ) as mock_factory,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_ms,
+            patch("spyglass.position.v2.train.ModelParams") as mock_mp,
+            patch("spyglass.position.v2.train.VidFileGroup") as mock_vfg,
+            patch.object(model, "insert1") as mock_insert,
+        ):
             mock_factory.create_strategy.return_value = mock_strategy
+            mock_ms.return_value.__and__.return_value.fetch1.return_value = (
+                sel_data
+            )
+            mock_mp.return_value.__and__.return_value.fetch1.return_value = (
+                params_data
+            )
+            mock_vfg.return_value.__and__.return_value.fetch1.return_value = (
+                vid_group_data
+            )
 
-            # Create test selection entry
-            sel_key = {
-                "model_params_id": "dlc_default",
-                "tool": "DLC",
-                "vid_group_id": "test_group",
-            }
+            model.make(sel_key)
 
-            # Use fixture-based approach to avoid import issues
-            with patch.object(model_sel, "fetch1") as mock_sel_fetch:
-                mock_sel_fetch.return_value = {
-                    "model_params_id": "dlc_default",
-                    "tool": "DLC",
-                    "vid_group_id": "test_group",
-                }
-
-                with patch.object(model_params, "fetch1") as mock_params_fetch:
-                    mock_params_fetch.return_value = {
-                        "tool": "DLC",
-                        "params": {"shuffle": 1, "trainingsetindex": 0},
-                        "skeleton_id": "test_skeleton",
-                    }
-
-                    # Mock VidFileGroup fetch
-                    mock_vid_group = {
-                        "vid_group_id": "test_group",
-                        "video_files": ["test1.mp4", "test2.mp4"],
-                    }
-
-                    # Mock VidFileGroup class - use string path to avoid import issues
-                    with patch(
-                        "spyglass.position.v2.train.VidFileGroup"
-                    ) as mock_vfg:
-                        mock_vfg_instance = MagicMock()
-                        mock_vfg_instance.fetch1.return_value = mock_vid_group
-                        mock_vfg.return_value = mock_vfg_instance
-
-                        # Mock the insert operation
-                        with patch.object(model, "insert1") as mock_insert:
-                            # Test make method
-                            model.make(sel_key)
-
-                            # Verify strategy was called correctly
-                            mock_factory.create_strategy.assert_called_once_with(
-                                "DLC"
-                            )
-                            mock_strategy.train_model.assert_called_once()
-
-                            # Verify result was inserted
-                            mock_insert.assert_called_once_with(
-                                {
-                                    "model_id": "test_model_123",
-                                    "model_path": "/path/to/model",
-                                    "evaluation": {"loss": 0.05},
-                                }
-                            )
+            mock_factory.create_strategy.assert_called_once_with("DLC")
+            mock_strategy.train_model.assert_called_once()
+            mock_insert.assert_called_once_with(train_result)
 
     def test_make_creates_nwb_file(
         self,
@@ -389,37 +377,32 @@ class TestModelTrain:
         """Test that train() creates new ModelSelection with parent_id."""
         model_key = {"model_id": "original_model"}
 
-        # Mock existing model
-        with patch.object(model, "fetch1") as mock_fetch:
-            mock_fetch.return_value = {
-                "model_id": "original_model",
-                "model_params_id": "original_params",
+        # train() uses (self & key), so patch __and__ at the class level
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "original_model",
+            "model_params_id": "original_params",
+            "tool": "DLC",
+            "vid_group_id": "original_videos",
+        }
+
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+            patch.object(model, "populate") as mock_populate,
+        ):
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "continued_params",
                 "tool": "DLC",
-                "vid_group_id": "original_videos",
             }
 
-            # Mock ModelParams and new parameter creation
-            with (
-                patch("spyglass.position.v2.train.ModelParams") as mock_params,
-                patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
-                patch.object(model, "populate") as mock_populate,
-            ):
+            _ = model.train(model_key, maxiters=50000)
 
-                mock_params.return_value.insert1.return_value = {
-                    "model_params_id": "continued_params",
-                    "tool": "DLC",
-                }
-
-                # Call train method
-                _ = model.train(model_key, maxiters=50000)
-
-                # Verify new ModelSelection was created with parent_id
-                mock_sel.return_value.insert1.assert_called_once()
-                sel_args = mock_sel.return_value.insert1.call_args[0][0]
-                assert sel_args["parent_id"] == "original_model"
-
-                # Verify populate was called
-                mock_populate.assert_called_once()
+            mock_sel.return_value.insert1.assert_called_once()
+            sel_args = mock_sel.return_value.insert1.call_args[0][0]
+            assert sel_args["parent_id"] == "original_model"
+            mock_populate.assert_called_once()
 
     def test_train_with_more_iterations(
         self,
@@ -428,45 +411,41 @@ class TestModelTrain:
     ):
         """Test continuing training with additional iterations."""
         model_key = {"model_id": "test_model"}
+        original_params = {
+            "shuffle": 1,
+            "trainingsetindex": 0,
+            "maxiters": 10000,
+        }
 
-        with patch.object(model, "fetch1") as mock_fetch:
-            mock_fetch.return_value = {
-                "model_id": "test_model",
-                "model_params_id": "test_params",
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "test_model",
+            "model_params_id": "test_params",
+            "tool": "DLC",
+            "vid_group_id": "test_videos",
+        }
+
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection"),
+            patch.object(model, "populate"),
+        ):
+            mock_params.return_value.__and__.return_value.fetch1.return_value = {
                 "tool": "DLC",
-                "vid_group_id": "test_videos",
+                "params": original_params,
+                "skeleton_id": None,
+                "model_params_id": "test_params",
+            }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "continued_params",
+                "tool": "DLC",
             }
 
-            with (
-                patch("spyglass.position.v2.train.ModelParams") as mock_params,
-                patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
-                patch.object(model, "populate"),
-            ):
-                _ = mock_sel
+            model.train(model_key, maxiters=50000)
 
-                original_params = {
-                    "shuffle": 1,
-                    "trainingsetindex": 0,
-                    "maxiters": 10000,
-                }
-
-                mock_params.return_value.fetch1.return_value = {
-                    "tool": "DLC",
-                    "params": original_params,
-                }
-
-                # Mock new params creation
-                mock_params.return_value.insert1.return_value = {
-                    "model_params_id": "continued_params",
-                    "tool": "DLC",
-                }
-
-                # Train with additional iterations
-                model.train(model_key, maxiters=50000)
-
-                # Verify new params include updated maxiters
-                insert_call = mock_params.return_value.insert1.call_args[0][0]
-                assert insert_call["params"]["maxiters"] == 50000
+            insert_call = mock_params.return_value.insert1.call_args[0][0]
+            assert insert_call["params"]["maxiters"] == 50000
 
     def test_train_with_new_data(
         self,
@@ -475,62 +454,78 @@ class TestModelTrain:
     ):
         """Test training with additional labeled frames."""
         model_key = {"model_id": "test_model"}
+        original_params = {
+            "shuffle": 1,
+            "trainingsetindex": 0,
+            "maxiters": 10000,
+        }
 
-        with patch.object(model, "fetch1") as mock_fetch:
-            mock_fetch.return_value = {
-                "model_id": "test_model",
-                "model_params_id": "test_params",
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "test_model",
+            "model_params_id": "test_params",
+            "tool": "DLC",
+            "vid_group_id": "test_videos",
+        }
+
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection"),
+            patch.object(model, "populate"),
+        ):
+            mock_params.return_value.__and__.return_value.fetch1.return_value = {
                 "tool": "DLC",
-                "vid_group_id": "test_videos",
+                "params": original_params,
+                "skeleton_id": None,
+                "model_params_id": "test_params",
+            }
+            mock_params.return_value.get_accepted_params.return_value = {
+                "trainingsetindex",
+                "shuffle",
+                "maxiters",
+            }
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "continued_params",
+                "tool": "DLC",
             }
 
-            with (
-                patch("spyglass.position.v2.train.ModelParams") as mock_params,
-                patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
-                patch.object(model, "populate"),
-            ):
-                _ = mock_sel
+            model.train(model_key, trainingsetindex=1)
 
-                # Test with new training set index (different data split)
-                model.train(model_key, trainingsetindex=1)
-
-                # Verify new params include updated trainingsetindex
-                insert_call = mock_params.return_value.insert1.call_args[0][0]
-                assert insert_call["params"]["trainingsetindex"] == 1
+            insert_call = mock_params.return_value.insert1.call_args[0][0]
+            assert insert_call["params"]["trainingsetindex"] == 1
 
     def test_train_parent_tracking(
         self,
         model,
-        model_sel,
         skip_if_no_dlc,
     ):
         """Test that parent model is properly tracked."""
         model_key = {"model_id": "parent_model"}
 
-        with patch.object(model, "fetch1") as mock_model_fetch:
-            mock_model_fetch.return_value = {
-                "model_id": "parent_model",
-                "model_params_id": "parent_params",
+        mock_restricted = MagicMock()
+        mock_restricted.fetch1.return_value = {
+            "model_id": "parent_model",
+            "model_params_id": "parent_params",
+            "tool": "DLC",
+            "vid_group_id": "test_videos",
+        }
+
+        with (
+            patch.object(type(model), "__and__", return_value=mock_restricted),
+            patch("spyglass.position.v2.train.ModelParams") as mock_params,
+            patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
+            patch.object(model, "populate"),
+        ):
+            mock_params.return_value.insert1.return_value = {
+                "model_params_id": "child_params",
                 "tool": "DLC",
-                "vid_group_id": "test_videos",
             }
 
-            with (
-                patch("spyglass.position.v2.train.ModelParams") as mock_params,
-                patch("spyglass.position.v2.train.ModelSelection") as mock_sel,
-                patch.object(model, "populate"),
-            ):
+            model.train(model_key, shuffle=2)
 
-                mock_params.return_value.insert1.return_value = {
-                    "model_params_id": "child_params",
-                    "tool": "DLC",
-                }
-
-                model.train(model_key, shuffle=2)
-
-                # Verify parent_id is set in ModelSelection
-                sel_insert_call = mock_sel.return_value.insert1.call_args[0][0]
-                assert sel_insert_call["parent_id"] == "parent_model"
+            sel_insert_call = mock_sel.return_value.insert1.call_args[0][0]
+            assert sel_insert_call["parent_id"] == "parent_model"
 
     def test_train_invalid_model(
         self,

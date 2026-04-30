@@ -1,5 +1,4 @@
 # Import submodules to make them accessible
-from spyglass.position.v2 import video
 from spyglass.position.v2.estim import (
     PoseEstim,
     PoseEstimParams,
@@ -15,7 +14,6 @@ from spyglass.position.v2.train import (
     ModelSelection,
     Skeleton,
 )
-from spyglass.position.v2.video import VideoGroupParams, VidFileGroup
 
 __all__ = [
     "BodyPart",
@@ -31,5 +29,4 @@ __all__ = [
     "Skeleton",
     "VidFileGroup",
     "VideoGroupParams",
-    "video",
 ]

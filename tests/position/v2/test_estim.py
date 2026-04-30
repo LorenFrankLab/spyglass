@@ -615,3 +615,58 @@ class TestPoseEstimDependencyInjection:
         assert recorded["bodyparts"] == ["part1"]
         assert recorded["scorer"] == "test_scorer"
         assert pose_est.description == "Test pose"
+
+
+class TestNDXPoseBuilderTimestamps:
+    """NDXPoseBuilder.build_pose_estimation requires real timestamps."""
+
+    def _make_pose_df(self, n=5, scorer="DLC_scorer", bodypart="nose"):
+        cols = pd.MultiIndex.from_product(
+            [[scorer], [bodypart], ["x", "y", "likelihood"]],
+            names=["scorer", "bodypart", "coords"],
+        )
+        return pd.DataFrame(
+            [[float(i), float(i), 0.99] for i in range(n)], columns=cols
+        )
+
+    def test_raises_when_no_timestamps(self, NDXPoseBuilder):
+        """build_pose_estimation raises ValueError when timestamps=None."""
+        builder = NDXPoseBuilder()
+        df = self._make_pose_df()
+        with pytest.raises(ValueError, match="[Tt]imestamp"):
+            builder.build_pose_estimation(
+                pose_df=df,
+                bodyparts=["nose"],
+                scorer="DLC_scorer",
+                model_id="m1",
+                timestamps=None,
+            )
+
+    def test_raises_on_length_mismatch(self, NDXPoseBuilder):
+        """build_pose_estimation raises when timestamp length != frame count."""
+        builder = NDXPoseBuilder()
+        df = self._make_pose_df(n=5)
+        with pytest.raises(ValueError, match="[Tt]imestamp"):
+            builder.build_pose_estimation(
+                pose_df=df,
+                bodyparts=["nose"],
+                scorer="DLC_scorer",
+                model_id="m1",
+                timestamps=np.arange(3),  # wrong length
+            )
+
+    def test_stored_timestamps_match_provided(self, NDXPoseBuilder):
+        """build_pose_estimation stores the provided timestamps exactly."""
+        builder = NDXPoseBuilder()
+        n = 5
+        df = self._make_pose_df(n=n)
+        ts = np.linspace(0.0, 1.0, n)
+        pose_estimation, _ = builder.build_pose_estimation(
+            pose_df=df,
+            bodyparts=["nose"],
+            scorer="DLC_scorer",
+            model_id="m1",
+            timestamps=ts,
+        )
+        series = list(pose_estimation.pose_estimation_series.values())[0]
+        np.testing.assert_array_equal(series.timestamps[:], ts)

@@ -921,7 +921,7 @@ class DLCStrategy(PoseToolStrategy):
         from deeplabcut.utils import get_model_folder
         from deeplabcut.utils.auxiliaryfunctions import read_config
 
-        from spyglass.position.v2.train import default_pk_name
+        from spyglass.position.utils.protocols import default_pk_name
 
         project_path = Path(config["project_path"])
         config_path = project_path / "config.yaml"
