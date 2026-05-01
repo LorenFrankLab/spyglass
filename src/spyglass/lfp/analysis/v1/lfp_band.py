@@ -196,10 +196,10 @@ class LFPBandSelection(SpyglassMixin, dj.Manual):
         reference_electrode_list = reference_electrode_list[electrode_sort_ind]
 
         # Warn if the sampling rate is not the same as the original
-        if lfp_band_sampling_rate is not None:
+        if lfp_band_sampling_rate > lfp_sampling_rate:
             self._info_msg(
-                "It is recommended to use the same sampling rate as the original "
-                + "lfp data to avoid aliasing."
+                "It is recommended to use a sampling rate less than or equal to the "
+                + "original lfp data to avoid aliasing."
             )
         # if no sampling rate is provided, use the default
         lfp_band_sampling_rate = lfp_band_sampling_rate or lfp_sampling_rate
