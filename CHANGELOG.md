@@ -282,6 +282,7 @@ for label, interval_data in results.groupby("interval_labels"):
     - Prompt user to verify compatibility between new insert and existing table
         entries # 1318, #1350
     - Skip empty timeseries ingestion (`PositionSource`, `DioEvents`) #1347
+    - Reduce excess warnings/errors #1589
 - Position
     - Allow population of missing `PositionIntervalMap` entries during population
         of `DLCPoseEstimation` #1208
