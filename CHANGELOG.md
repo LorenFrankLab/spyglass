@@ -234,6 +234,8 @@ for label, interval_data in results.groupby("interval_labels"):
         `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
         SpikeInterface `ValueError` caused by floating-point round-trip in the
         seconds-to-samples conversion #1564
+    - Trigger recording recompute in `SpikeSortingRecording.populate` when
+        necessary #1588
 
 ## [0.5.5] (Aug 6, 2025)
 
