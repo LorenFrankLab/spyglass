@@ -1308,10 +1308,12 @@ class Model(SpyglassMixin, dj.Computed):
         This method is deprecated and maintained for backwards compatibility.
         New code should use the strategy pattern via make() method.
         """
+        from spyglass.common.common_usage import ActivityLog
         from spyglass.position.utils.tool_strategies import DLCStrategy
 
-        self._warn_msg(
-            "_make_dlc_model is deprecated. Use make() with tool='DLC' instead."
+        ActivityLog().deprecate_log(
+            "_make_dlc_model",
+            alt="Model.make() with tool='DLC'",
         )
 
         strategy = DLCStrategy()

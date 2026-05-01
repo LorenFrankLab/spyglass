@@ -315,10 +315,15 @@ def interp_pos(dlc_df: pd.DataFrame, spans_to_interp, **kwargs) -> pd.DataFrame:
 
     Notes
     -----
-    This is a compatibility wrapper around the newer interp_position function.
-    New code should use interp_position directly for better performance and
-    more flexible column specification.
+    Deprecated. Use ``spyglass.position.utils.interpolation.interp_position``
+    directly. This alias will be removed in a future release.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "interp_pos",
+        alt="spyglass.position.utils.interpolation.interp_position",
+    )
     # Use the newer function with default x,y columns
     return interp_position(
         pos_df=dlc_df,
@@ -362,7 +367,18 @@ def smooth_moving_avg_v1(
     Examples
     --------
     >>> smoothed_df = smooth_moving_avg_v1(pos_df, 0.5, 30)  # 0.5s window at 30Hz
+
+    Notes
+    -----
+    Deprecated. Use ``spyglass.position.utils.interpolation.smooth_moving_avg``
+    directly. This alias will be removed in a future release.
     """
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "smooth_moving_avg_v1",
+        alt="spyglass.position.utils.interpolation.smooth_moving_avg",
+    )
     try:
         import bottleneck as bn
     except ImportError:
@@ -409,6 +425,12 @@ def two_pt_head_orientation(pos_df: pd.DataFrame, **params):
     if BP1 is None or BP2 is None:
         raise ValueError("bodypart1 and bodypart2 must be specified")
 
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "two_pt_head_orientation",
+        alt="spyglass.position.utils.orientation.two_pt_orientation",
+    )
     # Use the modern function with proper parameter mapping
     return two_pt_orientation(pos_df, point1=BP1, point2=BP2)
 
@@ -439,6 +461,12 @@ def red_led_bisector_orientation(pos_df: pd.DataFrame, **params):
     if any(x is None for x in [LED1, LED2, LED3]):
         raise ValueError("led1, led2, and led3 must be specified")
 
+    from spyglass.common.common_usage import ActivityLog
+
+    ActivityLog().deprecate_log(
+        "red_led_bisector_orientation",
+        alt="spyglass.position.utils.orientation.bisector_orientation",
+    )
     # Use the modern bisector function with proper parameter mapping
     return bisector_orientation(pos_df, led1=LED1, led2=LED2, led3=LED3)
 

@@ -1,6 +1,6 @@
 """Tests for Model.make() and Model.train() methods."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -175,7 +175,7 @@ class TestModelMake:
             mock_metadata_obj.latest_model = {
                 "iteration": 1000,
                 "trainFraction": 0.8,
-                "date_trained": datetime.utcnow(),
+                "date_trained": datetime.now(timezone.utc),
                 "snapshot": "snapshot-1000",
             }
             mock_metadata_obj.skeleton_id = "test_skeleton"
@@ -583,7 +583,7 @@ class TestModelMetadataRegistration:
             latest_model={
                 "iteration": 1000,
                 "trainFraction": 0.8,
-                "date_trained": datetime.utcnow(),
+                "date_trained": datetime.now(timezone.utc),
                 "snapshot": "snapshot-1000",
             },
             skeleton_id="test_skeleton",
@@ -635,7 +635,7 @@ class TestModelMetadataRegistration:
             latest_model={
                 "iteration": 500,
                 "trainFraction": 0.9,
-                "date_trained": datetime.utcnow(),
+                "date_trained": datetime.now(timezone.utc),
             },
             skeleton_id="test_skeleton",
         )
@@ -662,7 +662,7 @@ class TestModelMetadataRegistration:
             latest_model={
                 "iteration": 100,
                 "trainFraction": 0.7,
-                "date_trained": datetime.utcnow(),
+                "date_trained": datetime.now(timezone.utc),
             },
             skeleton_id="test_skeleton",
         )

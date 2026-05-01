@@ -36,6 +36,15 @@ class PoseToolStrategy(ABC):
         """Name of the pose estimation tool."""
 
     @property
+    def source_software(self) -> str:
+        """Display name for source_software in ndx-pose NWB objects.
+
+        Override in concrete strategies to return the canonical software name
+        (e.g. ``"DeepLabCut"`` rather than ``"DLC"``). Defaults to tool_name.
+        """
+        return self.tool_name
+
+    @property
     @abstractmethod
     def supports_training(self) -> bool:
         """Whether this tool supports model training.
@@ -328,6 +337,11 @@ class DLCStrategy(PoseToolStrategy):
     @property
     def tool_name(self) -> str:
         return "DLC"
+
+    @property
+    def source_software(self) -> str:
+        """Canonical software name used in ndx-pose NWB objects."""
+        return "DeepLabCut"
 
     @property
     def supports_training(self) -> bool:

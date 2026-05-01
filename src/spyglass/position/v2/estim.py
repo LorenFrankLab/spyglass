@@ -29,6 +29,7 @@ import io
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 from typing import Union
 
@@ -506,6 +507,7 @@ class NDXPoseBuilder(BaseMixin):
         description: str = None,
         original_videos: list = None,
         timestamps: np.ndarray = None,
+        source_software: str = "DeepLabCut",
     ) -> tuple:
         """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
 
@@ -525,6 +527,10 @@ class NDXPoseBuilder(BaseMixin):
             Description for PoseEstimation object
         original_videos : list, optional
             List of original video identifiers
+        source_software : str, optional
+            Source software name for ndx-pose metadata, by default
+            "DeepLabCut". Pass from the active tool strategy's
+            ``source_software`` property.
 
         Returns
         -------
@@ -600,7 +606,7 @@ class NDXPoseBuilder(BaseMixin):
             description=description or f"Pose estimation from model {model_id}",
             original_videos=original_videos
             or [],  # Use provided videos or empty list
-            source_software="DeepLabCut",
+            source_software=source_software,
             skeleton=skeleton,
             scorer=scorer,
         )
@@ -1111,7 +1117,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         nwbfile = get_nwb_file(nwb_data["nwb2load_filepath"])
 
         if "behavior" not in nwbfile.processing:
-            raise ValueError(f"No behavior module in NWB: {nwb_file_name}")
+            raise ValueError(
+                f"No behavior module in NWB: {nwb_file_name}. "
+                "The analysis file may be corrupted or was created by an "
+                "older pipeline. Delete the PoseEstim entry and re-populate: "
+                "``(PoseEstim & key).delete(); populate(key)``"
+            )
 
         behavior_module = nwbfile.processing["behavior"]
 
@@ -1123,7 +1134,12 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         }
 
         if not pose_estimations:
-            raise ValueError(f"No PoseEstimation in NWB: {nwb_file_name}")
+            raise ValueError(
+                f"No PoseEstimation in NWB: {nwb_file_name}. "
+                "Expected an ndx-pose PoseEstimation object in the behavior "
+                "processing module. Delete the PoseEstim entry and "
+                "re-populate: ``(PoseEstim & key).delete(); populate(key)``"
+            )
 
         # Use first PoseEstimation (or could select by name)
         pose_estimation = list(pose_estimations.values())[0]
@@ -1256,7 +1272,11 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if not output_files:
             raise FileNotFoundError(
                 f"No output files found for {tool} inference. "
-                f"Video paths: {video_paths}, output_dir: {output_dir}"
+                f"Video paths: {video_paths}, output_dir: {output_dir}. "
+                "For DLC, check that analyze_videos completed without error "
+                "and that output_dir matches the destfolder used during "
+                "inference. You can re-trigger by setting task_mode='trigger' "
+                "in PoseEstimSelection and calling populate() again."
             )
 
         # Use the most recent output file
@@ -1490,6 +1510,20 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         # Build pose estimation using helper class
         vid_timestamps = self._fetch_video_timestamps(key)
         builder = self._get_nwb_builder_cls()()
+
+        # Derive canonical software name from the active tool strategy so
+        # ndx-pose NWB metadata reflects the actual tool used (e.g.
+        # "DeepLabCut" for DLC, not the internal abbreviation).
+        from spyglass.position.utils.tool_strategies import ToolStrategyFactory
+
+        try:
+            active_strategy = ToolStrategyFactory.create_strategy(
+                model_info["tool"]
+            )
+            source_sw = active_strategy.source_software
+        except (ValueError, KeyError):
+            source_sw = model_info.get("tool", "unknown")
+
         pose_estimation, nwb_skeleton = builder.build_pose_estimation(
             pose_df=pose_df,
             bodyparts=bodyparts,
@@ -1499,6 +1533,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             description=f"Pose estimation from model {key['model_id']}",
             original_videos=video_keys,
             timestamps=vid_timestamps,
+            source_software=source_sw,
         )
 
         # original_videos now set in builder, no need to set again here
@@ -2255,7 +2290,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
             raise FileNotFoundError(
                 f"ffprobe failed on {video_path}: {ret.stderr}"
             )
-        fps = eval(ret.stdout.strip())  # e.g. "30000/1001" → 29.97
+        fps = float(Fraction(ret.stdout.strip()))  # e.g. "30000/1001" → 29.97
 
         # video_frame_inds: timestamps ARE frame indices (0, 1, 2, ...) since
         # DLC runs inference on every frame. Mirrors V1's video_frame_ind column.
