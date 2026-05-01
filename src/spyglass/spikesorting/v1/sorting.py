@@ -269,20 +269,12 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             SpikeSorterParameters * SpikeSortingSelection & key
         ).fetch1("sorter", "sorter_params")
 
-        recording_analysis_nwb_file_abs_path = AnalysisNwbfile.get_abs_path(
-            recording_key["analysis_file_name"]
-        )
-
-        # Check if recording file exists on disc. Trigger recompute if not.
-        if not os.path.exists(recording_analysis_nwb_file_abs_path):
-            _ = (AnalysisNwbfile() & recording_key).fetch_nwb()
-
         return [
             nwb_file_name,
             artifact_removed_intervals,
             sorter,
             sorter_params,
-            recording_analysis_nwb_file_abs_path,
+            recording_key,
         ]
 
     def make_compute(
@@ -292,10 +284,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         artifact_removed_intervals: IntervalLike,
         sorter: str,
         sorter_params: dict,
-        recording_analysis_nwb_file_abs_path: str,
+        recording_key: dict,
     ):
         sorting, timestamps = self._run_spike_sorter(
-            recording_analysis_nwb_file_abs_path=recording_analysis_nwb_file_abs_path,
+            recording_key=recording_key,
             artifact_removed_intervals=artifact_removed_intervals,
             sorter=sorter,
             sorter_params=sorter_params,
@@ -332,7 +324,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
     def _run_spike_sorter(
         self,
-        recording_analysis_nwb_file_abs_path,
+        recording_key,
         artifact_removed_intervals,
         sorter,
         sorter_params,
@@ -344,8 +336,8 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        recording_analysis_nwb_file_abs_path : str
-            Path to recording NWB file
+        recording_key : dict
+            Key for the recording
         artifact_removed_intervals : np.ndarray
             Artifact-free time intervals
         sorter : str
@@ -361,9 +353,7 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             Recording timestamps
         """
         # Load recording (spikeinterface)
-        recording = se.read_nwb_recording(
-            recording_analysis_nwb_file_abs_path, load_time_vector=True
-        )
+        recording = SpikeSortingRecording().get_recording(recording_key)
 
         timestamps = recording.get_times()
 
