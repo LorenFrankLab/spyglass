@@ -9,7 +9,6 @@ import numpy as np
 import pynwb
 import spikeinterface as si
 import spikeinterface.curation as sic
-import spikeinterface.extractors as se
 import spikeinterface.preprocessing as sip
 import spikeinterface.sorters as sis
 from spikeinterface.sortingcomponents.peak_detection import detect_peaks
