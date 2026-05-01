@@ -1,3 +1,29 @@
+"""DataJoint tables for pose estimation inference and pose output processing.
+
+Typical workflow
+----------------
+1. Configure inference parameters and select a model + video group::
+
+       PoseEstimParams.insert_params({...})          # or use default
+       PoseEstimSelection().insert1({
+           "model_id": ..., "vid_group_id": ...,
+           "pose_estim_params_id": "default",
+           "task_mode": "trigger", "output_dir": "/path/to/output"
+       })
+       PoseEstim().populate()
+
+2. Configure pose processing (centroid, orientation, smoothing) and populate::
+
+       PoseParams.insert_default()                   # or custom
+       PoseSelection().insert1({
+           **pose_estim_key, "pose_params_id": "default"
+       })
+       PoseV2().populate()
+
+Results are registered in ``PositionOutput`` automatically and accessible via
+``PositionOutput.fetch1_dataframe()``.
+"""
+
 import contextlib
 import io
 import subprocess
@@ -130,7 +156,7 @@ class PoseParameterSet:
     def to_params_dict(self) -> dict:
         """Convert to dictionary format for database insertion."""
         return {
-            "pose_params": self.params_name,
+            "pose_params_id": self.params_name,
             "orient": self.orient.to_dict(),
             "centroid": self.centroid.to_dict(),
             "smoothing": self.smoothing.to_dict(),
@@ -1515,7 +1541,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
 
     Attributes
     ----------
-    pose_params : str
+    pose_params_id : str
         Name for this parameter set
     orient : dict
         Orientation calculation parameters
@@ -1526,7 +1552,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
     """
 
     definition = """
-    pose_params: varchar(32)
+    pose_params_id: varchar(32)
     ---
     orient: json  # Orientation calculation params
     centroid: json  # Centroid calculation params
@@ -1577,7 +1603,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         - Moving average smoothing with interpolation
         """
         default_params = {
-            "pose_params": "default",
+            "pose_params_id": "default",
             "orient": {
                 "method": "two_pt",
                 "bodypart1": "greenLED",
@@ -1622,7 +1648,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         - Moving average smoothing with interpolation
         """
         params_4led = {
-            "pose_params": "4LED_default",
+            "pose_params_id": "4LED_default",
             "orient": {
                 "method": "bisector",
                 "led1": "redLED_L",
@@ -1670,7 +1696,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         - Savitzky-Golay smoothing
         """
         params_single = {
-            "pose_params": "single_LED",
+            "pose_params_id": "single_LED",
             "orient": {
                 "method": "none",
             },
@@ -1707,7 +1733,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         - No interpolation or smoothing
         """
         params_raw = {
-            "pose_params": "no_smoothing",
+            "pose_params_id": "no_smoothing",
             "orient": {
                 "method": "two_pt",
                 "bodypart1": "greenLED",
@@ -1741,7 +1767,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         ----------
         key : dict
             Parameter dictionary with:
-            - pose_params: str (name for parameter set)
+            - pose_params_id: str (name for parameter set)
             - orient: dict (orientation parameters)
             - centroid: dict (centroid parameters)
             - smoothing: dict (smoothing parameters)
@@ -1752,7 +1778,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         --------
         >>> # Standard DataJoint interface
         >>> PoseParams().insert1({
-        ...     "pose_params": "my_config",
+        ...     "pose_params_id": "my_config",
         ...     "orient": {"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
         ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
         ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
@@ -1760,14 +1786,14 @@ class PoseParams(SpyglassMixin, dj.Lookup):
 
         >>> # Or use class method
         >>> PoseParams.insert1({
-        ...     "pose_params": "my_config",
+        ...     "pose_params_id": "my_config",
         ...     "orient": {"method": "none"},
         ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
         ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
         ... })
         """
         # Validate parameter structure
-        required_keys = {"pose_params", "orient", "centroid", "smoothing"}
+        required_keys = {"pose_params_id", "orient", "centroid", "smoothing"}
         missing_keys = required_keys - set(key.keys())
         if missing_keys:
             raise ValueError(f"Missing required keys: {missing_keys}")
@@ -1818,7 +1844,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         ... )
         """
         params_dict = {
-            "pose_params": params_name,
+            "pose_params_id": params_name,
             "orient": orient,
             "centroid": centroid,
             "smoothing": smoothing,
@@ -1852,7 +1878,7 @@ class PoseSelection(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         key : dict
-            Primary key with pose_estim_id and pose_params entries
+            Primary key with pose_estim_id and pose_params_id entries
         **kwargs
             Additional DataJoint insertion options
         """
@@ -1868,7 +1894,7 @@ class PoseSelection(SpyglassMixin, dj.Manual):
         Parameters
         ----------
         key : dict
-            Contains pose_estim_id and pose_params for validation
+            Contains pose_estim_id and pose_params_id for validation
         """
         try:
             # Get skeleton_id by joining through the pipeline:
@@ -1900,7 +1926,7 @@ class PoseSelection(SpyglassMixin, dj.Manual):
 
             # Get centroid params from PoseParams
             pose_params_key = {
-                k: v for k, v in key.items() if k in ["pose_params"]
+                k: v for k, v in key.items() if k in ["pose_params_id"]
             }
             params_info = (PoseParams & pose_params_key).fetch1()
             centroid_params = params_info["centroid"]
@@ -1921,13 +1947,13 @@ class PoseSelection(SpyglassMixin, dj.Manual):
 
             if actual_method is None:
                 logger.warning(
-                    f"No centroid method specified in '{pose_params_key['pose_params']}'. "
+                    f"No centroid method specified in '{pose_params_key['pose_params_id']}'. "
                     f"Skeleton '{skeleton_id}' suggests: '{suggested_method}'"
                 )
             elif actual_method != suggested_method:
                 bodyparts = skeleton_entry.get_bodyparts()
                 logger.warning(
-                    f"Centroid method '{actual_method}' in '{pose_params_key['pose_params']}' "
+                    f"Centroid method '{actual_method}' in '{pose_params_key['pose_params_id']}' "
                     f"may not be optimal for skeleton '{skeleton_id}' (bodyparts: {bodyparts}). "
                     f"Suggested method: '{suggested_method}'"
                 )

@@ -7,7 +7,7 @@ rather than using unittest.mock.patch().
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Protocol, Union
 
@@ -37,7 +37,7 @@ def default_pk_name(
     include_hash : bool, optional
         Append the hash component when True (default).
     """
-    when = datetime.utcnow()
+    when = datetime.now(timezone.utc)
     if include_hash:
         raw = json.dumps(params or {}, sort_keys=True, default=str)
         h = "-" + hashlib.md5(raw.encode()).hexdigest()[:8]
@@ -53,7 +53,7 @@ class InferenceRunnerProtocol(Protocol):
     hard-coding PoseInferenceRunner instantiation.
     """
 
-    def run_dlc_inference(
+    def run_inference(
         self,
         model_info: Dict,
         video_path: Union[str, Path],
@@ -61,7 +61,7 @@ class InferenceRunnerProtocol(Protocol):
         destfolder: Optional[Union[str, Path]] = None,
         **kwargs,
     ) -> pd.DataFrame:
-        """Run DLC inference on a video.
+        """Run pose inference on a video.
 
         Parameters
         ----------

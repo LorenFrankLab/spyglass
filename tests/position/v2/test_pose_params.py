@@ -13,7 +13,7 @@ class TestPoseParamsDefaults:
         PoseParams.insert_default(skip_duplicates=True)
 
         # Fetch and verify
-        params = (PoseParams & {"pose_params": "default"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "default"}).fetch1()
 
         # Check orientation params
         assert params["orient"]["method"] == "two_pt"
@@ -37,7 +37,7 @@ class TestPoseParamsDefaults:
 
         PoseParams.insert_4LED_default(skip_duplicates=True)
 
-        params = (PoseParams & {"pose_params": "4LED_default"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "4LED_default"}).fetch1()
 
         # Check orientation uses bisector
         assert params["orient"]["method"] == "bisector"
@@ -56,7 +56,7 @@ class TestPoseParamsDefaults:
 
         PoseParams.insert_single_LED(skip_duplicates=True)
 
-        params = (PoseParams & {"pose_params": "single_LED"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "single_LED"}).fetch1()
 
         # Check no orientation
         assert params["orient"]["method"] == "none"
@@ -74,7 +74,7 @@ class TestPoseParamsDefaults:
 
         PoseParams.insert_no_smoothing(skip_duplicates=True)
 
-        params = (PoseParams & {"pose_params": "no_smoothing"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "no_smoothing"}).fetch1()
 
         # Check interpolation and smoothing are disabled
         assert params["smoothing"]["interpolate"] is False
@@ -106,7 +106,7 @@ class TestPoseParamsCustom:
             },
         )
 
-        params = (PoseParams & {"pose_params": "my_custom"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "my_custom"}).fetch1()
         assert params["orient"]["bodypart1"] == "nose"
         assert params["centroid"]["points"]["point1"] == "nose"
 
@@ -133,7 +133,7 @@ class TestPoseParamsCustom:
             },
         )
 
-        params = (PoseParams & {"pose_params": "gaussian_smooth"}).fetch1()
+        params = (PoseParams & {"pose_params_id": "gaussian_smooth"}).fetch1()
         assert params["smoothing"]["smoothing_params"]["method"] == "gaussian"
 
 

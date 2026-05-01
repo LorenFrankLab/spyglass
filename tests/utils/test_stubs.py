@@ -27,7 +27,7 @@ class StubInferenceRunner:
             self.mock_result = mock_result
         self.calls = []  # Track method calls for assertions
 
-    def run_dlc_inference(
+    def run_inference(
         self,
         model_info: Dict,
         video_path: Union[str, Path],
@@ -38,7 +38,7 @@ class StubInferenceRunner:
         """Mock DLC inference - returns pre-configured DataFrame."""
         self.calls.append(
             {
-                "method": "run_dlc_inference",
+                "method": "run_inference",
                 "model_info": model_info,
                 "video_path": video_path,
                 "save_as_csv": save_as_csv,

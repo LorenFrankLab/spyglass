@@ -1,3 +1,22 @@
+"""PositionOutput merge table — unified interface to all position sources.
+
+This module exposes ``PositionOutput``, a DataJoint merge table that collects
+position results from every upstream pipeline behind a single fetch interface:
+
+- ``IntervalPositionInfo`` (common/Trodes-based)
+- ``TrodesPosV1``
+- ``DLCPosV1`` / ``DLCPoseEstimation`` (DeepLabCut V1)
+- ``PoseV2`` (position V2 — ndx-pose / multi-tool)
+- ``ImportedPose``
+
+Typical usage
+-------------
+::
+
+    # After populating any upstream table, fetch position::
+    (PositionOutput & {"nwb_file_name": ..., "epoch": 1}).fetch1_dataframe()
+"""
+
 import datajoint as dj
 from datajoint.utils import to_camel_case
 from pandas import DataFrame

@@ -823,12 +823,24 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
     @classmethod
     def update_entries(cls, restrict=True):
-        """Update the camera_name field for all entries in the table."""
+        """Update the camera_name and path fields for all entries in the table.
+
+        Prints a summary of updated, skipped, and failed entries.
+        Aggregates FileNotFoundError for path updates.
+        """
         query = cls & restrict & "camera_name IS NULL OR path IS NULL"
         existing_entries = query.fetch("KEY")
+        total = len(existing_entries)
+        updated_camera = 0
+        updated_path = 0
+        skipped_camera = 0
+        skipped_path = 0
+        failed_path = []
 
+        # Update camera_name
         for row in existing_entries:
             if row.get("camera_name"):
+                skipped_camera += 1
                 continue
             video_nwb = (cls & row).fetch_nwb()
             if len(video_nwb) != 1:
@@ -837,17 +849,32 @@ class VideoFile(SpyglassMixin, dj.Imported):
                 )
             row["camera_name"] = video_nwb[0]["video_file"].device.camera_name
             cls.update1(row=row)
+            updated_camera += 1
 
+        # Update path
         for row in existing_entries:
             if row.get("path"):
+                skipped_path += 1
                 continue
             try:
                 abs_path = cls.get_abs_path(row)
             except FileNotFoundError as e:
-                logger.warning(f"Skipping path update for {row}: {e}")
+                failed_path.append((row, str(e)))
                 continue
             row["path"] = abs_path
             cls.update1(row=row)
+            updated_path += 1
+
+        msg = [
+            f"VideoFile.update_entries: {total} entries checked.",
+            f"  camera_name updated: {updated_camera}, skipped: {skipped_camera}",
+            f"  path updated: {updated_path}, skipped: {skipped_path}, failed: {len(failed_path)}",
+        ]
+        if failed_path:
+            msg.append("  FileNotFoundError for the following entries:")
+            for row, err in failed_path:
+                msg.append(f"    {row}: {err}")
+        logger.info("\n".join(msg))
 
     @classmethod
     def get_abs_path(cls, key: Dict):
@@ -938,9 +965,12 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if not video_path.exists():
             raise FileNotFoundError(f"File {video_path} does not exist.")
 
-        _ = self.update_entries()  # ensure paths are updated
+        query = self & {"path": video_path.as_posix()}
 
-        query = self & f"path='{video_path.as_posix()}'"
+        if not query:
+            # Path not in DB yet — refresh null entries then retry once
+            self.update_entries()
+            query = self & {"path": video_path.as_posix()}
 
         if len(query) != 1:
             raise ValueError(

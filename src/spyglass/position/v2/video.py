@@ -1,3 +1,22 @@
+"""DataJoint tables for grouping video files used in pose estimation.
+
+Typical workflow
+----------------
+1. Create a video file group from a session epoch or explicit file list::
+
+       VidFileGroup.create_from_epoch(
+           nwb_file_name="subject20230101.nwb", epoch=1
+       )
+       # or from an explicit list of paths
+       VidFileGroup.create_from_files(
+           ["video1.mp4", "video2.mp4"],
+           description="two-camera run 1"
+       )
+
+2. The resulting ``vid_group_id`` is used as a foreign key in
+   ``PoseEstimSelection`` to link a model to its input videos.
+"""
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Union

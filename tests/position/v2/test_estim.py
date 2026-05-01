@@ -236,7 +236,7 @@ class TestPoseParameterSet:
 
         result = param_set.to_params_dict()
 
-        assert result["pose_params"] == "test_params"
+        assert result["pose_params_id"] == "test_params"
         assert result["orient"]["method"] == "none"
         assert result["centroid"]["method"] == "centroid"
         assert result["smoothing"]["interpolate"] is True
@@ -459,7 +459,7 @@ class StubInferenceRunner:
         else:
             self.pose_data = pose_data
 
-    def run_dlc_inference(self, model_info, video_path, **kwargs):
+    def run_inference(self, model_info, video_path, **kwargs):
         """Return pre-configured pose data."""
         return self.pose_data.copy()
 
@@ -562,7 +562,7 @@ class TestPoseEstimDependencyInjection:
         stub_builder = StubNWBBuilder()
 
         # Verify stub behavior works as expected
-        result = stub_runner.run_dlc_inference({}, "dummy_video.mp4")
+        result = stub_runner.run_inference({}, "dummy_video.mp4")
         assert len(result) == 2
         assert "likelihood" in result.columns.get_level_values(2)
 
@@ -583,7 +583,7 @@ class TestPoseEstimDependencyInjection:
         )
 
         runner = StubInferenceRunner(pose_data=custom_data)
-        result = runner.run_dlc_inference({}, "test_video.mp4")
+        result = runner.run_inference({}, "test_video.mp4")
 
         assert result.equals(custom_data)
         assert len(result) == 3

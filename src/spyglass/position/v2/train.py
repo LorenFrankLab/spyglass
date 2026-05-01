@@ -10,7 +10,7 @@ inefficient.
 import re
 import warnings
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Tuple, Union
@@ -1225,8 +1225,8 @@ class Model(SpyglassMixin, dj.Computed):
         # Create basic NWB file
         nwbfile = NWBFile(
             session_description=f"DLC model training: {metadata.model_id}",
-            identifier=f"model_{datetime.utcnow():%Y%m%d%H%M%S}",
-            session_start_time=datetime.utcnow(),
+            identifier=f"model_{datetime.now(timezone.utc):%Y%m%d%H%M%S}",
+            session_start_time=datetime.now(timezone.utc),
         )
 
         # Store training metadata in scratch space
@@ -2103,7 +2103,9 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Step 5: Generate model_id and insert directly into Model
         task = config.get("Task", "DLCTask")
-        date = config.get("date", datetime.utcnow().strftime("%Y-%m-%d"))
+        date = config.get(
+            "date", datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        )
         model_id = kwargs.get("model_id") or default_pk_name(
             f"DLC-{task}-{date}",
             dict(tool="DLC", model_path=stored_path),

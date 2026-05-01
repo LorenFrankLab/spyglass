@@ -106,7 +106,7 @@ def test_pose_estim_with_injection():
     builder = testable_pose_estim._get_nwb_builder_cls()()
 
     # Test business logic without I/O
-    result = runner.run_dlc_inference(
+    result = runner.run_inference(
         model_info={"model_path": "/fake/model.yaml"},
         video_path="/fake/video.mp4",
     )

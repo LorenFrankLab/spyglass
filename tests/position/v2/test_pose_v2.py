@@ -734,13 +734,13 @@ class TestPoseV2MakeValidation:
 
         # 4. Pick a PoseParams entry — insert default if the table is empty
         PoseParams.insert_default(skip_duplicates=True)
-        pose_params_name = (PoseParams & {}).fetch("pose_params", limit=1)[0]
+        pose_params_id = (PoseParams & {}).fetch("pose_params_id", limit=1)[0]
         PoseSelection().insert1(
-            {**selection_key, "pose_params": pose_params_name},
+            {**selection_key, "pose_params_id": pose_params_id},
             skip_duplicates=True,
         )
 
-        pv2_key = {**selection_key, "pose_params": pose_params_name}
+        pv2_key = {**selection_key, "pose_params_id": pose_params_id}
 
         # 5. make() must fail immediately — before fetching pose data
         with pytest.raises(ValueError, match="Cannot store processed pose"):
@@ -822,7 +822,7 @@ class TestPositionOutputInsert:
             "model_id": "test_model",
             "vid_group_id": "test_group",
             "pose_estim_params_id": "default",
-            "pose_params": "default",
+            "pose_params_id": "default",
         }
 
         mock_pose_df = pd.DataFrame(
