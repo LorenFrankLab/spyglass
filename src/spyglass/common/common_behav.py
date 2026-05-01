@@ -779,6 +779,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
         if failed_videos["timestamp_mismatch"]:
             msg_parts.append("\nTimestamp mismatches:")
             for item in failed_videos["timestamp_mismatch"]:
+                if " 0.0% " in item["reason"]:
+                    continue # Don't report vidoes for other epochs as errors
                 msg_parts.append(f"  - {item['name']}: {item['reason']}")
 
         if failed_videos["missing_camera"]:
