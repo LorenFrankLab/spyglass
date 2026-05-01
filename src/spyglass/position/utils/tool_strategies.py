@@ -903,9 +903,9 @@ class DLCStrategy(PoseToolStrategy):
             model_instance._info_msg(
                 "DLC training stopped via Keyboard Interrupt"
             )
-        except Exception as e:
+        except RuntimeError as e:
             msg = str(e)
-            # Handle DLC end-of-training gracefully
+            # TF1 signals end-of-training by raising CancelledError mid-queue
             hit_end_of_train = ("CancelledError" in msg) and (
                 "fifo_queue_enqueue" in msg
             )

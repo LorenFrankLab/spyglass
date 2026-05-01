@@ -276,6 +276,29 @@ class TestModelParams:
                             mock_strategy.validate_params.assert_called_once()
                             assert result["tool"] == "DLC"
 
+    def test_insert1_real_db(self, pv2_train, model_params, skip_if_no_dlc):
+        """Test real ModelParams.insert1() with DB count verification."""
+        test_params = {
+            "tool": "DLC",
+            "params": {
+                "shuffle": 1,
+                "trainingsetindex": 0,
+                "maxiters": 1000,
+                "project_path": "/tmp/unit_test_project",
+            },
+        }
+
+        initial_count = len(model_params)
+        result = model_params.insert1(test_params, skip_duplicates=True)
+
+        assert len(model_params) == initial_count + 1
+        assert result["tool"] == "DLC"
+        assert "model_params_id" in result
+
+        (model_params & {"model_params_id": result["model_params_id"]}).delete(
+            safemode=False
+        )
+
     def test_insert1_duplicate_detection(self, pv2_train, model_params):
         """Test that insert1() duplicate detection returns expected format."""
         # This is a simplified test that verifies the return format

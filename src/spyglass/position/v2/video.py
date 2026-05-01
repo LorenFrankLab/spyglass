@@ -236,45 +236,6 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         ...         recursive=True
         ...     )
         ... )
-            Directory containing video files
-        description : str
-            Description of the video group
-        vid_group_id : Union[str, int, None], optional
-            Video group ID. If None, generated from description.
-            If string, hashed to integer. By default None
-        pattern : str, optional
-            Glob pattern for matching video files, by default "*.mp4"
-        recursive : bool, optional
-            Whether to search recursively in subdirectories,
-            by default False
-
-        Returns
-        -------
-        dict
-            Dictionary with 'vid_group_id' key
-
-        Raises
-        ------
-        FileNotFoundError
-            If directory doesn't exist
-        ValueError
-            If no video files found matching pattern
-
-        Examples
-        --------
-        >>> # Create group from all MP4s in directory
-        >>> group_key = VidFileGroup.create_from_directory(
-        ...     directory="/path/to/videos",
-        ...     description="All training videos"
-        ... )
-        >>>
-        >>> # Create group from all AVIs recursively
-        >>> group_key = VidFileGroup.create_from_directory(
-        ...     directory="/path/to/videos",
-        ...     description="All AVI videos",
-        ...     pattern="*.avi",
-        ...     recursive=True
-        ... )
         """
         directory = Path(params.directory)
         if not directory.exists():

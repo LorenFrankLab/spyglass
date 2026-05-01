@@ -711,9 +711,8 @@ class TestPoseV2MakeValidation:
         )
 
         # 3. Ensure PoseEstimSelection and PoseEstim entries exist
-        params_id = (
-            PoseEstimParams & {"pose_estim_params_id": "default"}
-        ).fetch1("pose_estim_params_id")
+        # Lookup tables auto-populate from `contents` on first access
+        params_id = PoseEstimParams.fetch("pose_estim_params_id", limit=1)[0]
         selection_key = {
             "model_id": model_key["model_id"],
             "vid_group_id": vg_id,

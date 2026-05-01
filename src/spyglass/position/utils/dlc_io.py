@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import ruamel.yaml as yaml
 
+from spyglass.position.utils.general import get_most_recent_file  # noqa: F401
 from spyglass.utils import logger
 
 try:
@@ -31,8 +32,7 @@ try:
                 "were designed for DLC 2.x and may encounter compatibility issues "
                 "with DLC 3.0+. Consider using Position V2 for DLC 3.0+ support."
             )
-    except Exception:
-        # If version check fails, continue without warning
+    except (AttributeError, ValueError):
         pass
 except ImportError:  # pragma: no cover
     evaluate_network, get_evaluation_folder = None, None  # pragma: no cover
@@ -41,7 +41,7 @@ except ImportError:  # pragma: no cover
 def parse_dlc_h5_output(
     h5_path: Union[Path, str],
     bodyparts: Optional[list[str]] = None,
-    likelihood_threshold: Optional[float] = None,
+    likelihood_thresh: Optional[float] = None,
     return_metadata: bool = True,
 ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, str, list]]:
     """Standardized DLC H5/CSV parsing for V1/V2 pipelines.
@@ -55,7 +55,7 @@ def parse_dlc_h5_output(
         Path to DLC output file (.h5 or .csv)
     bodyparts : Optional[list[str]], optional
         If provided, filter to only these bodyparts
-    likelihood_threshold : Optional[float], optional
+    likelihood_thresh : Optional[float], optional
         If provided, set low-confidence points to NaN
     return_metadata : bool, optional
         If True, return (df, scorer, bodyparts) tuple.
@@ -89,7 +89,7 @@ def parse_dlc_h5_output(
     >>> df, _, _ = parse_dlc_h5_output(
     ...     "output.h5",
     ...     bodyparts=["nose", "tail"],
-    ...     likelihood_threshold=0.9
+    ...     likelihood_thresh=0.9
     ... )
     """
     h5_path = Path(h5_path)
@@ -141,13 +141,13 @@ def parse_dlc_h5_output(
         available_bodyparts = bodyparts
 
     # Apply likelihood threshold if provided
-    if likelihood_threshold is not None:
+    if likelihood_thresh is not None:
         for bodypart in available_bodyparts:
             # Get likelihood column for this bodypart
             likelihood_col = (scorer, bodypart, "likelihood")
             if likelihood_col in df.columns:
                 # Set x,y to NaN where likelihood < threshold
-                low_conf_mask = df[likelihood_col] < likelihood_threshold
+                low_conf_mask = df[likelihood_col] < likelihood_thresh
                 for coord in ["x", "y"]:
                     coord_col = (scorer, bodypart, coord)
                     if coord_col in df.columns:
@@ -312,7 +312,7 @@ def validate_dlc_output_structure(df: pd.DataFrame) -> None:
 
 
 def convert_dlc_to_position_df(
-    df: pd.DataFrame, likelihood_threshold: Optional[float] = None
+    df: pd.DataFrame, likelihood_thresh: Optional[float] = None
 ) -> pd.DataFrame:
     """Convert DLC MultiIndex DataFrame to flat position DataFrame.
 
@@ -320,7 +320,7 @@ def convert_dlc_to_position_df(
     ----------
     df : pd.DataFrame
         DLC DataFrame with MultiIndex [scorer, bodypart, coords]
-    likelihood_threshold : float, optional
+    likelihood_thresh : float, optional
         If provided, set x/y to NaN where likelihood < threshold
 
     Returns
@@ -347,12 +347,12 @@ def convert_dlc_to_position_df(
     result_df = pd.DataFrame(result_data, index=df.index)
 
     # Apply likelihood threshold if provided
-    if likelihood_threshold is not None:
+    if likelihood_thresh is not None:
         for bodypart in bodyparts:
             likelihood_col = f"{bodypart}_likelihood"
             if likelihood_col in result_df.columns:
                 # Set x,y to NaN where likelihood < threshold
-                low_conf_mask = result_df[likelihood_col] < likelihood_threshold
+                low_conf_mask = result_df[likelihood_col] < likelihood_thresh
                 for coord in ["x", "y"]:
                     coord_col = f"{bodypart}_{coord}"
                     if coord_col in result_df.columns:
@@ -536,33 +536,6 @@ class DLCProjectReader:  # Note: simplifying to require only project path
             }
 
         return body_parts_position
-
-
-def get_most_recent_file(path: Path, ext: str = "") -> Path:
-    """Get the most recent file of a given extension in a directory
-
-    Parameters
-    ----------
-    path : Path
-        Path to the directory containing the files
-    ext : str
-        File extension to filter by (e.g., ".h5", ".csv"). Default is "",
-        which returns the most recent file regardless of extension.
-    """
-    import os
-
-    eval_files = list(Path(path).glob(f"*{ext}"))
-    if not eval_files:
-        raise FileNotFoundError(f"No {ext} files found in directory: {path}")
-
-    eval_latest, max_modified_time = None, 0
-    for eval_path in eval_files:
-        modified_time = os.path.getmtime(eval_path)
-        if modified_time > max_modified_time:
-            eval_latest = eval_path
-            max_modified_time = modified_time
-
-    return eval_latest
 
 
 def read_yaml(fullpath, filename="*"):
@@ -825,7 +798,7 @@ def get_dlc_model_eval(
         results = legacy_mapping
         return results
 
-    except Exception as e:
+    except (OSError, KeyError, ValueError, TypeError, AttributeError) as e:
         raise RuntimeError(
             f"Failed to parse evaluation results from {eval_path}: {e}"
         ) from e

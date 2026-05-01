@@ -38,9 +38,9 @@ class TestResolveModelPath:
 
     def test_relative_path_no_base_uses_cwd(self, monkeypatch):
         """Relative path falls back to cwd when pose_project_dir is None."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", None)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", None)
         from spyglass.position.v2.train import resolve_model_path
 
         result = resolve_model_path("relative/config.yaml")
@@ -48,9 +48,9 @@ class TestResolveModelPath:
 
     def test_relative_path_with_base(self, monkeypatch, tmp_path):
         """Relative path is joined to pose_project_dir."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", tmp_path)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
         from spyglass.position.v2.train import resolve_model_path
 
         result = resolve_model_path("project/config.yaml")
@@ -58,9 +58,9 @@ class TestResolveModelPath:
 
     def test_absolute_path_ignores_base(self, monkeypatch, tmp_path):
         """An absolute stored path is never prefixed with pose_project_dir."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", tmp_path)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
         from spyglass.position.v2.train import resolve_model_path
 
         p = "/fixed/absolute.yaml"
@@ -72,9 +72,9 @@ class TestToStoredPath:
 
     def test_under_base_stored_as_relative(self, monkeypatch, tmp_path):
         """Path under pose_project_dir is stored as a relative string."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", tmp_path)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
         from spyglass.position.v2.train import _to_stored_path
 
         full = tmp_path / "project" / "config.yaml"
@@ -82,9 +82,9 @@ class TestToStoredPath:
 
     def test_outside_base_stored_as_absolute(self, monkeypatch, tmp_path):
         """Path outside pose_project_dir is stored as an absolute string."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", tmp_path)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
         from spyglass.position.v2.train import _to_stored_path
 
         outside = Path("/other/location/config.yaml")
@@ -92,9 +92,9 @@ class TestToStoredPath:
 
     def test_no_base_always_absolute(self, monkeypatch):
         """With pose_project_dir=None, paths are always stored as absolute."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", None)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", None)
         from spyglass.position.v2.train import _to_stored_path
 
         p = Path("/some/path/config.yaml")
@@ -102,9 +102,9 @@ class TestToStoredPath:
 
     def test_roundtrip_under_base(self, monkeypatch, tmp_path):
         """_to_stored_path → resolve_model_path recovers the original path."""
-        import spyglass.position.v2.train as train_mod
+        import spyglass.position.utils.path_helpers as ph_mod
 
-        monkeypatch.setattr(train_mod, "pose_project_dir", tmp_path)
+        monkeypatch.setattr(ph_mod, "pose_project_dir", tmp_path)
         from spyglass.position.v2.train import (
             _to_stored_path,
             resolve_model_path,

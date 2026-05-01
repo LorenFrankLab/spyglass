@@ -4,14 +4,17 @@ from spyglass.position.utils.centroid import Centroid
 from spyglass.position.utils.interpolation import _key_to_smooth_func_dict
 from spyglass.position.utils.validation import validate_list, validate_option
 
-from .dlc_utils import (
+from spyglass.position.utils.general import (
     _convert_mp4,
-    find_full_path,
     find_mp4,
+    get_video_info,
+)
+
+from .dlc_utils import (
+    find_full_path,
     find_root_directory,
     get_dlc_processed_data_dir,
     get_dlc_root_data_dir,
-    get_video_info,
 )
 from .position_dlc_centroid import (
     DLCCentroid,

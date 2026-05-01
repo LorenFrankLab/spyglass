@@ -5,29 +5,21 @@ import logging
 import os
 import pwd
 import subprocess
-import sys
 from collections.abc import Sequence
 from itertools import combinations, groupby
 from operator import itemgetter
-from pathlib import Path, PosixPath
-from typing import Union
+from pathlib import Path
 
 import datajoint as dj
 import numpy as np
 import pandas as pd
 from position_tools import get_distance
 
-from spyglass.common.common_behav import VideoFile
 from spyglass.common.common_usage import ActivityLog
 
 # Import validation functions from utils module
 from spyglass.position.utils.validation import validate_list, validate_option
-from spyglass.settings import (
-    pose_output_dir,
-    pose_video_dir,
-    raw_dir,
-    test_mode,
-)
+from spyglass.settings import pose_output_dir, test_mode
 from spyglass.utils.logging import logger, stream_handler
 
 # validate_smooth_params functionality moved to utils.validation module
@@ -74,19 +66,19 @@ def _set_permissions(directory, mode, username: str, groupname: str = None):
             os.chmod(os.path.join(dirpath, filename), mode)
 
 
-def file_log(logger, console=False):
+def file_log(this_log, console=False):
     """Decorator to add a file handler to a logger.
 
     Parameters
     ----------
-    logger : logging.Logger
+    this_log : logging.Logger
         Logger to add file handler to.
     console : bool, optional
         If True, logged info will also be printed to console. Default False.
 
     Example
     -------
-    @file_log(logger, console=True)
+    @file_log(this_log, console=True)
     def func(self, *args, **kwargs):
         pass
     """
@@ -102,15 +94,15 @@ def file_log(logger, console=False):
                 datefmt="%y-%m-%d %H:%M:%S",
             )
             file_handler.setFormatter(file_fmt)
-            logger.addHandler(file_handler)
+            this_log.addHandler(file_handler)
             if not console:
-                logger.removeHandler(logger.handlers[0])
+                this_log.removeHandler(logger.handlers[0])
             try:
                 return func(self, *args, **kwargs)
             finally:
                 if not console:
-                    logger.addHandler(stream_handler)
-                logger.removeHandler(file_handler)
+                    this_log.addHandler(stream_handler)
+                this_log.removeHandler(file_handler)
                 file_handler.close()
 
         return wrapper
@@ -210,253 +202,12 @@ def find_root_directory(root_directories, full_path):  # pragma: no cover
         ) from exc
 
 
-def infer_output_dir(key, makedir=True):
-    """Return the expected pose_estimation_output_dir.
-
-    Parameters
-    ----------
-    key: DataJoint key specifying a pairing of VideoFile and Model.
-    """
-
-    file_name = key.get("nwb_file_name")
-    dlc_model_name = key.get("dlc_model_name")
-    epoch = key.get("epoch")
-
-    if not all([file_name, dlc_model_name, epoch]):
-        raise ValueError(
-            "Key must contain 'nwb_file_name', 'dlc_model_name', and 'epoch'"
-        )
-
-    nwb_file_name = key["nwb_file_name"].split("_.")[0]
-    output_dir = Path(pose_output_dir) / Path(
-        f"{nwb_file_name}/{nwb_file_name}_{key['epoch']:02}"
-        f"_model_" + key["dlc_model_name"].replace(" ", "-")
-    )
-    if makedir:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
-
-
 def _to_Path(path):
     """
     Convert the input "path" into a Path object
     Handles one odd Windows/Linux incompatibility of the "\\"
     """
     return Path(str(path).replace("\\", "/"))
-
-
-def get_video_info(key):
-    """Returns video path for a given key.
-
-    Given nwb_file_name and interval_list_name returns specified
-    video file filename, path, meters_per_pixel, and timestamps.
-
-    Parameters
-    ----------
-    key : dict
-        Dictionary containing nwb_file_name and interval_list_name as keys
-
-    Returns
-    -------
-    video_filepath : str
-        path to the video file, including video filename
-    video_filename : str
-        filename of the video
-    meters_per_pixel : float
-        meters per pixel conversion factor
-    timestamps : np.array
-        timestamps of the video
-    """
-    import pynwb
-
-    vf_key = {k: val for k, val in key.items() if k in VideoFile.heading}
-    video_query = VideoFile & vf_key
-
-    if not video_query:
-        VideoFile().make(vf_key, verbose=False)
-
-    if len(video_query) != 1:
-        logger.warning(f"Found {len(video_query)} videos for {vf_key}")
-        return None, None, None, None
-
-    video_info = video_query.fetch1()
-    nwb_path = f"{raw_dir}/{video_info['nwb_file_name']}"
-
-    with pynwb.NWBHDF5IO(path=nwb_path, mode="r") as in_out:
-        nwb_file = in_out.read()
-        nwb_video = nwb_file.objects[video_info["video_file_object_id"]]
-        try:
-            video_filepath = VideoFile.get_abs_path(vf_key)
-        except FileNotFoundError as e:
-            logger.warning(f"Video file not found, skipping: {e}")
-            return None, None, None, None
-        video_dir = os.path.dirname(video_filepath) + "/"
-        video_filename = video_filepath.split(video_dir)[-1]
-        meters_per_pixel = nwb_video.device.meters_per_pixel
-        timestamps = np.asarray(nwb_video.timestamps)
-
-    return video_dir, video_filename, meters_per_pixel, timestamps
-
-
-def find_mp4(
-    video_path: Union[str, PosixPath],
-    output_path: Union[str, PosixPath] = pose_video_dir,
-    video_filename: str = None,
-    video_filetype: str = "h264",
-):
-    """Check for video file and convert to .mp4 if necessary.
-
-    Parameters
-    ----------
-    video_path : str or PosixPath object
-        path to directory of the existing video file without filename
-    output_path : str or PosixPath object
-        path to directory where converted video will be saved
-    video_filename : str, Optional
-        filename of the video to convert, if not provided, video_filetype must
-        be and all video files of video_filetype in the directory will be
-        converted
-    video_filetype : str or List, Default 'h264', Optional
-        If video_filename is not provided,
-        all videos of this filetype will be converted to .mp4
-
-    Returns
-    -------
-    PosixPath object
-        path to converted video file
-    """
-
-    if not video_path or not Path(video_path).exists():
-        raise FileNotFoundError(f"Video path does not exist: {video_path}")
-
-    video_files = (
-        [Path(video_path) / video_filename]
-        if video_filename
-        else [p for p in Path(video_path).glob(f"*.{video_filetype}")]
-    )
-
-    if len(video_files) != 1:
-        raise FileNotFoundError(
-            f"Found {len(video_files)} video files: {video_files}"
-        )
-    video_filepath = video_files[0]
-
-    if video_filepath.exists() and video_filepath.suffix == ".mp4":
-        return video_filepath
-
-    video_file = (
-        video_filepath.as_posix()
-        .rsplit(video_filepath.parent.as_posix(), maxsplit=1)[-1]
-        .split("/")[-1]
-    )
-    return _convert_mp4(
-        video_file, video_path, output_path, videotype="mp4", count_frames=True
-    )
-
-
-def _convert_mp4(
-    filename: str,
-    video_path: str,
-    dest_path: str,
-    videotype: str = "mp4",
-    count_frames=False,
-    return_output=True,
-):
-    """converts video to mp4 using passthrough for frames
-    Parameters
-    ----------
-    filename: str
-        filename of video including suffix (e.g. .h264)
-    video_path: str
-        path of input video excluding filename
-    dest_path: str
-        path of output video excluding filename, but no suffix (e.g. no '.mp4')
-    videotype: str
-        str of filetype to convert to (currently only accepts 'mp4')
-    count_frames: bool
-        if True counts the number of frames in both videos instead of packets
-    return_output: bool
-        if True returns the destination filename
-    """
-    if videotype not in ["mp4"]:
-        raise NotImplementedError(f"videotype {videotype} not implemented")
-
-    orig_filename = filename
-    video_path = Path(video_path) / filename
-
-    dest_filename = os.path.splitext(filename)[0]
-    if ".1" in dest_filename:
-        dest_filename = os.path.splitext(dest_filename)[0]
-    dest_path = Path(f"{dest_path}/{dest_filename}.{videotype}")
-    if dest_path.exists():
-        logger.info(f"{dest_path} already exists, skipping conversion")
-        return dest_path
-
-    try:
-        sys.stdout.flush()
-        convert_process = subprocess.Popen(
-            [
-                "ffmpeg",
-                "-vsync",
-                "passthrough",
-                "-i",
-                f"{video_path.as_posix()}",
-                "-codec",
-                "copy",
-                f"{dest_path.as_posix()}",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError as err:  # pragma: no cover
-        raise RuntimeError(  # pragma: no cover
-            f"Video convert errored: Code {err.returncode}, {err.output}"
-        ) from err
-    out, _ = convert_process.communicate()
-    logger.info(f"Finished converting {filename}")
-
-    # check packets match orig file
-    logger.info(f"Checking packets match orig file: {dest_filename}")
-    orig_packets = _check_packets(video_path, count_frames=count_frames)
-    dest_packets = _check_packets(dest_path, count_frames=count_frames)
-    if orig_packets != dest_packets:  # pragma: no cover
-        logger.warning(  # pragma: no cover
-            f"Conversion error: {orig_filename} -> {dest_filename}"
-        )
-
-    if return_output:
-        return dest_path
-
-
-def _check_packets(file, count_frames=False):
-    checked = "frames" if count_frames else "packets"
-    try:
-        check_process = subprocess.Popen(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-select_streams",
-                "v:0",
-                f"-count_{checked}",
-                "-show_entries",
-                f"stream=nb_read_{checked}",
-                "-of",
-                "csv=p=0",
-                file.as_posix(),
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        )
-    except subprocess.CalledProcessError as err:  # pragma: no cover
-        raise RuntimeError(  # pragma: no cover
-            f"Check packets error: Code {err.returncode}, {err.output}"
-        ) from err
-    out, _ = check_process.communicate()
-    decoded_out = out.decode("utf-8").split("\n")[0]
-    if decoded_out.isnumeric():
-        return int(decoded_out)
-    raise ValueError(f"Check packets error: {out}")
 
 
 def get_gpu_memory():  # pragma: no cover
@@ -501,6 +252,15 @@ def get_span_start_stop(indices):
         span_inds.append((group[0], group[-1]))
     return span_inds
 
+
+# Video/path helpers moved to utils.general — re-export for backward compat
+from spyglass.position.utils.general import (
+    _check_packets,  # noqa: F401
+    _convert_mp4,
+    find_mp4,
+    get_video_info,
+    infer_output_dir,
+)
 
 # smooth_moving_avg moved to utils.interpolation module
 # Use compatibility wrapper below for V1 API

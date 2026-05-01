@@ -431,7 +431,7 @@ class PoseInferenceRunner(BaseMixin):
                 contextlib.redirect_stdout(io.StringIO()),
             ):
                 analyze_videos(**analyze_params)
-        except Exception as e:
+        except (RuntimeError, OSError, ValueError) as e:
             self._err_msg(f"DLC inference failed: {e}")
             raise
 
@@ -623,7 +623,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
     Uses helper classes for separation of concerns:
     - PoseInferenceRunner: DLC/SLEAP inference execution
-    - DLCOutputLoader: File I/O operations
     - NDXPoseBuilder: NWB serialization
 
     Attributes
@@ -1426,7 +1425,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         try:
             nwb_data = (VideoFile & vf_keys[0]).fetch_nwb()[0]
             ts = np.asarray(nwb_data["video_file"].timestamps)
-        except Exception as exc:
+        except (OSError, KeyError, TypeError, AttributeError) as exc:
             raise ValueError(
                 f"Could not fetch timestamps from VideoFile for "
                 f"vid_group_id='{key['vid_group_id']}': {exc}"
@@ -1876,7 +1875,9 @@ class PoseSelection(SpyglassMixin, dj.Manual):
             # PoseEstim -> PoseEstimSelection -> Model -> ModelSelection -> ModelParams -> skeleton_id
             # Use projection to avoid analysis_file_name conflicts
             pose_estim_key = {
-                k: v for k, v in key.items() if k in ["pose_estim_id"]
+                k: v
+                for k, v in key.items()
+                if k in PoseEstimSelection.heading.names
             }
 
             # First get the model_id from PoseEstimSelection (avoiding analysis_file_name in PoseEstim)
@@ -1935,7 +1936,7 @@ class PoseSelection(SpyglassMixin, dj.Manual):
                     f"Centroid method '{actual_method}' matches skeleton '{skeleton_id}' suggestion ✓"
                 )
 
-        except Exception as e:
+        except (KeyError, ValueError, AttributeError) as e:
             logger.warning(f"Could not validate centroid method: {e}")
 
 
@@ -2238,7 +2239,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
                     likelihoods[bp] = pose_df.loc[
                         :, idx[scorer, bp, "likelihood"]
                     ].values
-            except Exception as e:
+            except (KeyError, IndexError, ValueError, TypeError) as e:
                 self._warn_msg(
                     f"Could not load raw pose for overlay: {e}. "
                     "Proceeding without bodypart dots."
