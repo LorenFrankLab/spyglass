@@ -89,7 +89,7 @@ class PositionOutput(_Merge, SpyglassMixin):
         """
 
     class PoseV2(SpyglassMixin, dj.Part):
-        """Table to pass-through upstream Pose information from NWB file"""
+        """Link to PoseV2: centroid, orientation, and velocity from the V2 pipeline."""
 
         definition = """
         -> PositionOutput
@@ -98,9 +98,7 @@ class PositionOutput(_Merge, SpyglassMixin):
         """
 
     class ImportedPose(SpyglassMixin, dj.Part):
-        """
-        Table to pass-through upstream Pose information from NWB file
-        """
+        """Link to ImportedPose: pose keypoints ingested from externally-created NWB files."""
 
         definition = """
         -> PositionOutput

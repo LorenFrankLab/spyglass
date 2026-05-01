@@ -58,6 +58,7 @@ from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import pose_output_dir
 from spyglass.utils import SpyglassMixin, logger
 from spyglass.utils.mixins.base import BaseMixin
+from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 # ----------------------------- Optional imports ------------------------------
 try:
@@ -260,7 +261,10 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
     pose_estim_params_id : str
         Foreign key to PoseEstimParams table
     task_mode : enum
-        'trigger' to run inference, 'load' to load existing results
+        'trigger' to run inference, 'load' to load existing tool-native output
+        files (e.g. DLC .h5, SLEAP output) already on disk. Use 'load' when
+        inference was run outside Spyglass but with a supported tool; use
+        ``ImportedPose`` instead when results already exist in NWB format.
     output_dir : str
         Results directory (load: existing, trigger: destination)
     """
@@ -671,7 +675,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     # Tests can override these to inject stubs without unittest.mock.patch
     _inference_runner_cls = None  # Will be set to PoseInferenceRunner
     _nwb_builder_cls = None  # Will be set to NDXPoseBuilder
-    _nwb_reader_cls = None  # Will be set to RealNWBReader
     _nwb_writer_cls = None  # Will be set to RealNWBWriter
 
     @classmethod
@@ -687,15 +690,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if cls._nwb_builder_cls is None:
             return NDXPoseBuilder
         return cls._nwb_builder_cls
-
-    @classmethod
-    def _get_nwb_reader_cls(cls):
-        """Get the NWB reader class, defaulting to RealNWBReader."""
-        if cls._nwb_reader_cls is None:
-            from spyglass.position.utils.protocols import RealNWBReader
-
-            return RealNWBReader
-        return cls._nwb_reader_cls
 
     @classmethod
     def _get_nwb_writer_cls(cls):
@@ -1100,10 +1094,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "Install with: pip install ndx-pose>=0.2.0"
             )
 
-        # Fetch entry
-        entry = self.fetch1()
-        nwb_file_name = entry["analysis_file_name"]
-
+        # Guard: analysis_file_name is nullable; check before path resolution
+        nwb_file_name = self.fetch1("analysis_file_name")
         if nwb_file_name is None:
             raise ValueError(
                 "Cannot fetch pose data: analysis_file_name is not set. "
@@ -1113,65 +1105,54 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         self._logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
 
-        # Get NWB file path
-        nwb_file_matches = AnalysisNwbfile() & {
-            "analysis_file_name": nwb_file_name
+        # Use standard Spyglass path resolution (handles DANDI streaming,
+        # logging, and caching) instead of a custom AnalysisNwbfile lookup.
+        nwb_data = self.fetch_nwb("analysis_file_name")[0]
+        nwbfile = get_nwb_file(nwb_data["nwb2load_filepath"])
+
+        if "behavior" not in nwbfile.processing:
+            raise ValueError(f"No behavior module in NWB: {nwb_file_name}")
+
+        behavior_module = nwbfile.processing["behavior"]
+
+        # Find PoseEstimation objects
+        pose_estimations = {
+            name: obj
+            for name, obj in behavior_module.data_interfaces.items()
+            if isinstance(obj, ndx_pose.PoseEstimation)
         }
-        if not nwb_file_matches:
-            raise ValueError(
-                f"AnalysisNwbfile not found: {nwb_file_name}. "
-                "Ensure the NWB file is registered in AnalysisNwbfile table."
-            )
-        nwb_path = nwb_file_matches.fetch1("analysis_file_abs_path")
 
-        # Read pose data from NWB
-        nwb_reader_cls = self._get_nwb_reader_cls()
-        with nwb_reader_cls().read(str(nwb_path)) as io:
-            nwbfile = io.read()
+        if not pose_estimations:
+            raise ValueError(f"No PoseEstimation in NWB: {nwb_file_name}")
 
-            if "behavior" not in nwbfile.processing:
-                raise ValueError(f"No behavior module in NWB: {nwb_file_name}")
+        # Use first PoseEstimation (or could select by name)
+        pose_estimation = list(pose_estimations.values())[0]
+        scorer = getattr(pose_estimation, "scorer", "DLC_scorer")
 
-            behavior_module = nwbfile.processing["behavior"]
+        # Build DataFrame from PoseEstimationSeries
+        data_dict = {}
 
-            # Find PoseEstimation objects
-            pose_estimations = {
-                name: obj
-                for name, obj in behavior_module.data_interfaces.items()
-                if isinstance(obj, ndx_pose.PoseEstimation)
-            }
+        for series in pose_estimation.pose_estimation_series.values():
+            bodypart = series.name.replace("_pose", "")
 
-            if not pose_estimations:
-                raise ValueError(f"No PoseEstimation in NWB: {nwb_file_name}")
+            # Extract x, y data (shape: n_frames, 2)
+            pose_data = series.data[:]
+            x_data = pose_data[:, 0]
+            y_data = pose_data[:, 1]
 
-            # Use first PoseEstimation (or could select by name)
-            pose_estimation = list(pose_estimations.values())[0]
-            scorer = getattr(pose_estimation, "scorer", "DLC_scorer")
+            # Extract confidence
+            confidence = series.confidence[:]
 
-            # Build DataFrame from PoseEstimationSeries
-            data_dict = {}
+            # Add to dictionary with MultiIndex keys
+            data_dict[(scorer, bodypart, "x")] = x_data
+            data_dict[(scorer, bodypart, "y")] = y_data
+            data_dict[(scorer, bodypart, "likelihood")] = confidence
 
-            for series in pose_estimation.pose_estimation_series.values():
-                bodypart = series.name.replace("_pose", "")
-
-                # Extract x, y data (shape: n_frames, 2)
-                pose_data = series.data[:]
-                x_data = pose_data[:, 0]
-                y_data = pose_data[:, 1]
-
-                # Extract confidence
-                confidence = series.confidence[:]
-
-                # Add to dictionary with MultiIndex keys
-                data_dict[(scorer, bodypart, "x")] = x_data
-                data_dict[(scorer, bodypart, "y")] = y_data
-                data_dict[(scorer, bodypart, "likelihood")] = confidence
-
-            # Create DataFrame with MultiIndex columns
-            df = pd.DataFrame(data_dict)
-            df.columns = pd.MultiIndex.from_tuples(
-                df.columns, names=["scorer", "bodyparts", "coords"]
-            )
+        # Create DataFrame with MultiIndex columns
+        df = pd.DataFrame(data_dict)
+        df.columns = pd.MultiIndex.from_tuples(
+            df.columns, names=["scorer", "bodyparts", "coords"]
+        )
 
         self._logger.debug(f"Fetched {len(df)} frames of pose data")
 

@@ -670,3 +670,108 @@ class TestNDXPoseBuilderTimestamps:
         )
         series = list(pose_estimation.pose_estimation_series.values())[0]
         np.testing.assert_array_equal(series.timestamps[:], ts)
+
+
+class TestPoseEstimFetch1Dataframe:
+    """Unit tests for PoseEstim.fetch1_dataframe (T39).
+
+    Covers the None-guard and the fetch_nwb-based read path without a live DB.
+    """
+
+    def test_raises_when_analysis_file_name_none(self, pv2_estim):
+        """fetch1_dataframe raises ValueError when analysis_file_name is None."""
+        PoseEstim = pv2_estim.PoseEstim
+
+        table = PoseEstim()
+        with (
+            patch.object(table, "fetch1", return_value=None),
+            pytest.raises(ValueError, match="analysis_file_name is not set"),
+        ):
+            table.fetch1_dataframe()
+
+    def test_uses_fetch_nwb_path(self, pv2_estim):
+        """fetch1_dataframe uses self.fetch_nwb() for path resolution."""
+
+        import ndx_pose
+
+        PoseEstim = pv2_estim.PoseEstim
+
+        # Build a minimal in-memory NWBFile with a PoseEstimation
+        from datetime import datetime, timezone
+
+        from pynwb import NWBFile, ProcessingModule
+
+        n = 3
+        ts = np.linspace(0.0, 0.1, n)
+        x_data = np.column_stack([np.ones(n), np.zeros(n)])
+        confidence = np.ones(n)
+
+        series = ndx_pose.PoseEstimationSeries(
+            name="nose_pose",
+            data=x_data,
+            timestamps=ts,
+            confidence=confidence,
+            unit="pixels",
+            reference_frame="image",
+        )
+        pose_est = ndx_pose.PoseEstimation(
+            name="PoseEstimation",
+            pose_estimation_series=[series],
+            description="unit test",
+            source_software="DLC",
+        )
+        behavior = ProcessingModule(name="behavior", description="test")
+        behavior.add(pose_est)
+        nwbf = NWBFile(
+            session_description="test",
+            identifier="test-id",
+            session_start_time=datetime.now(timezone.utc),
+        )
+        nwbf.add_processing_module(behavior)
+
+        table = PoseEstim()
+        nwb_data = {
+            "analysis_file_name": "fake.nwb",
+            "nwb2load_filepath": "/fake/path.nwb",
+        }
+
+        with (
+            patch.object(table, "fetch1", return_value="fake.nwb"),
+            patch.object(table, "fetch_nwb", return_value=[nwb_data]),
+            patch("spyglass.position.v2.estim.get_nwb_file", return_value=nwbf),
+        ):
+            df = table.fetch1_dataframe()
+
+        assert df is not None
+        assert len(df) == n
+        assert df.columns.names == ["scorer", "bodyparts", "coords"]
+        # nose bodypart should be present (name.replace("_pose", ""))
+        assert "nose" in df.columns.get_level_values("bodyparts")
+
+    def test_raises_when_no_behavior_module(self, pv2_estim):
+        """fetch1_dataframe raises ValueError when NWB has no behavior module."""
+        from datetime import datetime, timezone
+
+        from pynwb import NWBFile
+
+        PoseEstim = pv2_estim.PoseEstim
+
+        nwbf = NWBFile(
+            session_description="test",
+            identifier="test-id-2",
+            session_start_time=datetime.now(timezone.utc),
+        )
+
+        table = PoseEstim()
+        nwb_data = {
+            "analysis_file_name": "fake.nwb",
+            "nwb2load_filepath": "/fake/path.nwb",
+        }
+
+        with (
+            patch.object(table, "fetch1", return_value="fake.nwb"),
+            patch.object(table, "fetch_nwb", return_value=[nwb_data]),
+            patch("spyglass.position.v2.estim.get_nwb_file", return_value=nwbf),
+            pytest.raises(ValueError, match="No behavior module"),
+        ):
+            table.fetch1_dataframe()
