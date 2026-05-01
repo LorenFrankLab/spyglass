@@ -2098,6 +2098,45 @@ class PoseV2(SpyglassMixin, dj.Computed):
 
         return df
 
+    def fetch_pose_dataframe(self):
+        """Fetch raw bodypart pose coordinates from the linked PoseEstim entry.
+
+        Returns
+        -------
+        pd.DataFrame
+            MultiIndex DataFrame with (scorer, bodypart, coord) columns,
+            as produced by PoseEstim.fetch1_dataframe().
+        """
+        _ = self.ensure_single_entry()
+        key = self.fetch1("KEY")
+        return (PoseEstim & key).fetch1_dataframe()
+
+    def fetch_video_paths(self) -> list:
+        """Return all valid video paths in the VidFileGroup.
+
+        Returns
+        -------
+        list of str
+            Absolute paths to all existing video files in the group.
+
+        Raises
+        ------
+        ValueError
+            If no valid video paths are found for this VidFileGroup.
+        """
+        _ = self.ensure_single_entry()
+        vid_group_id = self.fetch1("vid_group_id")
+        video_rows = (
+            VidFileGroup.File & {"vid_group_id": vid_group_id}
+        ) * VideoFile
+        paths = video_rows.fetch("path")
+        valid_paths = [p for p in paths if p and Path(p).exists()]
+        if not valid_paths:
+            raise ValueError(
+                f"No valid video paths found for vid_group_id='{vid_group_id}'."
+            )
+        return valid_paths
+
     def make_video(
         self,
         output_path: Union[Path, str, None] = None,
@@ -2321,6 +2360,14 @@ class PoseV2(SpyglassMixin, dj.Computed):
                 "velocity_object_id": obj_ids["velocity"],
                 "smoothed_pose_object_id": obj_ids["smoothed_pose"],
             }
+        )
+
+        from spyglass.position.position_merge import PositionOutput
+
+        PositionOutput._merge_insert(
+            [key],
+            part_name="PoseV2",
+            skip_duplicates=True,
         )
         self._info_msg("Pose processing complete!")
 

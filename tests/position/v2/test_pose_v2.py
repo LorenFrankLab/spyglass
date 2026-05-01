@@ -1,5 +1,7 @@
 """Tests for PoseV2 processing pipeline."""
 
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -743,3 +745,149 @@ class TestPoseV2MakeValidation:
         # 5. make() must fail immediately — before fetching pose data
         with pytest.raises(ValueError, match="Cannot store processed pose"):
             PoseV2().make(pv2_key)
+
+
+class TestFetchMethods:
+    """Test PoseV2.fetch_pose_dataframe() and fetch_video_path() (T10)."""
+
+    def test_fetch_pose_dataframe_delegates_to_pose_estim(
+        self, pose_v2_instance
+    ):
+        """fetch_pose_dataframe() returns PoseEstim.fetch1_dataframe() result."""
+        key = {"model_id": "m1", "vid_group_id": "g1"}
+        mock_df = pd.DataFrame({"x": [1.0, 2.0]})
+
+        with (
+            patch.object(pose_v2_instance, "ensure_single_entry"),
+            patch.object(pose_v2_instance, "fetch1", return_value=key),
+            patch("spyglass.position.v2.estim.PoseEstim") as mock_pe,
+        ):
+            mock_restricted = MagicMock()
+            mock_restricted.fetch1_dataframe.return_value = mock_df
+            mock_pe.__and__.return_value = mock_restricted
+
+            result = pose_v2_instance.fetch_pose_dataframe()
+
+        assert result is mock_df
+        mock_restricted.fetch1_dataframe.assert_called_once()
+
+    def test_fetch_video_paths_returns_all_valid(
+        self, pose_v2_instance, tmp_path
+    ):
+        """fetch_video_paths() returns all existing video paths."""
+        vid1 = tmp_path / "video1.mp4"
+        vid2 = tmp_path / "video2.mp4"
+        vid1.touch()
+        vid2.touch()
+        missing = "/nonexistent/path.mp4"
+
+        with (
+            patch.object(pose_v2_instance, "ensure_single_entry"),
+            patch.object(pose_v2_instance, "fetch1", return_value="test_group"),
+            patch("spyglass.position.v2.estim.VidFileGroup") as mock_vfg,
+            patch("spyglass.position.v2.estim.VideoFile"),
+        ):
+            mock_rows = MagicMock()
+            mock_rows.fetch.return_value = [str(vid1), missing, str(vid2)]
+            mock_vfg.File.__and__.return_value.__mul__.return_value = mock_rows
+
+            result = pose_v2_instance.fetch_video_paths()
+
+        assert result == [str(vid1), str(vid2)]
+
+    def test_fetch_video_paths_raises_on_no_valid_paths(self, pose_v2_instance):
+        """fetch_video_paths() raises ValueError when no valid videos found."""
+        with (
+            patch.object(pose_v2_instance, "ensure_single_entry"),
+            patch.object(
+                pose_v2_instance, "fetch1", return_value="empty_group"
+            ),
+            patch("spyglass.position.v2.estim.VidFileGroup") as mock_vfg,
+            patch("spyglass.position.v2.estim.VideoFile"),
+        ):
+            mock_rows = MagicMock()
+            mock_rows.fetch.return_value = []
+            mock_vfg.File.__and__.return_value.__mul__.return_value = mock_rows
+
+            with pytest.raises(ValueError, match="No valid video paths"):
+                pose_v2_instance.fetch_video_paths()
+
+
+class TestPositionOutputInsert:
+    """Test that PoseV2.make() inserts into PositionOutput (T11)."""
+
+    def test_make_calls_merge_insert(self, pose_v2_instance):
+        """make() calls PositionOutput._merge_insert after self.insert1()."""
+        key = {
+            "model_id": "test_model",
+            "vid_group_id": "test_group",
+            "pose_estim_params_id": "default",
+            "pose_params": "default",
+        }
+
+        mock_pose_df = pd.DataFrame(
+            {
+                ("scorer", "nose", "x"): [1.0, 2.0],
+                ("scorer", "nose", "y"): [1.0, 2.0],
+                ("scorer", "nose", "likelihood"): [0.99, 0.99],
+            },
+            index=[0.0, 1.0],
+        )
+        mock_pose_df.columns = pd.MultiIndex.from_tuples(mock_pose_df.columns)
+
+        mock_outputs = {
+            "orientation": np.array([0.0, 0.1]),
+            "centroid": np.array([[1.0, 1.0], [2.0, 2.0]]),
+            "velocity": np.array([0.0, 1.0]),
+            "timestamps": np.array([0.0, 1.0]),
+            "sampling_rate": 1.0,
+        }
+        mock_obj_ids = {
+            "orient": "o_id",
+            "centroid": "c_id",
+            "velocity": "v_id",
+            "smoothed_pose": "sp_id",
+        }
+        mock_params = {
+            "orient": {"method": "none"},
+            "centroid": {"method": "1pt", "points": {"point1": "nose"}},
+            "smoothing": {"interpolate": False, "smooth": False},
+        }
+
+        with (
+            patch.object(
+                type(pose_v2_instance),
+                "_get_nwb_file_name",
+                return_value="test.nwb",
+            ),
+            patch("spyglass.position.v2.estim.PoseEstim") as mock_pe,
+            patch("spyglass.position.v2.estim.PoseParams") as mock_pp,
+            patch(
+                "spyglass.position.utils.pose_processing.compute_pose_outputs",
+                return_value=mock_outputs,
+            ),
+            patch.object(
+                pose_v2_instance,
+                "_store_pose_nwb",
+                return_value=("analysis.nwb", mock_obj_ids),
+            ),
+            patch.object(pose_v2_instance, "insert1"),
+            patch(
+                "spyglass.position.position_merge.PositionOutput._merge_insert"
+            ) as mock_merge,
+        ):
+            mock_restricted = MagicMock()
+            mock_restricted.fetch1.return_value = {
+                **key,
+                "analysis_file_name": "analysis.nwb",
+            }
+            mock_restricted.fetch1_dataframe.return_value = mock_pose_df
+            mock_pe.__and__.return_value = mock_restricted
+            mock_pp.__and__.return_value.fetch1.return_value = mock_params
+
+            pose_v2_instance.make(key)
+
+            mock_merge.assert_called_once()
+            call_args = mock_merge.call_args
+            assert call_args.kwargs.get("part_name") == "PoseV2"
+            assert call_args.kwargs.get("skip_duplicates") is True
