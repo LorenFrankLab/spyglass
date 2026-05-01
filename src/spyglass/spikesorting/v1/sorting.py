@@ -273,6 +273,10 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
             recording_key["analysis_file_name"]
         )
 
+        # Check if recording file exists on disc. Trigger recompute if not.
+        if not os.path.exists(recording_analysis_nwb_file_abs_path):
+            _ = (AnalysisNwbfile() & recording_key).fetch_nwb()
+
         return [
             nwb_file_name,
             artifact_removed_intervals,
