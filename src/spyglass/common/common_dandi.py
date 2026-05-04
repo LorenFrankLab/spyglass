@@ -88,7 +88,9 @@ class DandiViolationsSelection(SpyglassMixin, dj.Manual):
 
         self.insert(files_to_check, skip_duplicates=True)
         DandiViolations.populate(
-            files_to_check, processes=min(n_processes, len(files_to_check))
+            files_to_check,
+            processes=min(n_processes, len(files_to_check)),
+            display_progress=True,
         )
 
 
@@ -124,7 +126,7 @@ class DandiViolations(SpyglassMixin, dj.Computed):
                 **key,
                 "violation_id": i,
                 "id": result.id,
-                "message": result.message,
+                "message": result.message[:255],
                 "full_error": str(result),
                 "file_path": file_path,
             }
