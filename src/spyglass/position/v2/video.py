@@ -43,6 +43,146 @@ class VideoGroupParams:
 schema = dj.schema("cbroz_position_v2_video")
 
 
+# ---------------------------------------------------------------------------
+# Multi-camera rig and calibration
+# ---------------------------------------------------------------------------
+
+
+@schema
+class CameraRig(SpyglassMixin, dj.Manual):
+    """Physical multi-camera rig configuration.
+
+    A rig groups one or more cameras that are physically co-located and used
+    together for a recording.  Each camera slot is described by
+    :class:`CameraRig.Camera`.
+
+    Attributes
+    ----------
+    camera_rig_id : str
+        Human-readable name for the rig (e.g. ``"stereo_rig_1"``).
+    description : str
+        Free-text description of the rig.
+    n_cameras : int
+        Number of camera slots in this rig.
+    """
+
+    definition = """
+    camera_rig_id: varchar(32)      # human-readable rig name
+    ---
+    description: varchar(255)       # free-text description
+    n_cameras: int                  # expected number of cameras in rig
+    """
+
+    class Camera(dj.Part):
+        """Individual camera slot in a rig.
+
+        Attributes
+        ----------
+        camera_rig_id : str
+            Foreign key to the parent :class:`CameraRig`.
+        camera_index : int
+            Zero-based camera slot index within the rig.
+        camera_name : str
+            Name matching a ``CameraDevice.camera_name`` entry.
+        """
+
+        definition = """
+        -> master
+        camera_index: int           # 0-based camera slot in rig
+        ---
+        camera_name: varchar(80)    # matches CameraDevice.camera_name
+        """
+
+
+@schema
+class Calibration(SpyglassMixin, dj.Manual):
+    """Camera calibration parameters for a :class:`CameraRig`.
+
+    Per-camera intrinsic and extrinsic parameters are stored in the
+    :class:`Calibration.Camera` part table.
+
+    Intrinsics (per camera)
+    -----------------------
+    ``fx``, ``fy``
+        Focal length in pixels along x and y axes.
+    ``cx``, ``cy``
+        Principal point (optical centre) in pixels.
+    ``dist_coeffs``
+        Radial and tangential distortion coefficients ``[k1, k2, p1, p2]``.
+
+    Extrinsics (per camera, relative to rig origin)
+    ------------------------------------------------
+    ``R``
+        3×3 rotation matrix (camera-to-rig).
+    ``t``
+        3-element translation vector in metres (camera-to-rig).
+
+    Attributes
+    ----------
+    camera_rig_id : str
+        Foreign key to the parent :class:`CameraRig`.
+    calibration_id : str
+        Human-readable identifier, e.g. ``"2026-05-01"`` or ``"run1"``.
+    calibration_date : date
+        Date the calibration was performed.
+    notes : str
+        Optional free-text notes.
+    """
+
+    definition = """
+    -> CameraRig
+    calibration_id: varchar(32)     # e.g. date-stamped ID or 'run1'
+    ---
+    calibration_date: date          # date calibration was performed
+    notes = '': varchar(255)        # optional free-text notes
+    """
+
+    class Camera(dj.Part):
+        """Per-camera intrinsic and extrinsic parameters.
+
+        Intrinsics dict format::
+
+            {
+                "fx": float, "fy": float,
+                "cx": float, "cy": float,
+                "dist_coeffs": [k1, k2, p1, p2],
+            }
+
+        Extrinsics dict format::
+
+            {
+                "R": [[...], [...], [...]],  # 3x3 rotation matrix
+                "t": [tx, ty, tz],           # translation in metres
+            }
+
+        Attributes
+        ----------
+        camera_index : int
+            Must match a ``camera_index`` in the parent
+            :class:`CameraRig.Camera`.
+        intrinsics : dict
+            Focal length, principal point, and distortion coefficients.
+        extrinsics : dict
+            Rotation matrix and translation relative to rig origin.
+        image_size : list
+            ``[width_px, height_px]`` of calibration images.
+        """
+
+        definition = """
+        -> master
+        camera_index: int           # matches CameraRig.Camera.camera_index
+        ---
+        intrinsics: blob            # dict: fx, fy, cx, cy, dist_coeffs
+        extrinsics: blob            # dict: R (3x3), t (3,) camera-to-rig
+        image_size: blob            # [width_px, height_px]
+        """
+
+
+# ---------------------------------------------------------------------------
+# Video file groups
+# ---------------------------------------------------------------------------
+
+
 # TODO: Common or Position schema?
 # 1. VidFileGroup could be used across multiple pipelines
 # 2. Calibration is specific to Position pipeline
@@ -64,19 +204,17 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         """
 
     class Calibration(dj.Part):
-        definition = """
-        -> VidFileGroup
-        calibration_id: int
-        ---
-        # What other fields are needed? blob catch-all?
-        path: varchar(255)
+        """Optional calibration set linked to a multi-camera video group.
+
+        Associates a :class:`~spyglass.position.v2.video.Calibration` entry
+        with a video group, enabling per-camera intrinsic/extrinsic lookup
+        during 3-D pose reconstruction.
         """
 
-        def insert1(self, key, **kwargs):
-            raise NotImplementedError(
-                "Calibration insertion not implemented yet. "
-                + "Peinding inclusion of SLEAP support"
-            )
+        definition = """
+        -> master
+        -> Calibration
+        """
 
     def insert1(self, key, **kwargs):
         """Insert video file group with automatic ID generation.

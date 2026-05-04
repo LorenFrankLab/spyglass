@@ -25,9 +25,9 @@ Results are registered in ``PositionOutput`` automatically and accessible via
 """
 
 import contextlib
+import dataclasses
 import io
 import subprocess
-import dataclasses
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from fractions import Fraction
@@ -675,7 +675,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     definition = """
     -> PoseEstimSelection
     ---
-    -> [nullable] AnalysisNwbfile
+    -> AnalysisNwbfile
     """
 
     # Dependency injection - default to real implementations
@@ -1092,8 +1092,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         ------
         ImportError
             If ndx-pose is not installed
-        ValueError
-            If analysis_file_name is not set
         """
         if ndx_pose is None:  # pragma: no cover
             raise ImportError(  # pragma: no cover
@@ -1101,15 +1099,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "Install with: pip install ndx-pose>=0.2.0"
             )
 
-        # Guard: analysis_file_name is nullable; check before path resolution
         nwb_file_name = self.fetch1("analysis_file_name")
-        if nwb_file_name is None:
-            raise ValueError(
-                "Cannot fetch pose data: analysis_file_name is not set. "
-                "Re-populate with a VidFileGroup linked to a registered "
-                "Nwbfile so the entry references an AnalysisNwbfile."
-            )
-
         self._logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
 
         # Use standard Spyglass path resolution (handles DANDI streaming,
@@ -2018,94 +2008,12 @@ class PoseV2(SpyglassMixin, dj.Computed):
     definition = """
     -> PoseSelection
     ---
-    -> [nullable] AnalysisNwbfile
+    -> AnalysisNwbfile
     orient_object_id='': varchar(40)
     centroid_object_id='': varchar(40)
     velocity_object_id='': varchar(40)
     smoothed_pose_object_id='': varchar(40)
     """
-
-    def fetch_obj(self, objects=None):
-        """Fetch processed pose objects from NWB file.
-
-        Parameters
-        ----------
-        objects : str or list of str, optional
-            Which objects to fetch. Options: "orient", "centroid",
-            "velocity", "smoothed_pose". If None, fetches all objects.
-            Default: None
-
-        Returns
-        -------
-        dict
-            Dictionary with requested objects. Keys are object names,
-            values are pynwb objects:
-            - "orient": BehavioralTimeSeries with orientation data
-            - "centroid": Position with centroid spatial series
-            - "velocity": BehavioralTimeSeries with velocity data
-            - "smoothed_pose": Position with smoothed position data
-
-        Examples
-        --------
-        >>> # Fetch all objects
-        >>> objs = (PoseV2 & key).fetch_obj()
-        >>> orientation = objs["orient"].time_series["orientation"]
-        >>> centroid = objs["centroid"].spatial_series["centroid"]
-        >>>
-        >>> # Fetch specific object
-        >>> objs = (PoseV2 & key).fetch_obj("centroid")
-        >>> centroid_data = objs["centroid"].spatial_series["centroid"].data[:]
-
-        Notes
-        -----
-        - Uses fetch_nwb() to retrieve objects from AnalysisNwbfile
-        - Object IDs are stored in table columns: orient_object_id,
-          centroid_object_id, velocity_object_id, smoothed_pose_object_id
-        - Requires exactly one entry in the restriction
-        """
-        # Ensure single entry
-        _ = self.ensure_single_entry()
-
-        # Map user-friendly names to database column names
-        object_map = {
-            "orient": "orient_object_id",
-            "centroid": "centroid_object_id",
-            "velocity": "velocity_object_id",
-            "smoothed_pose": "smoothed_pose_object_id",
-        }
-
-        # Determine which objects to fetch
-        if objects is None:
-            # Fetch all objects
-            fetch_objects = list(object_map.keys())
-        elif isinstance(objects, str):
-            # Single object requested
-            fetch_objects = [objects]
-        else:
-            # List of objects requested
-            fetch_objects = list(objects)
-
-        # Validate requested objects
-        invalid_objects = set(fetch_objects) - set(object_map.keys())
-        if invalid_objects:
-            raise ValueError(
-                f"Invalid objects requested: {invalid_objects}. "
-                f"Valid options: {list(object_map.keys())}"
-            )
-
-        # Use standard FetchMixin infrastructure with automatic object ID processing
-        nwb_attrs = [object_map[obj] for obj in fetch_objects] + [
-            "analysis_file_name"
-        ]
-        nwb_data = self.fetch_nwb(*nwb_attrs)[0]
-
-        # Build result dictionary using processed NWB objects from FetchMixin
-        # FetchMixin._process_object_ids converts "name_object_id" -> "name"
-        result = {}
-        for obj_name in fetch_objects:
-            result[obj_name] = nwb_data[obj_name]
-
-        return result
 
     def fetch1_dataframe(self):
         """Fetch processed pose data as pandas DataFrame.
@@ -2139,16 +2047,17 @@ class PoseV2(SpyglassMixin, dj.Computed):
         """
         import pandas as pd
 
-        # Ensure single entry
         _ = self.ensure_single_entry()
 
-        # Fetch NWB objects
-        objs = self.fetch_obj()
-
-        # Extract data from NWB objects
-        centroid_series = objs["centroid"].spatial_series["centroid"]
-        orient_series = objs["orient"].spatial_series["orientation"]
-        velocity_series = objs["velocity"].time_series["velocity"]
+        nwb_data = self.fetch_nwb(
+            "orient_object_id",
+            "centroid_object_id",
+            "velocity_object_id",
+            "analysis_file_name",
+        )[0]
+        centroid_series = nwb_data["centroid"].spatial_series["centroid"]
+        orient_series = nwb_data["orient"].spatial_series["orientation"]
+        velocity_series = nwb_data["velocity"].time_series["velocity"]
 
         # Get timestamps from centroid (should be same for all)
         timestamps = centroid_series.timestamps[:]
@@ -2395,14 +2304,6 @@ class PoseV2(SpyglassMixin, dj.Computed):
         from spyglass.position.utils.pose_processing import compute_pose_outputs
 
         nwb_file_name = self._get_nwb_file_name(key)
-        estim_entry = (PoseEstim & key).fetch1()
-        if not estim_entry.get("analysis_file_name") or nwb_file_name is None:
-            raise ValueError(
-                "Cannot store processed pose: the parent PoseEstim entry "
-                f"for VidFileGroup '{key['vid_group_id']}' has no "
-                "AnalysisNwbfile. Ensure the video group is linked to a "
-                "registered Nwbfile before populating."
-            )
 
         self._info_msg(f"Processing pose for: {key['model_id']}")
         pose_df = (PoseEstim & key).fetch1_dataframe()

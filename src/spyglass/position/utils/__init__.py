@@ -31,13 +31,6 @@ from .dlc_io import (
     validate_dlc_file,
 )
 from .general import flatten_multiindex, get_param_names, sanitize_filename
-from .path_helpers import resolve_model_path, to_stored_path
-from .pose_processing import (
-    apply_likelihood_threshold,
-    calculate_velocity,
-    compute_pose_outputs,
-)
-from .yaml_io import dump_yaml, load_yaml
 from .interpolation import (
     SMOOTHING_METHODS,
     get_smoothing_function,
@@ -54,6 +47,12 @@ from .orientation import (
     no_orientation,
     smooth_orientation,
     two_pt_orientation,
+)
+from .path_helpers import resolve_model_path, to_stored_path
+from .pose_processing import (
+    apply_likelihood_threshold,
+    calculate_velocity,
+    compute_pose_outputs,
 )
 from .tool_strategies import (
     DLCStrategy,
@@ -83,6 +82,7 @@ from .validation import (
     validate_required_keys,
     validate_smoothing_params,
 )
+from .yaml_io import dump_yaml, load_yaml
 
 __all__ = [
     # Centroid

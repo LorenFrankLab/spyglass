@@ -675,19 +675,8 @@ class TestNDXPoseBuilderTimestamps:
 class TestPoseEstimFetch1Dataframe:
     """Unit tests for PoseEstim.fetch1_dataframe (T39).
 
-    Covers the None-guard and the fetch_nwb-based read path without a live DB.
+    Covers the fetch_nwb-based read path without a live DB.
     """
-
-    def test_raises_when_analysis_file_name_none(self, pv2_estim):
-        """fetch1_dataframe raises ValueError when analysis_file_name is None."""
-        PoseEstim = pv2_estim.PoseEstim
-
-        table = PoseEstim()
-        with (
-            patch.object(table, "fetch1", return_value=None),
-            pytest.raises(ValueError, match="analysis_file_name is not set"),
-        ):
-            table.fetch1_dataframe()
 
     def test_uses_fetch_nwb_path(self, pv2_estim):
         """fetch1_dataframe uses self.fetch_nwb() for path resolution."""

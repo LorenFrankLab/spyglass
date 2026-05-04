@@ -39,9 +39,17 @@ from spyglass.position.v2.train import (
     ModelSelection,
     Skeleton,
 )
+from spyglass.position.v2.video import (
+    Calibration,
+    CameraRig,
+    VidFileGroup,
+    VideoGroupParams,
+)
 
 __all__ = [
     "BodyPart",
+    "Calibration",
+    "CameraRig",
     "Model",
     "ModelParams",
     "ModelSelection",
