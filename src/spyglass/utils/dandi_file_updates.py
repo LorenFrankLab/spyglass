@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 
 import h5py
 
@@ -16,7 +16,7 @@ STR_DTYPE = h5py.special_dtype(vlen=str)
 
 def update_analysis_for_dandi_standard(
     filepath: str,
-    age: str = "P4M/P8M",
+    age: Union[str, dict] = "P4M/P8M",
     resolve_external_table: bool = True,
 ):
     """Function to resolve common nwb file format errors within the database
@@ -26,7 +26,8 @@ def update_analysis_for_dandi_standard(
     filepath : str
         abs path to the file to edit
     age : str, optional
-        age to assign animal if missing, by default "P4M/P8M"
+        if string, age to assign animal if missing. if dict, age to assign for
+        each animal by default "P4M/P8M"
     resolve_external_table : bool, optional
         whether to update the external table. Set False if editing file
         outside the database, by default True
@@ -154,7 +155,7 @@ def ensure_species_is_latin(file: h5py.File):
         )
 
 
-def add_age_if_missing(file: h5py.File, age: str = "P4/P8"):
+def add_age_if_missing(file: h5py.File, age: Union[str, dict] = "P4M/P8M"):
     """
     Add the subject age if not present
 
@@ -163,12 +164,20 @@ def add_age_if_missing(file: h5py.File, age: str = "P4/P8"):
     file : h5py.File
         An open HDF5 file object.
 
-    age : str, optional
-       age of the subject, by default "P4/P8"
+    age : Union[str, dict], optional
+       age of the subject, if dict, lookup by subject_id, by default "P4M/P8M"
     """
     if "age" in file["/general/subject"]:
         return
-    new_age_value = age
+    if isinstance(age, str):
+        new_age_value = age
+    else:
+        animal_name = file["general/subject/subject_id"][()].decode("utf-8")
+        if animal_name not in age:
+            raise ValueError(
+                f"Age for animal '{animal_name}' not found in provided age dictionary."
+            )
+        new_age_value = age[animal_name]
     logger.info(f"Adding missing subject age, set to '{new_age_value}'.")
     file["/general/subject"].create_dataset(
         name="age", data=new_age_value, dtype=STR_DTYPE
