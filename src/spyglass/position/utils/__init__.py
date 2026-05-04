@@ -56,7 +56,6 @@ from .pose_processing import (
 )
 from .tool_strategies import (
     DLCStrategy,
-    NDXPoseStrategy,
     PoseToolStrategy,
     SLEAPStrategy,
     ToolStrategyFactory,
@@ -122,7 +121,6 @@ __all__ = [
     "PoseToolStrategy",
     "DLCStrategy",
     "SLEAPStrategy",
-    "NDXPoseStrategy",
     "ToolStrategyFactory",
     # Validation
     "validate_option",

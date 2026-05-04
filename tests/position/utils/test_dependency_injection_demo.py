@@ -11,7 +11,6 @@ from tests.utils.test_stubs import (
     StubFileSystem,
     StubInferenceRunner,
     StubNWBBuilder,
-    StubNWBWriter,
 )
 
 
@@ -57,7 +56,6 @@ def test_pose_estim_with_injection():
 
         _inference_runner_cls = StubInferenceRunner
         _nwb_builder_cls = StubNWBBuilder
-        _nwb_writer_cls = StubNWBWriter
 
         @classmethod
         def _get_inference_runner_cls(cls):
@@ -66,10 +64,6 @@ def test_pose_estim_with_injection():
         @classmethod
         def _get_nwb_builder_cls(cls):
             return cls._nwb_builder_cls
-
-        @classmethod
-        def _get_nwb_writer_cls(cls):
-            return cls._nwb_writer_cls
 
     testable_pose_estim = TestablePoseEstim()
 

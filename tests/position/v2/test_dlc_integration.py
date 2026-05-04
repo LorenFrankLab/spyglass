@@ -238,17 +238,10 @@ class TestGetTrainingHistory:
         with pytest.raises(ValueError, match="Model not found"):
             model.get_training_history({"model_id": "nonexistent_xyz"})
 
-    def test_imported_model_returns_none(self, model, mock_ndx_pose_nwb_file):
-        """ndx-pose imported model has no training CSV → returns None."""
-        model_key = model.load(str(mock_ndx_pose_nwb_file))
-        result = model.get_training_history(model_key)
-        assert result is None
-
-    def test_plot_raises_when_no_history(self, model, mock_ndx_pose_nwb_file):
-        """plot_training_history raises ValueError when no CSV is found."""
-        model_key = model.load(str(mock_ndx_pose_nwb_file))
-        with pytest.raises(ValueError, match="No training history"):
-            model.plot_training_history(model_key)
+    def test_nwb_file_raises_with_guidance(self, model, mock_ndx_pose_nwb_file):
+        """Model.load() raises ValueError for ndx-pose NWB with guidance."""
+        with pytest.raises(ValueError, match="ImportedPose"):
+            model.load(str(mock_ndx_pose_nwb_file))
 
 
 # ---------------------------------------------------------------------------

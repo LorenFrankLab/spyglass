@@ -109,51 +109,6 @@ class TestSLEAPStrategy:
             strategy.validate_params(params)
 
 
-class TestNDXPoseStrategy:
-    """Test NDXPoseStrategy implementation."""
-
-    @pytest.fixture
-    def strategy(self, NDXPoseStrategy):
-        """Create NDXPoseStrategy instance."""
-        return NDXPoseStrategy()
-
-    def test_initialization(self, strategy):
-        """Test NDXPoseStrategy initialization."""
-        assert strategy.tool_name == "ndx-pose"
-        assert hasattr(strategy, "validate_params")
-        assert hasattr(strategy, "get_required_params")
-        assert hasattr(strategy, "train_model")
-
-    def test_get_required_params(self, strategy):
-        """Test get_required_params method."""
-        required = strategy.get_required_params()
-        assert "nwb_file" in required
-        assert "model_name" in required
-        assert isinstance(required, set)
-
-    def test_get_accepted_params(self, strategy):
-        """Test get_accepted_params method."""
-        accepted = strategy.get_accepted_params()
-        assert "nwb_file" in accepted
-        assert "model_name" in accepted
-        assert "source_software" in accepted
-        assert isinstance(accepted, set)
-
-    def test_get_default_params(self, strategy):
-        """Test get_default_params method."""
-        defaults = strategy.get_default_params()
-        assert defaults["source_software"] == "unknown"
-        assert "Imported from ndx-pose" in defaults["description"]
-        assert isinstance(defaults, dict)
-
-    def test_validate_params_missing_required(self, strategy):
-        """Test validate_params with missing required parameters."""
-        params = {}  # Missing nwb_file and model_name
-
-        with pytest.raises(ValueError, match="missing required parameters"):
-            strategy.validate_params(params)
-
-
 class TestToolStrategyFactory:
     """Test ToolStrategyFactory."""
 
@@ -174,11 +129,10 @@ class TestToolStrategyFactory:
         assert isinstance(strategy, SLEAPStrategy)
         assert strategy.tool_name == "SLEAP"
 
-    def test_get_ndx_pose_strategy(self, factory, NDXPoseStrategy):
-        """Test getting NDX-Pose strategy."""
-        strategy = factory.create_strategy("ndx-pose")
-        assert isinstance(strategy, NDXPoseStrategy)
-        assert strategy.tool_name == "ndx-pose"
+    def test_ndx_pose_is_not_a_strategy(self, factory):
+        """ndx-pose is a file format, not a tool strategy."""
+        with pytest.raises(ValueError, match="Unsupported tool"):
+            factory.create_strategy("ndx-pose")
 
     def test_get_unknown_strategy(self, factory):
         """Test error for unknown strategy."""
@@ -188,7 +142,7 @@ class TestToolStrategyFactory:
     def test_list_available_strategies(self, factory):
         """Test listing available strategies."""
         strategies = factory.get_available_tools()
-        expected = ["DLC", "SLEAP", "ndx-pose"]
+        expected = ["DLC", "SLEAP"]
         assert set(strategies) == set(expected)
 
     def test_register_new_strategy(self, factory, PoseToolStrategy):

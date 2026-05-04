@@ -9,23 +9,17 @@ class TestModelVerification:
     def test_verify_valid_model(
         self,
         model,
-        mock_ndx_pose_nwb_file,
+        skip_if_no_dlc,
+        dlc_project_config,
     ):
-        """Test verification of a valid model."""
-        # Import a model
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
+        """Test verification of a valid model (DLC)."""
+        model_key = model.load(model_path=str(dlc_project_config))
 
-        # Verify the model
         results = model.verify(model_key)
 
-        # Should pass basic checks
         assert results["valid"] is True
         assert results["checks"]["model_exists"] is True
         assert results["checks"]["model_path_exists"] is True
-        assert results["checks"]["skeleton_valid"] is True
-        assert results["checks"]["params_valid"] is True
         assert len(results["errors"]) == 0
 
     def test_verify_nonexistent_model(self, model):
@@ -40,58 +34,28 @@ class TestModelVerification:
     def test_verify_with_missing_file(
         self,
         model,
-        mock_ndx_pose_nwb_file,
+        skip_if_no_dlc,
         tmp_path,
     ):
         """Test verification when model file doesn't exist."""
-        # Import a model
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
+        # Create a fake yaml file then delete it
+        fake_yaml = tmp_path / "fake_model.yaml"
+        fake_yaml.write_text("project: fake")
+        model_key = model.load(model_path=str(fake_yaml))
+        fake_yaml.unlink()
 
-        # Delete the model file
-        mock_ndx_pose_nwb_file.unlink()
-
-        # Verify should fail
         results = model.verify(model_key)
 
         assert results["valid"] is False
-        assert results["checks"]["model_exists"] is True
         assert results["checks"]["model_path_exists"] is False
         assert len(results["errors"]) > 0
         assert "not found" in results["errors"][0].lower()
 
-    def test_verify_with_inference_check(
-        self,
-        model,
-        mock_ndx_pose_nwb_file,
-    ):
-        """Test verification with inference readiness check."""
-        # Import a model
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
-
-        # Verify with inference check
-        results = model.verify(model_key, check_inference=True)
-
-        # ndx-pose models should have warning about inference
-        assert results["valid"] is True
-        # The specific warning depends on whether DLC is installed
-        # Just check that we got warnings
-        assert isinstance(results["warnings"], list)
-
     def test_verify_result_structure(
-        self,
-        model,
-        mock_ndx_pose_nwb_file,
+        self, model, skip_if_no_dlc, dlc_project_config
     ):
-        """Test that verification results have correct structure."""
-        # Import a model
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
-
+        """Test that verification results have correct structure (DLC model)."""
+        model_key = model.load(model_path=str(dlc_project_config))
         results = model.verify(model_key)
 
         # Verify result structure

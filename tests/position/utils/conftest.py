@@ -173,12 +173,6 @@ def SLEAPStrategy(tool_strategies_module):
 
 
 @pytest.fixture(scope="session")
-def NDXPoseStrategy(tool_strategies_module):
-    """Fixture for NDXPoseStrategy class."""
-    yield tool_strategies_module.NDXPoseStrategy
-
-
-@pytest.fixture(scope="session")
 def ToolStrategyFactory(tool_strategies_module):
     """Fixture for ToolStrategyFactory class."""
     yield tool_strategies_module.ToolStrategyFactory

@@ -1163,144 +1163,12 @@ class SLEAPStrategy(PoseToolStrategy):
         }
 
 
-class NDXPoseStrategy(PoseToolStrategy):
-    """NDX-Pose import strategy for pre-trained models."""
-
-    @property
-    def tool_name(self) -> str:
-        return "ndx-pose"
-
-    @property
-    def supports_training(self) -> bool:
-        return False  # NDX-Pose is for importing existing models only
-
-    def get_required_params(self) -> Set[str]:
-        return {"nwb_file", "model_name"}  # Required for NDX-Pose import
-
-    def get_skipped_params(self) -> Set[str]:
-        return {
-            "model_path",
-            "analysis_file_id",
-            "nwb_file_path",
-        }
-
-    def get_accepted_params(self) -> Set[str]:
-        return {
-            "source_software",
-            "source_software_version",
-            "model_name",
-            "nwb_file",
-            "description",
-            "original_videos",
-            "labeled_videos",
-            "dimensions",
-            "scorer",
-            "nodes",
-            "edges",
-        }
-
-    def get_default_params(self) -> Dict[str, Any]:
-        return {
-            "source_software": "unknown",
-            "description": "Imported from ndx-pose NWB file",
-        }
-
-    def get_parameter_aliases(self) -> Dict[str, list]:
-        return {
-            "nwb_file": ["nwb_path", "file_path"],
-            "model_name": ["model_id"],
-        }
-
-    def validate_params(self, params: dict) -> None:
-        """Validate NDX-Pose import parameters."""
-        required = self.get_required_params()
-        missing = [k for k in required if k not in params]
-        if missing:
-            raise ValueError(
-                f"NDX-Pose import missing required parameters: {missing}"
-            )
-
-        # Validate NWB file exists
-        nwb_path = Path(params["nwb_file"])
-        if not nwb_path.exists():
-            raise ValueError(f"NWB file does not exist: {nwb_path}")
-
-    def train_model(
-        self,
-        key: dict,
-        params: dict,
-        skeleton_id: str,
-        vid_group: dict,
-        sel_entry: dict,
-        model_instance,
-    ) -> dict:
-        """Import model from NDX-Pose NWB (training not applicable)."""
-        raise NotImplementedError(
-            "NDX-Pose strategy is for importing existing models, not training. "
-            "Use Model.load() for NDX-Pose NWB files."
-        )
-
-    def evaluate_model(
-        self,
-        model_entry: dict,
-        params_entry: dict,
-        model_instance,
-        plotting: bool = True,
-        show_errors: bool = True,
-        **kwargs,
-    ) -> dict:
-        """Evaluate NDX-Pose model (not applicable for imported models)."""
-        raise NotImplementedError(
-            "NDX-Pose models are pre-trained imports and cannot be evaluated. "
-            "Evaluation should be done in the original training environment."
-        )
-
-    def load(self, model_path: Path, model_instance, **kwargs) -> dict:
-        """Import NDX-Pose model using existing _import_ndx_pose_model method."""
-        return model_instance._import_ndx_pose_model(model_path, **kwargs)
-
-    def verify_model(
-        self, model_path: Path, check_inference: bool = True
-    ) -> tuple[dict, list]:
-        """Verify NDX-Pose model integrity."""
-        checks, warnings = super().verify_model(model_path, check_inference)
-
-        if check_inference and checks.get("model_exists"):
-            # ndx-pose models cannot run inference directly
-            warnings.append(
-                "ndx-pose models cannot run inference directly - "
-                "use original DLC/SLEAP project"
-            )
-
-        return checks, warnings
-
-    def find_output_files(
-        self,
-        video_paths: list,
-        output_dir: str = "",
-        output_file_info: Any = None,
-    ) -> list:
-        """Find NDX-Pose output files (not applicable for imports)."""
-        # NDX-Pose models are imported from existing NWB files, not generated
-        raise NotImplementedError(
-            "NDX-Pose models are imported from NWB files, not generated from inference"
-        )
-
-    def get_output_file_patterns(self) -> Dict[str, str]:
-        """Get NDX-Pose output patterns (not applicable)."""
-        return {
-            "primary": "*.nwb",  # NWB files contain the pose data
-            "fallback": "*.nwb",
-        }
-
-
 class ToolStrategyFactory:
     """Factory for creating tool strategy instances."""
 
     _strategies = {
         "DLC": DLCStrategy,
         "SLEAP": SLEAPStrategy,
-        "ndx-pose": NDXPoseStrategy,
     }
 
     @classmethod
@@ -1310,7 +1178,7 @@ class ToolStrategyFactory:
         Parameters
         ----------
         tool : str
-            Tool name ("DLC", "SLEAP", "ndx-pose")
+            Tool name ("DLC", "SLEAP")
 
         Returns
         -------

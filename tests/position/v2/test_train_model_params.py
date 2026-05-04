@@ -160,10 +160,23 @@ class TestModelParamsValidation:
 class TestModelParamsToolSupport:
     """Test support for different pose estimation tools."""
 
-    def test_tool_info_contains_all_tools(self, model_params):
-        """Test tool_info contains all supported tools."""
+    def test_tool_info_contains_supported_tools(self, model_params):
+        """Test tool_info contains DLC and SLEAP."""
         assert "DLC" in model_params.tool_info()
-        assert "ndx-pose" in model_params.tool_info()
+        assert "SLEAP" in model_params.tool_info()
+        assert "ndx-pose" not in model_params.tool_info()
+
+    def test_ndx_pose_tool_rejected(self, model_params, tmp_path):
+        """ndx-pose is a file format, not a ModelParams tool."""
+        with pytest.raises(ValueError, match="Tool not supported"):
+            model_params.insert1(
+                {
+                    "tool": "ndx-pose",
+                    "params": {"nwb_file": str(tmp_path / "t.nwb")},
+                },
+                skip_duplicates=True,
+                accept_default=True,
+            )
 
     def test_dlc_tool_supported(self, model_params):
         """Test DLC tool is supported."""
@@ -176,21 +189,6 @@ class TestModelParamsToolSupport:
                 },
             },
             **INSERT_KWARGS,
-        )
-
-    def test_ndx_pose_tool_supported(self, model_params, tmp_path):
-        """Test ndx-pose tool is supported."""
-        # Create a temporary NWB file for testing
-        test_nwb_file = tmp_path / "test.nwb"
-        test_nwb_file.touch()  # Create empty file
-
-        params = {
-            "nwb_file": str(test_nwb_file),
-            "source_software": "DeepLabCut",
-            "model_name": "test",
-        }
-        model_params.insert1(
-            {"tool": "ndx-pose", "params": params}, **INSERT_KWARGS
         )
 
     def test_empty_params_dict(self, model_params):

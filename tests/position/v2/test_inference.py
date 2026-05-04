@@ -11,22 +11,18 @@ class TestModelInference:
 
     Note: These tests verify error handling. Actual DLC inference requires
     a real DLC config.yaml and trained model, which can't be mocked easily.
-    Models imported from ndx-pose NWB files don't contain the trained weights
-    needed for inference.
     """
 
     def test_run_inference_basic(
         self,
         model,
-        mock_ndx_pose_nwb_file,
+        dlc_project_config,
+        dlc_bootstrapped_session,
         mock_video_file,
         skip_if_no_dlc,
     ):
-        """Test that inference on ndx-pose models raises appropriate error."""
-        # Import a model from ndx-pose (doesn't have DLC weights)
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
+        """Test that inference on a freshly loaded DLC model raises without weights."""
+        model_key = model.load(model_path=str(dlc_project_config))
 
         # Try to run inference - should fail because model_path is NWB, not config.yaml
         with pytest.raises(ValueError, match="config.yaml"):
@@ -35,14 +31,13 @@ class TestModelInference:
     def test_run_inference_with_options(
         self,
         model,
-        mock_ndx_pose_nwb_file,
+        dlc_project_config,
+        dlc_bootstrapped_session,
         mock_video_file,
         skip_if_no_dlc,
     ):
         """Test that inference options are validated properly."""
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
+        model_key = model.load(model_path=str(dlc_project_config))
 
         # Try to run inference with options - should still fail for same reason
         with pytest.raises(ValueError, match="config.yaml"):
@@ -393,7 +388,8 @@ class TestPoseEstimMakeValidation:
         self,
         position_v2,
         model,
-        mock_ndx_pose_nwb_file,
+        dlc_project_config,
+        dlc_bootstrapped_session,
         tmp_path,
         skip_if_no_dlc,
     ):
@@ -412,8 +408,8 @@ class TestPoseEstimMakeValidation:
         PoseEstimSelection = position_v2.estim.PoseEstimSelection
         VidFileGroup = position_v2.video.VidFileGroup
 
-        # 1. Import model (ndx-pose path, no DLC weights needed)
-        model_key = model.load(str(mock_ndx_pose_nwb_file))
+        # 1. Import model via DLC (skip_if_no_dlc gate is already applied)
+        model_key = model.load(str(dlc_project_config))
 
         # 2. Create a VidFileGroup with no File entries (no session link)
         vg_id = "pem_validate_no_nwb_8910"

@@ -25,15 +25,14 @@ import yaml
 from datajoint.errors import DuplicateError
 from pynwb import NWBHDF5IO
 
-from spyglass.common import AnalysisNwbfile, LabMember, VideoFile
+# Register NWB file in AnalysisNwbfile using any available parent file
+from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
 from spyglass.position.utils import (
     get_most_recent_file,
     get_param_names,
     suppress_print_from_package,
 )
-from spyglass.position.utils.path_helpers import (
-    resolve_model_path,
-)
+from spyglass.position.utils.path_helpers import resolve_model_path
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
@@ -1214,12 +1213,11 @@ class Model(SpyglassMixin, dj.Computed):
         str
             NWB file name for direct reference (stored in project directory)
         """
-        from pynwb import NWBHDF5IO, NWBFile
+        from pynwb import NWBFile
 
         nwb_file_name = f"{metadata.model_id}_model.nwb"
 
         # Store in analysis directory for AnalysisNwbfile compatibility
-        from spyglass.common import AnalysisNwbfile
 
         analysis_dir = AnalysisNwbfile()._analysis_dir
         nwb_path = Path(analysis_dir) / nwb_file_name
@@ -1263,9 +1261,6 @@ class Model(SpyglassMixin, dj.Computed):
             nwb_io.write(nwbfile)
 
         self._info_msg(f"Model metadata saved to NWB: {nwb_path}")
-
-        # Register NWB file in AnalysisNwbfile using any available parent file
-        from spyglass.common import AnalysisNwbfile, Nwbfile
 
         # Get any available NWB file as a dummy parent (foreign key requirement)
         available_parents = Nwbfile().fetch("nwb_file_name")
@@ -2033,11 +2028,20 @@ class Model(SpyglassMixin, dj.Computed):
         )
 
         # Auto-detect tool from file extension if not provided
-        tool_suffix_map = {"yml": "DLC", "yaml": "DLC", "nwb": "ndx-pose"}
+        tool_suffix_map = {"yml": "DLC", "yaml": "DLC"}
         suffix = model_path.suffix.lstrip(".").lower()
         if tool is None:
             tool = tool_suffix_map.get(suffix)
             if tool is None:
+                if suffix == "nwb":
+                    raise ValueError(
+                        "ndx-pose NWB files should be ingested via "
+                        "ImportedPose, not Model.load(). "
+                        "Use:\n"
+                        "  ImportedPose().insert_from_nwbfile(nwb_file_name)\n"
+                        "Pass import_to_v2=True to also register skeleton and "
+                        "model metadata in the V2 pipeline tables."
+                    )
                 raise ValueError(
                     f"Cannot auto-detect tool from file extension: {suffix}. "
                     "Please specify 'tool' parameter."
@@ -2123,292 +2127,6 @@ class Model(SpyglassMixin, dj.Computed):
         self._info_msg(f"Model imported: {model_id}")
 
         return model_key
-
-    def _import_ndx_pose_model(self, model_path: Path, **kwargs):
-        """Import a trained model from an ndx-pose NWB file.
-
-        Parameters
-        ----------
-        model_path : Path
-            Path to the NWB file containing ndx-pose data
-        **kwargs
-            Additional parameters:
-            - nwb_file_name: Parent NWB file name for linking
-            - model_name: Name of specific PoseEstimation to import (required
-              if multiple models in file)
-            - skeleton_id: Override skeleton ID
-            - model_params_id: Override model params ID
-            - model_id: Override model ID
-
-        Returns
-        -------
-        dict
-            Primary key for the created Model entry
-
-        Raises
-        ------
-        ImportError
-            If ndx-pose is not installed
-        ValueError
-            If NWB file has no pose data or multiple models without model_name
-        """
-        if ndx_pose is None:
-            raise ImportError(
-                "ndx-pose is required to import pose estimation models from NWB"
-                "Install with: pip install ndx-pose>=0.2.0"
-            )
-
-        if model_path.suffix != ".nwb":
-            raise ValueError("ndx-pose model path must be an .nwb file")
-
-        self._info_msg(f"Importing ndx-pose model from {model_path}")
-
-        # Step 1: Read NWB file and extract pose data
-        with NWBHDF5IO(str(model_path), mode="r") as nwb_io:
-            nwbfile = nwb_io.read()
-
-            # Step 2: Find behavior processing module
-            if "behavior" not in nwbfile.processing:
-                raise ValueError(
-                    f"No 'behavior' processing module in NWB file: {model_path}"
-                )
-
-            # Step 3: Find PoseEstimation objects in behavior processing module
-
-            behavior_module = nwbfile.processing["behavior"]
-            pose_estimations = {
-                name: obj
-                for name, obj in behavior_module.data_interfaces.items()
-                if isinstance(obj, ndx_pose.PoseEstimation)
-            }
-
-            if not pose_estimations:
-                raise ValueError(
-                    f"No PoseEstimation objects found in NWB file: {model_path}"
-                )
-
-            # Step 4: Select which PoseEstimation to import
-            model_name = kwargs.get("model_name")
-            if len(pose_estimations) > 1 and not model_name:
-                raise ValueError(
-                    f"NWB file contains {len(pose_estimations)} mation models. "
-                    f"Please specify 'model_name' parameter. Available models: "
-                    f"{list(pose_estimations.keys())}"
-                )
-
-            if model_name:
-                if model_name not in pose_estimations:
-                    raise ValueError(
-                        f"Model '{model_name}' not found in NWB file. "
-                        f"Available models: {list(pose_estimations.keys())}"
-                    )
-                pose_estimation = pose_estimations[model_name]
-            else:
-                # Single model, use it
-                pose_estimation = list(pose_estimations.values())[0]
-                model_name = list(pose_estimations.keys())[0]
-
-            self._info_msg(f"Importing model: {model_name}")
-
-            # Step 5: Extract skeleton from PoseEstimation
-            skeleton_obj = pose_estimation.skeleton
-            if skeleton_obj is None:
-                raise ValueError(
-                    f"PoseEstimation '{model_name}' has no skeleton defined"
-                )
-
-            # Step 6: Extract bodyparts (nodes) and edges
-            bodyparts = list(skeleton_obj.nodes)
-            edges_array = skeleton_obj.edges
-
-            # Convert edge indices to bodypart name tuples
-            edges = []
-            for edge in edges_array:
-                node1_idx, node2_idx = int(edge[0]), int(edge[1])
-                edges.append((bodyparts[node1_idx], bodyparts[node2_idx]))
-
-            self._info_msg(
-                f"Skeleton has {len(bodyparts)} bodyparts, {len(edges)} edges"
-            )
-
-            # Step 7: Extract metadata from PoseEstimation
-            source_software = getattr(
-                pose_estimation, "source_software", "ndx-pose"
-            )
-            source_version = getattr(
-                pose_estimation, "source_software_version", None
-            )
-
-            # Map source_software to our tool naming
-            tool_mapping = {"deeplabcut": "DLC", "sleap": "SLEAP"}
-            tool = tool_mapping.get(source_software.lower(), "ndx-pose")
-
-            # Build params dict from available metadata
-            params = {
-                "source_software": source_software,
-                "model_name": model_name,
-                "nwb_file": str(model_path),
-            }
-            if source_version:
-                params["source_software_version"] = source_version
-            if pose_estimation.description:
-                params["description"] = pose_estimation.description
-            if pose_estimation.original_videos:
-                params["original_videos"] = list(
-                    pose_estimation.original_videos
-                )
-            if pose_estimation.labeled_videos:
-                params["labeled_videos"] = list(pose_estimation.labeled_videos)
-            if pose_estimation.dimensions is not None:
-                # Convert to numpy array first (could be HDF5 Dataset)
-                params["dimensions"] = np.array(
-                    pose_estimation.dimensions
-                ).tolist()
-
-            # Apply tool-specific import defaults using strategy
-            strategy = ToolStrategyFactory.create_strategy(tool)
-            params = strategy.apply_import_defaults(params, model_path)
-
-        # Step 8: Create skeleton config dict for Skeleton.insert1()
-        skeleton_config = {
-            "bodyparts": bodyparts,
-            "skeleton": edges,
-        }
-        # Add skeleton_id to config dict if provided
-        if "skeleton_id" in kwargs and kwargs["skeleton_id"] is not None:
-            skeleton_config["skeleton_id"] = kwargs["skeleton_id"]
-
-        # Step 9: Create or retrieve Skeleton entry
-        skeleton_key = Skeleton().insert1(
-            skeleton_config,
-            check_duplicates=True,
-            skip_duplicates=True,
-        )
-        self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
-
-        # Step 10: Create or retrieve ModelParams entry
-        self._info_msg("Creating or retrieving ModelParams entry")
-        model_params_key = ModelParams().insert1(
-            dict(
-                tool=tool,
-                params=params,
-                model_params_id=kwargs.get("model_params_id"),
-                skeleton_id=skeleton_key["skeleton_id"],
-            ),
-            skip_duplicates=True,
-        )
-
-        if not model_params_key:
-            # Fetch existing params
-            params_hash = dj.hash.key_hash(params)
-            model_params_key = (
-                ModelParams() & {"tool": tool, "params_hash": params_hash}
-            ).fetch1("KEY")
-
-        self._info_msg(f"ModelParams: {model_params_key['model_params_id']}")
-
-        # Step 11: Create VidFileGroup placeholder
-        vid_group_id = f"ndx-pose-{model_name}"
-        vid_group_key = VidFileGroup().insert1(
-            {
-                "vid_group_id": vid_group_id,
-                "description": f"Videos from {model_name} in {model_path.name}",
-            },
-            skip_duplicates=True,
-        )
-        if not vid_group_key:
-            vid_group_key = (
-                VidFileGroup() & {"vid_group_id": vid_group_id}
-            ).fetch1("KEY")
-
-        self._info_msg(f"VidFileGroup: {vid_group_key['vid_group_id']}")
-
-        # Step 11b: Link original_videos from NWB to existing VideoFile entries
-        matched_files = []
-        for vid_path in params.get("original_videos", []):
-            try:
-                vf_key = VideoFile().fetch_key_from_path(str(vid_path))
-                matched_files.append(vf_key)
-            except Exception:
-                self._logger.debug(
-                    f"No VideoFile match for ndx-pose video: {vid_path}"
-                )
-        if matched_files:
-            VidFileGroup().add_files(
-                vid_group_key["vid_group_id"], matched_files
-            )
-            self._info_msg(
-                f"Linked {len(matched_files)} video(s) to VidFileGroup "
-                f"'{vid_group_key['vid_group_id']}'"
-            )
-        else:
-            self._info_msg(
-                "No matching VideoFile entries found for original_videos. "
-                "VidFileGroup created as placeholder — call add_files() or "
-                "register sessions before running PoseEstim.populate()."
-            )
-
-        # Step 12: Create ModelSelection entry
-        sel_key = {**model_params_key, **vid_group_key}
-        # Generate model_selection_id if not provided
-        if "model_selection_id" not in sel_key:
-            sel_key["model_selection_id"] = default_pk_name(
-                "ms-ndx",
-                {"model_params_id": model_params_key["model_params_id"]},
-            )
-        ModelSelection().insert1(sel_key, skip_duplicates=True)
-
-        # Return the existing Model entry if one already exists for this path.
-        if existing := (self & {"model_path": str(model_path)}):
-            return existing.fetch1()
-
-        # Step 13: Create Model entry
-        model_id = kwargs.get("model_id")
-        if not model_id:
-            # Generate default model_id using helper (max 32 chars)
-            model_id = default_pk_name(
-                "mdl", {"model_name": model_name, "nwb_file": str(model_path)}
-            )
-
-        # For ndx-pose imports the source NWB file IS the model artifact —
-        # analysis_file_name is intentionally nullable here. Unlike DLC
-        # imports (which create a fresh AnalysisNwbfile to store training
-        # metadata), the ndx-pose file already contains all model info and
-        # is tracked via model_path. An AnalysisNwbfile link can be added
-        # after import if the file is later registered in a Spyglass session.
-        nwb_file_name = kwargs.get("nwb_file_name")
-        if nwb_file_name and (
-            AnalysisNwbfile & {"analysis_file_name": nwb_file_name}
-        ):
-            analysis_file_name = nwb_file_name
-        else:
-            analysis_file_name = None
-            if nwb_file_name:
-                self._warn_msg(
-                    f"nwb_file_name {nwb_file_name!r} not found in "
-                    "AnalysisNwbfile; analysis_file_name link skipped."
-                )
-            else:
-                self._info_msg(
-                    "ndx-pose import: analysis_file_name=None (model_path is "
-                    "the NWB reference). Pass nwb_file_name= to link a "
-                    "registered AnalysisNwbfile."
-                )
-
-        model_key = {
-            **sel_key,
-            "model_id": model_id,
-            "model_path": str(model_path),
-        }
-        if analysis_file_name:
-            model_key["analysis_file_name"] = analysis_file_name
-
-        self.insert1(model_key, skip_duplicates=True, allow_direct_insert=True)
-        self._info_msg(f"Model imported: {model_id}")
-
-        # skeleton_id is a secondary attribute of ModelParams, not a Model column.
-        # Include it in the return value for convenience.
-        return {**model_key, "skeleton_id": skeleton_key["skeleton_id"]}
 
     def verify(
         self,
