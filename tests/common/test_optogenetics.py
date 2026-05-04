@@ -115,99 +115,165 @@ def test_optogenetic_protocol(
     ], "ThetaTrigger did not import the expected filter phase."
 
 
-def test_optogenetic_protocol_basic_functionality():
-    """Test OptogeneticProtocol basic functionality and imports."""
-    from spyglass.common.common_optogenetics import OptogeneticProtocol
-
-    # Test basic table structure
-    protocol = OptogeneticProtocol()
-    assert hasattr(protocol, "definition")
-
-    # Test parameter validation logic
-    def validate_protocol_params(params):
-        required_keys = ["pulse_length_in_ms", "power_in_mW"]
-        return all(key in params for key in required_keys)
-
-    valid_params = {
-        "pulse_length_in_ms": 10.0,
-        "power_in_mW": 2.5,
-        "period_in_ms": 100.0,
-    }
-
-    assert validate_protocol_params(valid_params)
-    assert valid_params["pulse_length_in_ms"] > 0
-    assert valid_params["power_in_mW"] > 0
-
-
-def test_optogenetic_protocol_device_detection():
-    """Test device detection logic."""
+def _make_opto_row(**kwargs):
+    """Return a Mock with the NWB row attributes used by make_*_entry methods."""
     from unittest.mock import Mock
 
-    # Test optogenetic device detection
-    mock_device = Mock()
-    mock_device.name = "optogenetic_stimulator"
-    mock_device.description = "LED stimulator"
+    defaults = dict(
+        epoch_number=1,
+        convenience_code="test_stim",
+        pulse_length_in_ms=10.0,
+        number_pulses_per_pulse_train=5,
+        period_in_ms=100.0,
+        intertrain_interval_in_ms=500.0,
+        power_in_mW=2.5,
+        ripple_filter_threshold_sd=3.0,
+        ripple_filter_num_above_threshold=2,
+        ripple_filter_lockout_period_in_samples=30,
+        theta_filter_phase_in_deg=180.0,
+        theta_filter_reference_ntrode=1,
+        theta_filter_lockout_period_in_samples=20,
+        speed_filter_threshold_in_cm_per_s=5.0,
+        speed_filter_on_above_threshold=True,
+    )
+    defaults.update(kwargs)
+    row = Mock(**defaults)
+    row.stimulus_signal.object_id = "abc123"
+    return row
 
-    def is_optogenetic_device(device_name):
-        return (
-            "optogenetic" in device_name.lower()
-            or "opto" in device_name.lower()
+
+def test_make_epoch_entry():
+    """make_epoch_entry maps NWB row attributes to table column names."""
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
+
+    row = _make_opto_row()
+    result = OptogeneticProtocol.make_epoch_entry("test.nwb", row)
+
+    assert result["nwb_file_name"] == "test.nwb"
+    assert result["epoch"] == 1
+    assert result["description"] == "test_stim"
+    assert result["pulse_length"] == 10.0
+    assert result["pulses_per_train"] == 5
+    assert result["period"] == 100.0
+    assert result["intertrain_interval"] == 500.0
+    assert result["stimulus_power"] == 2.5
+    assert result["stimulus_object_id"] == "abc123"
+
+
+def test_make_ripple_trigger_entry():
+    """make_ripple_trigger_entry maps ripple filter attributes correctly."""
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
+
+    row = _make_opto_row()
+    result = OptogeneticProtocol.make_ripple_trigger_entry("test.nwb", row)
+
+    assert result["nwb_file_name"] == "test.nwb"
+    assert result["epoch"] == 1
+    assert result["threshold_sd"] == 3.0
+    assert result["n_above_threshold"] == 2
+    assert result["ripple_lockout_period"] == 30
+
+
+def test_make_theta_trigger_entry():
+    """make_theta_trigger_entry maps theta filter attributes correctly."""
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
+
+    row = _make_opto_row()
+    result = OptogeneticProtocol.make_theta_trigger_entry("test.nwb", row)
+
+    assert result["nwb_file_name"] == "test.nwb"
+    assert result["epoch"] == 1
+    assert result["filter_phase"] == 180.0
+    assert result["reference_ntrode"] == 1
+    assert result["theta_lockout_period"] == 20
+
+
+def test_make_speed_filter_entry():
+    """make_speed_filter_entry maps speed filter attributes correctly."""
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
+
+    row = _make_opto_row()
+    result = OptogeneticProtocol.make_speed_filter_entry("test.nwb", row)
+
+    assert result["nwb_file_name"] == "test.nwb"
+    assert result["epoch"] == 1
+    assert result["speed_threshold"] == 5.0
+    assert result["active_above_threshold"] is True
+
+
+def test_get_stimulus_on_intervals_nominal():
+    """get_stimulus_on_intervals pairs on/off transitions correctly."""
+    import numpy as np
+    from unittest.mock import Mock, patch
+
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
+
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0, 5.0])
+    data = np.array([1, 0, 1, 0, 1, 0])  # three clean on/off pairs
+
+    mock_stim = Mock()
+    mock_stim.get_timestamps.return_value = times
+    mock_stim.data = data
+
+    mock_interval = Mock()
+    mock_interval.contains.return_value = np.ones(len(times), dtype=bool)
+
+    protocol = OptogeneticProtocol()
+    with (
+        patch.object(protocol, "ensure_single_entry"),
+        patch.object(
+            type(protocol),
+            "fetch_nwb",
+            return_value=[{"stimulus": mock_stim}],
+        ),
+        patch("spyglass.common.common_optogenetics.IntervalList") as mock_il,
+        patch("spyglass.common.common_optogenetics.TaskEpoch"),
+    ):
+        mock_il.__and__ = Mock(return_value=Mock())
+        mock_il.__and__.return_value.fetch_interval = Mock(
+            return_value=mock_interval
         )
+        result = protocol.get_stimulus_on_intervals({})
 
-    assert is_optogenetic_device("optogenetic_stimulator")
-    assert not is_optogenetic_device("electrode_array")
-
-
-def test_optogenetic_protocol_parameter_validation():
-    """Test parameter validation ranges."""
-    # Test valid parameter ranges
-    test_cases = [
-        {"pulse_length_in_ms": 5.0, "expected": True},
-        {"pulse_length_in_ms": 0.0, "expected": False},  # Invalid
-        {"pulse_length_in_ms": -1.0, "expected": False},  # Invalid
-    ]
-
-    for case in test_cases:
-        is_valid = case["pulse_length_in_ms"] > 0
-        assert is_valid == case["expected"]
+    assert result.shape == (3, 2)
+    np.testing.assert_array_equal(result[:, 0], [0.0, 2.0, 4.0])
+    np.testing.assert_array_equal(result[:, 1], [1.0, 3.0, 5.0])
 
 
-def test_optogenetic_protocol_config_processing():
-    """Test configuration processing logic."""
-    # Test config structure
-    config = {
-        "OptogeneticProtocol": {
-            "epoch_1": {"pulse_length_in_ms": 10.0, "power_in_mW": 2.5}
-        }
-    }
+def test_get_stimulus_on_intervals_leading_off():
+    """Leading off-sample before first on is discarded."""
+    import numpy as np
+    from unittest.mock import Mock, patch
 
-    # Test config access patterns
-    opto_config = config.get("OptogeneticProtocol", {})
-    assert len(opto_config) == 1
+    from spyglass.common.common_optogenetics import OptogeneticProtocol
 
-    epoch_config = opto_config.get("epoch_1", {})
-    assert epoch_config["pulse_length_in_ms"] == 10.0
-    assert epoch_config["power_in_mW"] == 2.5
+    times = np.array([0.0, 1.0, 2.0, 3.0, 4.0])
+    data = np.array([0, 1, 0, 1, 0])  # off comes before first on
 
+    mock_stim = Mock()
+    mock_stim.get_timestamps.return_value = times
+    mock_stim.data = data
 
-def test_optogenetic_protocol_edge_cases():
-    """Test edge cases and error conditions."""
-    # Test empty configurations
-    empty_config = {}
-    opto_section = empty_config.get("OptogeneticProtocol", {})
-    assert len(opto_section) == 0
+    mock_interval = Mock()
+    mock_interval.contains.return_value = np.ones(len(times), dtype=bool)
 
-    # Test missing device scenarios
-    empty_devices = {}
-    assert len(empty_devices) == 0
+    protocol = OptogeneticProtocol()
+    with (
+        patch.object(protocol, "ensure_single_entry"),
+        patch.object(
+            type(protocol),
+            "fetch_nwb",
+            return_value=[{"stimulus": mock_stim}],
+        ),
+        patch("spyglass.common.common_optogenetics.IntervalList") as mock_il,
+        patch("spyglass.common.common_optogenetics.TaskEpoch"),
+    ):
+        mock_il.__and__ = Mock(return_value=Mock())
+        mock_il.__and__.return_value.fetch_interval = Mock(
+            return_value=mock_interval
+        )
+        result = protocol.get_stimulus_on_intervals({})
 
-    # Test parameter boundary conditions
-    boundary_params = {
-        "pulse_length_in_ms": 0.1,  # Very small pulse
-        "power_in_mW": 0.01,  # Very low power
-    }
-
-    assert boundary_params["pulse_length_in_ms"] > 0
-    assert boundary_params["power_in_mW"] > 0
-    assert boundary_params["power_in_mW"] > 0
-    assert boundary_params["power_in_mW"] > 0
+    assert result.shape == (2, 2)
+    np.testing.assert_array_equal(result[:, 0], [1.0, 3.0])
+    np.testing.assert_array_equal(result[:, 1], [2.0, 4.0])
