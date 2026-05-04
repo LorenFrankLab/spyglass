@@ -630,9 +630,8 @@ class NDXPoseBuilder(BaseMixin):
         """
         import pynwb
 
-        nwb_writer_cls = self._get_nwb_writer_cls()
-        with nwb_writer_cls().write(
-            path=str(analysis_abs_path), mode="a"
+        with pynwb.NWBHDF5IO(
+            path=str(analysis_abs_path), mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
             if "behavior" not in nwbf.processing:
@@ -682,7 +681,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     # Tests can override these to inject stubs without unittest.mock.patch
     _inference_runner_cls = None  # Will be set to PoseInferenceRunner
     _nwb_builder_cls = None  # Will be set to NDXPoseBuilder
-    _nwb_writer_cls = None  # Will be set to RealNWBWriter
 
     @classmethod
     def _get_inference_runner_cls(cls):
@@ -697,15 +695,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         if cls._nwb_builder_cls is None:
             return NDXPoseBuilder
         return cls._nwb_builder_cls
-
-    @classmethod
-    def _get_nwb_writer_cls(cls):
-        """Get the NWB writer class, defaulting to RealNWBWriter."""
-        if cls._nwb_writer_cls is None:
-            from spyglass.position.utils.protocols import RealNWBWriter
-
-            return RealNWBWriter
-        return cls._nwb_writer_cls
 
     def insert1(self, row, **kwargs):
         """Insert a single row, allowing direct inserts outside of populate.
@@ -733,7 +722,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         dlc_output_path: Union[Path, str],
         nwb_file_name: Union[Path, str, None] = None,
         pose_estimation_name: str = "PoseEstimation",
-        nwb_writer_cls=None,
         timestamps: np.ndarray = None,
     ) -> Path:
         """Load DLC inference output (h5 or csv) into NWB file with ndx-pose.
@@ -747,9 +735,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             on the DLC output file, by default None
         pose_estimation_name : str, optional
             Name for the PoseEstimation object in NWB, by default "PoseEstimation"
-        nwb_writer_cls : class, optional
-            NWB writer class for dependency injection, by default None
-
         Returns
         -------
         Path
@@ -817,13 +802,9 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             logger.info_msg(f"Creating new NWB file: {nwb_path}")
             io_mode = "w"
 
-        # Build ndx-pose structure
-        if nwb_writer_cls is None:
-            from spyglass.position.utils.protocols import RealNWBWriter
-
-            nwb_writer_cls = RealNWBWriter
-
-        with nwb_writer_cls().write(str(nwb_path), mode=io_mode) as io:
+        with NWBHDF5IO(
+            str(nwb_path), mode=io_mode, load_namespaces=(io_mode != "w")
+        ) as io:
             if io_mode == "r+":
                 nwbfile = io.read()
             else:

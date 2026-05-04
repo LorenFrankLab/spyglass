@@ -129,31 +129,6 @@ class NWBBuilderProtocol(Protocol):
         ...
 
 
-class NWBWriterProtocol(Protocol):
-    """Protocol for writing NWB files.
-
-    Enables dependency injection of NWB file writing operations.
-    Implementations must return a context manager compatible with pynwb.NWBHDF5IO.
-    """
-
-    def write(self, path: Union[str, Path], mode: str = "w"):
-        """Create an NWB writer context manager.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Destination file path
-        mode : str, optional
-            File mode ("w" for write, "a"/"r+" for append/read), by default "w"
-
-        Returns
-        -------
-        context manager
-            An IO object usable as ``with writer.write(path) as io:``
-        """
-        ...
-
-
 class FileSystemProtocol(Protocol):
     """Protocol for file system operations.
 
@@ -248,26 +223,3 @@ class RealFileSystem:
     def getmtime(self, path: Union[str, Path]) -> float:
         """Get the modification time of a file."""
         return Path(path).stat().st_mtime
-
-
-class RealNWBWriter:
-    """Real NWB writer implementation using pynwb.NWBHDF5IO."""
-
-    def write(self, path: Union[str, Path], mode: str = "w"):
-        """Create an NWB writer context manager.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Destination file path
-        mode : str, optional
-            File mode ("w" for write, "a" for append), by default "w"
-
-        Returns
-        -------
-        context manager
-            NWBHDF5IO context manager for writing
-        """
-        from pynwb import NWBHDF5IO
-
-        return NWBHDF5IO(str(path), mode=mode, load_namespaces=mode == "a")

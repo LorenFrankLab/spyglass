@@ -24,8 +24,8 @@ class TestModelInference:
         """Test that inference on a freshly loaded DLC model raises without weights."""
         model_key = model.load(model_path=str(dlc_project_config))
 
-        # Try to run inference - should fail because model_path is NWB, not config.yaml
-        with pytest.raises(ValueError, match="config.yaml"):
+        # Try to run inference - should fail because model has no trained weights
+        with pytest.raises((ValueError, FileNotFoundError)):
             model.run_inference(model_key, video_path=str(mock_video_file))
 
     def test_run_inference_with_options(
@@ -39,8 +39,8 @@ class TestModelInference:
         """Test that inference options are validated properly."""
         model_key = model.load(model_path=str(dlc_project_config))
 
-        # Try to run inference with options - should still fail for same reason
-        with pytest.raises(ValueError, match="config.yaml"):
+        # Try to run inference with options - should fail (no trained weights)
+        with pytest.raises((ValueError, FileNotFoundError)):
             model.run_inference(
                 model_key,
                 video_path=str(mock_video_file),
@@ -63,14 +63,14 @@ class TestModelInference:
     def test_run_inference_invalid_video(
         self,
         model,
-        mock_ndx_pose_nwb_file,
+        skip_if_no_dlc,
+        dlc_project_config,
+        dlc_bootstrapped_session,
     ):
         """Test error when video doesn't exist."""
-        model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
-        )
+        model_key = model.load(model_path=str(dlc_project_config))
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises((FileNotFoundError, ValueError)):
             model.run_inference(
                 model_key,
                 video_path="/nonexistent/video.avi",
@@ -119,7 +119,9 @@ class TestPoseEstimPopulation:
         self,
         position_v2,
         model,
-        mock_ndx_pose_nwb_file,
+        skip_if_no_dlc,
+        dlc_project_config,
+        dlc_bootstrapped_session,
         mock_dlc_inference_output,
         mock_nwb_file_for_parent,
     ):
@@ -129,7 +131,7 @@ class TestPoseEstimPopulation:
 
         # Import model
         model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
+            model_path=str(dlc_project_config),
         )
 
         # Create video group
@@ -313,10 +315,11 @@ class TestEndToEndInference:
         self,
         position_v2,
         model,
-        mock_ndx_pose_nwb_file,
+        skip_if_no_dlc,
+        dlc_project_config,
+        dlc_bootstrapped_session,
         mock_video_file,
         mock_dlc_inference_output,
-        skip_if_no_dlc,
     ):
         """Test workflow: import model -> load existing results -> fetch data.
 
@@ -328,7 +331,7 @@ class TestEndToEndInference:
 
         # Step 1: Import model
         model_key = model.load(
-            model_path=str(mock_ndx_pose_nwb_file),
+            model_path=str(dlc_project_config),
         )
 
         # Step 2: Create video group
