@@ -89,6 +89,34 @@ def test_videofile_update_entries(common):
     common.VideoFile().update_entries(key)
 
 
+def test_fetch_key_from_path_no_side_effect(common, tmp_path):
+    """fetch_key_from_path must not call update_entries by default (T34)."""
+    from unittest.mock import patch
+
+    fake = tmp_path / "no_such_video.mp4"
+    fake.touch()
+
+    with patch.object(common.VideoFile, "update_entries") as mock_update:
+        with pytest.raises(ValueError):
+            common.VideoFile().fetch_key_from_path(str(fake))
+        mock_update.assert_not_called()
+
+
+def test_fetch_key_from_path_update_on_miss(common, tmp_path):
+    """update_on_miss=True triggers update_entries then retries (T34)."""
+    from unittest.mock import patch
+
+    fake = tmp_path / "no_such_video.mp4"
+    fake.touch()
+
+    with patch.object(common.VideoFile, "update_entries") as mock_update:
+        with pytest.raises(ValueError):
+            common.VideoFile().fetch_key_from_path(
+                str(fake), update_on_miss=True
+            )
+        mock_update.assert_called_once()
+
+
 def test_videofile_getabspath(common):
     """Test get absolute path"""
     key = common.VideoFile().fetch(as_dict=True)[0]

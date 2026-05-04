@@ -31,12 +31,14 @@ from spyglass.position.utils import (
     get_param_names,
     suppress_print_from_package,
 )
-from spyglass.position.utils.protocols import default_pk_name
-from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.path_helpers import (
     resolve_model_path,
+)
+from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
 )
+from spyglass.position.utils.protocols import default_pk_name
+from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin

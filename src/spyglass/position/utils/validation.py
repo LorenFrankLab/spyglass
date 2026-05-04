@@ -1,9 +1,208 @@
 """Shared parameter validation utilities for Position V1/V2 pipelines.
 
 Consolidates duplicate validation logic with consistent error messages.
+
+Typed parameter dataclasses
+---------------------------
+Each param family exposes a set of frozen dataclasses whose ``method`` field
+is a ``Literal`` discriminator.  Constructing one of these objects gives you
+IDE auto-complete, type-checking, and a structural guarantee that all
+required fields for the chosen method are present — without touching the
+database schema (they are serialised to plain dicts via ``to_dict()``).
+
+Orientation::
+
+    from spyglass.position.utils.validation import TwoPtOrientParams
+    orient = TwoPtOrientParams(bodypart1="greenLED", bodypart2="redLED_C")
+    orient.to_dict()  # {"method": "two_pt", "bodypart1": ..., ...}
+
+Centroid::
+
+    from spyglass.position.utils.validation import TwoPtCentroidParams
+    centroid = TwoPtCentroidParams(
+        points={"point1": "greenLED", "point2": "redLED_C"},
+        max_LED_separation=15.0,
+    )
+
+Smoothing method sub-params::
+
+    from spyglass.position.utils.validation import MovingAvgParams, SmoothingParams
+    smoothing = SmoothingParams(
+        likelihood_thresh=0.95,
+        smooth=True,
+        smoothing_params=MovingAvgParams(smoothing_duration=0.05),
+    )
+
+All dataclasses are accepted wherever plain dicts were accepted before.
 """
 
-from typing import Any, Iterable, Optional, Tuple, Union
+import dataclasses
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Literal, Optional, Tuple, Union
+
+# ---------------------------------------------------------------------------
+# Typed parameter dataclasses
+# ---------------------------------------------------------------------------
+# Orientation ---------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TwoPtOrientParams:
+    """Two-point head-orientation parameters.
+
+    ``method`` is a ``Literal["two_pt"]`` discriminator so static tools and
+    runtime code both know which bodypart keys are required.
+    """
+
+    bodypart1: str
+    bodypart2: str
+    method: Literal["two_pt"] = "two_pt"
+    interpolate: bool = True
+    smooth: bool = True
+    smoothing_params: Optional[Dict] = None
+
+    def to_dict(self) -> dict:
+        """Return a plain dict suitable for DB insertion."""
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class BisectorOrientParams:
+    """Bisector (three-LED) orientation parameters."""
+
+    led1: str
+    led2: str
+    led3: str
+    method: Literal["bisector"] = "bisector"
+    interpolate: bool = True
+    smooth: bool = True
+    smoothing_params: Optional[Dict] = None
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class NoOrientParams:
+    """Sentinel for 'no orientation calculation'."""
+
+    method: Literal["none"] = "none"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+#: Discriminated union for orientation params.
+OrientParams = Union[TwoPtOrientParams, BisectorOrientParams, NoOrientParams]
+
+# Centroid ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class OnePtCentroidParams:
+    """Single-point (passthrough) centroid parameters."""
+
+    points: Dict[str, str]  # {"point1": "<bodypart>"}
+    method: Literal["1pt"] = "1pt"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class TwoPtCentroidParams:
+    """Two-point centroid parameters."""
+
+    points: Dict[str, str]  # {"point1": "<bp1>", "point2": "<bp2>"}
+    max_LED_separation: float
+    method: Literal["2pt"] = "2pt"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class FourPtCentroidParams:
+    """Four-LED centroid parameters (Frank Lab standard)."""
+
+    points: Dict[str, str]  # keys: greenLED, redLED_C, redLED_L, redLED_R
+    max_LED_separation: float
+    method: Literal["4pt"] = "4pt"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+#: Discriminated union for centroid params.
+CentroidParams = Union[
+    OnePtCentroidParams, TwoPtCentroidParams, FourPtCentroidParams
+]
+
+# Smoothing method sub-params -----------------------------------------------
+
+
+@dataclass(frozen=True)
+class MovingAvgParams:
+    """Moving-average smoothing sub-parameters."""
+
+    smoothing_duration: float = 0.05
+    method: Literal["moving_avg"] = "moving_avg"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class SavGolParams:
+    """Savitzky-Golay smoothing sub-parameters."""
+
+    window_length: int = 11
+    polyorder: int = 3
+    method: Literal["savgol"] = "savgol"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(frozen=True)
+class GaussianParams:
+    """Gaussian smoothing sub-parameters."""
+
+    smoothing_duration: float = 0.05
+    method: Literal["gaussian"] = "gaussian"
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+#: Discriminated union for smoothing method sub-params.
+SmoothingMethodParams = Union[MovingAvgParams, SavGolParams, GaussianParams]
+
+
+@dataclass
+class SmoothingParams:
+    """Top-level smoothing / interpolation parameters.
+
+    ``smoothing_params`` accepts either a typed sub-dataclass or a plain dict.
+    """
+
+    likelihood_thresh: float
+    interpolate: bool = False
+    interp_params: Optional[Dict] = None
+    smooth: bool = False
+    smoothing_params: Optional[Union[SmoothingMethodParams, Dict]] = None
+
+    def to_dict(self) -> dict:
+        d = dataclasses.asdict(self)
+        # If smoothing_params was a dataclass, asdict already recursed into it.
+        return d
+
+
+def _to_dict_if_dataclass(obj):
+    """Return ``obj.to_dict()`` if it is a dataclass, else return ``obj``."""
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return obj.to_dict()
+    return obj
 
 
 def validate_option(
@@ -147,16 +346,19 @@ def validate_list(
         )
 
 
-def validate_smoothing_params(params: dict) -> None:
+def validate_smoothing_params(
+    params: Union["SmoothingParams", dict],
+) -> None:
     """Validate smoothing parameters for pose processing.
 
+    Accepts either a :class:`SmoothingParams` dataclass or a plain ``dict``.
     Unified validation for both V1 and V2 smoothing parameter formats.
     Supports both V1-style (smooth boolean + smoothing_params) and
     V2-style (nested structure with method validation).
 
     Parameters
     ----------
-    params : dict
+    params : SmoothingParams or dict
         Smoothing parameters to validate
 
     Raises
@@ -166,6 +368,18 @@ def validate_smoothing_params(params: dict) -> None:
     """
     if params is None:
         return  # No smoothing params provided (None)
+
+    params = _to_dict_if_dataclass(params)
+
+    # Normalise nested smoothing_params if it is a typed dataclass
+    if (
+        isinstance(params.get("smoothing_params"), dict) is False
+        and params.get("smoothing_params") is not None
+    ):
+        params = dict(
+            params,
+            smoothing_params=_to_dict_if_dataclass(params["smoothing_params"]),
+        )
 
     # Only require likelihood_thresh if smoothing or interpolation is happening
     has_smoothing = params.get("smooth", False) or "smoothing_params" in params
@@ -228,12 +442,18 @@ def validate_smoothing_params(params: dict) -> None:
             )
 
 
-def validate_orientation_params(params: dict, method: str = None) -> None:
+def validate_orientation_params(
+    params: Union["OrientParams", dict],
+    method: str = None,
+) -> None:
     """Validate orientation calculation parameters.
+
+    Accepts either a typed orientation dataclass (:class:`TwoPtOrientParams`,
+    :class:`BisectorOrientParams`, :class:`NoOrientParams`) or a plain ``dict``.
 
     Parameters
     ----------
-    params : dict
+    params : OrientParams or dict
         Orientation parameters to validate
     method : str, optional
         Orientation method to validate for. If None, method will be
@@ -246,6 +466,8 @@ def validate_orientation_params(params: dict, method: str = None) -> None:
     """
     if params is None:
         return  # No orientation params provided (None)
+
+    params = _to_dict_if_dataclass(params)
 
     # If params is an empty dict or missing method, that's an error
     method = method or params.get("method")
@@ -268,12 +490,19 @@ def validate_orientation_params(params: dict, method: str = None) -> None:
         validate_required_keys(params, required_keys, "orientation params")
 
 
-def validate_centroid_params(params: dict, method: str = None) -> None:
+def validate_centroid_params(
+    params: Union["CentroidParams", dict],
+    method: str = None,
+) -> None:
     """Validate centroid calculation parameters.
+
+    Accepts either a typed centroid dataclass (:class:`OnePtCentroidParams`,
+    :class:`TwoPtCentroidParams`, :class:`FourPtCentroidParams`) or a plain
+    ``dict``.
 
     Parameters
     ----------
-    params : dict
+    params : CentroidParams or dict
         Centroid parameters to validate
     method : str, optional
         Centroid method to validate for. If None, method will be
@@ -286,6 +515,8 @@ def validate_centroid_params(params: dict, method: str = None) -> None:
     """
     if params is None:
         return  # No centroid params provided (None)
+
+    params = _to_dict_if_dataclass(params)
 
     # If params is an empty dict or missing method, that's an error
     method = method or params.get("method")

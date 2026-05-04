@@ -27,6 +27,7 @@ Results are registered in ``PositionOutput`` automatically and accessible via
 import contextlib
 import io
 import subprocess
+import dataclasses
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from fractions import Fraction
@@ -1814,7 +1815,9 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         if missing_keys:
             raise ValueError(f"Missing required keys: {missing_keys}")
 
-        # Extract and validate each component using validation.py functions
+        # Extract and validate each component using validation.py functions.
+        # Each field may be a typed dataclass or a plain dict; validate_*
+        # functions accept both and _to_dict_if_dataclass normalises.
         orient = key["orient"]
         centroid = key["centroid"]
         smoothing = key["smoothing"]
@@ -1826,6 +1829,17 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         if smoothing is not None:
             validate_smoothing_params(smoothing)
 
+        # Serialise typed dataclasses to plain dicts before DB insertion.
+        key = dict(key)
+        for field_name in ("orient", "centroid", "smoothing"):
+            val = key[field_name]
+            if (
+                val is not None
+                and dataclasses.is_dataclass(val)
+                and not isinstance(val, type)
+            ):
+                key[field_name] = val.to_dict()
+
         # Call parent insert1 with validated parameters
         # Use the DataJoint Table base class directly
         return dj.Table.insert1(self, key, **kwargs)
@@ -1834,29 +1848,46 @@ class PoseParams(SpyglassMixin, dj.Lookup):
     def insert_custom(cls, params_name, orient, centroid, smoothing, **kwargs):
         """Convenience method for parameter insertion with individual arguments.
 
-        This method provides a more explicit way to insert parameters without
-        nested dictionaries, while maintaining backward compatibility with tests.
+        Accepts plain dicts or typed dataclasses from
+        :mod:`spyglass.position.utils.validation`
+        (e.g. :class:`~TwoPtOrientParams`, :class:`~TwoPtCentroidParams`,
+        :class:`~SmoothingParams`).  Typed dataclasses are automatically
+        serialised to dicts before validation and database insertion.
 
         Parameters
         ----------
         params_name : str
             Name for this parameter set
-        orient : dict
+        orient : dict or OrientParams
             Orientation calculation parameters
-        centroid : dict
+        centroid : dict or CentroidParams
             Centroid calculation parameters
-        smoothing : dict
+        smoothing : dict or SmoothingParams
             Smoothing and interpolation parameters
         **kwargs
             Additional DataJoint insertion options
 
         Examples
         --------
+        >>> # Plain dict API (backward compatible)
         >>> PoseParams.insert_custom(
         ...     params_name="my_config",
         ...     orient={"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
         ...     centroid={"method": "1pt", "points": {"point1": "nose"}},
         ...     smoothing={"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ... )
+
+        >>> # Typed dataclass API
+        >>> from spyglass.position.utils.validation import (
+        ...     TwoPtOrientParams, OnePtCentroidParams, SmoothingParams
+        ... )
+        >>> PoseParams.insert_custom(
+        ...     params_name="typed_config",
+        ...     orient=TwoPtOrientParams(bodypart1="nose", bodypart2="tail"),
+        ...     centroid=OnePtCentroidParams(points={"point1": "nose"}),
+        ...     smoothing=SmoothingParams(
+        ...         likelihood_thresh=0.9, interpolate=False, smooth=False
+        ...     ),
         ... )
         """
         params_dict = {

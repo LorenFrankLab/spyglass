@@ -944,7 +944,7 @@ class VideoFile(SpyglassMixin, dj.Imported):
         )
 
     def fetch_key_from_path(
-        self, video_file_path: str, insert: bool = False
+        self, video_file_path: str, update_on_miss: bool = False
     ) -> Dict:
         """Return the primary key for a given video file path.
 
@@ -952,8 +952,12 @@ class VideoFile(SpyglassMixin, dj.Imported):
         ----------
         video_file_path : str
             The path to the video file.
-        insert : bool
-            Whether to insert the key if not found. Defaults to False.
+        update_on_miss : bool
+            If True and the path is not found in the table, call
+            ``update_entries()`` to refresh null-path rows, then retry.
+            Defaults to False to avoid the O(N) scan on every read. Call
+            ``VideoFile.update_entries()`` explicitly before this method if
+            you expect newly-ingested paths to be present.
 
         Returns
         -------
@@ -967,8 +971,8 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         query = self & {"path": video_path.as_posix()}
 
-        if not query:
-            # Path not in DB yet — refresh null entries then retry once
+        if not query and update_on_miss:
+            # Caller opted in — refresh null-path entries then retry once
             self.update_entries()
             query = self & {"path": video_path.as_posix()}
 

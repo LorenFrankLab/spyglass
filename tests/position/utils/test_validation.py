@@ -413,3 +413,187 @@ class TestValidationEdgeCases:
                     },
                 }
             )
+
+
+class TestParamDataclasses:
+    """Tests for the Literal-typed parameter dataclasses in validation.py."""
+
+    # ------------------------------------------------------------------
+    # Orientation dataclasses
+    # ------------------------------------------------------------------
+
+    def test_two_pt_orient_to_dict(self):
+        """TwoPtOrientParams serialises to a dict validate_orientation_params accepts."""
+        from spyglass.position.utils.validation import (
+            TwoPtOrientParams,
+            validate_orientation_params,
+        )
+
+        p = TwoPtOrientParams(bodypart1="greenLED", bodypart2="redLED_C")
+        assert p.method == "two_pt"
+        d = p.to_dict()
+        assert d["method"] == "two_pt"
+        assert d["bodypart1"] == "greenLED"
+        # Should not raise
+        validate_orientation_params(p)
+        validate_orientation_params(d)
+
+    def test_bisector_orient_to_dict(self):
+        """BisectorOrientParams serialises correctly."""
+        from spyglass.position.utils.validation import (
+            BisectorOrientParams,
+            validate_orientation_params,
+        )
+
+        p = BisectorOrientParams(
+            led1="redLED_L", led2="redLED_R", led3="greenLED"
+        )
+        assert p.method == "bisector"
+        validate_orientation_params(p)
+
+    def test_no_orient_to_dict(self):
+        """NoOrientParams serialises to {method: 'none'}."""
+        from spyglass.position.utils.validation import (
+            NoOrientParams,
+            validate_orientation_params,
+        )
+
+        p = NoOrientParams()
+        assert p.to_dict() == {"method": "none"}
+        validate_orientation_params(p)
+
+    def test_orient_dataclass_is_frozen(self):
+        """Orientation dataclasses should be immutable."""
+        from spyglass.position.utils.validation import TwoPtOrientParams
+
+        p = TwoPtOrientParams(bodypart1="a", bodypart2="b")
+        with pytest.raises((TypeError, AttributeError)):
+            p.bodypart1 = "c"  # type: ignore[misc]
+
+    def test_orient_literal_method_value(self):
+        """The method field default always matches the Literal value."""
+        from spyglass.position.utils.validation import (
+            BisectorOrientParams,
+            NoOrientParams,
+            TwoPtOrientParams,
+        )
+
+        assert (
+            TwoPtOrientParams(bodypart1="a", bodypart2="b").method == "two_pt"
+        )
+        assert (
+            BisectorOrientParams(led1="a", led2="b", led3="c").method
+            == "bisector"
+        )
+        assert NoOrientParams().method == "none"
+
+    # ------------------------------------------------------------------
+    # Centroid dataclasses
+    # ------------------------------------------------------------------
+
+    def test_one_pt_centroid_to_dict(self):
+        """OnePtCentroidParams serialises correctly."""
+        from spyglass.position.utils.validation import (
+            OnePtCentroidParams,
+            validate_centroid_params,
+        )
+
+        p = OnePtCentroidParams(points={"point1": "nose"})
+        assert p.method == "1pt"
+        validate_centroid_params(p)
+
+    def test_two_pt_centroid_to_dict(self):
+        """TwoPtCentroidParams serialises and validates correctly."""
+        from spyglass.position.utils.validation import (
+            TwoPtCentroidParams,
+            validate_centroid_params,
+        )
+
+        p = TwoPtCentroidParams(
+            points={"point1": "greenLED", "point2": "redLED_C"},
+            max_LED_separation=15.0,
+        )
+        assert p.method == "2pt"
+        validate_centroid_params(p)
+
+    def test_four_pt_centroid_to_dict(self):
+        """FourPtCentroidParams serialises and validates correctly."""
+        from spyglass.position.utils.validation import (
+            FourPtCentroidParams,
+            validate_centroid_params,
+        )
+
+        p = FourPtCentroidParams(
+            points={
+                "greenLED": "greenLED",
+                "redLED_C": "redLED_C",
+                "redLED_L": "redLED_L",
+                "redLED_R": "redLED_R",
+            },
+            max_LED_separation=15.0,
+        )
+        assert p.method == "4pt"
+        validate_centroid_params(p)
+
+    # ------------------------------------------------------------------
+    # Smoothing dataclasses
+    # ------------------------------------------------------------------
+
+    def test_smoothing_params_dataclass(self):
+        """SmoothingParams with typed sub-params serialises and validates."""
+        from spyglass.position.utils.validation import (
+            MovingAvgParams,
+            SmoothingParams,
+            validate_smoothing_params,
+        )
+
+        sub = MovingAvgParams(smoothing_duration=0.05)
+        p = SmoothingParams(
+            likelihood_thresh=0.95,
+            smooth=True,
+            smoothing_params=sub,
+        )
+        # to_dict should recurse into the nested dataclass
+        d = p.to_dict()
+        assert d["smoothing_params"]["method"] == "moving_avg"
+        # validate_smoothing_params should accept both the dataclass and the dict
+        validate_smoothing_params(p)
+        validate_smoothing_params(d)
+
+    def test_smoothing_sub_param_classes(self):
+        """MovingAvgParams, SavGolParams, GaussianParams have correct defaults."""
+        from spyglass.position.utils.validation import (
+            GaussianParams,
+            MovingAvgParams,
+            SavGolParams,
+        )
+
+        assert MovingAvgParams().method == "moving_avg"
+        assert SavGolParams().method == "savgol"
+        assert GaussianParams().method == "gaussian"
+
+    # ------------------------------------------------------------------
+    # Integration: validate_* accept dataclasses transparently
+    # ------------------------------------------------------------------
+
+    def test_validate_orientation_accepts_dict_and_dataclass(
+        self, validate_orientation_params
+    ):
+        """validate_orientation_params is transparent to dict vs dataclass."""
+        from spyglass.position.utils.validation import TwoPtOrientParams
+
+        dc = TwoPtOrientParams(bodypart1="a", bodypart2="b")
+        validate_orientation_params(dc)
+        validate_orientation_params(dc.to_dict())
+
+    def test_validate_centroid_accepts_dict_and_dataclass(
+        self, validate_centroid_params
+    ):
+        """validate_centroid_params is transparent to dict vs dataclass."""
+        from spyglass.position.utils.validation import TwoPtCentroidParams
+
+        dc = TwoPtCentroidParams(
+            points={"point1": "a", "point2": "b"}, max_LED_separation=10.0
+        )
+        validate_centroid_params(dc)
+        validate_centroid_params(dc.to_dict())
