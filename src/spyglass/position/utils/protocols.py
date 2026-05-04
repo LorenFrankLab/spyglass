@@ -1,18 +1,10 @@
-"""Protocol definitions for dependency injection in position v2.
-
-These protocols enable testability by providing injection seams for dependencies
-that would otherwise be hard-coded. Tests can provide stub implementations
-rather than using unittest.mock.patch().
-"""
+"""Utilities and protocols for dependency injection in position v2."""
 
 import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Protocol, Union
-
-import numpy as np
-import pandas as pd
+from typing import Dict, List, Protocol, Union
 
 
 def default_pk_name(
@@ -44,89 +36,6 @@ def default_pk_name(
     else:
         h = ""
     return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
-
-
-class InferenceRunnerProtocol(Protocol):
-    """Protocol for pose inference runners (DLC, SLEAP, etc.).
-
-    Enables dependency injection of inference execution into PoseEstim without
-    hard-coding PoseInferenceRunner instantiation.
-    """
-
-    def run_inference(
-        self,
-        model_info: Dict,
-        video_path: Union[str, Path],
-        save_as_csv: bool = False,
-        destfolder: Optional[Union[str, Path]] = None,
-        **kwargs,
-    ) -> pd.DataFrame:
-        """Run pose inference on a video.
-
-        Parameters
-        ----------
-        model_info : Dict
-            Model metadata including config path and other parameters
-        video_path : Union[str, Path]
-            Path to the video file to analyze
-        save_as_csv : bool, optional
-            Whether to save output as CSV, by default False
-        destfolder : Optional[Union[str, Path]], optional
-            Output directory, by default None
-        **kwargs
-            Additional inference parameters
-
-        Returns
-        -------
-        pd.DataFrame
-            Pose estimation results with MultiIndex columns
-        """
-        ...
-
-
-class NWBBuilderProtocol(Protocol):
-    """Protocol for NWB pose object builders.
-
-    Enables dependency injection of NWB creation logic into PoseEstim without
-    hard-coding NDXPoseBuilder instantiation.
-    """
-
-    def build_pose_estimation(
-        self,
-        pose_df: pd.DataFrame,
-        bodyparts: List[str],
-        scorer: str,
-        model_id: str,
-        skeleton_edges: List,
-        description: str = "Pose estimation",
-        original_videos: Optional[List[str]] = None,
-        timestamps: Optional[np.ndarray] = None,
-    ) -> tuple:
-        """Build ndx-pose PoseEstimation and Skeleton objects.
-
-        Parameters
-        ----------
-        pose_df : pd.DataFrame
-            Pose data with MultiIndex columns (scorer, bodypart, coord)
-        bodyparts : List[str]
-            List of bodypart names
-        scorer : str
-            Name of the scorer/model
-        model_id : str
-            Identifier of the model used
-        skeleton_edges : List
-            List of skeleton edge connections
-        description : str, optional
-            Description for the pose estimation, by default "Pose estimation"
-        original_videos : Optional[List[str]], optional
-            List of original video file references, by default None
-
-        Returns
-        -------
-        tuple
-            (pose_estimation, nwb_skeleton) objects ready for NWB insertion
-        """
-        ...
 
 
 class FileSystemProtocol(Protocol):

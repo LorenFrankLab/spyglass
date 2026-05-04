@@ -441,11 +441,7 @@ class TestBasicMethods:
 
 
 class StubInferenceRunner:
-    """Stub inference runner for testing without database dependencies.
-
-    Implements InferenceRunnerProtocol to enable pure unit testing of
-    PoseEstim business logic without requiring real DLC inference.
-    """
+    """Stub inference runner for testing PoseEstim without real DLC inference."""
 
     def __init__(self, pose_data=None):
         if pose_data is None:
@@ -465,11 +461,7 @@ class StubInferenceRunner:
 
 
 class StubNWBBuilder:
-    """Stub NWB builder for testing without file system dependencies.
-
-    Implements NWBBuilderProtocol to enable testing of PoseEstim
-    NWB creation logic without actual file I/O.
-    """
+    """Stub NWB builder for testing PoseEstim without ndx-pose file I/O."""
 
     def __init__(self):
         self.built_objects = []

@@ -184,10 +184,12 @@ class TestModelMake:
             MockMetadata.return_value = mock_metadata_obj
 
             with (
-                patch("pynwb.NWBHDF5IO"),
+                patch("spyglass.position.v2.train.NWBHDF5IO"),
                 patch("pynwb.NWBFile") as mock_nwb,
-                patch("spyglass.common.AnalysisNwbfile") as mock_analysis,
-                patch("spyglass.common.Nwbfile") as mock_base_nwb,
+                patch(
+                    "spyglass.position.v2.train.AnalysisNwbfile"
+                ) as mock_analysis,
+                patch("spyglass.position.v2.train.Nwbfile") as mock_base_nwb,
             ):
 
                 # Mock available parent files
@@ -596,9 +598,11 @@ class TestModelMetadataRegistration:
 
         with (
             patch("pynwb.NWBFile", return_value=mock_nwbfile),
-            patch("pynwb.NWBHDF5IO", return_value=mock_io),
-            patch("spyglass.common.AnalysisNwbfile") as mock_analysis,
-            patch("spyglass.common.Nwbfile") as mock_base_nwb,
+            patch("spyglass.position.v2.train.NWBHDF5IO", return_value=mock_io),
+            patch(
+                "spyglass.position.v2.train.AnalysisNwbfile"
+            ) as mock_analysis,
+            patch("spyglass.position.v2.train.Nwbfile") as mock_base_nwb,
         ):
 
             # Mock parent NWB files available
@@ -640,7 +644,7 @@ class TestModelMetadataRegistration:
             skeleton_id="test_skeleton",
         )
 
-        with patch("spyglass.common.Nwbfile") as mock_base_nwb:
+        with patch("spyglass.position.v2.train.Nwbfile") as mock_base_nwb:
             mock_base_nwb.return_value.fetch.return_value = (
                 []
             )  # No parent files
@@ -669,9 +673,11 @@ class TestModelMetadataRegistration:
 
         with (
             patch("pynwb.NWBFile"),
-            patch("pynwb.NWBHDF5IO"),
-            patch("spyglass.common.AnalysisNwbfile") as mock_analysis,
-            patch("spyglass.common.Nwbfile") as mock_base_nwb,
+            patch("spyglass.position.v2.train.NWBHDF5IO"),
+            patch(
+                "spyglass.position.v2.train.AnalysisNwbfile"
+            ) as mock_analysis,
+            patch("spyglass.position.v2.train.Nwbfile") as mock_base_nwb,
         ):
 
             mock_base_nwb.return_value.fetch.return_value = ["parent.nwb"]
@@ -725,9 +731,11 @@ class TestModelMetadataRegistration:
 
         with (
             patch("pynwb.NWBFile", return_value=mock_nwbfile),
-            patch("pynwb.NWBHDF5IO"),
-            patch("spyglass.common.AnalysisNwbfile") as mock_analysis,
-            patch("spyglass.common.Nwbfile") as mock_base_nwb,
+            patch("spyglass.position.v2.train.NWBHDF5IO"),
+            patch(
+                "spyglass.position.v2.train.AnalysisNwbfile"
+            ) as mock_analysis,
+            patch("spyglass.position.v2.train.Nwbfile") as mock_base_nwb,
             patch.object(model, "_info_msg"),
         ):
 
