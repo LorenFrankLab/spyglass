@@ -129,28 +129,6 @@ class NWBBuilderProtocol(Protocol):
         ...
 
 
-class NWBReaderProtocol(Protocol):
-    """Protocol for reading NWB files.
-
-    Enables dependency injection of NWB file reading operations.
-    """
-
-    def read(self, path: Union[str, Path]):
-        """Read an NWB file and return the file object.
-
-        Parameters
-        ----------
-        path : Union[str, Path]
-            Path to the NWB file
-
-        Returns
-        -------
-        pynwb.NWBFile
-            The loaded NWB file object
-        """
-        ...
-
-
 class NWBWriterProtocol(Protocol):
     """Protocol for writing NWB files.
 
@@ -270,17 +248,6 @@ class RealFileSystem:
     def getmtime(self, path: Union[str, Path]) -> float:
         """Get the modification time of a file."""
         return Path(path).stat().st_mtime
-
-
-class RealNWBReader:
-    """Real NWB reader implementation using pynwb.NWBHDF5IO."""
-
-    def read(self, path: Union[str, Path]):
-        """Read an NWB file and return the file object."""
-        from pynwb import NWBHDF5IO
-
-        # Note: This returns the IO context manager, caller must handle with statement
-        return NWBHDF5IO(str(path), mode="r")
 
 
 class RealNWBWriter:

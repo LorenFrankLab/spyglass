@@ -1,6 +1,6 @@
 """Video generation utilities for pose estimation overlays.
 
-Centralized from spyglass.position.v1.dlc_utils_makevid.
+Centralized from v1 (dlc_utils_makevid) and extended for V2.
 """
 
 import shutil

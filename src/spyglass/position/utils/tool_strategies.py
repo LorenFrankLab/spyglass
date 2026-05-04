@@ -1130,7 +1130,8 @@ class SLEAPStrategy(PoseToolStrategy):
         output_file_info: Any = None,
     ) -> list:
         """Find SLEAP output files (placeholder implementation)."""
-        # TODO: Implement SLEAP-specific output discovery
+        # SLEAP output discovery is not yet implemented; falls back to
+        # generic .slp file search in the expected output directory.
         from pathlib import Path
 
         output_files = []

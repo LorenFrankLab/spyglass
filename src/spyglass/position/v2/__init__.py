@@ -42,8 +42,8 @@ from spyglass.position.v2.train import (
 from spyglass.position.v2.video import (
     Calibration,
     CameraRig,
-    VidFileGroup,
     VideoGroupParams,
+    VidFileGroup,
 )
 
 __all__ = [

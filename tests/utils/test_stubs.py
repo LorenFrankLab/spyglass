@@ -138,21 +138,6 @@ class StubFileSystem:
         return False
 
 
-class StubNWBReader:
-    """Stub NWB reader for testing without real NWB files."""
-
-    def __init__(self, mock_data=None):
-        """Initialize with mock NWB data."""
-        self.mock_data = mock_data or {}
-        self.calls = []
-
-    def read(self, path: Union[str, Path]):
-        """Mock NWB reading - returns context manager with mock data."""
-        path_str = str(path)
-        self.calls.append({"method": "read", "path": path_str})
-        return MockNWBIO(self.mock_data.get(path_str, {}))
-
-
 class StubNWBWriter:
     """Stub NWB writer for testing without real file I/O."""
 

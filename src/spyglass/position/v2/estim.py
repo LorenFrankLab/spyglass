@@ -926,7 +926,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
     def load_from_nwb(
         nwb_file_path: Union[Path, str],
         pose_estimation_name: str = None,
-        nwb_reader_cls=None,
     ) -> dict:
         """Load pose estimation data from existing ndx-pose NWB file.
 
@@ -941,8 +940,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         pose_estimation_name : str, optional
             Name of specific PoseEstimation object to load. If None, uses the
             first PoseEstimation found, by default None
-        nwb_reader_cls : class, optional
-            NWB reader class for dependency injection, by default None
 
         Returns
         -------
@@ -982,86 +979,67 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "Install with: pip install ndx-pose>=0.2.0"
             )
 
-        nwb_file_path = Path(nwb_file_path)
-        if not nwb_file_path.exists():  # pragma: no cover
-            raise FileNotFoundError(
-                f"NWB file not found: {nwb_file_path}"
-            )  # pragma: no cover
+        from spyglass.utils.nwb_helper_fn import get_nwb_file
 
+        nwb_file_path = Path(nwb_file_path)
         logger.info_msg(f"Loading pose data from NWB: {nwb_file_path}")
 
-        # Read NWB file and validate structure
-        if nwb_reader_cls is None:
-            from spyglass.position.utils.protocols import RealNWBReader
+        nwbfile = get_nwb_file(str(nwb_file_path))
 
-            nwb_reader_cls = RealNWBReader
-
-        with nwb_reader_cls().read(str(nwb_file_path)) as io:
-            nwbfile = io.read()
-
-            if "behavior" not in nwbfile.processing:  # pragma: no cover
-                raise ValueError(  # pragma: no cover
-                    f"No behavior module in NWB file: {nwb_file_path}. "
-                    "Expected ndx-pose PoseEstimation data in behavior module."
-                )
-
-            behavior_module = nwbfile.processing["behavior"]
-
-            # Find PoseEstimation objects
-            pose_estimations = {
-                name: obj
-                for name, obj in behavior_module.data_interfaces.items()
-                if isinstance(obj, ndx_pose.PoseEstimation)
-            }
-
-            if not pose_estimations:  # pragma: no cover
-                raise ValueError(  # pragma: no cover
-                    f"No PoseEstimation objects found in NWB: {nwb_file_path}. "
-                    "File must contain ndx-pose.PoseEstimation data."
-                )
-
-            # Select PoseEstimation
-            if pose_estimation_name is not None:
-                if (
-                    pose_estimation_name not in pose_estimations
-                ):  # pragma: no cover
-                    available = ", ".join(
-                        pose_estimations.keys()
-                    )  # pragma: no cover
-                    raise ValueError(  # pragma: no cover
-                        f"PoseEstimation '{pose_estimation_name}' not found in NWB. "
-                        f"Available: {available}"
-                    )
-                pose_estimation = pose_estimations[pose_estimation_name]
-                selected_name = pose_estimation_name
-            else:
-                # Use first PoseEstimation
-                selected_name = list(pose_estimations.keys())[0]
-                pose_estimation = pose_estimations[selected_name]
-                if len(pose_estimations) > 1:
-                    logger.warn_msg(
-                        f"Multiple PoseEstimation objects found. "
-                        f"Using '{selected_name}'. "
-                        f"Available: {', '.join(pose_estimations.keys())}"
-                    )
-
-            # Extract metadata
-            scorer = getattr(pose_estimation, "scorer", "unknown")
-            source_software = getattr(
-                pose_estimation, "source_software", "unknown"
+        if "behavior" not in nwbfile.processing:  # pragma: no cover
+            raise ValueError(  # pragma: no cover
+                f"No behavior module in NWB file: {nwb_file_path}. "
+                "Expected ndx-pose PoseEstimation data in behavior module."
             )
 
-            # Extract bodyparts from PoseEstimationSeries
-            bodyparts = []
-            n_frames = None
+        behavior_module = nwbfile.processing["behavior"]
 
-            for series in pose_estimation.pose_estimation_series.values():
-                bodypart = series.name.replace("_pose", "")
-                bodyparts.append(bodypart)
+        # Find PoseEstimation objects
+        pose_estimations = {
+            name: obj
+            for name, obj in behavior_module.data_interfaces.items()
+            if isinstance(obj, ndx_pose.PoseEstimation)
+        }
 
-                # Get frame count from first series
-                if n_frames is None:
-                    n_frames = series.data.shape[0]
+        if not pose_estimations:  # pragma: no cover
+            raise ValueError(  # pragma: no cover
+                f"No PoseEstimation objects found in NWB: {nwb_file_path}. "
+                "File must contain ndx-pose.PoseEstimation data."
+            )
+
+        # Select PoseEstimation
+        if pose_estimation_name is not None:
+            if pose_estimation_name not in pose_estimations:  # pragma: no cover
+                available = ", ".join(
+                    pose_estimations.keys()
+                )  # pragma: no cover
+                raise ValueError(  # pragma: no cover
+                    f"PoseEstimation '{pose_estimation_name}' not found in NWB. "
+                    f"Available: {available}"
+                )
+            pose_estimation = pose_estimations[pose_estimation_name]
+            selected_name = pose_estimation_name
+        else:
+            selected_name = list(pose_estimations.keys())[0]
+            pose_estimation = pose_estimations[selected_name]
+            if len(pose_estimations) > 1:
+                logger.warn_msg(
+                    f"Multiple PoseEstimation objects found. "
+                    f"Using '{selected_name}'. "
+                    f"Available: {', '.join(pose_estimations.keys())}"
+                )
+
+        scorer = getattr(pose_estimation, "scorer", "unknown")
+        source_software = getattr(pose_estimation, "source_software", "unknown")
+
+        bodyparts = []
+        n_frames = None
+
+        for series in pose_estimation.pose_estimation_series.values():
+            bodypart = series.name.replace("_pose", "")
+            bodyparts.append(bodypart)
+            if n_frames is None:
+                n_frames = series.data.shape[0]
 
         metadata = {
             "nwb_file_path": nwb_file_path,

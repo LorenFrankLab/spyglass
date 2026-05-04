@@ -183,10 +183,9 @@ class Calibration(SpyglassMixin, dj.Manual):
 # ---------------------------------------------------------------------------
 
 
-# TODO: Common or Position schema?
-# 1. VidFileGroup could be used across multiple pipelines
-# 2. Calibration is specific to Position pipeline
-# Separating would require a separate many-to-one Calibration table
+# Design note: VidFileGroup lives in the position schema (not common)
+# because Calibration is tightly coupled to the pose pipeline.
+# A future refactor could split them if VidFileGroup is needed elsewhere.
 
 
 @schema
@@ -248,9 +247,7 @@ class VidFileGroup(SpyglassMixin, dj.Manual):
         """
         # NOTE: Allowing a descriptive group ID relies on users to enforce
         # list uniqueness and consistency. The hash fallback provides a
-        # deterministic ID fallback, but doesn't prevent duplicates
-
-        # TODO: Always generate ID from file list?
+        # deterministic ID fallback, but doesn't prevent duplicates.
 
         if not isinstance(key, dict):  # Typing gate-keep
             raise TypeError(f"Key must be a dictionary, got {type(key)}")
