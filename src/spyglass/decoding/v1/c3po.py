@@ -28,7 +28,7 @@ except ImportError:
         "c3po package not found. Please install c3po to use the c3po decoding functionality."
     )
 
-schema = dj.schema("c3po_v1")
+schema = dj.schema("decoding_c3po_v1")
 
 
 @schema
