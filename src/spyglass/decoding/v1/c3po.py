@@ -10,6 +10,7 @@ from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 from spyglass.common import Session, IntervalList
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_interval import Interval
+from spyglass.src.spyglass.lfp import analysis
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.logging import logger
 
@@ -319,6 +320,7 @@ class Model(SpyglassMixin, dj.Computed):
     -> AnalysisNwbfile
     model_params: longblob  # state dict of the trained model
     training_history: longblob  # history of training and validation loss over epochs
+    input_shape: mediumblob  # shape of the input data used for training, needed for initializing the model when loading parameters
     z_object_id: varchar(40)
     c_object_id: varchar(40)
     """
@@ -456,6 +458,7 @@ class Model(SpyglassMixin, dj.Computed):
             analysis_file_name,
             z_object_id,
             c_object_id,
+            x_train.shape[2:],  # input shape for future use when loading the model
         ]
 
     def _make_insert(
@@ -466,6 +469,7 @@ class Model(SpyglassMixin, dj.Computed):
         analysis_file_name,
         z_object_id,
         c_object_id,
+        input_shape,
     ):
         self.insert1(
             {
@@ -475,6 +479,7 @@ class Model(SpyglassMixin, dj.Computed):
                 "analysis_file_name": analysis_file_name,
                 "z_object_id": z_object_id,
                 "c_object_id": c_object_id,
+                "input_shape": input_shape,
             }
         )
 
@@ -485,3 +490,36 @@ class Model(SpyglassMixin, dj.Computed):
             *vals,
         )
         self._make_insert(key, *results)
+
+    def fetch_c3po_analysis(self, key):
+        model_args = ModelParams().fetch_model_args(key)
+        model = (ModelParams & key).get_model()
+        input_shape = self.fetch1("input_shape")
+
+        # create dummy input to initialize the model parameters
+        x_ = np.zeros((1, 100, *input_shape))
+        if model_args["encoder_args"].get("input_format", None) == "indices":
+            x_ = x_.astype(np.int16)
+        delta_t_ = np.zeros(
+            (
+                1,
+                100,
+            )
+        )
+        rand_key = jax.random.PRNGKey(0)
+        null_params = model.init(jax.random.PRNGKey(1), x_, delta_t_, rand_key)
+        # load the trained model parameters  organized by the dummy input structure
+        params = serialization.from_bytes(null_params, self.fetch1("model_params"))
+
+        # build analysis object
+        analysis = C3poAnalysis(model=model, model_args=model_args, params=params)
+
+        # fetch the embedded latent states and context variables from the NWB file
+        # store them in the analysis object and return it
+        nwb = (self.fetch_nwb())[0]
+        analysis.t = nwb["z"].timestamps
+        analysis.z = nwb["z"].data
+        analysis.c = nwb["c"].data
+
+        return analysis
+
