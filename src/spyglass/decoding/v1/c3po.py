@@ -10,7 +10,6 @@ from spyglass.spikesorting.analysis.v1.group import SortedSpikesGroup
 from spyglass.common import Session, IntervalList
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_interval import Interval
-from spyglass.src.spyglass.lfp import analysis
 from spyglass.utils.dj_mixin import SpyglassMixin, SpyglassMixinPart
 from spyglass.utils.logging import logger
 
