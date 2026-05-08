@@ -140,9 +140,19 @@ line-length = 80
 lint.ignore = [ "E402", "E501", "F401" ]
 
 [tool.codespell]
-skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*'
+skip = '.git,*.pdf,*.svg,*.ipynb,./docs/site/**,temp*,.claude/*'
+ignore-words = './docs/spellcheck_words.txt'
 ignore-words-list = 'nevers'
 # Nevers - name in Citation
+
+[tool.cspell] # CB: Recommended as VSCode extension
+language = "en"
+ignorePaths = [
+    ".git,","*.pdf,","*.svg,","*.ipynb,","./docs/site/**,","temp*",".claude/*"
+]
+dictionaryDefinitions = [
+    { name = "project-words", path = "./docs/spellcheck_words.txt" }
+]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

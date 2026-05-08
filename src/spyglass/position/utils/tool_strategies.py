@@ -296,6 +296,24 @@ class PoseToolStrategy(ABC):
         """
         return params
 
+    def get_latest_model_info(self, config: dict) -> dict:
+        """Get information about the latest trained model in this project.
+
+        Override in tool-specific strategies to scan the project directory
+        and return metadata for the most recently modified trained model.
+
+        Parameters
+        ----------
+        config : dict
+            Tool configuration dictionary (must include ``project_path``)
+
+        Returns
+        -------
+        dict
+            Model metadata, or empty dict if no trained models exist.
+        """
+        return {}
+
     def append_aliases(self, params: dict) -> dict:
         """Append parameter aliases to params dictionary.
 
@@ -539,7 +557,7 @@ class DLCStrategy(PoseToolStrategy):
         model_path, model_id = self._localize_trained_model(
             config, model_instance
         )
-        latest_model = self._get_latest_dlc_model_info(config)
+        latest_model = self.get_latest_model_info(config)
 
         nwb_file_name = model_instance._register_model_metadata(
             ModelMetadata(
@@ -696,12 +714,12 @@ class DLCStrategy(PoseToolStrategy):
 
         return result_params
 
-    def _get_latest_dlc_model_info(self, config: dict) -> dict:
+    def get_latest_model_info(self, config: dict) -> dict:
         """Get latest trained DLC model information from project directory.
 
-        Discovers trained models in the DLC project's dlc-models directory structure.
-        Returns information about the most recently modified model, or empty dict if
-        no trained models are found.
+        Discovers trained models in the DLC project's dlc-models directory
+        structure. Returns information about the most recently modified model,
+        or empty dict if no trained models are found.
 
         Parameters
         ----------

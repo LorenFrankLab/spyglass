@@ -13,25 +13,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple, Union
-
-if TYPE_CHECKING:
-    import pandas as pd
+from typing import List, Optional, Tuple, Union
 
 import datajoint as dj
 import networkx as nx
-import numpy as np
-import yaml
-from datajoint.errors import DuplicateError
+import pandas as pd
 from pynwb import NWBHDF5IO
 
 # Register NWB file in AnalysisNwbfile using any available parent file
 from spyglass.common import AnalysisNwbfile, LabMember, Nwbfile, VideoFile
-from spyglass.position.utils import (
-    get_most_recent_file,
-    get_param_names,
-    suppress_print_from_package,
-)
+from spyglass.position.utils import suppress_print_from_package
 from spyglass.position.utils.path_helpers import resolve_model_path
 from spyglass.position.utils.path_helpers import (
     to_stored_path as _to_stored_path,
@@ -41,6 +32,27 @@ from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin
+
+# ------------------------------ Optional imports ------------------------------
+with suppress_print_from_package():
+    try:
+        # Only import evaluation function for remaining Model.evaluate()
+        from deeplabcut import evaluate_network
+    except (ImportError, RecursionError):
+        # RecursionError can occur when TF 2.16+ (Keras 3) is installed without
+        # tf-keras; the TF compat layer loader recurses infinitely. Set
+        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend support.
+        evaluate_network = None
+
+# -------------------------------- Module setup --------------------------------
+warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
+
+schema = dj.schema(
+    "cbroz_position_v2_train"
+)  # TODO: remove cbroz prefix  # pylint: disable=fixme
+
+
+# ----------------------------------- Helpers ----------------------------------
 
 
 # Parameter dataclasses for methods with 5+ parameters
@@ -57,55 +69,6 @@ class ModelMetadata:
     latest_model: dict
     skeleton_id: str
     parent_id: Optional[str] = None
-
-
-# ------------------------------ Optional imports ------------------------------
-try:
-    import ndx_pose
-except ImportError:
-    ndx_pose = None
-
-with suppress_print_from_package():
-    try:
-        # Only import evaluation function for remaining Model.evaluate() functionality
-        from deeplabcut import evaluate_network
-    except (ImportError, RecursionError):
-        # RecursionError can occur when TF 2.16+ (Keras 3) is installed without
-        # tf-keras; the TF compat layer loader recurses infinitely. Set
-        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend support.
-        evaluate_network = None
-
-# -------------------------------- Module setup --------------------------------
-warnings.filterwarnings("ignore", category=UserWarning, module="networkx")
-
-schema = dj.schema("cbroz_position_v2_train")  # TODO: remove cbroz prefix
-
-
-# ----------------------------------- Helpers ----------------------------------
-
-
-def prompt_default(primary_key: str, default: str) -> str:
-    """Prompt user for input with a default value.
-
-    Parameters
-    ----------
-    primary_key : str
-        Prompt message
-    default : str
-        Default value if user presses enter
-
-    Returns
-    -------
-    str
-        User input or default
-    """
-    choice = input(
-        f"Found no value for {primary_key}. Please provide one. "
-        + f"['enter' for default: {default!r}, 'n' to abort]: "
-    ).strip()
-    if choice.lower() == "n":
-        raise RuntimeError("Aborted by user.")
-    return choice if choice else default
 
 
 # ----------------------- Training-history pure helpers -----------------------
@@ -168,8 +131,6 @@ def parse_training_csv(path: Path) -> "pd.DataFrame | None":
         Columns: ``iteration``, ``loss``, optionally ``learning_rate``,
         and ``source_file``.  ``None`` on parse failure or insufficient data.
     """
-    import pandas as pd
-
     try:
         # Always read raw (no header) first to detect format
         df_raw = pd.read_csv(path, header=None)
@@ -244,7 +205,6 @@ def aggregate_training_stats(dfs: "list[pd.DataFrame]") -> "pd.DataFrame":
         Concatenated data sorted by ``iteration`` (if present).  An empty
         DataFrame is returned when *dfs* is empty.
     """
-    import pandas as pd
 
     if not dfs:
         return pd.DataFrame()
@@ -281,13 +241,14 @@ def validate_skeleton_graph(
     for edge in edges:
         try:
             a, b = edge
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
             raise ValueError(
                 f"Each edge must be a (bodypart, bodypart) pair, got: {edge!r}"
-            )
+            ) from e
         if a not in bp_set or b not in bp_set:
             raise ValueError(
-                f"Edge ({a!r}, {b!r}) references bodypart(s) not in {sorted(bp_set)}"
+                f"Edge ({a!r}, {b!r}) references bodypart(s) "
+                + f"not in {sorted(bp_set)}"
             )
 
 
@@ -315,24 +276,21 @@ def is_duplicate_skeleton(
     -------
     bool
     """
-    from difflib import SequenceMatcher
-
-    import networkx as nx
 
     def _build(bps, eds):
-        G = nx.Graph()
+        this_graph = nx.Graph()
         for bp in bps:
-            G.add_node(bp, label=bp.lower())
+            this_graph.add_node(bp, label=bp.lower())
         for a, b in eds:
-            G.add_edge(a, b)
-        return G
+            this_graph.add_edge(a, b)
+        return this_graph
 
-    G_new = _build(bodyparts_new, edges_new)
-    G_old = _build(bodyparts_existing, edges_existing)
+    graph_new = _build(bodyparts_new, edges_new)
+    graph_old = _build(bodyparts_existing, edges_existing)
 
-    if G_new.number_of_nodes() != G_old.number_of_nodes():
+    if graph_new.number_of_nodes() != graph_old.number_of_nodes():
         return False
-    if G_new.number_of_edges() != G_old.number_of_edges():
+    if graph_new.number_of_edges() != graph_old.number_of_edges():
         return False
 
     def node_match(a, b):
@@ -341,10 +299,10 @@ def is_duplicate_skeleton(
         ).ratio()
         return ratio >= threshold
 
-    GM = nx.algorithms.isomorphism.GraphMatcher(
-        G_new, G_old, node_match=node_match
+    graph_match = nx.algorithms.isomorphism.GraphMatcher(
+        graph_new, graph_old, node_match=node_match
     )
-    return GM.is_isomorphic()
+    return graph_match.is_isomorphic()
 
 
 # ---------------------------------- Tables -----------------------------------
@@ -387,8 +345,12 @@ class BodyPart(SpyglassMixin, dj.Lookup):
         ["objectA"],
     ]
 
-    def insert1(self, key, **kwargs):
+    def insert1(self, key, warn=True, **kwargs):
         """Insert body part into the database."""
+        if self & {"bodypart": key["bodypart"]}:
+            if warn:
+                self._warn_msg(f"Body part {key['bodypart']} already exists")
+            return
         if not LabMember().user_is_admin:
             raise PermissionError("Only admins can insert body parts")
         super().insert1(key, **kwargs)
@@ -511,8 +473,24 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             }
         )
 
-    def _validate_bodyparts(self, labels: set[str]):
-        """Validate that all normalized labels exist in BodyPart table."""
+    def _validate_bodyparts(self, labels: set[str]) -> bool:
+        """Validate that all normalized labels exist in BodyPart table.
+
+        Parameters
+        ----------
+        labels : set[str]
+            Set of normalized body part labels to validate.
+
+        Raises
+        ------
+        dj.DataJointError
+            If any label is not found in the BodyPart table.
+
+        Returns
+        -------
+        bool
+            True if all labels are valid.
+        """
         all_parts = BodyPart().fetch("bodypart")
         valid = {self._normalize_label(x) for x in all_parts}
         missing = set(self._normalize_label(x) for x in labels) - valid
@@ -522,6 +500,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 + "\nPlease either change to existing name or "
                 + "consult with admin to add it."
             )
+        return True
 
     def _shape_hash_from_edges(
         self, labels: list[str], edges: Union[list[tuple[str, str]], None]
@@ -545,9 +524,9 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                         + "references a label not in bodyparts."
                     )
 
-        G = nx.Graph()
-        G.add_nodes_from(range(len(labels_norm)))
-        G.add_edges_from(
+        this_graph = nx.Graph()
+        this_graph.add_nodes_from(range(len(labels_norm)))
+        this_graph.add_edges_from(
             (
                 idx_of[self._normalize_label(u)],
                 idx_of[self._normalize_label(v)],
@@ -555,7 +534,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             for u, v in edges
         )
         return nx.weisfeiler_lehman_graph_hash(
-            G, node_attr=None, edge_attr=None
+            this_graph, node_attr=None, edge_attr=None
         )
 
     def _build_labeled_graph(
@@ -567,12 +546,12 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         if len(labels_norm) != len(set(labels_norm)):
             raise ValueError("Duplicate body part names after normalization.")
 
-        G = nx.Graph()
+        this_graph = nx.Graph()
         for label in labels_norm:
-            G.add_node(label, label=label)
+            this_graph.add_node(label, label=label)
 
         if not edges:
-            return G
+            return this_graph
 
         label_set = set(labels_norm)
         # Edge endpoints must belong to the declared label set
@@ -583,9 +562,11 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 )
 
         for u, v in edges:
-            G.add_edge(self._normalize_label(u), self._normalize_label(v))
+            this_graph.add_edge(
+                self._normalize_label(u), self._normalize_label(v)
+            )
 
-        return G
+        return this_graph
 
     # ----------------- main insert -----------------
 
@@ -593,7 +574,6 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         self,
         key: dict,
         name_similarity: float = 0.85,
-        accept_default: bool = False,
         check_duplicates: bool = True,
         **kwargs,
     ):
@@ -608,21 +588,14 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             (List[Tuple[str, str]]). Or DLC config.
         name_similarity : float, optional
             Fuzzy matching threshold for body part names [0..1], by default 0.85
-        accept_default : bool, optional
-            Whether to accept default skeleton_id without prompting, by default
-            False
         check_duplicates : bool, optional
             Whether to run duplicate detection, by default True
         """
-        skeleton_id: str = key.get("skeleton_id", "").strip()
         bodyparts: List[str] = key.get("bodyparts", [])
         edges: List[Tuple[str, str]] = key.get("edges") or key.get(
             "skeleton", []
         )
 
-        if skeleton_id in self.fetch("skeleton_id"):
-            self._warn_msg(f"Skeleton ID {skeleton_id} already exists")
-            return (self & dict(skeleton_id=skeleton_id)).fetch1("KEY")
         if not bodyparts or edges is None:
             raise dj.DataJointError(
                 f"Key must include 'bodyparts' and 'edges' fields: {key}"
@@ -638,8 +611,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         shape_hash = self._shape_hash_from_edges(bodyparts, edges)
 
-        # Duplicate detection: skip when caller supplies an explicit skeleton_id
-        if check_duplicates and not skeleton_id:
+        if check_duplicates:
             for row in self & dict(hash=shape_hash):
                 row_bodyparts = self.get_bodyparts(row["skeleton_id"])
                 if is_duplicate_skeleton(
@@ -658,11 +630,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                         )
                     return dict(skeleton_id=row["skeleton_id"])
 
-        if not skeleton_id:
-            skeleton_id = default_pk_name("skel", key)
-            if not accept_default and not self._test_mode:
-                skeleton_id = prompt_default("skeleton_id", skeleton_id)
-
+        skeleton_id = default_pk_name("skel", key)
         insert_pk = dict(skeleton_id=skeleton_id)
         super().insert1(
             dict(insert_pk, bodyparts=bodyparts, edges=edges, hash=shape_hash),
@@ -703,12 +671,11 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         try:
             import matplotlib.patches as patches
             import matplotlib.pyplot as plt
-            import networkx as nx
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "Skeleton visualization requires matplotlib and networkx. "
-                "Install with: pip install matplotlib networkx"
-            )
+                "Install with: pip install matplotlib"
+            ) from e
 
         # Get skeleton data
         if skeleton_id:
@@ -729,7 +696,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             return None
 
         # Use existing method to build graph for positioning
-        G = self._build_labeled_graph(bodyparts, edges)
+        this_graph = self._build_labeled_graph(bodyparts, edges)
 
         # Create figure with better sizing for zoomed-out view
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -740,7 +707,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             pos = {self._normalize_label(bodyparts[0]): (0, 0)}
         else:
             # Spring layout with larger separation (k parameter)
-            pos = nx.spring_layout(G, k=3, iterations=150, seed=42)
+            pos = nx.spring_layout(this_graph, k=3, iterations=150, seed=42)
 
         # Create mapping from normalized labels back to original labels
         label_map = {self._normalize_label(bp): bp for bp in bodyparts}
@@ -751,7 +718,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         circle_radius = 0.25  # Smaller circles for better proportions
 
         # Draw edges first (behind nodes)
-        for u, v in G.edges():  # G has normalized node names
+        for u, v in this_graph.edges():  # G has normalized node names
             if u in pos and v in pos:
                 x1, y1 = pos[u]
                 x2, y2 = pos[v]
@@ -973,7 +940,14 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         -------
         dict
             Tool information with structure:
-            {tool_name: {"required": set, "accepted": set, "skipped": set, "aliases": dict}}
+            {
+                tool_name: {
+                    "required": set,
+                    "accepted": set,
+                    "skipped": set,
+                    "aliases": dict
+                }
+            }
         """
         if hasattr(cls, "_cached_tool_info"):
             return cls._cached_tool_info
@@ -1090,10 +1064,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
                 f"Skeleton ID not in the Skeleton table: {key['skeleton_id']}"
             )
 
-        # Filter out unsupported kwargs for DataJoint insert
-        insert_kwargs = {
-            k: v for k, v in kwargs.items() if k != "accept_default"
-        }
+        insert_kwargs = dict(kwargs)
         super().insert1(
             dict(key, params=params, **params_hash_dict), **insert_kwargs
         )
@@ -1103,6 +1074,8 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
 @schema
 class ModelSelection(SpyglassMixin, dj.Manual):
+    """Represents a paring of model parameters and video group for training."""
+
     definition = """
     -> ModelParams
     -> VidFileGroup
@@ -1194,7 +1167,7 @@ class Model(SpyglassMixin, dj.Computed):
         except NotImplementedError as e:
             raise NotImplementedError(
                 f"Training not implemented for {tool}: {e}"
-            )
+            ) from e
 
         # Insert into Model table
         self.insert1(model_result)
@@ -1219,7 +1192,9 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Store in analysis directory for AnalysisNwbfile compatibility
 
-        analysis_dir = AnalysisNwbfile()._analysis_dir
+        analysis_dir = (
+            AnalysisNwbfile()._analysis_dir
+        )  # pylint: disable=protected-access
         nwb_path = Path(analysis_dir) / nwb_file_name
 
         # Create basic NWB file
@@ -1557,7 +1532,7 @@ class Model(SpyglassMixin, dj.Computed):
 
     def _evaluate_dlc_model(
         self,
-        model_entry: dict,
+        _model_entry: dict,
         params_entry: dict,
         plotting: bool,
         show_errors: bool,
@@ -1567,8 +1542,8 @@ class Model(SpyglassMixin, dj.Computed):
 
         Parameters
         ----------
-        model_entry : dict
-            Model table entry
+        _model_entry : dict
+            Model table entry (unused; kept for API consistency)
         params_entry : dict
             ModelParams entry
         plotting : bool
@@ -1638,7 +1613,7 @@ class Model(SpyglassMixin, dj.Computed):
         return results
 
     def _parse_dlc_evaluation_results(
-        self, project_path: Path, shuffle: int, trainingsetindex: int
+        self, project_path: Path, shuffle: int, _trainingsetindex: int
     ) -> dict:
         """Parse DLC evaluation results from CSV file.
 
@@ -1687,11 +1662,9 @@ class Model(SpyglassMixin, dj.Computed):
 
         # Use most recent results file
         results_csv = max(results_csvs, key=lambda p: p.stat().st_mtime)
-        self._logger.debug(f"Reading evaluation results: {results_csv}")
+        self._logger.debug("Reading evaluation results: %s", results_csv)
 
         # Parse CSV
-        import pandas as pd
-
         df = pd.read_csv(results_csv)
 
         # Get last row (latest snapshot)
@@ -1737,8 +1710,6 @@ class Model(SpyglassMixin, dj.Computed):
         >>> if history is not None:
         ...     print(f"Final loss: {history['loss'].iloc[-1]:.4f}")
         """
-        import pandas as pd
-
         # Validate model exists
         if not (self & model_key):
             raise ValueError(f"Model not found: {model_key}")
@@ -1935,32 +1906,218 @@ class Model(SpyglassMixin, dj.Computed):
 
         return fig
 
-    def _get_latest_dlc_model_info(self, config: dict) -> dict:
-        """Get latest trained DLC model information (wrapper for DLCStrategy).
+    def create_project(
+        self,
+        project_name: str,
+        bodyparts: "List[str]",
+        video_list: "List[dict]",
+        frames_per_video: int = 20,
+        project_directory: Union[str, None] = None,
+        **kwargs,
+    ) -> dict:
+        """Create a new DLC project from videos in the Spyglass database.
 
-        This is a compatibility method that delegates to the DLCStrategy
-        implementation for discovering trained DLC models.
+        Creates the DLC project folder on disk, extracts frames for labeling,
+        and inserts a ``Skeleton`` entry.  Does **not** insert into
+        ``ModelSelection`` or trigger training — return here with
+        ``Model.load(config_path)`` after labeling frames externally.
+
+        .. note::
+            There is no ``Project`` table in V2.  The DLC project folder and
+            its ``config.yaml`` are the on-disk record.  ``config.yaml`` is
+            stored in ``ModelParams`` only after training is complete via
+            ``Model.load()``.
 
         Parameters
         ----------
-        config : dict
-            DLC configuration dictionary containing 'project_path' key
+        project_name : str
+            Human-readable name for the DLC project (passed to
+            ``deeplabcut.create_new_project`` as ``project``).
+        bodyparts : list of str
+            Body parts to track. Every entry must already exist in the
+            ``BodyPart`` lookup table (admins can add new ones).
+        video_list : list of dict
+            Training videos.  Each element is a dict with at least
+            ``nwb_file_name`` and ``epoch`` keys to look up an existing
+            ``VideoFile`` entry.  Partial keys (without ``video_file_num``)
+            expand to all camera angles for that epoch.
+        frames_per_video : int, optional
+            Number of frames to extract per video (``numframes2pick`` in
+            DLC). Default 20.
+        project_directory : str, optional
+            Directory in which to create the project folder. Defaults to
+            ``spyglass.settings.pose_project_dir``.
+        **kwargs
+            Passed through to ``deeplabcut.create_new_project()`` and/or
+            ``deeplabcut.extract_frames()`` based on each function's
+            signature.  For example, pass ``algo='uniform'`` to override
+            the default ``'kmeans'`` frame-extraction algorithm.
 
         Returns
         -------
         dict
-            Dictionary with keys: path, iteration, trainFraction, shuffle, date_trained
-            Returns empty dict {} if no trained models exist.
+            ``{"config_path": str, "skeleton_id": str, "vid_group_id": str}``
 
         Raises
         ------
+        ImportError
+            If DeepLabCut is not installed.
+        PermissionError
+            If a bodypart in *bodyparts* does not yet exist in the
+            ``BodyPart`` table.  Adding new body parts is restricted to
+            admins; this error is raised by ``Skeleton().insert1()`` (which
+            delegates to ``BodyPart.insert1()``), not by this method.
         FileNotFoundError
-            If the project_path does not exist
-        """
-        from spyglass.position.utils.tool_strategies import DLCStrategy
+            If a video path cannot be resolved from ``VideoFile`` or does not
+            exist on disk.
+        ValueError
+            If *video_list* is empty or no valid videos are found.
 
-        strategy = DLCStrategy()
-        return strategy._get_latest_dlc_model_info(config)
+        Examples
+        --------
+        Train from videos already registered in Spyglass::
+
+            project_info = Model().create_project(
+                project_name="rat_head_tracking",
+                bodyparts=["greenLED", "redLED_C"],
+                video_list=[
+                    {"nwb_file_name": "subject_20240101_.nwb", "epoch": 1},
+                ],
+            )
+            # → label frames externally, then:
+            model_key = Model().load(project_info["config_path"])
+
+        """
+        try:
+            from deeplabcut import create_new_project, extract_frames
+        except ImportError as e:
+            raise ImportError(
+                "DeepLabCut is required for Model.create_project(). "
+                "Install with: pip install deeplabcut"
+            ) from e
+
+        from spyglass.position.utils import (
+            get_param_names,
+            sanitize_filename,
+        )
+        from spyglass.position.utils.dlc_io import read_yaml, save_yaml
+        from spyglass.settings import pose_project_dir
+
+        # Split kwargs by function signature so callers control both steps
+        # without us needing to hard-code every parameter name.
+        create_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in get_param_names(create_new_project)
+        }
+        extract_kwargs = {
+            k: v
+            for k, v in kwargs.items()
+            if k in get_param_names(extract_frames)
+        }
+        extract_kwargs.setdefault("algo", "uniform")
+        extract_kwargs.setdefault("userfeedback", False)
+
+        # ── 1. Resolve video paths via VideoFile; build a VidFileGroup ────────
+        # Each dict in video_list is a partial VideoFile key; get_abs_paths
+        # expands multi-camera epochs automatically.
+        resolved_videos = [
+            path
+            for item in video_list
+            for path in VideoFile.get_abs_paths(item)
+        ]
+
+        if not resolved_videos:
+            raise ValueError(
+                "No valid training videos found. Check video_list entries."
+            )
+
+        vid_group_key = VidFileGroup.create_from_files(
+            video_files=resolved_videos,
+            description=f"Training videos: {project_name}",
+        )
+
+        # ── 2. Create the DLC project folder ─────────────────────────────────
+        project_directory = str(
+            project_directory
+            or pose_project_dir
+            or Path.home() / "dlc_projects"
+        )
+
+        config_path = Path(
+            create_new_project(
+                project=project_name,
+                experimenter=sanitize_filename(project_name),
+                videos=resolved_videos,
+                working_directory=project_directory,
+                copy_videos=True,
+                multianimal=False,
+                **create_kwargs,
+            )
+        )
+        self._info_msg(f"DLC project created: {config_path}")
+
+        # ── 3. Patch numframes2pick via dlc_io utilities ──────────────────────
+        _, cfg = read_yaml(config_path.parent)
+        cfg["numframes2pick"] = frames_per_video
+        config_path = Path(
+            save_yaml(config_path.parent, cfg, filename="config")
+        )
+
+        # ── 4. Extract frames ─────────────────────────────────────────────────
+        algo = extract_kwargs["algo"]
+        self._info_msg(
+            f"Extracting {frames_per_video} frames/video (algo='{algo}')…"
+        )
+        extract_frames(str(config_path), **extract_kwargs)
+        self._info_msg("Frame extraction complete.")
+
+        # ── 5. Insert (or retrieve) Skeleton ──────────────────────────────────
+        # BodyPart validation is deferred to Skeleton().insert1(): unknown
+        # body parts cause PermissionError for non-admin users.
+        sk_key = Skeleton().insert1(
+            {"bodyparts": bodyparts, "edges": []},
+            skip_duplicates=True,
+        )
+
+        self._info_msg(f"Skeleton: {sk_key['skeleton_id']}")
+
+        return {
+            "config_path": str(config_path),
+            "skeleton_id": sk_key["skeleton_id"],
+            "vid_group_id": vid_group_key["vid_group_id"],
+        }
+
+    def get_latest(self, config: dict) -> dict:
+        """Get latest trained model information for the tool used by this entry.
+
+        Fetches the tool name from the linked ``ModelParams`` row and delegates
+        to the matching strategy's ``get_latest_model_info`` implementation.
+
+        Parameters
+        ----------
+        config : dict
+            Tool configuration dictionary containing at minimum
+            ``project_path``.
+
+        Returns
+        -------
+        dict
+            Model metadata dict whose keys depend on the tool (e.g. ``path``,
+            ``iteration``, ``trainFraction``, ``shuffle``, ``date_trained``
+            for DLC).  Returns ``{}`` if no trained models exist or if the
+            strategy has no discovery logic.
+
+        Raises
+        ------
+        ValueError
+            If ``self`` is not restricted to exactly one entry.
+        FileNotFoundError
+            If the ``project_path`` in *config* does not exist.
+        """
+        tool = (ModelParams & self).fetch1("tool")
+        strategy = ToolStrategyFactory.create_strategy(tool)
+        return strategy.get_latest_model_info(config)
 
     def load(
         self,
@@ -2051,6 +2208,69 @@ class Model(SpyglassMixin, dj.Computed):
         strategy = ToolStrategyFactory.create_strategy(tool)
         return strategy.load(model_path, self, **kwargs)
 
+    def import_from_v1(self, v1_key: dict, **kwargs) -> dict:
+        """Import a V1 DLCModel into the V2 pipeline.
+
+        Looks up the V1 model's ``project_path`` from the
+        ``spyglass.position.v1`` schema and delegates to :meth:`load` with the
+        resolved ``config.yaml`` path.
+
+        Parameters
+        ----------
+        v1_key : dict
+            Primary-key fields that uniquely identify a row in the V1
+            ``DLCModel`` table, e.g.::
+
+                {
+                    "project_name": "Wtrack_WhiteLED",
+                    "dlc_model_name": "Wtrack_WhiteLED_ms_stim_wtrack_00",
+                    "dlc_model_params_name": "default",
+                }
+
+        **kwargs
+            Forwarded to :meth:`load` (e.g. ``skeleton_id``,
+            ``model_params_id``).
+
+        Returns
+        -------
+        dict
+            V2 ``Model`` primary key returned by :meth:`load`.
+
+        Raises
+        ------
+        ImportError
+            If the V1 position schema is not available in the current
+            environment.
+        FileNotFoundError
+            If the V1 ``project_path`` does not contain a ``config.yaml``.
+        KeyError
+            If *v1_key* does not match any row in ``DLCModel``.
+        """
+        try:
+            from spyglass.position.v1.position_dlc_model import DLCModel
+        except Exception as exc:
+            raise ImportError(
+                "Could not import the V1 DLCModel table.  Make sure the "
+                "spyglass.position.v1 schema is available and that the V1 "
+                "tables have been created in your database."
+            ) from exc
+
+        row = (DLCModel & v1_key).fetch1()
+        project_path = Path(row["project_path"])
+        available = sorted(project_path.glob("*config.y*ml"))
+        if not available:
+            raise FileNotFoundError(
+                f"No config.yaml found in V1 project_path: {project_path}"
+            )
+        # Prefer a DJ-managed config (prefixed with 'dj_dlc') when present
+        dj_configs = [p for p in available if "dj_dlc" in p.name]
+        config_path = dj_configs[0] if dj_configs else available[0]
+        self._info_msg(
+            f"Importing V1 model '{row['dlc_model_name']}' "
+            f"from {config_path}"
+        )
+        return self.load(config_path, **kwargs)
+
     def _import_dlc_model(self, model_path: Path, **kwargs):
         if model_path.suffix not in [".yml", ".yaml"]:
             raise ValueError("DLC model path must be a .yml or .yaml file")
@@ -2062,14 +2282,10 @@ class Model(SpyglassMixin, dj.Computed):
             "bodyparts": config.get("bodyparts", []),
             "skeleton": config.get("skeleton", []),
         }
-        if kwargs.get("skeleton_id"):
-            skeleton_config["skeleton_id"] = kwargs["skeleton_id"]
-
         skeleton_key = Skeleton().insert1(
             skeleton_config,
             check_duplicates=True,
             skip_duplicates=True,
-            accept_default=True,
         )
         self._info_msg(f"Skeleton: {skeleton_key['skeleton_id']}")
 
@@ -2177,7 +2393,7 @@ class Model(SpyglassMixin, dj.Computed):
         ... )
         """
         errors = []
-        warnings = []
+        warn_list = []
         checks = {
             "model_exists": False,
             "model_path_exists": False,
@@ -2197,7 +2413,7 @@ class Model(SpyglassMixin, dj.Computed):
                 "valid": False,
                 "checks": checks,
                 "errors": errors,
-                "warnings": warnings,
+                "warnings": warn_list,
                 "model_info": model_info,
             }
         checks["model_exists"] = True
@@ -2212,7 +2428,7 @@ class Model(SpyglassMixin, dj.Computed):
                 "valid": False,
                 "checks": checks,
                 "errors": errors,
-                "warnings": warnings,
+                "warnings": warn_list,
                 "model_info": model_info,
             }
 
@@ -2226,7 +2442,7 @@ class Model(SpyglassMixin, dj.Computed):
             # For DLC models, verify it's a valid config file
             if model_entry["tool"] == "DLC":
                 if model_path.suffix not in [".yaml", ".yml"]:
-                    warnings.append(
+                    warn_list.append(
                         f"DLC model path should be config.yaml, got: {model_path.name}"
                     )
                 else:
@@ -2234,11 +2450,11 @@ class Model(SpyglassMixin, dj.Computed):
                     try:
                         config = load_yaml(model_path)
                         if "project_path" not in config:
-                            warnings.append(
+                            warn_list.append(
                                 "DLC config missing 'project_path' field"
                             )
                     except Exception as e:
-                        warnings.append(f"Could not parse DLC config: {e}")
+                        warn_list.append(f"Could not parse DLC config: {e}")
 
         # Check 3: Skeleton is valid
         try:
@@ -2259,14 +2475,14 @@ class Model(SpyglassMixin, dj.Computed):
                 if not bodyparts or len(bodyparts) == 0:
                     errors.append("Skeleton has no bodyparts")
                 elif len(bodyparts) < 2:
-                    warnings.append(
+                    warn_list.append(
                         f"Skeleton has only {len(bodyparts)} bodypart(s)"
                     )
                 else:
                     checks["skeleton_valid"] = True
 
                 if edges is None or len(edges) == 0:
-                    warnings.append("Skeleton has no edges defined")
+                    warn_list.append("Skeleton has no edges defined")
             else:
                 errors.append(f"Skeleton not found: {skeleton_id}")
 
@@ -2314,14 +2530,14 @@ class Model(SpyglassMixin, dj.Computed):
                         model_path, check_inference=True
                     )
                     checks.update(tool_checks)
-                    warnings.extend(tool_warnings)
+                    warn_list.extend(tool_warnings)
                 else:
-                    warnings.append(
+                    warn_list.append(
                         f"Model verification not supported for tool: {tool} "
                         "(tool does not support training)"
                     )
             except ValueError:
-                warnings.append(
+                warn_list.append(
                     f"Inference check not supported for tool: {tool}"
                 )
 
@@ -2338,15 +2554,15 @@ class Model(SpyglassMixin, dj.Computed):
             "valid": valid,
             "checks": checks,
             "errors": errors,
-            "warnings": warnings,
+            "warnings": warn_list,
             "model_info": model_info,
         }
 
         # Log results
         if valid:
             self._info_msg(f"Model verification PASSED: {model_key}")
-            if warnings:
-                self._warn_msg(f"Warnings: {warnings}")
+            if warn_list:
+                self._warn_msg(f"Warnings: {warn_list}")
         else:
             self._err_msg(f"Model verification FAILED: {model_key}")
             self._err_msg(f"Errors: {errors}")

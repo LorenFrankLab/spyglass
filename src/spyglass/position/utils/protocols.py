@@ -30,11 +30,10 @@ def default_pk_name(
         Append the hash component when True (default).
     """
     when = datetime.now(timezone.utc)
+    h = ""
     if include_hash:
         raw = json.dumps(params or {}, sort_keys=True, default=str)
         h = "-" + hashlib.md5(raw.encode()).hexdigest()[:8]
-    else:
-        h = ""
     return f"{prefix}-{when:%Y%m%d}{h}"[:limit]
 
 

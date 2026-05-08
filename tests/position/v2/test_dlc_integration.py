@@ -2,7 +2,7 @@
 
 Covers:
 - Path resolution utilities (resolve_model_path, _to_stored_path)
-- Model._get_latest_dlc_model_info() using the synthetic test project
+- DLCStrategy.get_latest_model_info() using the synthetic test project
 - Model.get_training_history() using the synthetic test project
 - Model.load() via DLC config.yaml with bootstrapped session
 - Model.load() error cases
@@ -121,7 +121,7 @@ class TestToStoredPath:
 
 
 class TestGetLatestDLCModelInfo:
-    """Test _get_latest_dlc_model_info() using the synthetic DLC project.
+    """Test DLCStrategy.get_latest_model_info() using the synthetic DLC project.
 
     The ``dlc_project_config`` fixture creates a project with a fake trained
     model (pose_cfg.yaml) so the method can be exercised without GPU/DLC
@@ -133,23 +133,29 @@ class TestGetLatestDLCModelInfo:
     def _require_dlc(self, skip_if_no_dlc):
         """Apply DLC skip guard to every test in this class."""
 
+    @pytest.fixture
+    def strategy(self):
+        from spyglass.position.utils.tool_strategies import DLCStrategy
+
+        return DLCStrategy()
+
     def _read_config(self, config_path):
         import yaml
 
         with open(config_path) as f:
             return yaml.safe_load(f)
 
-    def test_returns_nonempty_dict(self, model, dlc_project_config):
+    def test_returns_nonempty_dict(self, strategy, dlc_project_config):
         """Returns a non-empty dict for a project with a trained model."""
         config = self._read_config(dlc_project_config)
-        result = model._get_latest_dlc_model_info(config)
+        result = strategy.get_latest_model_info(config)
         assert isinstance(result, dict)
         assert len(result) > 0
 
-    def test_has_required_keys(self, model, dlc_project_config):
+    def test_has_required_keys(self, strategy, dlc_project_config):
         """Result has path, iteration, trainFraction, shuffle, date_trained."""
         config = self._read_config(dlc_project_config)
-        result = model._get_latest_dlc_model_info(config)
+        result = strategy.get_latest_model_info(config)
         for key in (
             "path",
             "iteration",
@@ -159,37 +165,37 @@ class TestGetLatestDLCModelInfo:
         ):
             assert key in result, f"Missing key: {key!r}"
 
-    def test_path_exists_on_disk(self, model, dlc_project_config):
+    def test_path_exists_on_disk(self, strategy, dlc_project_config):
         """The returned path actually exists on the filesystem."""
         config = self._read_config(dlc_project_config)
-        result = model._get_latest_dlc_model_info(config)
+        result = strategy.get_latest_model_info(config)
         assert Path(result["path"]).is_dir()
 
-    def test_iteration_is_zero(self, model, dlc_project_config):
+    def test_iteration_is_zero(self, strategy, dlc_project_config):
         """Fake project has only iteration-0; returned iteration == 0."""
         config = self._read_config(dlc_project_config)
-        result = model._get_latest_dlc_model_info(config)
+        result = strategy.get_latest_model_info(config)
         assert result["iteration"] == 0
 
-    def test_train_fraction_in_unit_interval(self, model, dlc_project_config):
+    def test_train_fraction_in_unit_interval(
+        self, strategy, dlc_project_config
+    ):
         """trainFraction is a float in (0, 1]."""
         config = self._read_config(dlc_project_config)
-        result = model._get_latest_dlc_model_info(config)
+        result = strategy.get_latest_model_info(config)
         tf = result["trainFraction"]
         assert isinstance(tf, float) and 0.0 < tf <= 1.0
 
-    def test_nonexistent_project_raises(self, model):
+    def test_nonexistent_project_raises(self, strategy):
         """Raises FileNotFoundError for a project_path that does not exist."""
         with pytest.raises(FileNotFoundError):
-            model._get_latest_dlc_model_info(
+            strategy.get_latest_model_info(
                 {"project_path": "/nonexistent/dlc/project"}
             )
 
-    def test_empty_project_returns_empty(self, model, tmp_path):
+    def test_empty_project_returns_empty(self, strategy, tmp_path):
         """Returns {} when project has no trained models."""
-        result = model._get_latest_dlc_model_info(
-            {"project_path": str(tmp_path)}
-        )
+        result = strategy.get_latest_model_info({"project_path": str(tmp_path)})
         assert result == {}
 
 

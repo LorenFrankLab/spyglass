@@ -117,7 +117,7 @@ class CentroidParams:
 
     method: str
     points: dict
-    max_LED_separation: float = None
+    max_LED_separation: float = None  # noqa: C0103
 
     def to_dict(self) -> dict:
         """Convert to dictionary format."""
@@ -484,7 +484,7 @@ class PoseInferenceRunner(BaseMixin):
                 output_paths.append(str(latest_output))
                 self._info_msg(f"DLC created: {latest_output}")
             else:
-                self._warning_msg(
+                self._warn_msg(
                     f"No DLC output found for {vid_path.stem} in {output_dir}"
                 )
 
@@ -650,6 +650,94 @@ class NDXPoseBuilder(BaseMixin):
         self._info_msg(f"Stored pose estimation in NWB: {analysis_abs_path}")
 
 
+def _populate_nwb_pose_estimation(
+    nwbfile,
+    df,
+    scorer: str,
+    bodyparts: list,
+    pose_estimation_name: str,
+    dlc_output_path: Path,
+    timestamps: np.ndarray,
+) -> None:
+    """Populate an NWBFile with a PoseEstimation object built from DLC data.
+
+    Adds (or extends) the ``behavior`` processing module with a
+    ``Skeletons`` container and a ``PoseEstimation`` container holding one
+    ``PoseEstimationSeries`` per body-part.
+
+    Parameters
+    ----------
+    nwbfile : pynwb.NWBFile
+        Open NWB file to modify in-place.
+    df : pd.DataFrame
+        Multi-level DataFrame returned by ``parse_dlc_h5_output``.
+    scorer : str
+        DLC scorer/network name (top-level column label).
+    bodyparts : list[str]
+        Ordered list of body-part names.
+    pose_estimation_name : str
+        Name for the ``PoseEstimation`` NWB object.
+    dlc_output_path : Path
+        Source DLC output file (used for description strings).
+    timestamps : np.ndarray
+        Per-frame timestamps (seconds).
+    """
+    # Behavior processing module
+    if "behavior" not in nwbfile.processing:
+        behavior_module = nwbfile.create_processing_module(
+            name="behavior",
+            description="Behavioral pose estimation data",
+        )
+    else:
+        behavior_module = nwbfile.processing["behavior"]
+
+    # Skeleton (no edge info available from DLC output alone)
+    skeleton = ndx_pose.Skeleton(
+        name=f"{pose_estimation_name}_skeleton",
+        nodes=bodyparts,
+        edges=np.array([], dtype="uint8").reshape(0, 2),
+    )
+
+    if "Skeletons" not in behavior_module.data_interfaces:
+        behavior_module.add_data_interface(
+            ndx_pose.Skeletons(skeletons=[skeleton])
+        )
+    else:
+        behavior_module.data_interfaces["Skeletons"].skeletons.append(skeleton)
+
+    # One PoseEstimationSeries per body-part
+    pose_series_list = [
+        ndx_pose.PoseEstimationSeries(
+            name=f"{bp}_pose",
+            description=f"Pose estimation for {bp}",
+            data=np.column_stack(
+                [
+                    df[(scorer, bp, "x")].values,
+                    df[(scorer, bp, "y")].values,
+                ]
+            ),
+            unit="pixels",
+            reference_frame="(0,0) is top-left corner",
+            timestamps=timestamps,
+            confidence=df[(scorer, bp, "likelihood")].values,
+            confidence_definition="DLC likelihood score",
+        )
+        for bp in bodyparts
+    ]
+
+    behavior_module.add(
+        ndx_pose.PoseEstimation(
+            name=pose_estimation_name,
+            pose_estimation_series=pose_series_list,
+            description=f"Pose estimation from DLC: {dlc_output_path.name}",
+            original_videos=[str(dlc_output_path.stem)],
+            source_software="DeepLabCut",
+            skeleton=skeleton,
+            scorer=scorer,
+        )
+    )
+
+
 @schema
 class PoseEstim(SpyglassMixin, dj.Computed):
     """Pose estimation results from model inference on video files.
@@ -709,7 +797,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
         sel_fields = ["model_id", "vid_group_id", "pose_estim_params_id"]
         sel_key = {k: row[k] for k in sel_fields if k in row}
-        if len(sel_key) == 3 and not (PoseEstimSelection() & sel_key):
+        if len(sel_key) == 3 and not PoseEstimSelection() & sel_key:
             PoseEstimSelection().insert1(
                 {**sel_key, "task_mode": "load", "output_dir": ""},
                 skip_duplicates=True,
@@ -734,7 +822,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             Name of NWB file to create/update. If None, generates a name based
             on the DLC output file, by default None
         pose_estimation_name : str, optional
-            Name for the PoseEstimation object in NWB, by default "PoseEstimation"
+            Name for the PoseEstimation object in NWB. Default: "PoseEstimation"
         Returns
         -------
         Path
@@ -802,6 +890,19 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             logger.info_msg(f"Creating new NWB file: {nwb_path}")
             io_mode = "w"
 
+        # Resolve timestamps before opening the file (raises early on error)
+        if df.index.name == "time":
+            _timestamps = df.index.values
+        elif timestamps is not None:
+            _timestamps = timestamps
+        else:
+            raise ValueError(
+                "No 'time' index in DLC output and no timestamps "
+                "provided to load_dlc_output; refusing to fall back to "
+                "frame indices. Pass timestamps fetched from the "
+                "registered VideoFile NWB."
+            )
+
         with NWBHDF5IO(
             str(nwb_path), mode=io_mode, load_namespaces=(io_mode != "w")
         ) as io:
@@ -811,93 +912,22 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 from pynwb import NWBFile
 
                 nwbfile = NWBFile(
-                    session_description=f"Pose estimation from {dlc_output_path.name}",
+                    session_description=(
+                        f"Pose estimation from DLC output {dlc_output_path.name}"
+                    ),
                     identifier=f"pose_{datetime.now():%Y%m%d%H%M%S}",
                     session_start_time=datetime.now(),
                 )
 
-            # Create behavior processing module if it doesn't exist
-            if "behavior" not in nwbfile.processing:
-                behavior_module = nwbfile.create_processing_module(
-                    name="behavior",
-                    description="Behavioral pose estimation data",
-                )
-            else:
-                behavior_module = nwbfile.processing["behavior"]
-
-            # Create skeleton
-            # Note: We don't have edge information from DLC output alone
-            skeleton = ndx_pose.Skeleton(
-                name=f"{pose_estimation_name}_skeleton",
-                nodes=bodyparts,
-                edges=np.array([], dtype="uint8").reshape(
-                    0, 2
-                ),  # No edges from DLC output
+            _populate_nwb_pose_estimation(
+                nwbfile,
+                df,
+                scorer,
+                bodyparts,
+                pose_estimation_name,
+                dlc_output_path,
+                _timestamps,
             )
-
-            # Create Skeletons container if it doesn't exist
-            if "Skeletons" not in behavior_module.data_interfaces:
-                skeletons = ndx_pose.Skeletons(skeletons=[skeleton])
-                behavior_module.add_data_interface(skeletons)
-            else:
-                # Add skeleton to existing container
-                skeletons = behavior_module.data_interfaces["Skeletons"]
-                skeletons.skeletons.append(skeleton)
-
-            # Create PoseEstimationSeries for each bodypart
-            pose_series_list = []
-
-            # Resolve timestamps — prefer named index "time", then
-            # caller-provided; never silently fall back to frame indices.
-            if df.index.name == "time":
-                _timestamps = df.index.values
-            elif timestamps is not None:
-                _timestamps = timestamps
-            else:
-                raise ValueError(
-                    "No 'time' index in DLC output and no timestamps "
-                    "provided to load_dlc_output; refusing to fall back to "
-                    "frame indices. Pass timestamps fetched from the "
-                    "registered VideoFile NWB."
-                )
-
-            for bodypart in bodyparts:
-                # Extract x, y, likelihood for this bodypart
-                x = df[(scorer, bodypart, "x")].values
-                y = df[(scorer, bodypart, "y")].values
-                likelihood = df[(scorer, bodypart, "likelihood")].values
-
-                # Stack x, y as (n_frames, 2)
-                pose_data = np.column_stack([x, y])
-
-                # Create PoseEstimationSeries
-                series = ndx_pose.PoseEstimationSeries(
-                    name=f"{bodypart}_pose",
-                    description=f"Pose estimation for {bodypart}",
-                    data=pose_data,
-                    unit="pixels",
-                    reference_frame="(0,0) is top-left corner",
-                    timestamps=_timestamps,
-                    confidence=likelihood,
-                    confidence_definition="DLC likelihood score",
-                )
-                pose_series_list.append(series)
-
-            # Create PoseEstimation container
-            pose_estimation = ndx_pose.PoseEstimation(
-                name=pose_estimation_name,
-                pose_estimation_series=pose_series_list,
-                description=f"Pose estimation from DLC: {dlc_output_path.name}",
-                original_videos=[str(dlc_output_path.stem)],
-                source_software="DeepLabCut",
-                skeleton=skeleton,
-                scorer=scorer,
-            )
-
-            # Add to behavior module
-            behavior_module.add(pose_estimation)
-
-            # Write NWB file
             io.write(nwbfile)
 
         logger.info_msg(f"DLC output loaded into NWB: {nwb_path}")
@@ -960,8 +990,6 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                 "Install with: pip install ndx-pose>=0.2.0"
             )
 
-        from spyglass.utils.nwb_helper_fn import get_nwb_file
-
         nwb_file_path = Path(nwb_file_path)
         logger.info_msg(f"Loading pose data from NWB: {nwb_file_path}")
 
@@ -995,8 +1023,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
                     pose_estimations.keys()
                 )  # pragma: no cover
                 raise ValueError(  # pragma: no cover
-                    f"PoseEstimation '{pose_estimation_name}' not found in NWB. "
-                    f"Available: {available}"
+                    f"PoseEstimation '{pose_estimation_name}' not found in NWB."
+                    f" Available: {available}"
                 )
             pose_estimation = pose_estimations[pose_estimation_name]
             selected_name = pose_estimation_name
@@ -1165,7 +1193,8 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         inference_params = inference_params or {}
 
         self._info_msg(
-            f"PoseEstim.make: tool={tool}, mode={task_mode}, output_dir={output_dir}"
+            "PoseEstim.make: "
+            + f"tool={tool}, mode={task_mode}, output_dir={output_dir}"
         )
 
         # Resolve video paths (needed for trigger mode inference)
@@ -1727,7 +1756,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         """Insert pose parameters with validation.
 
         Standard DataJoint insert1 interface with added parameter validation.
-        Validates orientation, centroid, and smoothing parameters before insertion.
+        Validates orientation, centroid, and smoothing params before insertion.
 
         Parameters
         ----------
@@ -1745,9 +1774,15 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         >>> # Standard DataJoint interface
         >>> PoseParams().insert1({
         ...     "pose_params_id": "my_config",
-        ...     "orient": {"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
+        ...     "orient": {
+        ...         "method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"
+        ...     },
         ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
-        ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ...     "smoothing": {
+        ...         "interpolate": False,
+        ...         "smooth": False,
+        ...         "likelihood_thresh": 0.9,
+        ...     },
         ... })
 
         >>> # Or use class method
@@ -1755,7 +1790,11 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         ...     "pose_params_id": "my_config",
         ...     "orient": {"method": "none"},
         ...     "centroid": {"method": "1pt", "points": {"point1": "nose"}},
-        ...     "smoothing": {"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ...     "smoothing": {
+        ...         "interpolate": False,
+        ...         "smooth": False,
+        ...         "likelihood_thresh": 0.9,
+        ...     }
         ... })
         """
         # Validate parameter structure
@@ -1778,7 +1817,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         if smoothing is not None:
             validate_smoothing_params(smoothing)
 
-        # Serialise typed dataclasses to plain dicts before DB insertion.
+        # Serialize typed dataclasses to plain dicts before DB insertion.
         key = dict(key)
         for field_name in ("orient", "centroid", "smoothing"):
             val = key[field_name]
@@ -1801,7 +1840,7 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         :mod:`spyglass.position.utils.validation`
         (e.g. :class:`~TwoPtOrientParams`, :class:`~TwoPtCentroidParams`,
         :class:`~SmoothingParams`).  Typed dataclasses are automatically
-        serialised to dicts before validation and database insertion.
+        serialized to dicts before validation and database insertion.
 
         Parameters
         ----------
@@ -1821,9 +1860,15 @@ class PoseParams(SpyglassMixin, dj.Lookup):
         >>> # Plain dict API (backward compatible)
         >>> PoseParams.insert_custom(
         ...     params_name="my_config",
-        ...     orient={"method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"},
+        ...     orient={
+        ...         "method": "two_pt", "bodypart1": "nose", "bodypart2": "tail"
+        ...     },
         ...     centroid={"method": "1pt", "points": {"point1": "nose"}},
-        ...     smoothing={"interpolate": False, "smooth": False, "likelihood_thresh": 0.9}
+        ...     smoothing={
+        ...         "interpolate": False,
+        ...         "smooth": False,
+        ...         "likelihood_thresh": 0.9,
+        ...     },
         ... )
 
         >>> # Typed dataclass API
@@ -1860,6 +1905,8 @@ class PoseParams(SpyglassMixin, dj.Lookup):
 
 @schema
 class PoseSelection(SpyglassMixin, dj.Manual):
+    """Pairing of PoseEstim and PoseParams for pose processing."""
+
     definition = """
     -> PoseEstim
     -> PoseParams
@@ -1892,78 +1939,87 @@ class PoseSelection(SpyglassMixin, dj.Manual):
         key : dict
             Contains pose_estim_id and pose_params_id for validation
         """
-        try:
-            # Get skeleton_id by joining through the pipeline:
-            # PoseEstim -> PoseEstimSelection -> Model -> ModelSelection -> ModelParams -> skeleton_id
-            # Use projection to avoid analysis_file_name conflicts
-            pose_estim_key = {
-                k: v
-                for k, v in key.items()
-                if k in PoseEstimSelection.heading.names
-            }
+        # Get skeleton_id by joining through the pipeline:
+        # PoseEstim -> PoseEstimSelection -> Model -> ModelSelection ...
+        # -> ModelParams -> skeleton_id
+        # Use projection to avoid analysis_file_name conflicts
+        pose_estim_key = {
+            k: v
+            for k, v in key.items()
+            if k in PoseEstimSelection.heading.names
+        }
 
-            # First get the model_id from PoseEstimSelection (avoiding analysis_file_name in PoseEstim)
-            selection_info = (PoseEstimSelection & pose_estim_key).fetch1()
-            model_id = selection_info["model_id"]
+        # First get the model_id from PoseEstimSelection
+        selection_info = (PoseEstimSelection & pose_estim_key).fetch1()
+        model_id = selection_info["model_id"]
 
-            # Then get skeleton_id from Model -> ModelSelection -> ModelParams
-            model_info = (Model & {"model_id": model_id}).fetch1()
-            model_selection_key = {
-                k: v
-                for k, v in model_info.items()
-                if k in ModelSelection.heading.names
-            }
+        # Then get skeleton_id from Model -> ModelSelection -> ModelParams
+        model_info = (Model & {"model_id": model_id}).fetch1()
+        model_selection_key = {
+            k: v
+            for k, v in model_info.items()
+            if k in ModelSelection.heading.names
+        }
 
-            # Get skeleton_id from ModelParams via ModelSelection
-            params_info = (
-                ModelParams & (ModelSelection & model_selection_key)
-            ).fetch1()
-            skeleton_id = params_info["skeleton_id"]
+        # Get skeleton_id from ModelParams via ModelSelection
+        params_info = (
+            ModelParams & (ModelSelection & model_selection_key)
+        ).fetch1()
+        skeleton_id = params_info["skeleton_id"]
 
-            # Get centroid params from PoseParams
-            pose_params_key = {
-                k: v for k, v in key.items() if k in ["pose_params_id"]
-            }
-            params_info = (PoseParams & pose_params_key).fetch1()
-            centroid_params = params_info["centroid"]
+        # Get centroid params from PoseParams
+        pose_params_key = {
+            k: v for k, v in key.items() if k in ["pose_params_id"]
+        }
+        params_info = (PoseParams & pose_params_key).fetch1()
+        centroid_params = params_info["centroid"]
 
-            if not centroid_params:
-                return  # No centroid params to validate
+        if not centroid_params:
+            return  # No centroid params to validate
 
-            # Check if skeleton exists and get suggestion
-            skeleton_entry = Skeleton & {"skeleton_id": skeleton_id}
-            if len(skeleton_entry) == 0:
-                logger.warning(
-                    f"Skeleton '{skeleton_id}' not found. Skipping validation."
-                )
-                return
+        # Check if skeleton exists and get suggestion
+        skeleton_entry = Skeleton & {"skeleton_id": skeleton_id}
+        if len(skeleton_entry) == 0:
+            self._warn_msg(
+                "Skeleton '%s' not found. Skipping validation.",
+                skeleton_id,
+            )
+            return
 
-            suggested_method = skeleton_entry.get_centroid_method()
-            actual_method = centroid_params.get("method")
+        suggested_method = skeleton_entry.get_centroid_method()
+        actual_method = centroid_params.get("method")
 
-            if actual_method is None:
-                logger.warning(
-                    f"No centroid method specified in '{pose_params_key['pose_params_id']}'. "
-                    f"Skeleton '{skeleton_id}' suggests: '{suggested_method}'"
-                )
-            elif actual_method != suggested_method:
-                bodyparts = skeleton_entry.get_bodyparts()
-                logger.warning(
-                    f"Centroid method '{actual_method}' in '{pose_params_key['pose_params_id']}' "
-                    f"may not be optimal for skeleton '{skeleton_id}' (bodyparts: {bodyparts}). "
-                    f"Suggested method: '{suggested_method}'"
-                )
-            else:
-                logger.info(
-                    f"Centroid method '{actual_method}' matches skeleton '{skeleton_id}' suggestion ✓"
-                )
+        if actual_method is None:
+            self._warn_msg(
+                "No centroid method specified in '%s'. Skeleton '%s' use: '%s'",
+                pose_params_key["pose_params_id"],
+                skeleton_id,
+                suggested_method,
+            )
+        elif actual_method != suggested_method:
+            bodyparts = skeleton_entry.get_bodyparts()
+            self._warn_msg(
+                "Centroid method '%s' in '%s' may not be optimal for "
+                + "skeleton '%s' (bodyparts: %s). Suggested method: '%s'",
+                actual_method,
+                pose_params_key["pose_params_id"],
+                skeleton_id,
+                bodyparts,
+                suggested_method,
+            )
 
-        except (KeyError, ValueError, AttributeError) as e:
-            logger.warning(f"Could not validate centroid method: {e}")
+        self._info_msg(
+            "Centroid method '%s' in '%s' matches skeleton '%s' suggestion",
+            actual_method,
+            pose_params_key["pose_params_id"],
+            skeleton_id,
+        )
 
 
 @schema
 class PoseV2(SpyglassMixin, dj.Computed):
+    """Processed pose derivatives (orientation, centroid, velocity)"""
+
     definition = """
     -> PoseSelection
     ---
@@ -2004,8 +2060,6 @@ class PoseV2(SpyglassMixin, dj.Computed):
         - Velocity is Euclidean speed in cm/s
         - First velocity value is typically NaN
         """
-        import pandas as pd
-
         _ = self.ensure_single_entry()
 
         nwb_data = self.fetch_nwb(
@@ -2099,7 +2153,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
             Path for the output video file. Defaults to
             ``<video_stem>_pose.mp4`` next to the source video.
         cm_to_pixels : float, optional
-            Conversion factor from centimetres to pixels, by default 1.0.
+            Conversion factor from centimeters to pixels, by default 1.0.
         percent_frames : float, optional
             Fraction of video frames to process (0.0–1.0), by default 1.0.
         **kwargs
@@ -2184,6 +2238,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            check=True,
         )
         if ret.returncode != 0:
             raise FileNotFoundError(
@@ -2192,7 +2247,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         fps = float(Fraction(ret.stdout.strip()))  # e.g. "30000/1001" → 29.97
 
         # video_frame_inds: timestamps ARE frame indices (0, 1, 2, ...) since
-        # DLC runs inference on every frame. Mirrors V1's video_frame_ind column.
+        # DLC runs inference on every frame. Mirrors V1's video_frame_ind column
         video_frame_inds = timestamps.astype(int)
 
         # position_time: convert frame indices to seconds for VideoMaker display
@@ -2248,7 +2303,7 @@ class PoseV2(SpyglassMixin, dj.Computed):
         return output_path
 
     def make(self, key):
-        """Process raw pose estimation with orientation, centroid, and smoothing.
+        """Process raw pose estimation with orientation, centroid, and smoothing
 
         1. Fail fast: verify NWB link
         2. Fetch raw pose DataFrame and parameters

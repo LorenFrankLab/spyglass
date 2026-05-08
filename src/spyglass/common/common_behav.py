@@ -842,7 +842,14 @@ class VideoFile(SpyglassMixin, dj.Imported):
             if row.get("camera_name"):
                 skipped_camera += 1
                 continue
-            video_nwb = (cls & row).fetch_nwb()
+            try:
+                video_nwb = (cls & row).fetch_nwb()
+            except (FileNotFoundError, ValueError, dj.DataJointError) as e:
+                cls()._warn_msg(
+                    f"DataJoint error fetching NWB for {row}: {str(e)}"
+                )
+                skipped_camera += 1
+                continue
             if len(video_nwb) != 1:
                 raise ValueError(
                     f"Expecting 1 video file per entry. {len(video_nwb)} found"
@@ -866,9 +873,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
             updated_path += 1
 
         msg = [
-            f"VideoFile.update_entries: {total} entries checked.",
-            f"  camera_name updated: {updated_camera}, skipped: {skipped_camera}",
-            f"  path updated: {updated_path}, skipped: {skipped_path}, failed: {len(failed_path)}",
+            "VideoFile.update_entries:",
+            f"  entries checked: {total}",
+            f"  updated/skipped camera_name: {updated_camera}/{skipped_camera}",
+            f"  updated/skipped/failed path: {updated_path}/{skipped_path}/"
+            + f"{len(failed_path)}",
         ]
         if failed_path:
             msg.append("  FileNotFoundError for the following entries:")
@@ -908,13 +917,11 @@ class VideoFile(SpyglassMixin, dj.Imported):
 
         # If the stored object ID resolves to a non-ImageSeries (e.g. a stale
         # reference to a ProcessingModule), search the NWB for ImageSeries.
-        import pynwb as _pynwb
-
-        if not isinstance(nwb_video, _pynwb.image.ImageSeries):
+        if not isinstance(nwb_video, pynwb.image.ImageSeries):
             image_series = [
                 obj
                 for obj in nwbf.objects.values()
-                if isinstance(obj, _pynwb.image.ImageSeries)
+                if isinstance(obj, pynwb.image.ImageSeries)
             ]
             if not image_series:
                 raise FileNotFoundError(
@@ -942,6 +949,35 @@ class VideoFile(SpyglassMixin, dj.Imported):
             f"video file with filename: {video_filename} "
             f"does not exist in {video_path_obj}/"
         )
+
+    @classmethod
+    def get_abs_paths(cls, key: Dict) -> list:
+        """Return absolute paths for all VideoFile rows matching *key*.
+
+        Unlike :meth:`get_abs_path`, *key* may be a partial primary key
+        (e.g. ``{nwb_file_name, epoch}`` without ``video_file_num``).  Every
+        matching row is resolved and returned as a list, which handles
+        multi-camera epochs gracefully.
+
+        Parameters
+        ----------
+        key : dict
+            Partial or full primary key for VideoFile.
+
+        Returns
+        -------
+        list of str
+            Absolute paths for all matching video files.
+
+        Raises
+        ------
+        ValueError
+            If no VideoFile rows match *key*.
+        """
+        row_keys = (cls & key).fetch("KEY")
+        if not row_keys:
+            raise ValueError(f"No VideoFile rows found for key: {key}")
+        return [cls.get_abs_path(k) for k in row_keys]
 
     def fetch_key_from_path(
         self, video_file_path: str, update_on_miss: bool = False

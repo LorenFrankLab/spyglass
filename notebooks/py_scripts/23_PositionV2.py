@@ -63,14 +63,17 @@
 # - [Setup](#Setup) - Environment configuration
 #     - Load packages & configure environment
 #     - Connect to database
-# - [Model Training](#MVPTraining) - Train a model from scratch *(primary path)*
-#     - Minimal model training setup
+# - [Which path?](#DecisionTree) - Decision tree
+# - [Path A: Train a New Model](#PathA) - Create a DLC project & train *(start here if no model yet)*
+#     - Choose training videos from `VideoFile`
+#     - Define body parts and skeleton
+#     - `Model.create_project()` → label frames → train
 #     - Training loss curve visualization
-#     - Understand training workflow
-# - [Model Import](#Model) - Import a pre-trained model *(alternative path)*
-#     - Import DLC project (`config.yaml`), SLEAP NWB, or DLC h5 output
-#     - Verify skeleton and bodyparts
-#     - Create video file groups
+# - [Path B: Import a Pre-Trained Model](#PathB) - Import existing model *(skip if you did Path A)*
+#     - Find or download a pretrained model (DLC Model Zoo, DANDI)
+#     - Import from a V1 Spyglass model (`Model.import_from_v1()`)
+#     - Import any DLC project directly (`config.yaml`)
+#     - SLEAP / ndx-pose NWB ingestion
 # - [Pose Estimation](#PoseEstim) - Run inference on videos
 #     - Configure inference parameters (e.g., device, batch size)
 #     - Set up estimation task
@@ -89,7 +92,6 @@
 #
 # #### Advanced Features
 #
-# - [Training New Models](#TrainingWorkflow) - Custom model development
 # - [Model Evaluation](#ModelEvaluation) - Training curves and performance metrics
 # - [Video Generation](#VideoGeneration) - Create annotated outputs
 #
@@ -132,7 +134,8 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
 os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
 os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
 
-dj.config.load("../dj_local_conf.json")
+# dj.config.load("../dj_local_conf.json")
+dj.config.load("dj_local_conf.json")
 print(dj.conn(reset=True))
 
 from spyglass.common import Session, VideoFile
@@ -197,176 +200,280 @@ dj.Diagram(video) + dj.Diagram(train) + dj.Diagram(estim) + dj.Diagram(PoseV2)
 #     orientation and smoothing.
 
 # %% [markdown]
-# ## Model Training <a id="MVPTraining"></a>
+# ## Which path is right for you? <a id="DecisionTree"></a>
 #
-# **🎯 Goal**: Train a pose estimation model from within Spyglass
+# | Situation | Path |
+# |---|---|
+# | You want to **train a new model** from videos already in Spyglass | **Path A** — [Train a new model](#PathA) |
+# | You already have a **pre-trained DLC or SLEAP model** | **Path B** — [Import a pre-trained model](#PathB) |
 #
-# **🔍 What you'll accomplish**:
-# - Create a skeleton and set up training parameters
-# - Run a minimal training demonstration
-# - Visualize training loss curves
-#
-# **Core Components:**
-# - **ModelParams**: Training configuration and hyperparameters
-# - **ModelSelection**: Links parameters, video data, and skeleton definitions
-# - **Model**: Executes training and stores results
-#
-# **Key Methods:**
-# - `Model().train(model_key, **params)` - Continue training existing models
-# - `Model().get_training_history(model_key)` - Retrieve training metrics
-# - `Model().plot_training_history(model_key)` - Visualize training curves
-#
-# > **Alternative**: If you already have a pre-trained DLC or SLEAP model,
-# > skip ahead to [Model Import](#Model) below.
+# Both paths converge at the [Pose Estimation](#PoseEstim) section below.
 
 # %% [markdown]
-# ### Configuration
+# ## Path A: Train a New Model <a id="PathA"></a>
 #
-# Set up training parameters for minimal demonstration with training curve
-# visualization (10 iterations):
+# **🎯 Goal**: Create a DLC project from videos in Spyglass, label frames, and
+# train a pose estimation model.
+#
+# **Steps**:
+# 1. Choose training videos from the `VideoFile` table
+# 2. Define body parts and skeleton
+# 3. Call `Model.create_project()` to create the DLC project and extract frames
+# 4. Label frames externally (DLC GUI / napari)
+# 5. Train the model
+# 6. Visualize training curves
+
+# %% [markdown]
+# ### Step 1 — Choose training videos
+#
+# Browse the `VideoFile` table to find recordings you want to train on.
+# Each row corresponds to one video file registered in Spyglass.
 
 # %%
-# Configure training parameters for minimal training curve demonstration
-config_path = (
-    Path.home()
-    / "DeepLabCut"
-    / "examples"
-    / "TEST-Alex-2025-09-08"
-    / "config.yaml"
+# Inspect available videos — pick the ones you want to use for training
+VideoFile()
+
+# %% [markdown]
+# Select your training videos.  You can use `nwb_file_name` + `epoch` dicts
+# to reference videos by session, or supply absolute paths:
+
+# %%
+# ── Choose your training videos ──────────────────────────────────────────────
+# Reference videos by session/epoch — VideoFile.get_abs_paths() resolves them.
+# Partial keys (nwb_file_name + epoch, no video_file_num) expand to all
+# camera angles recorded for that epoch.
+# training_video_list = [
+#     {"nwb_file_name": "subject_20240101_.nwb", "epoch": 1},
+#     {"nwb_file_name": "subject_20240101_.nwb", "epoch": 3},
+# ]
+
+# Tutorial default: set after bootstrapping a session below.
+training_video_list = []  # overridden in the bootstrap block below
+
+# %% [markdown]
+# ### Step 2 — Define body parts and skeleton
+
+# %%
+# List the body parts your model will track.
+# Every name must already exist in the BodyPart table (admins can add new ones).
+training_bodyparts = ["whiteLED", "tailBase"]
+
+# %% [markdown]
+# ### Step 3 — Bootstrap tutorial session & create project
+#
+# <details>
+# <summary><b>Tutorial helper — not for production use</b></summary>
+#
+# `Model.create_project()` calls DLC to create a project folder and extract
+# frames.  Later, `Model.load()` calls `VidFileGroup.create_from_dlc_config()`
+# internally, which needs a matching `Session` in the Spyglass database.
+#
+# **In production**, register your NWB session with `insert_sessions()` and
+# ensure `VideoFile` rows exist *before* calling `Model.create_project()` or
+# `Model.load()`.
+#
+# The `bootstrap_from_video_paths()` helper (from
+# `tests/position/v2/make_example_dlc_project.py`) creates minimal dummy
+# entries so this tutorial works without a recorded session.  It is maintained
+# alongside the test suite to stay in sync with the production API.
+#
+# **If you run this on a shared database, please delete the dummy entries when
+# done.**
+#
+# </details>
+
+# %%
+# Tutorial bootstrap helper — sourced from the test utility module so it is
+# maintained in one place and exercised by the test suite.
+# sys.path is extended to allow importing from tests/ without installing a
+# separate package. This pattern is NOT for production use.
+import sys
+
+import spyglass
+
+_tests_v2 = Path(spyglass.__file__).parents[2] / "tests" / "position" / "v2"
+if str(_tests_v2) not in sys.path:
+    sys.path.insert(0, str(_tests_v2))
+
+# %%
+import yaml
+from make_example_dlc_project import (  # noqa: E402
+    bootstrap_from_video_paths,
+    make_dlc_project,
 )
+
+# Shared state initialised here; both paths (A and B) update these variables.
 model_key = None
 nwb_file_name = None
 inf_vid_path = None
 _demo_output_dir = None
 training_vid_group_id = None
-skeleton_id = None
+config_path = None
 
-minimal_training_params = {
-    "trainingsetindex": 0,
-    "shuffle": 1,
-    "gputouse": None,  # Auto-detect available GPU
-    "TFGPUinference": False,
-    "net_type": "resnet_50",  # Standard architecture
-    "augmenter_type": "imgaug",
-    "maxiters": 10,  # Very low for quick demo - may cause TensorFlow errors
-    "displayiters": 1,  # Write data every iteration for training curve
-    "saveiters": 2,  # Save checkpoint every 2 iterations
-    "project_path": str(config_path.parent),
-}
-model_tool = "DLC"  # Explicitly specify DLC for training
-
-# Set up model parameters ID for the training
-mvp_params_name = "mvp_demo_10iter"
-
-training_params_insert = {
-    "model_params_id": mvp_params_name,
-    "params": minimal_training_params,
-    "tool": model_tool,
-    "skeleton_id": skeleton_id,  # Required field for ModelParams
-}
-
-mvp_selection_key = {
-    "model_params_id": mvp_params_name,
-    "tool": model_tool,
-    "vid_group_id": training_vid_group_id,  # Single vid_group_id, not array
-    "parent_id": None,  # No parent model for this demo
-}
-
-# Validate prerequisites
-if not ("skeleton_id" in locals() and skeleton_id):
-    raise ValueError("❌ skeleton_id required - import model first")
-
-if not config_path:
-    raise ValueError("❌ config_path required - check model import")
-
-if not training_vid_group_id:
-    raise ValueError("❌ training_vid_group_id required - import model first")
-
-print(
-    f"🔧 Training config: {model_tool}/{minimal_training_params['net_type']}, "
-    + f"{minimal_training_params['maxiters']} iterations"
+# ── Tutorial: create a minimal example DLC project if none exists ─────────
+_demo_dlc_dir = Path.home() / "DeepLabCut" / "examples"
+_demo_config = (
+    _demo_dlc_dir / "tutorial_dlc-tutorial_dlc-2025-01-01" / "config.yaml"
 )
 
-# %% [markdown]
-# ### Execution
-#
-# Run the actual DLC training with our minimal configuration:
-#
-# ⚠️ **Note**: Low iteration count during demo may raise TensorFlow errors.
-# This is expected behavior for demonstration purposes.
-
-# %%
-# Validate training prerequisites
-ModelParams.insert1(training_params_insert, skip_duplicates=True)
-
-# Create model selection using correct field names for ModelSelection table
-ModelSelection.insert1(mvp_selection_key, skip_duplicates=True)
-
-# Execute training using the selection key
-if len(Model & mvp_selection_key) > 0:
-    print(f"ℹ️ Model '{mvp_params_name}' already exists - skipping training")
+if not _demo_config.exists():
+    _demo_config = make_dlc_project(_demo_dlc_dir)
+    print(f"Created example DLC project: {_demo_config}")
 else:
-    print("🏃 Starting MVP training ...")
-    Model.populate(mvp_selection_key, display_progress=True)
-    print(f"✅ Model '{mvp_params_name}' trained and saved")
+    print(f"Using existing DLC project: {_demo_config}")
+
+config_path = Path(_demo_config)
+
+# ── Read the DLC config to get video paths ───────────────────────────────────
+with open(config_path) as _f:
+    _cfg = yaml.safe_load(_f)
+_training_videos = list(_cfg.get("video_sets", {}).keys())
+_project_name = Path(_cfg.get("project_path", str(config_path.parent))).name
+
+# ── Register a Spyglass session for those videos (tutorial only) ──────────────
+print("Bootstrapping tutorial Spyglass session...")
+nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
+    _training_videos, nwb_stem=_project_name
+)
+print(f"  nwb_file_name  : {nwb_file_name}")
+print(f"  inf_vid_path   : {inf_vid_path}")
+
+# Use the registered videos as our training list
+training_video_list = [{"nwb_file_name": nwb_file_name, "epoch": 1}]
 
 # %% [markdown]
-# ### Results
-#
-# Verify the trained model and display training outcomes:
+# Now call `Model.create_project()`.  This:
+# 1. Validates body parts are in the `BodyPart` table
+# 2. Resolves video paths from `VideoFile` (or uses absolute paths directly)
+# 3. Calls `deeplabcut.create_new_project()` to create the project folder
+# 4. Calls `deeplabcut.extract_frames()` with uniform sampling
+# 5. Inserts (or retrieves) a `Skeleton` entry
+# 6. Returns `{"config_path": ..., "skeleton_id": ...}`
 
 # %%
-# Verify successful training and display results
-trained_models = Model & mvp_selection_key
-if len(trained_models) == 0:
-    raise ValueError(
-        "❌ No model found for selection key - run training execution cell again"
-    )
+project_info = Model().create_project(
+    project_name="tutorial_dlc",
+    bodyparts=training_bodyparts,
+    video_list=training_video_list,
+    frames_per_video=20,
+)
 
-# Training completed successfully
-model_entry = trained_models.fetch1()
-print(f"✅ Model '{model_entry['model_id']}' ready for pose estimation")
+config_path = Path(project_info["config_path"])
+skeleton_id = project_info["skeleton_id"]
+
+print(f"DLC project created : {config_path}")
+print(f"Skeleton ID         : {skeleton_id}")
+print()
+print("Next: label the extracted frames, then return to train below.")
 
 # %% [markdown]
-# ### Training Progress
+# <details>
+# <summary><b>Why no <code>DLCProject</code> table in V2?</b></summary>
 #
-# Visualize training loss curves:
+# V1 maintained a `DLCProject` table to track project state and training files,
+# keeping a copy of every config and video path in the database.  In practice
+# this created bookkeeping overhead without adding scientific value, because the
+# on-disk DLC project folder already serves as the ground truth.
+#
+# V2 treats the `config.yaml` on disk as the record of truth.  The config is
+# stored in `ModelParams` only *after* training is complete (via `Model.load()`),
+# keeping the database focused on results rather than intermediate state.
+#
+# </details>
+
+# %% [markdown]
+# ### Step 4 — Label frames (manual step)
+#
+# After `create_project()` finishes, DLC has extracted frames into
+# `labeled-data/` inside the project folder.  Label them using the DLC GUI or
+# the napari plugin before training:
+#
+# ```bash
+# # DLC GUI (requires a display)
+# python -m deeplabcut
+#
+# # Or programmatically (works in headless environments with napari installed)
+# ipython -c "import deeplabcut; deeplabcut.label_frames('$config_path')"
+# ```
+#
+# Return here once labeling is complete.
+
+# %% [markdown]
+# ### Step 5 — Train the model
+#
+# After labeling, insert `ModelParams` and `ModelSelection`, then call
+# `Model.populate()`:
 
 # %%
-# 📊 Training Progress Visualization
-# Enhanced training history with improved CSV discovery and visualization
+# Training parameters — use low maxiters for a quick demo
+_train_params = {
+    "trainingsetindex": 0,
+    "shuffle": 1,
+    "gputouse": None,
+    "TFGPUinference": False,
+    "net_type": "resnet_50",
+    "augmenter_type": "imgaug",
+    "maxiters": 10,
+    "displayiters": 1,
+    "saveiters": 2,
+    "project_path": str(config_path.parent),
+}
+_train_params_id = "path_a_demo_10iter"
 
-if "model_entry" not in locals():
-    raise ValueError(
-        "❌ model_entry not found - run results verification cell first"
-    )
+ModelParams.insert1(
+    {
+        "model_params_id": _train_params_id,
+        "params": _train_params,
+        "tool": "DLC",
+        "skeleton_id": skeleton_id,
+    },
+    skip_duplicates=True,
+)
 
-mvp_model_id = model_entry["model_id"]
-mvp_model_key = {"model_id": mvp_model_id}
+# Create a VidFileGroup from the DLC config so ModelSelection can reference it
+training_vid_group_key = VidFileGroup.create_from_dlc_config(config_path)
+training_vid_group_id = training_vid_group_key["vid_group_id"]
 
-# Get training history using enhanced core methods
-# These methods try simple discovery first, then enhanced patterns if needed
-training_history = Model().get_training_history(mvp_model_key)
+_sel_key = {
+    "model_params_id": _train_params_id,
+    "tool": "DLC",
+    "vid_group_id": training_vid_group_id,
+    "parent_id": None,
+}
+ModelSelection.insert1(_sel_key, skip_duplicates=True)
 
-if len(training_history) == 0:
-    raise ValueError("❌ No training history found")
+if len(Model & _sel_key) > 0:
+    print(f"Model '{_train_params_id}' already exists — skipping training")
+else:
+    print("Starting training (10 iterations) ...")
+    Model.populate(_sel_key, display_progress=True)
+    print(f"Model '{_train_params_id}' trained and saved")
 
-# Display enhanced training visualization
-fig = Model().plot_training_history(mvp_model_key)
+model_key = (Model & _sel_key).fetch1()
+print(f"model_key: {model_key['model_id']}")
 
 # %% [markdown]
-# ## Model Import <a id="Model"></a>
+# ### Step 6 — Visualize training curves
+
+# %%
+if model_key:
+    _history = Model().get_training_history({"model_id": model_key["model_id"]})
+    if len(_history) > 0:
+        Model().plot_training_history({"model_id": model_key["model_id"]})
+    else:
+        print("No training history yet (expected for 10-iteration demo).")
+
+# %% [markdown]
+# ## Path B: Import a Pre-Trained Model <a id="PathB"></a>
 #
-# **Goal**: Load a pre-trained pose estimation model into Spyglass
+# **Goal**: Load an existing DLC, SLEAP, or ndx-pose model into Spyglass.
 #
 # **What you'll accomplish**:
-# - Import a DeepLabCut project, SLEAP NWB file, or DLC h5 output
+# - Import a DeepLabCut project (`config.yaml`), SLEAP NWB file, or DLC h5 output
 # - Understand skeleton and bodypart organization
 # - Create video file groups for analysis
 #
-# > **Note**: This section is for users with an existing pre-trained model.
-# > If you want to train a model from scratch within Spyglass, see
-# > [Model Training](#MVPTraining) above.
+# > **Note**: Skip this section if you just completed Path A above.
 
 # %% [markdown]
 # Position V2 supports different import methods:
@@ -376,225 +483,86 @@ fig = Model().plot_training_history(mvp_model_key)
 # 3. **DLC h5 output**: Load inference results from pre-run DLC
 
 # %% [markdown]
-# Let's start by looking at the Model table:
-#
-
-# %% [markdown]
 # #### From DeepLabCut Project
 #
 # If you have a DeepLabCut model already trained, you can import it by changing
-# the following to the path to your `config.yaml`. If not, use the following
-# codeblock to download and set up an example project.
+# `config_path` below to your `config.yaml`. If not, obtain one from the
+# [DLC Model Zoo](https://www.mackenziemathislab.org/dlc-modelzoo):
 #
+# ```python
+# import deeplabcut
+# deeplabcut.create_project_from_modelzoo(
+#     modelname="full_cat",
+#     working_directory="/path/to/save",
+#     videos=["/path/to/your/video.mp4"],
+# )
+# ```
+#
+# Or clone the DLC examples:
 # ```bash
-# cd /your/desired/path
 # git clone https://github.com/DeepLabCut/DeepLabCut/
 # python ./DeepLabCut/examples/testscript.py
 # ```
 
 # %% [markdown]
-# > **Session prerequisite** — `import_model()` calls
-# > `VidFileGroup.create_from_dlc_config()` internally. If a corresponding
-# > `Session` already exists, great. If not, it makes some guesses based on
-# > `nwb_file_name` stems in video paths. In production, run
-# > `insert_sessions('your_training_session.nwb')` > first.
+# > **Session prerequisite** — `Model.load()` calls
+# > `VidFileGroup.create_from_dlc_config()` internally. In production, run
+# > `insert_sessions('your_training_session.nwb')` before this step.
 # >
-# > For this tutorial, `_tutorial_bootstrap_dlc_session()`
-# > creates minimal dummy entries so the import can proceed without a recorded
-# > session.
-# >
-# > If you use this on a shared database **PLEASE DELETE ENTRIES** when you're done.
+# > For this tutorial, `bootstrap_from_video_paths()` creates minimal dummy
+# > entries so the import can proceed without a recorded session.
+
+# %%
+# Path B: default — import from a Spyglass V1 DLC model
+# ────────────────────────────────────────────────────────────────────────────
+# If you completed Path A, model_key is already set — this block is skipped.
 #
+# By default we import the pre-trained Wtrack_WhiteLED model from the V1
+# schema.  Swap _DEFAULT_V1_KEY for any other V1 model key as needed.
+# To import a raw config.yaml instead, see the commented fallback below.
 
-# %%
-# NOT IMPORTANT, JUST A HELPER FOR THE TUTORIAL.
+_DEFAULT_V1_KEY = {
+    "project_name": "Wtrack_WhiteLED",
+    "dlc_model_name": "Wtrack_WhiteLED_ms_stim_wtrack_00",
+    "dlc_model_params_name": "default",
+}
 
-import uuid
-from datetime import datetime
-
-import yaml
-
-
-def _tutorial_bootstrap_dlc_session(config_path):
-    """Create minimal dummy Spyglass session entries for a DLC project.
-
-    Inserts Nwbfile, Session, Task, IntervalList, TaskEpoch, and VideoFile
-    entries derived from the DLC config so that create_from_dlc_config()
-    can find a session match and link the VidFileGroup to real VideoFile rows.
-
-    For tutorial / development use only. In production, register your
-    session with insert_sessions() before calling Model.load().
-    """
-    import shutil
-    import subprocess
-
-    from spyglass.common import (
-        IntervalList,
-        Nwbfile,
-        Session,
-        Task,
-        TaskEpoch,
-        VideoFile,
-    )
-    from spyglass.settings import raw_dir, video_dir
-
-    config_path = Path(config_path)
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
-
-    project_path = Path(cfg.get("project_path", str(config_path.parent)))
-    nwb_stem = project_path.name  # e.g. 'TEST-Alex-2025-09-08'
-    nwb_file_name = f"{nwb_stem}_.nwb"
-    training_video_paths = list(cfg.get("video_sets", {}).keys())
-    nwb_file_path = Path(raw_dir) / nwb_file_name
-
-    # Copy minirec as a valid NWB template so AnalysisNwbfile.create() can
-    # open it when storing pose estimation results.
-    if not nwb_file_path.exists() or nwb_file_path.stat().st_size == 0:
-        minirec = Path(raw_dir) / "minirec20230622_.nwb"
-        shutil.copy2(str(minirec), str(nwb_file_path))
-        print(f"Copied minirec as placeholder NWB: {nwb_file_path}")
-
-    # Create a 1-second inference clip directly in video_dir.
-    # Inference videos are assumed to live in video_dir; training videos
-    # stay in the DLC project folder (their absolute paths are stored in
-    # the VideoFile.path column so get_abs_path() can find them).
-    src_video = Path(training_video_paths[0])
-    inf_vid_name = f"example_inference{src_video.suffix}"
-    inf_vid_path = Path(video_dir) / inf_vid_name
-    if not inf_vid_path.exists():
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-i",
-                str(src_video),
-                "-t",
-                "1",
-                "-c",
-                "copy",
-                str(inf_vid_path),
-            ],
-            check=True,
-            capture_output=True,
-        )
-        print(f"Created inference clip: {inf_vid_path}")
-
-    # All video paths: training (DLC project folder) + inference (video_dir).
-    # path= is set explicitly so VideoFile.get_abs_path() short-circuits
-    # via the stored path without needing an NWB lookup.
-    all_video_paths = training_video_paths + [str(inf_vid_path)]
-
-    nwb_key = dict(nwb_file_name=nwb_file_name)
-    interval_key = dict(nwb_key, interval_list_name="tutorial_epoch_1")
-    now = datetime.now()
-    ins = dict(allow_direct_insert=True, skip_duplicates=True)
-
-    # Check existence before insert: DataJoint uploads external files before
-    # the duplicate check, so skip_duplicates alone will raise if the file
-    # content changed since the first upload.
-    if not (Nwbfile() & nwb_key):
-        Nwbfile().insert1(
-            {**nwb_key, "nwb_file_abs_path": str(nwb_file_path.resolve())},
-            allow_direct_insert=True,
-        )
-    Session().insert1(
-        {
-            **nwb_key,
-            "session_description": f"Tutorial dummy: {project_path.name}",
-            "session_start_time": now,
-            "timestamps_reference_time": now,
-        },
-        **ins,
-    )
-    Task().insert1({"task_name": "tutorial_dlc"}, **ins)
-    IntervalList().insert1(
-        {**interval_key, "valid_times": np.array([[0.0, 1.0]])}, **ins
-    )
-    TaskEpoch().insert1(
-        {
-            **interval_key,
-            "epoch": 1,
-            "task_name": "tutorial_dlc",
-            "camera_names": [],
-        },
-        **ins,
-    )
-    for i, video_path in enumerate(all_video_paths):
-        VideoFile().insert1(
-            {
-                **nwb_key,
-                "epoch": 1,
-                "video_file_num": i,
-                "camera_name": "tutorial_dlc",
-                "video_file_object_id": str(uuid.uuid4())[:40],
-                "path": str(Path(video_path).resolve()),
-            },
-            **ins,
-        )
-
-    print(
-        f"Tutorial session ready: {nwb_file_name} ({len(all_video_paths)} video(s))"
-    )
-    return nwb_file_name, inf_vid_path
-
-
-def _get_or_create_inference_video(config_path):
-    """Get or create inference video path for existing DLC projects."""
-    from spyglass.settings import video_dir
-
-    with open(config_path) as f:
-        cfg = yaml.safe_load(f)
-
-    training_videos = list(cfg.get("video_sets", {}).keys())
-    if training_videos:
-        src_video = Path(training_videos[0])
-        inf_vid_name = f"example_inference{src_video.suffix}"
-        inf_vid_path = Path(video_dir) / inf_vid_name
-
-        if inf_vid_path.exists():
-            return inf_vid_path
-
-    return None
-
-
-# %% [markdown]
-# Now, we'll add your DLC project.
-
-# %%
-# Point to your DLC project config file.
-# If this path does not exist, a self-contained demo runs automatically.
-dlc_path = Path.home() / "DeepLabCut"
-config_path = dlc_path / "examples" / "TEST-Alex-2025-09-08" / "config.yaml"
-
-model_key = None
-nwb_file_name = None
-inf_vid_path = None  # Inference video path (set below)
-_demo_output_dir = None  # Set to a pre-computed h5 dir when in demo mode
-
-if config_path.exists():
-    # ── Real data path ────────────────────────────────────────────────────
+if model_key is None:
     try:
-        model_key = Model().load(config_path)
-        # Get inference video path for existing projects
-        inf_vid_path = _get_or_create_inference_video(config_path)
-    except ValueError:
-        # No Spyglass Session matched the DLC video paths.
-        # Tutorial: create minimal dummy entries and retry.
-        # Production: run insert_sessions('your_session.nwb') instead.
-        print("Bootstrapping tutorial session for DLC import...")
-        nwb_file_name, inf_vid_path = _tutorial_bootstrap_dlc_session(
-            config_path
+        model_key = Model().import_from_v1(_DEFAULT_V1_KEY)
+        print(f"Imported V1 model: {model_key['model_id']}")
+    except (ImportError, KeyError, FileNotFoundError) as _exc:
+        print(f"V1 import unavailable ({type(_exc).__name__}): {_exc}")
+        print(
+            "Falling back to direct config.yaml import.\n"
+            "Uncomment and set _b_config_path in the block below."
         )
-        model_key = Model().load(config_path)
 
-    print(f"Imported model: {model_key}")
-    if inf_vid_path:
-        print(f"Inference video: {inf_vid_path}")
-    else:
-        print("No inference video found - some tutorial steps may be skipped")
+# ── Fallback: import from a raw config.yaml ──────────────────────────────────
+# Uncomment if import_from_v1 is unavailable or you want to import a model
+# that is not in the V1 schema.
+#
+# _b_config_path = Path("/path/to/your/config.yaml")
+# if model_key is None and _b_config_path.exists():
+#     with open(_b_config_path) as _f:
+#         _b_cfg = yaml.safe_load(_f)
+#     _b_videos = list(_b_cfg.get("video_sets", {}).keys())
+#     _b_project_name = Path(
+#         _b_cfg.get("project_path", str(_b_config_path.parent))
+#     ).name
+#     try:
+#         model_key = Model().load(_b_config_path)
+#     except ValueError:
+#         print("Bootstrapping tutorial session for DLC import...")
+#         nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
+#             _b_videos, nwb_stem=_b_project_name
+#         )
+#         model_key = Model().load(_b_config_path)
+#     config_path = _b_config_path
+#     print(f"Imported model: {model_key}")
 
 # %% [markdown]
-# The import process:
+# The `Model.load()` import process:
 #
 # 1. Detects the latest trained model snapshot
 # 2. Extracts the skeleton (bodyparts and connections)
@@ -605,43 +573,70 @@ if config_path.exists():
 #
 
 # %% [markdown]
-# ##### ✅ Model Validation
-#
-# Let's verify the model import was successful:
+# #### Validate model (Path B)
 
 # %%
-if not (Model() & model_key):
+if model_key and not (Model() & model_key):
     raise ValueError(f"❌ Model entry not found : {model_key}")
 
-model_params_dict = dict(model_params_id=model_key["model_params_id"])
-if not (model_params := (ModelParams() & model_params_dict).fetch1()):
-    raise ValueError(f"❌ Model parameters not found : {model_key}")
-
-skeleton_id = model_params.get("skeleton_id")
-if not (Skeleton() & {"skeleton_id": skeleton_id}).fetch1("KEY"):
-    raise ValueError(f"❌ Skeleton details not found : {model_key}")
-
-if vid_group_id := model_key.get("vid_group_id"):
-    if not (VidFileGroup() & {"vid_group_id": vid_group_id}):
-        raise ValueError(f"❌ Video group not found: {vid_group_id}")
-
-print("✅ Model import successful")
-
-# %% [markdown]
-# This import process generates a video group based on the config.
-
-# %%
-VideoFile()
+if model_key:
+    _mp = (
+        ModelParams() & {"model_params_id": model_key["model_params_id"]}
+    ).fetch1()
+    skeleton_id = _mp.get("skeleton_id")
+    if not (Skeleton() & {"skeleton_id": skeleton_id}).fetch1("KEY"):
+        raise ValueError(f"❌ Skeleton not found for model: {model_key}")
+    if _vgid := model_key.get("vid_group_id"):
+        if not (VidFileGroup() & {"vid_group_id": _vgid}):
+            raise ValueError(f"❌ Video group not found: {_vgid}")
+    training_vid_group_id = model_key["vid_group_id"]
+    print("✅ Path B model import validated")
 
 # %% [markdown]
-# We can see the skeleton with this helper method
+# #### Inference video — auto-generated from training data
+#
+# If `inf_vid_path` is still `None` after Path B, the cell below fetches the
+# first training video from the V1 model, calls `bootstrap_from_video_paths()`
+# to create a 1-second inference clip via ffmpeg, and registers it in
+# `VideoFile`.
+#
+# To use your own video instead, set `inf_vid_path` before running this cell:
+#
+# ```python
+# inf_vid_path = Path("/path/to/your/video.mp4")
+# ```
 
 # %%
-fig = (Skeleton & {"skeleton_id": skeleton_id}).show_skeleton()
-plt.show()  # Explicit display for testing
+if inf_vid_path is None and model_key is not None:
+    _v1_videos = []
+    try:
+        from spyglass.position.v1.position_dlc_model import (
+            DLCModel as _DLCModel,
+        )
 
-# Set training_vid_group_id for use in subsequent cells
-training_vid_group_id = model_key["vid_group_id"] if model_key else None
+        _v1_cfg = (_DLCModel & _DEFAULT_V1_KEY).fetch1("config_template")
+        _v1_videos = list(_v1_cfg.get("video_sets", {}).keys())
+    except Exception as _exc:
+        print(f"Could not fetch V1 training videos: {_exc}")
+
+    if _v1_videos:
+        _v1_project_name = Path(_v1_videos[0]).parent.parent.name
+        print("Creating 1-second inference clip from V1 training video...")
+        nwb_file_name, inf_vid_path = bootstrap_from_video_paths(
+            _v1_videos, nwb_stem=_v1_project_name
+        )
+        print(f"  nwb_file_name : {nwb_file_name}")
+        print(f"  inf_vid_path  : {inf_vid_path}")
+    else:
+        print(
+            "No training videos found in V1 model.  "
+            "Set inf_vid_path manually before running Pose Estimation."
+        )
+
+# %%
+if skeleton_id:
+    fig = (Skeleton & {"skeleton_id": skeleton_id}).show_skeleton()
+    plt.show()
 
 # %% [markdown]
 # #### From SLEAP / External Tools (via ndx-pose NWB)
@@ -742,6 +737,14 @@ except ImportError:
 # %% [markdown]
 # ## Pose Estimation <a id="PoseEstim"></a>
 #
+
+# %%
+# Guard: a model must be available from either Path A or Path B above.
+if model_key is None:
+    raise ValueError(
+        "Complete Path A (train a new model) or Path B (import a pre-trained "
+        "model) before running pose estimation."
+    )
 
 # %% [markdown]
 #
@@ -1312,84 +1315,13 @@ plt.show()
 # %% [markdown]
 # ## New Models <a id="TrainingWorkflow"></a>
 #
-
-# %% [markdown]
-# **🎯 Goal**: Train custom pose estimation models from scratch
+# The complete workflow for training a new model from scratch — including
+# video selection, skeleton definition, frame extraction, and training —
+# is covered in **[Path A](#PathA)** at the top of this notebook.
 #
-# **🔍 What you'll accomplish**:
-# - Create skeletal structure and bodypart definitions
-# - Set up training parameters and video datasets
-# - Train DLC models with custom configurations
-# - Enable model evaluation and performance metrics
-#
-# <details>
-# <summary><b>Model Training</b></summary>
-#
-# ```python
-# # 1. Create skeleton
-# skeleton_id = Skeleton().insert1({
-#     "skeleton_name": "my_tracking",
-#     "bodyparts": ["nose", "tail_base", "left_ear", "right_ear"],
-#     "edges": [[0, 1], [0, 2], [0, 3]],  # nose connects to all
-# })
-#
-# # 2. Define training parameters
-# params_key = ModelParams().insert1({
-#     "tool": "DLC",
-#     "params": {
-#         "dlc": {
-#             "train_params": {
-#                 "training_params": {
-#                     "net_type": "resnet_50",
-#                     "augmentation_method": "default",
-#                     "solver": "adam",
-#                 },
-#                 "model_params": {"backbone": "resnet50"},
-#             }
-#         }
-#     },
-# })
-#
-# # 3. Create training VidFileGroup
-# training_vid_group = VidFileGroup.create_from_files({
-#     "vid_group_id": "training_data",
-#     "video_files": [list_of_training_videos],
-# })
-#
-# # 4. Create model training task
-# model_key = ModelSelection().insert1({
-#     "model_params": params_key,
-#     "vid_group_id": "training_data",
-#     "skeleton_id": skeleton_id,
-# })
-#
-# # 5. Run training
-# Model().populate([model_key])
-# ```
-#
-# **Note**: Training typically requires 10,000+ iterations for good performance.
-# For demo purposes, use minimal iterations:
-#
-# ```python
-# # Minimal training for testing evaluation features
-# params_key = ModelParams().insert1({
-#     "tool": "DLC",
-#     "params": {
-#         "dlc": {
-#             "train_params": {
-#                 "training_params": {
-#                     "max_iters": 100,  # Very low for demo only
-#                     "save_iters": 50,
-#                     "display_iters": 25,
-#                 }
-#             }
-#         }
-#     }
-# })
-# ```
-# </details>
-#
-# ---
+# Return to Path A if you need a refresher.  The steps below (Model
+# Evaluation, Video Generation) assume you have a `model_key` from either
+# Path A or Path B.
 
 # %% [markdown]
 # ## Model Evaluation <a id="ModelEvaluation"></a>
