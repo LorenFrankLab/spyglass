@@ -241,9 +241,9 @@ class TestPoseParameterSet:
         assert result["centroid"]["method"] == "centroid"
         assert result["smoothing"]["interpolate"] is True
 
-    @patch("spyglass.position.v2.estim.validate_orientation_params")
-    @patch("spyglass.position.v2.estim.validate_centroid_params")
-    @patch("spyglass.position.v2.estim.validate_smoothing_params")
+    @patch("spyglass.position.v2.utils.params.validate_orientation_params")
+    @patch("spyglass.position.v2.utils.params.validate_centroid_params")
+    @patch("spyglass.position.v2.utils.params.validate_smoothing_params")
     def test_validate_calls_validators(
         self,
         mock_smooth,

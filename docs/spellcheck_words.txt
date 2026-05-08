@@ -6,7 +6,6 @@ Brozdowski
 CICD
 Clusterless
 DANDI
-userfeedback
 Denovellis
 Estim
 Golay
@@ -27,9 +26,11 @@ Trodes
 Xshuffle
 Yshuffle
 addopts
+aggr
 arctan
 arrowprops
 arrowstyle
+autouse
 auxiliaryfunctions
 behav
 bodypart
@@ -38,6 +39,8 @@ boxstyle
 cbroz
 codespell
 colorbar
+comparisonbodyparts
+connectionstyle
 coveragerc
 cuda
 dask
@@ -141,6 +144,7 @@ pynwb
 pytables
 pytest
 rawdata
+restr
 saveiters
 savetxt
 savgol
@@ -164,10 +168,13 @@ timespec
 topdown
 trainingsetindex
 trainset
+unet
 unsmoothed
+userfeedback
 verticalalignment
 videotype
 vsync
+weisfeiler
 wtrack
 xanchor
 xaxes

@@ -14,7 +14,7 @@ import pytest
 
 
 def _make_dlc_model_mock(row: dict):
-    """Return a DLCModel class mock that returns *row* from (DLCModel & key).fetch1().
+    """Return a DLCModel class mock
 
     DataJoint tables are singletons — the & operator is called on the *class*,
     not an instance.  MagicMock magic methods must be configured via
@@ -153,7 +153,7 @@ class TestImportFromV1:
     # ── dj_dlc-prefixed config is preferred ──────────────────────────────────
 
     def test_dj_dlc_config_preferred_over_plain(self, tmp_path):
-        """When dj_dlc_config.yaml exists alongside config.yaml, it is preferred."""
+        """When dj_dlc_config.yaml exists alongside config.yaml, use it"""
         import shutil
 
         cfg_path = self._make_project(tmp_path, config_name="config.yaml")

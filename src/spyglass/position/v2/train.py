@@ -7,11 +7,9 @@ truth'. In practice, file modification is rare, and storing copies is
 inefficient.
 """
 
-import re
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -30,6 +28,19 @@ from spyglass.position.utils.path_helpers import (
 from spyglass.position.utils.protocols import default_pk_name
 from spyglass.position.utils.tool_strategies import ToolStrategyFactory
 from spyglass.position.utils.yaml_io import load_yaml
+from spyglass.position.v2.utils.skeleton import (
+    build_labeled_graph,
+    is_duplicate_skeleton,
+    normalize_label,
+    norm_edges,
+    shape_hash_from_edges,
+    validate_skeleton_graph,
+)
+from spyglass.position.v2.utils.training_io import (
+    aggregate_training_stats,
+    discover_training_csvs,
+    parse_training_csv,
+)
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.utils import SpyglassMixin
 
@@ -41,7 +52,7 @@ with suppress_print_from_package():
     except (ImportError, RecursionError):
         # RecursionError can occur when TF 2.16+ (Keras 3) is installed without
         # tf-keras; the TF compat layer loader recurses infinitely. Set
-        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend support.
+        # TF_USE_LEGACY_KERAS=1 and install tf-keras to restore TF-backend
         evaluate_network = None
 
 # -------------------------------- Module setup --------------------------------
@@ -69,240 +80,6 @@ class ModelMetadata:
     latest_model: dict
     skeleton_id: str
     parent_id: Optional[str] = None
-
-
-# ----------------------- Training-history pure helpers -----------------------
-
-_CSV_PATTERNS = [
-    "**/learning_stats.csv",
-    "**/log.csv",
-    "**/*training*.csv",
-]
-
-
-def discover_training_csvs(model_dir: Path) -> "list[Path]":
-    """Return unique CSV files that may contain training loss data.
-
-    Searches *model_dir* and up to two parent directories using the
-    standard DLC CSV filename patterns.  Results are deduplicated while
-    preserving discovery order.
-
-    Parameters
-    ----------
-    model_dir : Path
-        Directory where the trained model weights live.
-
-    Returns
-    -------
-    list[Path]
-        Unique paths to candidate CSV files.  Empty list if none found.
-    """
-    search_roots = [model_dir, model_dir.parent, model_dir.parent.parent]
-    seen: set = set()
-    found: list = []
-    for root in search_roots:
-        if not root.exists():
-            continue
-        for pattern in _CSV_PATTERNS:
-            for p in root.glob(pattern):
-                if p not in seen:
-                    seen.add(p)
-                    found.append(p)
-        if found:
-            break  # stop once any root yields results
-    return found
-
-
-def parse_training_csv(path: Path) -> "pd.DataFrame | None":
-    """Parse a single training-history CSV into a normalised DataFrame.
-
-    Handles both header-less (DLC ``learning_stats.csv``) and header-bearing
-    formats.  Returns ``None`` when the file is empty or has fewer than 2
-    columns (not parseable as training data).
-
-    Parameters
-    ----------
-    path : Path
-        Path to the CSV file.
-
-    Returns
-    -------
-    pd.DataFrame or None
-        Columns: ``iteration``, ``loss``, optionally ``learning_rate``,
-        and ``source_file``.  ``None`` on parse failure or insufficient data.
-    """
-    try:
-        # Always read raw (no header) first to detect format
-        df_raw = pd.read_csv(path, header=None)
-    except Exception:
-        return None
-
-    if df_raw.empty or df_raw.shape[1] < 2:
-        return None
-
-    # Detect whether the first row is a header (any non-numeric value)
-    def _is_numeric(val):
-        try:
-            float(val)
-            return True
-        except (TypeError, ValueError):
-            return False
-
-    first_row_numeric = all(_is_numeric(v) for v in df_raw.iloc[0])
-    if first_row_numeric:
-        # Headerless format (DLC learning_stats.csv)
-        df = df_raw
-    else:
-        # Re-read letting pandas use first row as header
-        try:
-            df = pd.read_csv(path)
-        except Exception:
-            return None
-        if df.empty or df.shape[1] < 2:
-            return None
-
-    col_map: dict = {}
-    cols = list(df.columns)
-
-    # Map first two columns to canonical names if needed
-    if str(cols[0]) != "iteration":
-        col_map[cols[0]] = "iteration"
-    if str(cols[1]) != "loss":
-        col_map[cols[1]] = "loss"
-
-    # Detect learning-rate column by name or position
-    lr_candidates = [
-        c
-        for c in cols
-        if isinstance(c, str)
-        and ("learning_rate" in c.lower() or c.lower() == "lr")
-    ]
-    if lr_candidates and str(lr_candidates[0]) != "learning_rate":
-        col_map[lr_candidates[0]] = "learning_rate"
-    elif (
-        not lr_candidates and len(cols) >= 3 and str(cols[2]) != "learning_rate"
-    ):
-        col_map[cols[2]] = "learning_rate"
-
-    if col_map:
-        df = df.rename(columns=col_map)
-
-    df["source_file"] = str(path)
-    return df
-
-
-def aggregate_training_stats(dfs: "list[pd.DataFrame]") -> "pd.DataFrame":
-    """Combine a list of per-file training DataFrames into one sorted table.
-
-    Parameters
-    ----------
-    dfs : list[pd.DataFrame]
-        DataFrames produced by :func:`parse_training_csv`.
-
-    Returns
-    -------
-    pd.DataFrame
-        Concatenated data sorted by ``iteration`` (if present).  An empty
-        DataFrame is returned when *dfs* is empty.
-    """
-
-    if not dfs:
-        return pd.DataFrame()
-
-    combined = pd.concat(dfs, ignore_index=True)
-    if "iteration" in combined.columns:
-        combined = combined.sort_values("iteration").reset_index(drop=True)
-    return combined
-
-
-# ----------------------- Skeleton pure helpers -----------------------
-
-
-def validate_skeleton_graph(
-    bodyparts: "list[str]", edges: "list[tuple[str, str]]"
-) -> None:
-    """Raise if *bodyparts* / *edges* do not form a valid skeleton description.
-
-    Parameters
-    ----------
-    bodyparts : list[str]
-        Node labels.
-    edges : list[tuple[str, str]]
-        Pairs of node labels defining connections.
-
-    Raises
-    ------
-    ValueError
-        When *bodyparts* is empty or an edge references an unknown bodypart.
-    """
-    if not bodyparts:
-        raise ValueError("bodyparts must not be empty")
-    bp_set = set(bodyparts)
-    for edge in edges:
-        try:
-            a, b = edge
-        except (TypeError, ValueError) as e:
-            raise ValueError(
-                f"Each edge must be a (bodypart, bodypart) pair, got: {edge!r}"
-            ) from e
-        if a not in bp_set or b not in bp_set:
-            raise ValueError(
-                f"Edge ({a!r}, {b!r}) references bodypart(s) "
-                + f"not in {sorted(bp_set)}"
-            )
-
-
-def is_duplicate_skeleton(
-    bodyparts_new: "list[str]",
-    edges_new: "list[tuple[str, str]]",
-    bodyparts_existing: "list[str]",
-    edges_existing: "list[tuple[str, str]]",
-    threshold: float = 0.85,
-) -> bool:
-    """Return True if the two skeletons are graph-isomorphic with similar labels.
-
-    Uses :mod:`networkx` graph isomorphism with fuzzy node-label matching.
-
-    Parameters
-    ----------
-    bodyparts_new, edges_new : list
-        Candidate skeleton to test.
-    bodyparts_existing, edges_existing : list
-        Skeleton already in the database.
-    threshold : float, optional
-        SequenceMatcher ratio threshold for node-label similarity, by default 0.85.
-
-    Returns
-    -------
-    bool
-    """
-
-    def _build(bps, eds):
-        this_graph = nx.Graph()
-        for bp in bps:
-            this_graph.add_node(bp, label=bp.lower())
-        for a, b in eds:
-            this_graph.add_edge(a, b)
-        return this_graph
-
-    graph_new = _build(bodyparts_new, edges_new)
-    graph_old = _build(bodyparts_existing, edges_existing)
-
-    if graph_new.number_of_nodes() != graph_old.number_of_nodes():
-        return False
-    if graph_new.number_of_edges() != graph_old.number_of_edges():
-        return False
-
-    def node_match(a, b):
-        ratio = SequenceMatcher(
-            None, a.get("label", ""), b.get("label", "")
-        ).ratio()
-        return ratio >= threshold
-
-    graph_match = nx.algorithms.isomorphism.GraphMatcher(
-        graph_new, graph_old, node_match=node_match
-    )
-    return graph_match.is_isomorphic()
 
 
 # ---------------------------------- Tables -----------------------------------
@@ -358,6 +135,8 @@ class BodyPart(SpyglassMixin, dj.Lookup):
 
 @schema
 class Skeleton(SpyglassMixin, dj.Lookup):
+    """Defines skeletons as body parts and their connections (edges)."""
+
     definition = """
     skeleton_id: varchar(32)
     ---
@@ -367,6 +146,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     """
 
     class BodyPart(dj.Part):
+        """Body parts belonging to a skeleton."""
+
         definition = """
         -> Skeleton
         -> BodyPart
@@ -394,7 +175,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         ],
     ]
 
-    # Bodyparts for default skeletons (populated via _populate_default_bodyparts)
+    # Bodyparts for default skeletons
     _default_bodyparts = {
         "1LED": ["whiteLED"],
         "2LED": ["greenLED", "redLED_C"],
@@ -405,7 +186,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
     def _populate_default_bodyparts(cls):
         """Populate BodyPart part table for default skeleton contents."""
         for skeleton_id, bodyparts in cls._default_bodyparts.items():
-            if not (cls & {"skeleton_id": skeleton_id}):
+            if not cls & {"skeleton_id": skeleton_id}:
                 continue  # Skip if skeleton doesn't exist yet
             for bp in bodyparts:
                 cls.BodyPart.insert1(
@@ -419,7 +200,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
         Parameters
         ----------
         skeleton_id : str, optional
-            Skeleton ID to fetch bodyparts for. If None, uses current restriction.
+            Skeleton ID to fetch bodyparts for. If None, uses cls.restriction.
 
         Returns
         -------
@@ -432,48 +213,26 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             query = self.BodyPart & self.restriction
         return list(query.fetch("bodypart"))
 
-    # ----------------- static helpers -----------------
-    @staticmethod
-    def _normalize_label(s: str) -> str:
-        """Normalize a body part label for matching/comparison.
-
-        Handles camelCase, snake_case, kebab-case, and whitespace.
-        Examples:
-            'FirstSecond' -> 'first second'
-            'greenLED' -> 'green led'
-            'green_led' -> 'green led'
-            'green-led' -> 'green led'
-        """
-        # Insert space before uppercase letters that follow lowercase letters
-        # This handles camelCase: 'FirstSecond' -> 'First Second'
-        s = re.sub(r"([a-z])([A-Z])", r"\1 \2", s)
-        # Replace underscores and hyphens with spaces
-        s = s.replace("_", " ").replace("-", " ")
-        # Lowercase, strip, and normalize multiple spaces to single space
-        return " ".join(s.strip().lower().split())
+    # Thin wrappers so callers (including tests) can use instance methods.
+    # Implementations live in spyglass.position.v2.utils.skeleton.
+    def _normalize_label(self, s: str) -> str:
+        return normalize_label(s)
 
     def _fuzzy_equal(self, a: str, b: str, threshold: float = 0.85) -> bool:
-        """Fuzzy string equality at given similarity threshold [0..1]."""
-        a_norm = self._normalize_label(a)
-        b_norm = self._normalize_label(b)
-        return SequenceMatcher(None, a_norm, b_norm).ratio() >= threshold
+        from spyglass.position.v2.utils.skeleton import fuzzy_equal
 
-    def _norm_edges(
-        self, edges: list[tuple[str, str]]
-    ) -> list[tuple[str, str]]:
-        """Return edges with normalized labels and sorted tuples."""
-        if not edges:
-            return None
-        return sorted(
-            {
-                tuple(
-                    sorted((self._normalize_label(u), self._normalize_label(v)))
-                )
-                for (u, v) in edges
-            }
-        )
+        return fuzzy_equal(a, b, threshold)
 
-    def _validate_bodyparts(self, labels: set[str]) -> bool:
+    def _norm_edges(self, edges):
+        return norm_edges(edges)
+
+    def _shape_hash_from_edges(self, labels, edges):
+        return shape_hash_from_edges(labels, edges)
+
+    def _build_labeled_graph(self, labels, edges):
+        return build_labeled_graph(labels, edges)
+
+    def _validate_bodyparts(self, labels: "set[str]") -> bool:
         """Validate that all normalized labels exist in BodyPart table.
 
         Parameters
@@ -492,8 +251,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             True if all labels are valid.
         """
         all_parts = BodyPart().fetch("bodypart")
-        valid = {self._normalize_label(x) for x in all_parts}
-        missing = set(self._normalize_label(x) for x in labels) - valid
+        valid = {normalize_label(x) for x in all_parts}
+        missing = {normalize_label(x) for x in labels} - valid
         if missing:
             raise dj.DataJointError(
                 f"Unknown bodypart name(s) (not in BodyPart): {sorted(missing)}"
@@ -501,72 +260,6 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 + "consult with admin to add it."
             )
         return True
-
-    def _shape_hash_from_edges(
-        self, labels: list[str], edges: Union[list[tuple[str, str]], None]
-    ) -> str:
-        """Compute a topology hash on an unlabeled graph."""
-
-        # Map normalized label -> deterministic node id
-        labels_norm = [self._normalize_label(x) for x in labels]
-        if len(labels_norm) != len(set(labels_norm)):
-            raise dj.DataJointError(
-                "Duplicate body part names after normalization."
-            )
-
-        idx_of = {label: i for i, label in enumerate(labels_norm)}
-        # Verify edges reference known labels
-        if edges:
-            for left, right in self._norm_edges(edges):
-                if left not in idx_of or right not in idx_of:
-                    raise dj.DataJointError(
-                        f"Edge ({left!r}, {right!r}) "
-                        + "references a label not in bodyparts."
-                    )
-
-        this_graph = nx.Graph()
-        this_graph.add_nodes_from(range(len(labels_norm)))
-        this_graph.add_edges_from(
-            (
-                idx_of[self._normalize_label(u)],
-                idx_of[self._normalize_label(v)],
-            )
-            for u, v in edges
-        )
-        return nx.weisfeiler_lehman_graph_hash(
-            this_graph, node_attr=None, edge_attr=None
-        )
-
-    def _build_labeled_graph(
-        self, labels: list[str], edges: list[tuple[str, str]]
-    ) -> nx.Graph:
-        """Build a graph with labeled nodes with normalized labels."""
-
-        labels_norm = [self._normalize_label(x) for x in labels]
-        if len(labels_norm) != len(set(labels_norm)):
-            raise ValueError("Duplicate body part names after normalization.")
-
-        this_graph = nx.Graph()
-        for label in labels_norm:
-            this_graph.add_node(label, label=label)
-
-        if not edges:
-            return this_graph
-
-        label_set = set(labels_norm)
-        # Edge endpoints must belong to the declared label set
-        for u, v in self._norm_edges(edges):
-            if u not in label_set or v not in label_set:
-                raise ValueError(
-                    f"Edge uses label not in bodyparts: ({u!r}, {v!r})"
-                )
-
-        for u, v in edges:
-            this_graph.add_edge(
-                self._normalize_label(u), self._normalize_label(v)
-            )
-
-        return this_graph
 
     # ----------------- main insert -----------------
 
@@ -601,15 +294,15 @@ class Skeleton(SpyglassMixin, dj.Lookup):
                 f"Key must include 'bodyparts' and 'edges' fields: {key}"
             )
 
-        # Validate body parts against the reference table (DB query, raises first)
-        labels_norm = [self._normalize_label(x) for x in bodyparts]
+        # Validate body parts against the reference table
+        labels_norm = [normalize_label(x) for x in bodyparts]
         _ = self._validate_bodyparts(set(labels_norm))
 
         # Validate edge structure (pure, no DB — runs after bodypart check so
         # "unknown bodypart" errors surface before structural edge errors)
         validate_skeleton_graph(bodyparts, edges)
 
-        shape_hash = self._shape_hash_from_edges(bodyparts, edges)
+        shape_hash = shape_hash_from_edges(bodyparts, edges)
 
         if check_duplicates:
             for row in self & dict(hash=shape_hash):
@@ -696,7 +389,7 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             return None
 
         # Use existing method to build graph for positioning
-        this_graph = self._build_labeled_graph(bodyparts, edges)
+        this_graph = build_labeled_graph(bodyparts, edges)
 
         # Create figure with better sizing for zoomed-out view
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -704,13 +397,13 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
         # Calculate positions with expanded coordinate space
         if len(bodyparts) == 1:
-            pos = {self._normalize_label(bodyparts[0]): (0, 0)}
+            pos = {normalize_label(bodyparts[0]): (0, 0)}
         else:
             # Spring layout with larger separation (k parameter)
             pos = nx.spring_layout(this_graph, k=3, iterations=150, seed=42)
 
         # Create mapping from normalized labels back to original labels
-        label_map = {self._normalize_label(bp): bp for bp in bodyparts}
+        label_map = {normalize_label(bp): bp for bp in bodyparts}
 
         # Style settings for zoomed-out view
         node_color = "#E8F4FD"  # Light blue like DataJoint tables
@@ -775,7 +468,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             ax.set_xlim(-2, 2)
             ax.set_ylim(-2, 2)
         ax.set_title(
-            f"Skeleton: {skeleton_id}\n{len(bodyparts)} bodyparts, {len(edges)} connections",
+            f"Skeleton: {skeleton_id}\n{len(bodyparts)} bodyparts, "
+            + f"{len(edges)} connections",
             fontsize=14,
             fontweight="bold",
             pad=20,
@@ -853,14 +547,14 @@ class Skeleton(SpyglassMixin, dj.Lookup):
             raise ValueError("No bodyparts found for skeleton")
 
         # Normalize bodypart names for consistent matching
-        normalized_bodyparts = {self._normalize_label(bp) for bp in bodyparts}
+        normalized_bodyparts = {normalize_label(bp) for bp in bodyparts}
 
         # Required bodyparts for 4-point Frank Lab method
         frank_lab_parts = {
-            self._normalize_label("greenLED"),
-            self._normalize_label("redLED_C"),
-            self._normalize_label("redLED_L"),
-            self._normalize_label("redLED_R"),
+            normalize_label("greenLED"),
+            normalize_label("redLED_C"),
+            normalize_label("redLED_L"),
+            normalize_label("redLED_R"),
         }
 
         # Check if we have all Frank Lab LEDs (4pt method)
@@ -888,6 +582,8 @@ class Skeleton(SpyglassMixin, dj.Lookup):
 
 @schema
 class ModelParams(SpyglassMixin, dj.Lookup):
+    """Model parameters for training and evaluation."""
+
     definition = """
     model_params_id: varchar(32)
     tool: varchar(32)
@@ -976,7 +672,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         return tool_info
 
     def get_accepted_params(self, tool: str) -> set:
-        """Return all accepted parameters for specified tool using strategy pattern.
+        """Return all accepted parameters for specified tool using strategy
 
         Parameters
         ----------
@@ -1027,7 +723,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
         except ValueError as e:
             raise ValueError(f"Tool not supported: {this_tool}") from e
 
-        # Remove any skipped params (strategy pattern doesn't use skipped params)
+        # Remove any skipped params
         params = key["params"].copy()
 
         # Filter out skipped parameters using tool_info
@@ -1044,7 +740,7 @@ class ModelParams(SpyglassMixin, dj.Lookup):
 
         # Check for existing entry with same params hash
         params_hash_dict = dict(params_hash=dj.hash.key_hash(params))
-        if dupe := (self & params_hash_dict & dict(tool=key["tool"])):
+        if dupe := self & params_hash_dict & dict(tool=key["tool"]):
             dupe_key = dupe.fetch1("KEY")
             self._warn_msg(f"Entry exists with same params: {dupe_key}")
             return dupe_key
@@ -1337,7 +1033,7 @@ class Model(SpyglassMixin, dj.Computed):
         >>> new_model_key = model.train(model_key, shuffle=2)
         """
         # Validate model exists
-        if not (self & model_key):
+        if not self & model_key:
             raise ValueError(
                 f"Model not found in database: {model_key}. "
                 "Cannot continue training from non-existent model."
@@ -1408,9 +1104,7 @@ class Model(SpyglassMixin, dj.Computed):
                 "ms-train", {"parent_id": model_key["model_id"]}
             )
 
-        self._info_msg(
-            f"Inserting new ModelSelection with parent_id: {model_key['model_id']}"
-        )
+        self._info_msg(f"Inserting new ModelSelection: {model_key['model_id']}")
         ModelSelection().insert1(new_sel_key, skip_duplicates=True)
 
         # Populate to trigger make()
@@ -1483,7 +1177,7 @@ class Model(SpyglassMixin, dj.Computed):
         ... )
         """
         # Validate model exists FIRST (before checking DLC import)
-        if not (self & model_key):
+        if not self & model_key:
             raise ValueError(
                 f"Model not found in database: {model_key}. "
                 "Cannot evaluate non-existent model."
@@ -1632,7 +1326,8 @@ class Model(SpyglassMixin, dj.Computed):
             Parsed evaluation results
         """
         # Find evaluation results
-        # Pattern: evaluation-results/iteration-X/TASK-trainsetYshuffleZ/*-results.csv
+        # Pattern: evaluation-results/iteration-X/
+        #          TASK-trainsetYshuffleZ/*-results.csv
         eval_dir = project_path / "evaluation-results"
 
         if not eval_dir.exists():
@@ -1711,7 +1406,7 @@ class Model(SpyglassMixin, dj.Computed):
         ...     print(f"Final loss: {history['loss'].iloc[-1]:.4f}")
         """
         # Validate model exists
-        if not (self & model_key):
+        if not self & model_key:
             raise ValueError(f"Model not found: {model_key}")
 
         model_entry = (self & model_key).fetch1()
@@ -1724,7 +1419,7 @@ class Model(SpyglassMixin, dj.Computed):
         if not csv_files:
             self._warn_msg(
                 f"No training stats found near: {model_path}. "
-                "Training may have been too short (displayiters > 0 required) or incomplete."
+                "Training may have been too short (displayiters > 0 required)"
             )
             return None
 
@@ -1755,7 +1450,8 @@ class Model(SpyglassMixin, dj.Computed):
             )
 
         self._info_msg(
-            f"Combined {len(combined)} training records from {len(valid)} file(s)"
+            f"Combined {len(combined)} training records from "
+            + f"{len(valid)} file(s)"
         )
         return combined
 
@@ -1888,7 +1584,10 @@ class Model(SpyglassMixin, dj.Computed):
         if has_source:
             unique_sources = df["source_file"].nunique()
             if unique_sources > 1:
-                source_text = f"Data from {unique_sources} files: {', '.join(df['source_file'].unique())}"
+                source_text = (
+                    f"Data from {unique_sources} files: "
+                    + f"{', '.join(df['source_file'].unique())}"
+                )
                 fig.suptitle(source_text, fontsize=10, y=0.02)
 
         plt.tight_layout()
@@ -2322,7 +2021,7 @@ class Model(SpyglassMixin, dj.Computed):
         # model_path is the most stable identifier; default_pk_name embeds
         # today's date so model_id changes across days.
         stored_path = _to_stored_path(model_path)
-        if existing := (self & {"model_path": stored_path}):
+        if existing := self & {"model_path": stored_path}:
             return existing.fetch1()
 
         # Step 5: Generate model_id and insert directly into Model
@@ -2404,7 +2103,7 @@ class Model(SpyglassMixin, dj.Computed):
         model_info = {}
 
         # Check 1: Model exists in database
-        if not (self & model_key):
+        if not self & model_key:
             errors.append(
                 f"Model not found in database: {model_key}. "
                 "Use Model.load() to import a model first."
@@ -2443,7 +2142,8 @@ class Model(SpyglassMixin, dj.Computed):
             if model_entry["tool"] == "DLC":
                 if model_path.suffix not in [".yaml", ".yml"]:
                     warn_list.append(
-                        f"DLC model path should be config.yaml, got: {model_path.name}"
+                        "DLC model path should be config.yaml, got: "
+                        + f"{model_path.name}"
                     )
                 else:
                     # Try to read config to verify it's valid YAML
@@ -2601,7 +2301,7 @@ class Model(SpyglassMixin, dj.Computed):
         FileNotFoundError
             If video_path does not exist on disk.
         """
-        if not (self & model_key):
+        if not self & model_key:
             raise ValueError(f"Model not found in database: {model_key}")
 
         video_paths = (

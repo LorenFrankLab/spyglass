@@ -47,7 +47,7 @@ class TestCreateProjectUnit:
                 )
 
     def test_raises_value_error_for_empty_video_list(self, tmp_path):
-        """create_project raises ValueError when video_list resolves to empty."""
+        """create_project raises ValueError when video_list resolves empty."""
         fake_dlc = MagicMock()
         fake_dlc.create_new_project.return_value = str(tmp_path / "config.yaml")
         with patch.dict("sys.modules", {"deeplabcut": fake_dlc}):
@@ -395,17 +395,16 @@ class TestCreateProjectIntegration:
     tmp_path = None  # set by _setup fixture
 
     @pytest.fixture(autouse=True)
-    def _setup(
-        self, model, skip_if_no_dlc, dlc_bootstrapped_session, tmp_path
-    ):  # pylint: disable=unused-argument
+    def _setup(self, model, skip_if_no_dlc, dlc_bootstrapped_session, tmp_path):
+        _ = skip_if_no_dlc  # ensure DLC presence is checked before setup
         self.model = model  # pylint: disable=attribute-defined-outside-init
-        self.nwb_file_name = dlc_bootstrapped_session  # pylint: disable=attribute-defined-outside-init
+        self.nwb_file_name = dlc_bootstrapped_session
         self.tmp_path = (
             tmp_path  # pylint: disable=attribute-defined-outside-init
         )
 
     def test_create_project_returns_correct_keys(self, dlc_project_config):
-        """create_project with a real DLC project returns the expected dict keys."""
+        """create_project with a real DLC project returns the expected keys."""
         import yaml
 
         with open(dlc_project_config, encoding="utf-8") as f:

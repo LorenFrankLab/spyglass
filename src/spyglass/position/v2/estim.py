@@ -24,11 +24,8 @@ Results are registered in ``PositionOutput`` automatically and accessible via
 ``PositionOutput.fetch1_dataframe()``.
 """
 
-import contextlib
 import dataclasses
-import io
 import subprocess
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
@@ -41,7 +38,6 @@ from pynwb import NWBHDF5IO
 
 from spyglass.common import AnalysisNwbfile
 from spyglass.common.common_behav import VideoFile
-from spyglass.position.utils import suppress_print_from_package
 from spyglass.position.utils.dlc_io import parse_dlc_h5_output
 from spyglass.position.utils.validation import (
     validate_centroid_params,
@@ -56,10 +52,20 @@ from spyglass.position.v2.train import (
     default_pk_name,
     resolve_model_path,
 )
+from spyglass.position.v2.utils.nwb_io import (
+    NDXPoseBuilder,
+    PoseInferenceRunner,
+    _populate_nwb_pose_estimation,
+)
+from spyglass.position.v2.utils.params import (
+    CentroidParams,
+    OrientationParams,
+    PoseParameterSet,
+    SmoothingParams,
+)
 from spyglass.position.v2.video import VidFileGroup
 from spyglass.settings import pose_output_dir
 from spyglass.utils import SpyglassMixin, logger
-from spyglass.utils.mixins.base import BaseMixin
 from spyglass.utils.nwb_helper_fn import get_nwb_file
 
 # ----------------------------- Optional imports ------------------------------
@@ -67,104 +73,6 @@ try:
     import ndx_pose
 except ImportError:  # pragma: no cover
     ndx_pose = None  # pragma: no cover
-
-# ----------------------------- Parameter dataclasses ------------------------
-
-
-@dataclass
-class OrientationParams:
-    """Dataclass for orientation parameters."""
-
-    method: str
-    bodypart1: str = ""
-    bodypart2: str = ""
-    led1: str = ""
-    led2: str = ""
-    led3: str = ""
-    interpolate: bool = True
-    smooth: bool = True
-    smoothing_params: dict = None
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary format."""
-        result = asdict(self)
-        # Remove empty/unused fields based on method
-        if self.method == "two_pt":
-            result = {
-                k: v
-                for k, v in result.items()
-                if k not in ["led1", "led2", "led3"] and v != ""
-            }
-        elif self.method == "bisector":
-            result = {
-                k: v
-                for k, v in result.items()
-                if k not in ["bodypart1", "bodypart2"] and v != ""
-            }
-        elif self.method == "none":
-            result = {
-                k: v
-                for k, v in result.items()
-                if k not in ["bodypart1", "bodypart2", "led1", "led2", "led3"]
-                and v != ""
-            }
-        return {k: v for k, v in result.items() if v is not None and v != ""}
-
-
-@dataclass
-class CentroidParams:
-    """Dataclass for centroid parameters."""
-
-    method: str
-    points: dict
-    max_LED_separation: float = None  # noqa: C0103
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary format."""
-        result = asdict(self)
-        return {k: v for k, v in result.items() if v is not None}
-
-
-@dataclass
-class SmoothingParams:
-    """Dataclass for smoothing parameters."""
-
-    interpolate: bool = True
-    interp_params: dict = None
-    smooth: bool = True
-    smoothing_params: dict = None
-    likelihood_thresh: float = 0.95
-
-    def to_dict(self) -> dict:
-        """Convert to dictionary format."""
-        result = asdict(self)
-        return {k: v for k, v in result.items() if v is not None}
-
-
-@dataclass
-class PoseParameterSet:
-    """Complete parameter set for pose estimation."""
-
-    params_name: str
-    orient: OrientationParams
-    centroid: CentroidParams
-    smoothing: SmoothingParams
-
-    def validate(self):
-        """Validate all parameter components."""
-        validate_orientation_params(self.orient.to_dict())
-        validate_centroid_params(self.centroid.to_dict())
-        validate_smoothing_params(self.smoothing.to_dict())
-
-    def to_params_dict(self) -> dict:
-        """Convert to dictionary format for database insertion."""
-        return {
-            "pose_params_id": self.params_name,
-            "orient": self.orient.to_dict(),
-            "centroid": self.centroid.to_dict(),
-            "smoothing": self.smoothing.to_dict(),
-        }
-
 
 schema = dj.schema("cbroz_position_v2_estim")
 
@@ -376,368 +284,6 @@ class PoseEstimSelection(SpyglassMixin, dj.Manual):
         return str(output_dir)
 
 
-class PoseInferenceRunner(BaseMixin):
-    """Handles pose estimation inference execution for different tools."""
-
-    def run_dlc_inference(
-        self,
-        model_info: dict,
-        video_path: Union[Path, str, list],
-        save_as_csv: bool = False,
-        destfolder: Union[Path, str, None] = None,
-        **kwargs,
-    ) -> Union[str, list]:
-        """Run DLC inference on video(s).
-
-        Parameters
-        ----------
-        model_info : dict
-            Model table entry with model_path and metadata
-        video_path : Union[Path, str, list]
-            Video path(s) for inference
-        save_as_csv : bool
-            Save output as CSV
-        destfolder : Union[Path, str, None]
-            Destination folder for outputs
-        **kwargs
-            Additional DLC analyze_videos parameters
-
-        Returns
-        -------
-        Union[str, list]
-            Output file path(s)
-        """
-        if not isinstance(video_path, (list, tuple)):
-            video_path = [video_path]
-
-        for vp in video_path:
-            if not Path(vp).exists():
-                raise FileNotFoundError(f"Video not found: {vp}")
-        videos = [str(vp) for vp in video_path]
-
-        model_path = resolve_model_path(model_info["model_path"])
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model config not found: {model_path}")
-        if model_path.suffix not in [".yaml", ".yml"]:
-            raise ValueError(
-                f"DLC model path must be a config.yaml file, got: {model_path}"
-            )
-
-        analyze_params = {
-            "config": str(model_path),
-            "videos": [videos] if isinstance(videos, str) else videos,
-            "save_as_csv": save_as_csv,
-            "destfolder": str(destfolder) if destfolder else None,
-        }
-        dlc_params = [
-            "shuffle",
-            "trainingsetindex",
-            "videotype",
-            "in_random_order",
-            "snapshot_index",
-            "device",
-            "batch_size",
-            "dynamic",
-            "modelprefix",
-            "robust_nframes",
-            "cropping",
-        ]
-        for param in dlc_params:
-            if param in kwargs:
-                analyze_params[param] = kwargs[param]
-
-        self._info_msg(f"Running DLC inference on {videos}")
-        self._logger.debug(f"DLC parameters: {analyze_params}")
-
-        try:
-            from deeplabcut import analyze_videos
-        except ImportError:  # pragma: no cover
-            raise ImportError(  # pragma: no cover
-                "DeepLabCut is required for inference. "
-                "Install with: pip install deeplabcut>=3.0"
-            )
-
-        try:
-            with (
-                suppress_print_from_package(),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
-                analyze_videos(**analyze_params)
-        except (RuntimeError, OSError, ValueError) as e:
-            self._err_msg(f"DLC inference failed: {e}")
-            raise
-
-        output_folder = Path(destfolder) if destfolder else None
-        output_paths = []
-        for vid_path in videos:
-            vid_path = Path(vid_path)
-            # DLC saves to destfolder if specified, otherwise to video directory
-            output_dir = output_folder if output_folder else vid_path.parent
-
-            # Look for DLC output files for this specific video
-            output_files = list(output_dir.glob(f"{vid_path.stem}DLC_*.h5"))
-            if output_files:
-                # Use most recent file if multiple exist
-                latest_output = max(
-                    output_files, key=lambda p: p.stat().st_mtime
-                )
-                output_paths.append(str(latest_output))
-                self._info_msg(f"DLC created: {latest_output}")
-            else:
-                self._warn_msg(
-                    f"No DLC output found for {vid_path.stem} in {output_dir}"
-                )
-
-        if not output_paths:
-            self._err_msg(f"No output files created for videos: {videos}")
-
-        self._info_msg(f"Inference complete. Output files: {output_paths}")
-        return output_paths if len(output_paths) != 1 else output_paths[0]
-
-
-class NDXPoseBuilder(BaseMixin):
-    """Handles building ndx-pose NWB structures."""
-
-    def build_pose_estimation(
-        self,
-        pose_df: pd.DataFrame,
-        bodyparts: list,
-        scorer: str,
-        model_id: str,
-        skeleton_edges: list = None,
-        description: str = None,
-        original_videos: list = None,
-        timestamps: np.ndarray = None,
-        source_software: str = "DeepLabCut",
-    ) -> tuple:
-        """Build ndx-pose PoseEstimation and Skeleton from DLC DataFrame.
-
-        Parameters
-        ----------
-        pose_df : pd.DataFrame
-            DLC output DataFrame with MultiIndex columns
-        bodyparts : list
-            List of bodypart names
-        scorer : str
-            Scorer/model name from DLC output
-        model_id : str
-            Model identifier for naming
-        skeleton_edges : list, optional
-            List of [bodypart1, bodypart2] edge pairs
-        description : str, optional
-            Description for PoseEstimation object
-        original_videos : list, optional
-            List of original video identifiers
-        source_software : str, optional
-            Source software name for ndx-pose metadata, by default
-            "DeepLabCut". Pass from the active tool strategy's
-            ``source_software`` property.
-
-        Returns
-        -------
-        tuple
-            (pose_estimation, skeleton) ndx-pose objects
-        """
-        if ndx_pose is None:  # pragma: no cover
-            raise ImportError(  # pragma: no cover
-                "ndx-pose is required to build pose structures. "
-                "Install with: pip install ndx-pose>=0.2.0"
-            )
-
-        # Build ndx-pose Skeleton
-        bp_index = {bp: i for i, bp in enumerate(bodyparts)}
-        if skeleton_edges:
-            edge_indices = [
-                [bp_index[a], bp_index[b]]
-                for a, b in skeleton_edges
-                if a in bp_index and b in bp_index
-            ]
-            edge_array = (
-                np.array(edge_indices, dtype="uint8")
-                if edge_indices
-                else np.array([], dtype="uint8").reshape(0, 2)
-            )
-        else:
-            edge_array = np.array([], dtype="uint8").reshape(0, 2)
-
-        skeleton = ndx_pose.Skeleton(
-            name=f"skeleton_{model_id}",
-            nodes=bodyparts,
-            edges=edge_array,
-        )
-
-        # Validate timestamps — real video timestamps are required
-        if timestamps is None:
-            raise ValueError(
-                "Real video timestamps are required for build_pose_estimation. "
-                "Pass timestamps fetched from VideoFile.fetch_nwb()[0]"
-                "['video_file'].timestamps."
-            )
-        if len(timestamps) != len(pose_df):
-            raise ValueError(
-                f"Timestamp length {len(timestamps)} does not match pose "
-                f"frame count {len(pose_df)}; check video/pose alignment."
-            )
-
-        # Build PoseEstimationSeries for each bodypart
-        pose_series_list = []
-
-        for bodypart in bodyparts:
-            x = pose_df[(scorer, bodypart, "x")].values
-            y = pose_df[(scorer, bodypart, "y")].values
-            likelihood = pose_df[(scorer, bodypart, "likelihood")].values
-            pose_data = np.column_stack([x, y])
-
-            series = ndx_pose.PoseEstimationSeries(
-                name=f"{bodypart}_pose",
-                description=f"Pose estimation for {bodypart}",
-                data=pose_data,
-                unit="pixels",
-                reference_frame="(0,0) is top-left corner",
-                timestamps=timestamps,
-                confidence=likelihood,
-                confidence_definition="DLC likelihood score",
-            )
-            pose_series_list.append(series)
-
-        # Build PoseEstimation container
-        pose_estimation = ndx_pose.PoseEstimation(
-            name="PoseEstimation",
-            pose_estimation_series=pose_series_list,
-            description=description or f"Pose estimation from model {model_id}",
-            original_videos=original_videos
-            or [],  # Use provided videos or empty list
-            source_software=source_software,
-            skeleton=skeleton,
-            scorer=scorer,
-        )
-
-        return pose_estimation, skeleton
-
-    def store_to_nwb(
-        self, pose_estimation, skeleton, analysis_abs_path: Union[Path, str]
-    ) -> None:
-        """Store pose estimation data to NWB file.
-
-        Parameters
-        ----------
-        pose_estimation : ndx_pose.PoseEstimation
-            Pose estimation object
-        skeleton : ndx_pose.Skeleton
-            Skeleton object
-        analysis_abs_path : Union[Path, str]
-            Absolute path to analysis NWB file
-        """
-        import pynwb
-
-        with pynwb.NWBHDF5IO(
-            path=str(analysis_abs_path), mode="a", load_namespaces=True
-        ) as io:
-            nwbf = io.read()
-            if "behavior" not in nwbf.processing:
-                behavior_module = nwbf.create_processing_module(
-                    name="behavior",
-                    description="Behavioral pose estimation data",
-                )
-            else:
-                behavior_module = nwbf.processing["behavior"]
-
-            skeletons = ndx_pose.Skeletons(skeletons=[skeleton])
-            behavior_module.add(skeletons)
-            behavior_module.add(pose_estimation)
-            io.write(nwbf)
-
-        self._info_msg(f"Stored pose estimation in NWB: {analysis_abs_path}")
-
-
-def _populate_nwb_pose_estimation(
-    nwbfile,
-    df,
-    scorer: str,
-    bodyparts: list,
-    pose_estimation_name: str,
-    dlc_output_path: Path,
-    timestamps: np.ndarray,
-) -> None:
-    """Populate an NWBFile with a PoseEstimation object built from DLC data.
-
-    Adds (or extends) the ``behavior`` processing module with a
-    ``Skeletons`` container and a ``PoseEstimation`` container holding one
-    ``PoseEstimationSeries`` per body-part.
-
-    Parameters
-    ----------
-    nwbfile : pynwb.NWBFile
-        Open NWB file to modify in-place.
-    df : pd.DataFrame
-        Multi-level DataFrame returned by ``parse_dlc_h5_output``.
-    scorer : str
-        DLC scorer/network name (top-level column label).
-    bodyparts : list[str]
-        Ordered list of body-part names.
-    pose_estimation_name : str
-        Name for the ``PoseEstimation`` NWB object.
-    dlc_output_path : Path
-        Source DLC output file (used for description strings).
-    timestamps : np.ndarray
-        Per-frame timestamps (seconds).
-    """
-    # Behavior processing module
-    if "behavior" not in nwbfile.processing:
-        behavior_module = nwbfile.create_processing_module(
-            name="behavior",
-            description="Behavioral pose estimation data",
-        )
-    else:
-        behavior_module = nwbfile.processing["behavior"]
-
-    # Skeleton (no edge info available from DLC output alone)
-    skeleton = ndx_pose.Skeleton(
-        name=f"{pose_estimation_name}_skeleton",
-        nodes=bodyparts,
-        edges=np.array([], dtype="uint8").reshape(0, 2),
-    )
-
-    if "Skeletons" not in behavior_module.data_interfaces:
-        behavior_module.add_data_interface(
-            ndx_pose.Skeletons(skeletons=[skeleton])
-        )
-    else:
-        behavior_module.data_interfaces["Skeletons"].skeletons.append(skeleton)
-
-    # One PoseEstimationSeries per body-part
-    pose_series_list = [
-        ndx_pose.PoseEstimationSeries(
-            name=f"{bp}_pose",
-            description=f"Pose estimation for {bp}",
-            data=np.column_stack(
-                [
-                    df[(scorer, bp, "x")].values,
-                    df[(scorer, bp, "y")].values,
-                ]
-            ),
-            unit="pixels",
-            reference_frame="(0,0) is top-left corner",
-            timestamps=timestamps,
-            confidence=df[(scorer, bp, "likelihood")].values,
-            confidence_definition="DLC likelihood score",
-        )
-        for bp in bodyparts
-    ]
-
-    behavior_module.add(
-        ndx_pose.PoseEstimation(
-            name=pose_estimation_name,
-            pose_estimation_series=pose_series_list,
-            description=f"Pose estimation from DLC: {dlc_output_path.name}",
-            original_videos=[str(dlc_output_path.stem)],
-            source_software="DeepLabCut",
-            skeleton=skeleton,
-            scorer=scorer,
-        )
-    )
-
-
 @schema
 class PoseEstim(SpyglassMixin, dj.Computed):
     """Pose estimation results from model inference on video files.
@@ -913,7 +459,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
 
                 nwbfile = NWBFile(
                     session_description=(
-                        f"Pose estimation from DLC output {dlc_output_path.name}"
+                        f"Pose estimation from DLC {dlc_output_path.name}"
                     ),
                     identifier=f"pose_{datetime.now():%Y%m%d%H%M%S}",
                     session_start_time=datetime.now(),
@@ -1087,7 +633,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
             )
 
         nwb_file_name = self.fetch1("analysis_file_name")
-        self._logger.debug(f"Fetching pose data from NWB: {nwb_file_name}")
+        self._logger.debug("Fetching pose data from NWB: %s", nwb_file_name)
 
         # Use standard Spyglass path resolution (handles DANDI streaming,
         # logging, and caching) instead of a custom AnalysisNwbfile lookup.
@@ -1372,7 +918,7 @@ class PoseEstim(SpyglassMixin, dj.Computed):
         Union[str, list]
             Path(s) to output file(s)
         """
-        if not (Model() & model_key):
+        if not Model() & model_key:
             raise ValueError(
                 f"Model not found in database: {model_key}. "
                 "Please import model first using Model.load()"
