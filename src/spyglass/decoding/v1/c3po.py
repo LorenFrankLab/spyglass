@@ -322,6 +322,9 @@ class Model(SpyglassMixin, dj.Computed):
     input_shape: mediumblob  # shape of the input data used for training, needed for initializing the model when loading parameters
     z_object_id: varchar(40)
     c_object_id: varchar(40)
+    checkpoint_batch_size = NULL: mediumblob  # training batch size at checkpoints
+    checkpoint_n_neg = NULL: mediumblob  # number of negative samples used at checkpoints
+    checkpoint_params = NULL: longblob  # parameters of the model at each checkpoint
     """
 
     def _make_fetch(self, key):
@@ -416,14 +419,18 @@ class Model(SpyglassMixin, dj.Computed):
                 f"Training function {training_params['training_function']} not found in TRAINING_FUNCTIONS."
             )
         print(jax.devices())
-        params, tracked_loss = training_function(
-            model,
-            params,
-            x_train,
-            delta_t_train,
-            learning_rate=training_params["learning_rate"],
-            n_epochs=training_params["n_epochs"],
-            **training_params["training_params"],
+        params, tracked_loss, intermediate_params, training_hypers = (
+            training_function(
+                model,
+                params,
+                x_train,
+                delta_t_train,
+                learning_rate=training_params["learning_rate"],
+                n_epochs=training_params["n_epochs"],
+                return_intermediate_params=True,
+                return_training_hypers=True,
+                **training_params["training_params"],
+            )
         )
 
         # Build a c3po analysis object and embed the data
@@ -457,7 +464,14 @@ class Model(SpyglassMixin, dj.Computed):
             analysis_file_name,
             z_object_id,
             c_object_id,
-            x_train.shape[2:],  # input shape for future use when loading the model
+            x_train.shape[
+                2:
+            ],  # input shape for future use when loading the model
+            [
+                serialization.to_bytes(intermediate)
+                for intermediate in intermediate_params
+            ],
+            training_hypers,
         ]
 
     def _make_insert(
@@ -469,6 +483,8 @@ class Model(SpyglassMixin, dj.Computed):
         z_object_id,
         c_object_id,
         input_shape,
+        intermediate_params,
+        training_hypers,
     ):
         self.insert1(
             {
@@ -479,6 +495,13 @@ class Model(SpyglassMixin, dj.Computed):
                 "z_object_id": z_object_id,
                 "c_object_id": c_object_id,
                 "input_shape": input_shape,
+                "checkpoint_params": intermediate_params,
+                "checkpoint_n_neg": [
+                    epoch["n_neg"] for epoch in training_hypers
+                ],
+                "checkpoint_batch_size": [
+                    epoch["batch_size"] for epoch in training_hypers
+                ],
             }
         )
 
@@ -508,10 +531,14 @@ class Model(SpyglassMixin, dj.Computed):
         rand_key = jax.random.PRNGKey(0)
         null_params = model.init(jax.random.PRNGKey(1), x_, delta_t_, rand_key)
         # load the trained model parameters  organized by the dummy input structure
-        params = serialization.from_bytes(null_params, self.fetch1("model_params"))
+        params = serialization.from_bytes(
+            null_params, self.fetch1("model_params")
+        )
 
         # build analysis object
-        analysis = C3poAnalysis(model=model, model_args=model_args, params=params)
+        analysis = C3poAnalysis(
+            model=model, model_args=model_args, params=params
+        )
 
         # fetch the embedded latent states and context variables from the NWB file
         # store them in the analysis object and return it
@@ -521,4 +548,3 @@ class Model(SpyglassMixin, dj.Computed):
         analysis.c = nwb["c"].data
 
         return analysis
-
