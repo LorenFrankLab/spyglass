@@ -199,13 +199,13 @@ class TestGetLabelsComparisonOperators:
 
 
 class TestGetLabelsUnitIdTypeMismatch:
-    """Document why Bugs B/C had minimal scientific impact.
+    """Verify unit_id normalization and its effect on label propagation.
 
-    Parent labels from the Curation table use integer unit_ids.
-    Quality-metrics JSON uses string unit_ids.  Python treats these
-    as distinct keys, so list aliasing (Bug B) and duplicate-label
-    comparisons (Bug C) could only propagate between string-keyed
-    QM units — never onto integer-keyed parent units.
+    ``get_labels`` normalizes all quality-metric unit_ids to ``int`` before
+    merging with parent labels, so int-keyed parent entries and string-keyed
+    QM entries for the same logical unit are now unified.  These tests
+    document the current (fixed) behavior, not the historical isolation that
+    existed before normalization was added.
     """
 
     def test_new_qm_unit_added_independently(self, get_labels):
@@ -1124,8 +1124,8 @@ class TestNwbTransactionSafety:
             not temp_file.exists()
         ), "temp file must be removed after DB failure"
 
-    def test_case_a_does_not_stage_nwb(self, table):
-        """Case A (no reject status change) skips NWB staging entirely."""
+    def test_case_a_also_stages_nwb(self, table):
+        """Case A (label text change, no reject flip) still stages NWB patches."""
         from unittest.mock import MagicMock, patch
 
         case_a_diff = {
@@ -1153,6 +1153,7 @@ class TestNwbTransactionSafety:
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
         ):
+            mock_stage.return_value = []
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
             self._mock_tx(mock_curation)
@@ -1161,7 +1162,7 @@ class TestNwbTransactionSafety:
             )
             table.make(self._make_key(), action="update")
 
-        mock_stage.assert_not_called()
+        mock_stage.assert_called_once()
 
     def test_activate_nwb_repairs_renames_and_checksums(self, tmp_path):
         """_activate_nwb_repairs renames each temp file and updates checksum."""

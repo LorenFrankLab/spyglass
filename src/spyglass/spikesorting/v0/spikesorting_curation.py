@@ -1461,7 +1461,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         except FileNotFoundError:
             logger.warning(
                 f"Fix1513Status: metrics file not found: "
-                f"{metrics_path}; skipping {key}"
+                f"{metrics_path}; entry will remain unpopulated for retry"
             )
             raise
 
@@ -2147,7 +2147,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             # DB transaction fails, the temp files are discarded.  Only
             # after a successful commit are temps renamed into place.
             staged = []
-            if has_downstream and case == "B":
+            if has_downstream:
                 staged = self._stage_nwb_repairs(auto_curation_key, new_labels)
             try:
                 with Curation.connection.transaction:
