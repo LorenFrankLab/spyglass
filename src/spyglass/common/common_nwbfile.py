@@ -834,13 +834,21 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
             if not dry_run:
                 registry.unblock_new_inserts()
 
-    def check_all_files(self) -> dict:
+    def check_all_files(self, resolve_tables: bool = False) -> dict:
         """Check files across all analysis tables for issues.
 
         Iterates through common and all custom AnalysisNwbfile tables,
         checking file existence and readability. Populates AnalysisFileIssues
         table with any problems found. This is a read-only monitoring operation
         that can be run independently of cleanup at different frequencies.
+
+        Parameters
+        ----------
+        resolve_tables : bool, optional
+            After all issues are collected, populate the table field for each
+            issue by querying downstream child tables. More efficient than
+            per-table resolution since children are fetched once per analysis
+            table across all newly inserted issues. Default False.
 
         Returns
         -------
@@ -850,12 +858,13 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         Example
         -------
         >>> from spyglass.common import AnalysisNwbfile
-        >>> results = AnalysisNwbfile().check_all_files()
+        >>> results = AnalysisNwbfile().check_all_files(resolve_tables=True)
         >>> print(f"Total issues: {sum(results.values())}")
 
         See Also
         --------
         AnalysisFileIssues : Table that stores detected issues
+        AnalysisFileIssues.resolve_table_refs : Populate table field on demand
         """
         from spyglass.common.common_file_tracking import AnalysisFileIssues
 
@@ -869,11 +878,16 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
         results = {}
         file_checker = AnalysisFileIssues()
 
+        # B: Fetch recompute-deleted files once for all tables
+        deleted_files = file_checker._get_recompute_deleted()
+
         for i, analysis_tbl in enumerate(analysis_tables, start=1):
             tbl_name = analysis_tbl.full_table_name
             self._info_msg(f"  [{i}/{num_tables}] Checking {tbl_name} files")
 
-            issue_count = file_checker.check_files(analysis_tbl)
+            issue_count = file_checker.check_files(
+                analysis_tbl, deleted_files=deleted_files
+            )
             results[tbl_name] = issue_count
 
             if issue_count > 0:
@@ -881,5 +895,9 @@ class AnalysisNwbfile(SpyglassAnalysis, dj.Manual):
 
         total_issues = sum(results.values())
         self._info_msg(f"File check complete: {total_issues} issues found")
+
+        if resolve_tables and total_issues > 0:
+            self._info_msg("Resolving downstream table references for issues")
+            file_checker.resolve_table_refs()
 
         return results

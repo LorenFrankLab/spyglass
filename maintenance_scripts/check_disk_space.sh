@@ -57,20 +57,8 @@ send_email_message() {
       -T <(echo "$EMAIL")
 }
 
-# Send slack message
-send_slack_message() {
-  # Note: This will not handle special characters. If needed, can extend to
-  # accept a JSON payload and use `--data-binary` instead of `-d`.
-  if [[ -z "$SLACK_TOKEN" || -z "$SLACK_CHANNEL" ]]; then
-    return 0
-  fi
-  local MESSAGE="$1"
-  curl -d "text=$MESSAGE" \
-    -d "channel=$SLACK_CHANNEL" \
-    -H "Authorization: Bearer $SLACK_TOKEN" \
-    -X POST https://slack.com/api/chat.postMessage \
-    2>> "$SPACE_LOG"
-}
+source "$SCRIPT_DIR/slack_utils.sh"
+SLACK_LOG="$SPACE_LOG"
 
 # Find the longest drive name for padding
 MAX_DRIVE_LEN=0

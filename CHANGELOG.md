@@ -166,6 +166,15 @@ for label, interval_data in results.groupby("interval_labels"):
 - Add `analysis_table` property to mixin for custom pipelines #1525
 - Quiet pytest output for expected warnings in test runs #1534
 - Fix update bug in `_resolve_external_tables` #1536
+- Fix `_get_epoch_groups` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1567
+- Fix `_get_pos_dict` raising `TypeError` for `SpatialSeries` with
+    `starting_time + rate` (no timestamps) #1571
+- Parallelize `AnalysisFileIssues` checks #1557
+- Tests update config sooner to avoid false-negative `test_mode` errors #1572
+- Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
+    `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
+    `FALSE` default #1575
 
 ### Pipelines
 
@@ -236,6 +245,11 @@ for label, interval_data in results.groupby("interval_labels"):
     - Improve get_recording efficiency #1522
     - Raise error if `FigURLCurationSelection` finds no curation label #1531
     - Allow `CurationV1` to save without any spikes #1533
+    - Trigger recompute in `CurationV1.get_recording` when necessary #1561
+    - Drop spike sample indices that exceed the recording length in
+        `CurationV1.get_sorting` and `SpikeSorting.get_sorting`, fixing a
+        SpikeInterface `ValueError` caused by floating-point round-trip in the
+        seconds-to-samples conversion #1564
     - Implement fix for `AutomaticCuration` incorrect labels #1537
 
 ## [0.5.5] (Aug 6, 2025)
@@ -259,6 +273,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Remove outdated code comments #1304
 - Add code coverage badge, and increase position coverage #1305, #1315
 - Force `TableChain` to follow shortest path #1356
+- Avoid database connections in import of `spyglass.settings` #1563
 
 ### Documentation
 

@@ -27,6 +27,59 @@ from spyglass.utils import SpyglassMixin, logger
 schema = dj.schema("spikesorting_v1_sorting")
 
 
+def spike_times_to_valid_samples(
+    recording_times: np.ndarray,
+    spike_times: np.ndarray,
+    n_samples: int,
+    unit_id,
+) -> np.ndarray:
+    """Convert spike times (seconds) to sample indices within recording bounds.
+
+    Spike times are persisted in absolute seconds in NWB. On readback,
+    floating-point rounding in the seconds-to-samples round-trip can cause
+    ``np.searchsorted`` to return an index equal to ``n_samples`` (one past
+    the last valid sample) for spikes at or near the end of the recording.
+    SpikeInterface rejects such a sorting with ``ValueError: "The sorting
+    object has spikes exceeding the recording duration"``. This helper drops
+    those out-of-bounds indices and emits a warning identifying the affected
+    unit and the count removed.
+
+    ``np.searchsorted`` is called with the default ``side='left'``: a spike
+    that exactly equals ``recording_times[-1]`` maps to index ``n_samples - 1``
+    (valid). Switching to ``side='right'`` would map the same spike to
+    ``n_samples`` and reintroduce the bug.
+
+    Parameters
+    ----------
+    recording_times : np.ndarray, shape (n_samples,)
+        Recording timestamps in seconds, monotonically increasing.
+    spike_times : np.ndarray, shape (n_spikes,)
+        Spike times for a single unit in seconds.
+    n_samples : int
+        Total number of samples in the recording.
+    unit_id : int or str
+        Identifier of the unit, used only in the warning message.
+
+    Returns
+    -------
+    spike_samples : np.ndarray, shape (n_valid_spikes,)
+        Sample indices in ``[0, n_samples)`` corresponding to ``spike_times``,
+        with any out-of-bounds indices removed. ``n_valid_spikes <= n_spikes``.
+    """
+    spike_samples = np.searchsorted(recording_times, spike_times)
+    excess_mask = spike_samples >= n_samples
+    n_excess = int(excess_mask.sum())
+    if n_excess > 0:
+        logger.warning(
+            f"Unit {unit_id} has {n_excess} spike(s) exceeding the "
+            "recording duration. Removing excess spikes. This may be "
+            "caused by floating-point rounding during the seconds-to-"
+            "samples conversion."
+        )
+        spike_samples = spike_samples[~excess_mask]
+    return spike_samples
+
+
 @schema
 class SpikeSorterParameters(SpyglassMixin, dj.Lookup):
     """Parameters for spike sorting algorithms.
@@ -480,17 +533,18 @@ class SpikeSorting(SpyglassMixin, dj.Computed):
         ) as io:
             nwbf = io.read()
             units = nwbf.units.to_dataframe()
-        units_dict_list = [
-            {
-                unit_id: np.searchsorted(recording.get_times(), spike_times)
-                for unit_id, spike_times in zip(
-                    units.index, units["spike_times"]
-                )
-            }
-        ]
+
+        recording_times = recording.get_times()
+        n_samples = recording.get_num_samples()
+        units_dict = {
+            unit_id: spike_times_to_valid_samples(
+                recording_times, spike_times, n_samples, unit_id
+            )
+            for unit_id, spike_times in zip(units.index, units["spike_times"])
+        }
 
         sorting = si.NumpySorting.from_unit_dict(
-            units_dict_list, sampling_frequency=sampling_frequency
+            [units_dict], sampling_frequency=sampling_frequency
         )
 
         return sorting
