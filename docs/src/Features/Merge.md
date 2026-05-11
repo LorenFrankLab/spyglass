@@ -69,23 +69,100 @@ under `utils.dj_merge_tables`.
 
 ### Restricting
 
-In short: restrict Merge Tables with arguments, not the `&` operator.
+Restrict a Merge Table with the standard `&` operator. Part-table fields are
+resolved automatically:
 
-- Normally: `Table & "field='value'"`
-- Instead: `MergeTable.merge_view(restriction="field='value'"`).
+```python
+# Restrict by a field that lives in a part table — works correctly
+result = MergeTable & {"nwb_file_name": "my_session.nwb"}
+len(result)  # only rows whose part has nwb_file_name == "my_session.nwb"
 
-_Caution_. The `&` operator may look like it's working when using `dict`, but
-this is because invalid keys will be ignored. `Master & {'part_field':'value'}`
-is equivalent to `Master` alone
-([source](https://docs.datajoint.org/python/queries/06-Restriction.html#restriction-by-a-mapping)).
+# Restrict by the master primary key — unchanged behavior
+result = MergeTable & {"merge_id": some_uuid}
+```
 
-When provided as arguments, methods like `merge_get_part` and `merge_get_parent`
-will override the permissive treatment of mappings described above to only
-return relevant tables.
+!!! note "String restrictions"
+
+    Both dict and string restrictions resolve through parts automatically when the
+    restriction references a part-table field name:
+
+    ```python
+    # These are equivalent:
+    MergeTable & {"nwb_file_name": "session.nwb"}
+    MergeTable & 'nwb_file_name LIKE "session%"'
+    ```
+
+    String restrictions on master-only fields (`merge_id`, `source`) are passed
+    through to DataJoint directly without part-table resolution.
+
+!!! note "Raw master-only restriction"
+
+    If you intentionally want to restrict on `merge_id` or `source` without
+    part-table resolution, use `super_restrict()`:
+
+    ```python
+    MergeTable.super_restrict({"source": "MyPart"})
+    ```
+
+### Fetching
+
+`fetch()` and `fetch1()` on a (restricted) Merge Table walk the part tables
+automatically:
+
+```python
+# Fetch a part-table attribute — walks parts
+(MergeTable & restriction).fetch("nwb_file_name")
+
+# fetch1() — exactly one row; returns dict / scalar / tuple per DJ convention
+(MergeTable & restriction).fetch1()  # dict of all columns
+(MergeTable & restriction).fetch1("nwb_file_name")  # scalar
+(MergeTable & restriction).fetch1("a", "b")  # tuple
+
+# Fetch master-only columns — served from master directly
+MergeTable.fetch("merge_id")
+MergeTable.fetch("source")
+
+# Raw master-only fetch (bypasses part-walking)
+MergeTable.super_fetch()
+```
+
+### Viewing
+
+```python
+# Print a merged union of all parts
+(MergeTable & restriction).view()
+
+# Return an HTML representation (notebooks)
+(MergeTable & restriction).html()
+```
+
+### Selecting part and parent tables
+
+```python
+# Get the part table matching the current restriction
+(MergeTable & restriction).get_part_table()
+
+# Get the part table joined with master (includes source column)
+(MergeTable & restriction).get_part_table(join_master=True)
+
+# Get the upstream parent table (the source of the data)
+(MergeTable & restriction).get_parent_table()
+```
+
+### Deleting
+
+```python
+# Delete merge entries (master + parts) matching the restriction
+(MergeTable & restriction).delete()
+
+# Delete the upstream parent-table entries (destructive!)
+(MergeTable & restriction).delete_upstream(dry_run=True)  # preview
+(MergeTable & restriction).delete_upstream(dry_run=False)  # execute
+```
 
 ### Building Downstream
 
-A downstream analysis will ideally be able to use all diverget pipelines
+A downstream analysis will ideally be able to use all divergent pipelines
 interchangeably. If there are parameters that may be required for downstream
 processing, they should be included in the final table of the pipeline. In the
 example above, both `One` and `Two` might have a secondary key `params`. A
@@ -94,14 +171,29 @@ downstream Computed table could do the following:
 ```python
 def make(self, key):
     try:
-        params = MergeTable.merge_get_parent(restriction=key).fetch("params")
+        params = (MergeTable & key).get_parent_table().fetch("params")
     except DataJointError:
         params = default_params
     processed_data = self.processing_func(key, params)
 ```
 
-Note that the `try/except` above catches a possible error in the event `params`
-is not present in the parent.
+## Deprecated API
+
+The following class methods are deprecated and will be removed in Spyglass
+0.7.0. They continue to work but emit a deprecation warning on first call.
+Migrate to the instance-method equivalents shown in the table below.
+
+| Deprecated call                                             | Replacement                                                |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `MergeTable.merge_view(restriction)`                        | `(MergeTable & restriction).view()`                        |
+| `MergeTable.merge_html(restriction)`                        | `(MergeTable & restriction).html()`                        |
+| `MergeTable.merge_restrict(restriction)`                    | `MergeTable & restriction`                                 |
+| `MergeTable.merge_delete(restriction)`                      | `(MergeTable & restriction).delete()`                      |
+| `MergeTable.merge_delete_parent(restriction, dry_run=True)` | `(MergeTable & restriction).delete_upstream(dry_run=True)` |
+| `MergeTable.merge_get_part(restriction, ...)`               | `(MergeTable & restriction).get_part_table(...)`           |
+| `MergeTable.merge_get_parent(restriction, ...)`             | `(MergeTable & restriction).get_parent_table(...)`         |
+| `MergeTable.merge_fetch(restriction, *attrs)`               | `(MergeTable & restriction).fetch(*attrs)`                 |
+| `MergeTable.merge_populate(source, keys)`                   | `MergeTable.populate(source, keys)`                        |
 
 ## Example
 

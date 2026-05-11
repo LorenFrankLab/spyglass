@@ -67,7 +67,9 @@ class ActivityLog(dj.Manual):
     """
 
     @classmethod
-    def deprecate_log(cls, name, alt=None, warning=True) -> None:
+    def deprecate_log(
+        cls, name, alt=None, warning=True, version="0.6.0"
+    ) -> None:
         """Log a deprecation warning for a feature.
 
         Parameters
@@ -78,11 +80,13 @@ class ActivityLog(dj.Manual):
             What to use instead. Default no such message.
         warning : bool, optional
             Whether to log a warning. Default is True.
+        version : str, optional
+            Spyglass version when removal is scheduled. Default "0.6.0".
         """
         if warning:
             msg = f"\n\tUse {alt} instead" if alt else ""
             logger.warning(
-                f"DEPRECATION scheduled for Spyglass 0.6.0: {name}{msg}"
+                f"DEPRECATION scheduled for Spyglass {version}: {name}{msg}"
             )
         cls.insert1(
             dict(dj_user=dj.config["database.user"], function=name[:64])

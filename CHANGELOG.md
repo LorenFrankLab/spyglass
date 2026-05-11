@@ -157,6 +157,7 @@ for label, interval_data in results.groupby("interval_labels"):
 - Fix typo in `env_defaults` key: `HD5_USE_FILE_LOCKING` →
     `HDF5_USE_FILE_LOCKING` so the HDF5 library actually sees the intended
     `FALSE` default #1575
+- Adjust `Merge` table API to align with DataJoint builtins #1583
 
 ### Pipelines
 
