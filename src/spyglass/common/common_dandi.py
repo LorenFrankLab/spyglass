@@ -126,8 +126,13 @@ class DandiViolations(SpyglassMixin, dj.Computed):
                 **key,
                 "violation_id": i,
                 "id": result.id,
-                "message": result.message[:255],
-                "full_error": str(result),
+                "message": result.message[:255]
+                .replace("'", "")
+                .encode("ascii", "ignore")
+                .decode(),  # ensure sql compatibility
+                "full_error": str(result).replace(
+                    "'", "''"
+                ),  # escape single quotes for SQL insertion
                 "file_path": file_path,
             }
             for i, result in enumerate(filtered_results)
