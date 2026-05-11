@@ -18,6 +18,7 @@ def update_analysis_for_dandi_standard(
     filepath: str,
     age: Union[str, dict] = "P4M/P8M",
     resolve_external_table: bool = True,
+    weight_unit: str = "g",
 ):
     """Function to resolve common nwb file format errors within the database
 
@@ -31,6 +32,8 @@ def update_analysis_for_dandi_standard(
     resolve_external_table : bool, optional
         whether to update the external table. Set False if editing file
         outside the database, by default True
+    weight_unit : str, optional
+        unit to append to weight values that are missing units, by default "g"
     """
     from spyglass.common import LabMember
 
@@ -47,6 +50,9 @@ def update_analysis_for_dandi_standard(
             )
             # Adjust to single letter sex identifier
             standardize_sex_identifier(file)
+
+            # Ensure weight has units or is removed if unknown
+            ensure_weight_units(file, intended_unit=weight_unit)
 
             # replace subject species value "Rat" with "Rattus norvegicus"
             ensure_species_is_latin(file)
@@ -122,6 +128,36 @@ def standardize_sex_identifier(file: h5py.File):
     new_sex_value = sex_value[0].upper()
     logger.info(f"Adjusting subject sex: '{sex_value}' -> '{new_sex_value}'")
     file["/general/subject/sex"][()] = new_sex_value
+
+
+def ensure_weight_units(file: h5py.File, intended_unit: str = "g"):
+    """
+    Ensure weight is stored with units or removed if unknown
+
+    Parameters
+    ----------
+    file : h5py.File
+        An open HDF5 file object.
+    intended_unit : str, optional
+        The unit to append to weight values that are missing units, by default "g"
+    """
+    subject_path = "/general/subject"
+    if "weight" not in file[subject_path]:
+        return
+    weight_path = "/general/subject/weight"
+
+    weight = file[weight_path][()].decode("utf-8")
+    if weight.lower() == "unknown":
+        # set a unknown weight value to None
+        file["/general/subject"].pop("weight")
+        return
+
+    valid_units = ("kg", "g", "mg", "ug", "g", "ng", "pg")
+    if weight.endswith(tuple(valid_units)):
+        return
+
+    new_weight = f"{weight} {intended_unit}"
+    file[weight_path][()] = new_weight
 
 
 def ensure_species_is_latin(file: h5py.File):
