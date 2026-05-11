@@ -577,8 +577,8 @@ class TestFix1513Status:
             table.make(key, action="update")
             mock_nwb.assert_not_called()
 
-    def test_update_case_b_calls_nwb_fix(self, table):
-        """Case B update: _repair_nwb_labels IS called inside transaction."""
+    def test_update_case_b_stages_and_activates_nwb(self, table):
+        """Case B update: stages NWB patches before TX, activates after."""
         from unittest.mock import MagicMock, patch
 
         key = self._make_key()
@@ -600,13 +600,15 @@ class TestFix1513Status:
             patch.object(table, "_compute_label_diff", return_value=diff),
             patch.object(table, "_check_permission", return_value="alice"),
             patch.object(table, "_print_diff"),
-            patch.object(table, "_repair_nwb_labels") as mock_nwb,
+            patch.object(table, "_stage_nwb_repairs") as mock_stage,
+            patch.object(table, "_activate_nwb_repairs") as mock_activate,
             patch.object(table, "_repair_unit_labels"),
             patch.object(table, "insert1"),
             patch(f"{module}.Curation") as mock_curation,
             patch(f"{module}.CuratedSpikeSorting") as mock_css,
             patch(f"{module}.LabMember") as mock_lm,
         ):
+            mock_stage.return_value = []
             mock_lm.return_value.get_djuser_name.return_value = "alice"
             mock_lm.return_value.admin = []
             mock_curation.connection.transaction.__enter__ = MagicMock(
@@ -620,7 +622,8 @@ class TestFix1513Status:
             )
 
             table.make(key, action="update")
-            mock_nwb.assert_called_once()
+            mock_stage.assert_called_once()
+            mock_activate.assert_called_once_with([])
 
     def test_update_case_c_raises_value_error(self, table):
         """Case C with action='update' raises ValueError before any DB write."""
@@ -736,6 +739,101 @@ class TestFix1513Status:
             mock_curation.update1.assert_not_called()
             row = mock_ins.call_args[0][0]
             assert row["action"] == "skip"
+
+    def _make_diff(self):
+        return {
+            "auto_curation_key": {
+                "nwb_file_name": "test.nwb",
+                "curation_id": 1,
+            },
+            "curation_key": {"curation_id": 1},
+            "old_labels": {0: [], 1: ["noise"]},
+            "new_labels": {0: ["mua"], 1: ["noise", "reject"]},
+            "reject_status_changed": [],
+        }
+
+    def test_keep_stores_label_diff(self, table):
+        """action='keep' persists old/new label diff for audit."""
+        from unittest.mock import patch
+
+        key = self._make_key()
+        diff = self._make_diff()
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(table, "_compute_label_diff", return_value=diff),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(table, "insert1") as mock_ins,
+            patch(f"{module}.Curation"),
+            patch(f"{module}.CuratedSpikeSorting"),
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            table.make(key, action="keep")
+
+        row = mock_ins.call_args[0][0]
+        assert "label_diff" in row
+        assert row["label_diff"]["old_labels"] == diff["old_labels"]
+        assert row["label_diff"]["new_labels"] == diff["new_labels"]
+
+    def test_skip_stores_label_diff(self, table):
+        """action='skip' persists old/new label diff for audit."""
+        from unittest.mock import patch
+
+        key = self._make_key()
+        diff = self._make_diff()
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(table, "_compute_label_diff", return_value=diff),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(table, "insert1") as mock_ins,
+            patch(f"{module}.Curation"),
+            patch(f"{module}.CuratedSpikeSorting"),
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            table.make(key, action="skip")
+
+        row = mock_ins.call_args[0][0]
+        assert "label_diff" in row
+        assert row["label_diff"]["old_labels"] == diff["old_labels"]
+        assert row["label_diff"]["new_labels"] == diff["new_labels"]
+
+    def test_update_does_not_store_label_diff(self, table):
+        """action='update' leaves label_diff as None (change is in Curation)."""
+        from unittest.mock import MagicMock, patch
+
+        key = self._make_key()
+        diff = self._make_diff()
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(table, "_compute_label_diff", return_value=diff),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(table, "_repair_unit_labels"),
+            patch.object(table, "insert1") as mock_ins,
+            patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            mock_curation.connection.transaction.__enter__ = MagicMock(
+                return_value=None
+            )
+            mock_curation.connection.transaction.__exit__ = MagicMock(
+                return_value=False
+            )
+            mock_css.__and__ = MagicMock(
+                return_value=MagicMock(__len__=MagicMock(return_value=0))
+            )
+            table.make(key, action="update")
+
+        row = mock_ins.call_args[0][0]
+        assert row.get("label_diff") is None
 
     def test_interactive_prompt_routes_to_update(self, table):
         """Interactive input 'u' routes to update action."""
@@ -897,3 +995,206 @@ class TestFix1513Status:
         assert "Alice" in first_print
         assert "3" in first_print  # unreviewed count
         assert "1" in first_print  # skipped count
+
+
+class TestNwbTransactionSafety:
+    """Option C: NWB writes staged to temp copies outside the DB transaction."""
+
+    @pytest.fixture(autouse=True)
+    def clear_perm_cache(self):
+        from spyglass.spikesorting.v0.spikesorting_curation import Fix1513Status
+
+        Fix1513Status._perm_pass.clear()
+        Fix1513Status._perm_fail.clear()
+        yield
+        Fix1513Status._perm_pass.clear()
+        Fix1513Status._perm_fail.clear()
+
+    @pytest.fixture
+    def table(self):
+        from spyglass.spikesorting.v0.spikesorting_curation import Fix1513Status
+
+        return Fix1513Status()
+
+    def _make_key(self):
+        return {"nwb_file_name": "test.nwb", "curation_id": 1}
+
+    def _case_b_diff(self):
+        return {
+            "auto_curation_key": {
+                "nwb_file_name": "test.nwb",
+                "curation_id": 1,
+            },
+            "curation_key": {"curation_id": 1},
+            "old_labels": {0: []},
+            "new_labels": {0: ["noise", "reject"]},
+            "reject_status_changed": [
+                {"unit": 0, "was_rejected": False, "should_reject": True}
+            ],
+        }
+
+    def _mock_tx(self, mock_curation, raises=None):
+        from unittest.mock import MagicMock
+
+        mock_curation.connection.transaction.__enter__ = MagicMock(
+            return_value=None
+        )
+        exit_mock = MagicMock(return_value=False)
+        if raises:
+            exit_mock.side_effect = raises
+        mock_curation.connection.transaction.__exit__ = exit_mock
+
+    def test_case_b_stages_before_tx_activates_after(self, table):
+        """stage_nwb_repairs precedes TX enter; activate_nwb_repairs follows."""
+        from unittest.mock import MagicMock, patch
+
+        call_order = []
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(
+                table, "_compute_label_diff", return_value=self._case_b_diff()
+            ),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(
+                table,
+                "_stage_nwb_repairs",
+                side_effect=lambda *a, **kw: call_order.append("stage") or [],
+            ),
+            patch.object(
+                table,
+                "_activate_nwb_repairs",
+                side_effect=lambda *a, **kw: call_order.append("activate"),
+            ),
+            patch.object(table, "_repair_unit_labels"),
+            patch.object(table, "insert1"),
+            patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            mock_curation.connection.transaction.__enter__ = MagicMock(
+                side_effect=lambda: call_order.append("tx_enter")
+            )
+            mock_curation.connection.transaction.__exit__ = MagicMock(
+                side_effect=lambda *a: call_order.append("tx_exit") or False
+            )
+            mock_css.__and__ = MagicMock(
+                return_value=MagicMock(__len__=MagicMock(return_value=1))
+            )
+            table.make(self._make_key(), action="update")
+
+        assert call_order.index("stage") < call_order.index("tx_enter")
+        assert call_order.index("tx_exit") < call_order.index("activate")
+
+    def test_db_failure_discards_staged_temps(self, table, tmp_path):
+        """Staged temp files are deleted when the DB transaction fails."""
+        from unittest.mock import MagicMock, patch
+
+        temp_file = tmp_path / "patch.nwb.tmp"
+        temp_file.write_bytes(b"staged content")
+        staged = [(str(temp_file), "/real/file.nwb")]
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(
+                table, "_compute_label_diff", return_value=self._case_b_diff()
+            ),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(table, "_stage_nwb_repairs", return_value=staged),
+            patch.object(table, "_activate_nwb_repairs"),
+            patch.object(table, "_repair_unit_labels"),
+            patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            self._mock_tx(mock_curation, raises=RuntimeError("DB failure"))
+            mock_css.__and__ = MagicMock(
+                return_value=MagicMock(__len__=MagicMock(return_value=1))
+            )
+            with pytest.raises(RuntimeError, match="DB failure"):
+                table.make(self._make_key(), action="update")
+
+        assert (
+            not temp_file.exists()
+        ), "temp file must be removed after DB failure"
+
+    def test_case_a_does_not_stage_nwb(self, table):
+        """Case A (no reject status change) skips NWB staging entirely."""
+        from unittest.mock import MagicMock, patch
+
+        case_a_diff = {
+            "auto_curation_key": {
+                "nwb_file_name": "test.nwb",
+                "curation_id": 1,
+            },
+            "curation_key": {"curation_id": 1},
+            "old_labels": {0: ["noise"]},
+            "new_labels": {0: ["noise", "mua"]},
+            "reject_status_changed": [],
+        }
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch.object(
+                table, "_compute_label_diff", return_value=case_a_diff
+            ),
+            patch.object(table, "_check_permission", return_value="alice"),
+            patch.object(table, "_print_diff"),
+            patch.object(table, "_stage_nwb_repairs") as mock_stage,
+            patch.object(table, "_activate_nwb_repairs"),
+            patch.object(table, "_repair_unit_labels"),
+            patch.object(table, "insert1"),
+            patch(f"{module}.Curation") as mock_curation,
+            patch(f"{module}.CuratedSpikeSorting") as mock_css,
+            patch(f"{module}.LabMember") as mock_lm,
+        ):
+            mock_lm.return_value.get_djuser_name.return_value = "alice"
+            mock_lm.return_value.admin = []
+            self._mock_tx(mock_curation)
+            mock_css.__and__ = MagicMock(
+                return_value=MagicMock(__len__=MagicMock(return_value=1))
+            )
+            table.make(self._make_key(), action="update")
+
+        mock_stage.assert_not_called()
+
+    def test_activate_nwb_repairs_renames_and_checksums(self, tmp_path):
+        """_activate_nwb_repairs renames each temp file and updates checksum."""
+        from unittest.mock import MagicMock, patch
+
+        temp_file = tmp_path / "file.nwb.tmp"
+        real_file = tmp_path / "file.nwb"
+        temp_file.write_bytes(b"patched content")
+
+        module = "spyglass.spikesorting.v0.spikesorting_curation"
+        with (
+            patch(f"{module}.AnalysisNwbfile") as mock_anwb,
+            patch(f"{module}.dj") as mock_dj,
+        ):
+            inst = mock_anwb.return_value
+            inst._analysis_dir = str(tmp_path)
+            ext_tbl = MagicMock()
+            inst._ext_tbl = ext_tbl
+            ext_tbl.__and__ = MagicMock(
+                return_value=MagicMock(
+                    fetch1=MagicMock(return_value={"filepath": "file.nwb"})
+                )
+            )
+            mock_dj.hash.uuid_from_file.return_value = "abc123"
+
+            from spyglass.spikesorting.v0.spikesorting_curation import (
+                Fix1513Status,
+            )
+
+            Fix1513Status._activate_nwb_repairs(
+                [(str(temp_file), str(real_file))], verbose=False
+            )
+
+        assert not temp_file.exists(), "temp file must be gone after activation"
+        assert real_file.read_bytes() == b"patched content"
+        ext_tbl.update1.assert_called_once()

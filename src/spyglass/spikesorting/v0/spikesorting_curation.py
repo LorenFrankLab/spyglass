@@ -3,6 +3,7 @@ import pynwb
 
 import os
 import shutil
+import tempfile
 import time
 import warnings
 from pathlib import Path
@@ -1399,6 +1400,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     reviewed_at   : datetime
     repopulated=0 : tinyint       # 1 after CuratedSpikeSorting confirmed
     notes=''      : varchar(500)
+    label_diff=NULL : longblob    # {old_labels, new_labels} for keep/skip audit
     """
 
     # Class-level permission cache — persists across populate() calls.
@@ -1649,29 +1651,19 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             Fix1513Status._patch_nwb_file(abs_path, new_labels, verbose)
 
     @staticmethod
-    def _patch_nwb_file(abs_path, new_labels, verbose):
-        """Edit the label column in one NWB file and update its checksum.
+    def _apply_nwb_label_edits(nwb_path, new_labels, verbose):
+        """Open nwb_path in-place ('a' mode), edit unit labels, write if changed.
 
-        Parameters
-        ----------
-        abs_path : str or Path
-            Absolute path to the NWB analysis file.
-        new_labels : dict
-            Corrected labels dict ``{unit_id: [label, ...]}``.
-        verbose : bool
-            If True, log changes.
+        Returns True if any label was modified.
         """
-        if verbose:
-            logger.info(f"  NWB: editing {abs_path}")
-
         with pynwb.NWBHDF5IO(
-            path=abs_path, mode="a", load_namespaces=True
+            path=nwb_path, mode="a", load_namespaces=True
         ) as io:
             nwbf = io.read()
             if nwbf.units is None or "label" not in nwbf.units:
                 if verbose:
                     logger.info("  NWB: no units/label column; skip")
-                return
+                return False
 
             unit_ids = list(nwbf.units.id.data[:])
             label_col = nwbf.units["label"]
@@ -1690,11 +1682,11 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
 
             if changed:
                 io.write(nwbf)
+        return changed
 
-        if not changed:
-            return
-
-        # Update the external-table checksum to match the edited file
+    @staticmethod
+    def _update_nwb_checksum(abs_path, verbose):
+        """Update the external-table checksum for the given NWB file."""
         abs_path = Path(abs_path)
         anwb = AnalysisNwbfile()
         rel_path = abs_path.relative_to(anwb._analysis_dir)
@@ -1709,6 +1701,94 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         ext_tbl.update1(ext_key)
         if verbose:
             logger.info("  NWB: checksum updated")
+
+    @staticmethod
+    def _patch_nwb_file(abs_path, new_labels, verbose):
+        """Edit the label column in one NWB file and update its checksum.
+
+        For direct / legacy use.  ``make()`` uses ``_stage_nwb_patch`` +
+        ``_activate_nwb_repairs`` instead so that HDF5 writes stay outside
+        the DataJoint transaction.
+
+        Parameters
+        ----------
+        abs_path : str or Path
+            Absolute path to the NWB analysis file.
+        new_labels : dict
+            Corrected labels dict ``{unit_id: [label, ...]}``.
+        verbose : bool
+            If True, log changes.
+        """
+        if verbose:
+            logger.info(f"  NWB: editing {abs_path}")
+        changed = Fix1513Status._apply_nwb_label_edits(
+            abs_path, new_labels, verbose
+        )
+        if changed:
+            Fix1513Status._update_nwb_checksum(abs_path, verbose)
+
+    @staticmethod
+    def _stage_nwb_patch(abs_path, new_labels, verbose):
+        """Copy abs_path to a temp file in the same directory and patch it.
+
+        Returns ``(temp_path, abs_path)`` if any label changed, else
+        ``None`` (and the temp file is immediately deleted).
+        The temp file lives on the same filesystem as the original so that
+        ``os.replace`` is atomic when the caller activates the patch.
+        """
+        abs_path = Path(abs_path)
+        tmp = tempfile.NamedTemporaryFile(
+            dir=abs_path.parent, suffix=".tmp", delete=False
+        )
+        tmp.close()
+        temp_path = Path(tmp.name)
+        shutil.copy2(abs_path, temp_path)
+        try:
+            changed = Fix1513Status._apply_nwb_label_edits(
+                temp_path, new_labels, verbose
+            )
+        except Exception:
+            temp_path.unlink(missing_ok=True)
+            raise
+        if not changed:
+            temp_path.unlink(missing_ok=True)
+            return None
+        return (str(temp_path), str(abs_path))
+
+    @staticmethod
+    def _stage_nwb_repairs(curation_key, new_labels, verbose=True):
+        """Stage NWB label patches for all CuratedSpikeSorting analysis files.
+
+        Returns a list of ``(temp_path, real_path)`` pairs — one per NWB
+        file that actually has label changes.  Pass this list to
+        ``_activate_nwb_repairs`` after the DB transaction commits.
+        """
+        css_rows = (CuratedSpikeSorting & curation_key).fetch(as_dict=True)
+        staged = []
+        for css_row in css_rows:
+            abs_path = AnalysisNwbfile().get_abs_path(
+                css_row["analysis_file_name"]
+            )
+            result = Fix1513Status._stage_nwb_patch(
+                abs_path, new_labels, verbose
+            )
+            if result is not None:
+                staged.append(result)
+        return staged
+
+    @staticmethod
+    def _activate_nwb_repairs(staged, verbose=True):
+        """Atomically rename staged temp NWB files into place and update checksums.
+
+        Call this only after the DB transaction has committed successfully.
+        Each ``os.replace`` is atomic on the same filesystem, so on-disk
+        state changes only after the DB is already consistent.
+        """
+        for temp_path, real_path in staged:
+            os.replace(temp_path, real_path)
+            if verbose:
+                logger.info(f"  NWB: activated patch for {real_path}")
+            Fix1513Status._update_nwb_checksum(real_path, verbose)
 
     # ------------------------------------------------------------------
     # Display helpers
@@ -2062,14 +2142,25 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
         repopulated = 0
 
         if action == "update":
-            with Curation.connection.transaction:
-                Curation.update1(
-                    {**auto_curation_key, "curation_labels": new_labels}
-                )
-                if has_downstream:
-                    self._repair_unit_labels(auto_curation_key, new_labels)
-                    if case == "B":
-                        self._repair_nwb_labels(auto_curation_key, new_labels)
+            # Stage NWB patches BEFORE the DB transaction so HDF5 writes
+            # never happen inside a DataJoint transaction context.  If the
+            # DB transaction fails, the temp files are discarded.  Only
+            # after a successful commit are temps renamed into place.
+            staged = []
+            if has_downstream and case == "B":
+                staged = self._stage_nwb_repairs(auto_curation_key, new_labels)
+            try:
+                with Curation.connection.transaction:
+                    Curation.update1(
+                        {**auto_curation_key, "curation_labels": new_labels}
+                    )
+                    if has_downstream:
+                        self._repair_unit_labels(auto_curation_key, new_labels)
+            except Exception:
+                for temp_path, _ in staged:
+                    Path(temp_path).unlink(missing_ok=True)
+                raise
+            self._activate_nwb_repairs(staged)
         elif action == "repopulate":
             with Curation.connection.transaction:
                 Curation.update1(
@@ -2080,6 +2171,12 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
             CuratedSpikeSorting.populate(auto_curation_key)
             repopulated = 1
 
+        label_diff = None
+        if action in ("keep", "skip") and diff is not None:
+            label_diff = {
+                "old_labels": diff["old_labels"],
+                "new_labels": diff["new_labels"],
+            }
         self.insert1(
             {
                 **key,
@@ -2088,5 +2185,6 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
                 "owner_member": owner_member,
                 "reviewed_at": datetime.now(),
                 "repopulated": repopulated,
+                "label_diff": label_diff,
             }
         )
