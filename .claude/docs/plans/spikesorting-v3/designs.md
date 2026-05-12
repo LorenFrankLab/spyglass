@@ -49,18 +49,54 @@ class SortGroupV3(SpyglassMixin, dj.Manual):
         """
 
     # Existing-entry handling (shared by both classmethod constructors below):
-    # Per Spyglass PR #1438 (set_group_by_electrode_table_column pattern):
+    # Per Spyglass PR #1438 (set_group_by_electrode_table_column pattern)
+    # AND the spyglass-skill's inspect-before-destroy discipline:
+    #
     # - If no existing rows: insert cleanly.
-    # - If existing rows AND delete_existing_entries=True: cascade-delete
-    #   via cautious_delete (preserves Spyglass team-permission semantics)
-    #   and then reinsert.
-    # - If existing rows AND delete_existing_entries=False: require the
-    #   caller to provide explicit `sort_group_ids` that don't overlap
-    #   the existing IDs. Raise ValueError on overlap. No silent overwrite.
+    #
+    # - If existing rows AND delete_existing_entries=False (default):
+    #   require the caller to provide explicit `sort_group_ids` that
+    #   don't overlap the existing IDs. Raise ValueError on overlap.
+    #   No silent overwrite. This is the "additive" path — adds new
+    #   sort groups without touching the existing ones.
+    #
+    # - If existing rows AND delete_existing_entries=True: INSPECT
+    #   BEFORE DESTROY. The classmethod first runs a dry-run query
+    #   (using the SpyglassMixin `delete(dry_run=True)` surface) that
+    #   walks downstream rows for each row that would be deleted. It
+    #   returns a `DeletionPreview` namedtuple containing:
+    #     - the SortGroup rows to be deleted,
+    #     - per-row counts of downstream Recording / Sorting /
+    #       CurationV3 / SpikeSortingOutput rows that would cascade,
+    #     - the total size on disk of analysis-NWB files and binary
+    #       caches that would be reclaimed,
+    #     - any rows owned by a different team (cautious_delete blocks
+    #       these regardless — surfaced eagerly to fail fast).
+    #   If `confirm=True` (additional required kwarg whenever
+    #   `delete_existing_entries=True`), the destroy proceeds via
+    #   `cautious_delete` (preserving team-permission semantics).
+    #   If `confirm=False` (default), the method returns the
+    #   `DeletionPreview` without deleting and raises with an explicit
+    #   message: "Pass `confirm=True` after reviewing the preview".
+    #
     # This replaces the v1 silent-overwrite footgun AND the earlier v3
-    # `force=True` design — the PR #1438 pattern is richer because it
-    # supports "add more sort groups to this session without losing the
-    # existing ones."
+    # `force=True` design. The dry-run + explicit-confirm pattern
+    # matches the spyglass-skill `destructive_operations.md` and
+    # `feedback_loops.md § inspect-before-destroy` discipline; no
+    # cascade-delete of another lab member's downstream data can happen
+    # by accident.
+
+    @classmethod
+    def preview_existing_entries(
+        cls,
+        nwb_file_name: str,
+    ) -> "DeletionPreview":
+        """Read-only preview helper. Returns the same DeletionPreview
+        that `set_group_by_*` would produce when called with
+        `delete_existing_entries=True, confirm=False`. Use this to
+        inspect cascading impact before deciding whether to overwrite.
+        """
+        ...
 
     @classmethod
     def set_group_by_shank(
@@ -322,18 +358,58 @@ class ArtifactDetectionParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
+class SharedArtifactGroup(SpyglassMixin, dj.Manual):
+    """Named bundle of Recording rows that share an artifact-detection pass.
+
+    Addresses Spyglass issue #928 (behavioral artifacts visible on every
+    probe — chewing, licking, head-bumps). Default per-recording artifact
+    detection misses these because each sort group is processed independently.
+    `SharedArtifactGroup` lets users declare a set of Recording rows from
+    the same session whose artifact intervals should be unioned: one
+    detection pass over the union of channels produces a shared interval
+    list that applies to every member.
+
+    Phase 1 declares the schema; the actual cross-channel detection logic
+    is implemented in ArtifactDetection.make() and selected by which
+    Selection variant points at it.
+    """
+    definition = """
+    shared_artifact_group_name: varchar(64)
+    -> Session                          # all members must belong to one session
+    """
+
+    class Member(SpyglassMixinPart):
+        definition = """
+        -> master
+        -> Recording                    # FK targets the Computed Recording,
+                                        # so populate-first semantics apply
+        """
+
+
+@schema
 class ArtifactDetectionSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, artifact params) pair to detect.
 
     UUID-keyed; populated via insert_selection() per shared-contracts.
     Computed table ArtifactDetection is keyed off this selection.
+
+    Two-source FK pattern (mirrors SortingSelection's recording vs concat
+    split): exactly one of `recording_id` or `shared_artifact_group_name`
+    must be non-null. XOR enforced in insert_selection().
     """
     definition = """
     artifact_id: uuid
     ---
-    -> Recording
+    -> [nullable] Recording                       # single-recording path (default)
+    -> [nullable] SharedArtifactGroup             # cross-recording path (#928)
     -> ArtifactDetectionParameters
     """
+
+    @classmethod
+    def insert_selection(cls, key: dict) -> dict:
+        """XOR-validates the two FKs; exactly one must be non-null.
+        Returns PK-only dict per shared-contracts."""
+        ...
 
 
 @schema
@@ -1331,64 +1407,84 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 ```python
 def run_v3_pipeline(
-    nwb_file_name: str,
-    sort_group_id: int,
-    interval_list_name: str,
-    team_name: str,
-    preset: str = "franklab_tetrode_mountainsort5",
+    nwb_file_name: str | None = None,
+    sort_group_id: int | None = None,
+    interval_list_name: str | None = None,
+    team_name: str | None = None,
+    session_group_name: str | None = None,        # Phase 3 — mutually exclusive
+                                                  # with the single-session args
+    preset: str = "franklab_polymer_mountainsort5",
     skip_artifact: bool = False,
-    auto_curate: bool = True,
+    auto_curate: bool = True,                     # Phase 2
+    unit_match: bool = False,                     # Phase 4 — requires
+                                                  # session_group_name
+    figpack: bool = False,                        # Phase 5
 ) -> dict:
-    """End-to-end v3 sort with auto-curation. Returns a manifest dict.
+    """End-to-end v3 pipeline with optional auto-curation, cross-session
+    matching, and FigPack curation publishing. Returns a manifest dict.
 
-    The manifest contains every (table, key) tuple that was inserted or
-    populated, plus the final SpikeSortingOutput.merge_id. Re-runnable
-    safely — finds existing rows via insert_selection's normalization.
+    Exactly one of (single-session args, session_group_name) must be set.
+    Re-runnable safely — find-existing logic in each insert_selection
+    means a second call with the same args returns the same manifest.
     """
-    preset_dict = PRESETS[preset]  # named bundle of preproc/sorter/metric/rules params
-
+    preset_dict = PRESETS[preset]
     manifest = {"preset": preset, "stages": []}
 
-    # 1. Recording
-    rec_key = RecordingSelection.insert_selection({
-        "nwb_file_name": nwb_file_name,
-        "sort_group_id": sort_group_id,
-        "interval_list_name": interval_list_name,
-        "preproc_params_name": preset_dict["preproc"],
-        "team_name": team_name,
-    })
-    Recording.populate(rec_key)
-    manifest["stages"].append({"stage": "recording", "key": rec_key})
-
-    # 2. Artifact detection
-    if skip_artifact:
-        artifact_params_name = "none"
+    # --- 1. Recording (single OR concatenated, dispatched by inputs) ---
+    if session_group_name is not None:
+        # Phase 3 concat path
+        concat_key = ConcatenatedRecordingSelection.insert_selection({
+            "session_group_name": session_group_name,
+            "preproc_params_name": preset_dict["preproc"],
+            "motion_correction_params_name": preset_dict["motion_correction"],
+        })
+        ConcatenatedRecording.populate(concat_key)
+        manifest["stages"].append({"stage": "concat_recording", "key": concat_key})
+        recording_fk = {"concat_recording_id": concat_key["concat_recording_id"]}
     else:
-        artifact_params_name = preset_dict["artifact"]
-    artifact_key = ArtifactDetection.insert_selection({
-        **rec_key,
-        "artifact_params_name": artifact_params_name,
-    })
-    ArtifactDetection.populate(artifact_key)
-    manifest["stages"].append({"stage": "artifact_detection", "key": artifact_key})
+        rec_key = RecordingSelection.insert_selection({
+            "nwb_file_name": nwb_file_name,
+            "sort_group_id": sort_group_id,
+            "interval_list_name": interval_list_name,
+            "preproc_params_name": preset_dict["preproc"],
+            "team_name": team_name,
+        })
+        Recording.populate(rec_key)
+        manifest["stages"].append({"stage": "recording", "key": rec_key})
+        recording_fk = {"recording_id": rec_key["recording_id"]}
 
-    # 3. Sorting
-    sort_key = Sorting.insert_selection({
-        **rec_key, **artifact_key,
+    # --- 2. Artifact detection (single-recording path only in Phase 1; concat
+    #        path uses skip_artifact=True until cross-recording artifact lands) ---
+    if not skip_artifact and "recording_id" in recording_fk:
+        artifact_key = ArtifactDetectionSelection.insert_selection({
+            **recording_fk,
+            "artifact_params_name": preset_dict["artifact"],
+        })
+        ArtifactDetection.populate(artifact_key)
+        manifest["stages"].append({"stage": "artifact_detection", "key": artifact_key})
+        artifact_fk = {"artifact_id": artifact_key["artifact_id"]}
+    else:
+        artifact_fk = {}  # no artifact FK on this SortingSelection row
+
+    # --- 3. Sorting ---
+    sort_key = SortingSelection.insert_selection({
+        **recording_fk,
+        **artifact_fk,
         "sorter": preset_dict["sorter"],
         "sorter_params_name": preset_dict["sorter_params"],
     })
     Sorting.populate(sort_key)
     manifest["stages"].append({"stage": "sorting", "key": sort_key})
 
-    # 4. Initial empty curation
+    # --- 4. Initial curation ---
     curation_key = CurationV3.insert_curation(
         sorting_key=sort_key,
+        labels={},  # explicit empty dict per Boundary Invariant 4
         description=f"initial via run_v3_pipeline preset={preset}",
     )
     manifest["stages"].append({"stage": "initial_curation", "key": curation_key})
 
-    # 5. Auto-curation
+    # --- 5. Auto-curation (Phase 2) ---
     if auto_curate:
         ac_key = AnalyzerCurationSelection.insert_selection({
             **curation_key,
@@ -1403,10 +1499,27 @@ def run_v3_pipeline(
     else:
         final_curation_key = curation_key
 
-    # 6. Final merge_id
+    # --- 6. UnitMatch cross-session (Phase 4) ---
+    if unit_match:
+        if session_group_name is None:
+            raise ValueError("unit_match=True requires session_group_name")
+        um_key = UnitMatchSelection.insert_selection({
+            "session_group_name": session_group_name,
+            "matcher_params_name": preset_dict["matcher"],
+        }, curation_choices={...})  # auto-pin latest CurationV3 per member
+        UnitMatch.populate(um_key)
+        TrackedUnit.populate(um_key)
+        manifest["stages"].append({"stage": "unit_match", "key": um_key})
+
+    # --- 7. FigPack curation (Phase 5) ---
+    if figpack:
+        fp_key = FigPackCurationSelection.insert_selection(final_curation_key)
+        FigPackCuration.populate(fp_key)
+        manifest["stages"].append({"stage": "figpack", "key": fp_key})
+
+    # --- 8. Final merge_id ---
     merge_query = SpikeSortingOutput.CurationV3 & final_curation_key
     manifest["merge_id"] = merge_query.fetch1("merge_id")
-
     return manifest
 ```
 

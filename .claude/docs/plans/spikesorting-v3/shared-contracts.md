@@ -384,8 +384,12 @@ class Unit(SpyglassMixinPart):
 
     Why a part table and not derived-on-the-fly: walking templates +
     Electrode joins on every fetch is slow; persisting at sort time
-    is cheap (already have the analyzer in memory) and gives
-    SpikeSortingOutput.get_sort_group_info() a constant-time path.
+    is cheap (already have the analyzer in memory) and powers the
+    constant-time per-unit accessor `get_unit_brain_regions(key)`.
+    This is distinct from `get_sort_group_info(key)` — that method
+    returns sort-group-level electrode metadata (joining SortGroupV3 *
+    Electrode * BrainRegion across all electrodes in the group) and
+    does NOT key off `Sorting.Unit`.
     """
     definition = """
     -> master

@@ -2,12 +2,12 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#matcherparameters--unitmatch--trackedunit)
 
-Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design is pluggable: a `MatcherProtocol` interface accepts swappable backends (UnitMatch in this phase, DeepUnitMatch as future work). Includes an **explicit tetrode validation gate** before declaring tetrode support production-ready.
+Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design is pluggable: a `MatcherProtocol` interface accepts swappable backends (UnitMatch in this phase, DeepUnitMatch as future work). **Validation gate is the polymer probe** (Frank-lab standard, Chung et al. 2019); tetrode and Neuropixels validations run alongside but are informational, not gating.
 
 **Phase 4 is split into two sub-phases** so the matcher's actual API and data flow are pinned BEFORE the v3 schema is finalized (per review feedback — UnitMatchPy's API surface is under-spiked for a zero-migration schema-final phase):
 
 - **Phase 4a (technical spike)**: install UnitMatchPy, run it end-to-end against an existing v3 `SortingAnalyzer`, document the actual API surface, the input data layout it expects, and the failure modes. No DataJoint tables. Writes findings into `appendix.md § UnitMatchPy integration notes` (replacing the current speculative content). Confirms or revises the `MatcherProtocol` contract in `shared-contracts.md`.
-- **Phase 4b (schema + implementation)**: locks in `MatcherParameters`, `UnitMatchSelection` (+ `MemberCuration` part), `UnitMatch` (+ `Pair` part), and `TrackedUnit` (+ `Member` part) based on what 4a discovered. Includes the tetrode validation gate.
+- **Phase 4b (schema + implementation)**: locks in `MatcherParameters`, `UnitMatchSelection` (+ `MemberCuration` part), `UnitMatch` (+ `Pair` part), and `TrackedUnit` (+ `Member` part) based on what 4a discovered. Includes the polymer validation gate + informational tetrode/Neuropixels tests.
 
 The matcher contract was overly strict in its earlier form. **Refined contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v3 derives from the `SortingAnalyzer` and writes into a matcher-specific on-disk layout (the exact layout is pinned by the Phase 4a spike — do not encode UnitMatchPy-specific directory or file names in shared-contracts before 4a runs). The "must not depend on raw recording data" invariant becomes: the v3 wrapper extracts what the matcher needs from the analyzer and feeds the matcher a self-contained directory; the wrapper never hands raw NWB paths to the matcher.
 
@@ -84,12 +84,12 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Optional real-data supplementary check**: if `SPIKESORTING_V3_REAL_NWB_PATH` is set AND points to a multi-session dataset with manual cross-session correspondences, `validate_unitmatch.py` (standalone CLI script, not a pytest test) reports AUC on the real data alongside the MEArec AUC. Provides empirical real-world confirmation but is NOT what gates Phase 4 shipping.
 
-- **Validation in code (`make()`)**: in `UnitMatch.make()`, log a warning if `session_analyzers[0].analyzer.get_extension("templates")` has fewer than 16 channels per unit (a heuristic that catches tetrode usage). The warning includes a pointer to the tetrode validation document.
+- **Validation in code (`make()`)**: in `UnitMatch.make()`, log an INFO message naming the probe type detected (polymer / Neuropixels / tetrode) so users see which validation regime applies; link to `docs/src/Pipelines/SpikeSorting/v3-validation-notes.md` where per-probe AUC results are recorded.
 
 - **Documentation update**:
   - New section in `docs/src/Pipelines/SpikeSorting/v3.md` titled "Cross-session unit tracking".
-  - New `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md` documenting the tetrode validation findings (link to the validation script).
-  - CHANGELOG.md: "v3 cross-session unit tracking via UnitMatch (Neuropixels validated; tetrode use case documented). `TrackedUnit` derives biological-unit identities across sessions."
+  - New `docs/src/Pipelines/SpikeSorting/v3-validation-notes.md` documenting the polymer / tetrode / Neuropixels AUC results from the three MEArec fixtures.
+  - CHANGELOG.md: "v3 cross-session unit tracking via UnitMatch. Polymer probe is the validated path (Frank-lab standard); Neuropixels + tetrode AUC recorded as informational. `TrackedUnit` derives biological-unit identities across sessions."
 
 ## Deliberately not in this phase
 
@@ -111,13 +111,15 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 | `test_tracked_unit_strict_clique_basic` | Synthetic pair list with three sessions where ALL pairwise edges between three units exceed threshold (true clique); `TrackedUnit.make()` in default strict mode produces exactly 1 component containing all three. |
 | `test_tracked_unit_strict_default_rejects_transitive` | Pairs A↔B (high), B↔C (high), A↔C (low). Default `tracked_unit_policy="strict"` (maximal cliques) produces ≥2 components (NOT 1) — A and C cannot be lumped without a direct above-threshold edge. Test asserts >1 component and asserts no component contains both A and C. |
 | `test_tracked_unit_transitive_opt_in_unifies` | Same input as above; with `tracked_unit_policy="transitive"`, connected-components yields 1 component with `n_transitive_only_edges == 1` (the A↔C edge missing). |
-| `test_tetrode_warning_logged` | Running UnitMatch on a SessionGroup with ≤4 channels per unit logs a warning string containing "tetrode". |
+| `test_probe_type_logged` | `UnitMatch.make()` emits an INFO log naming the detected probe type (polymer / Neuropixels / tetrode) so users see which validation regime applies. |
 | `test_v3_unitmatch_neuropixels_smoke` (slow, optional) | Skipped unless `--run-neuropixels` is passed; uses a small Neuropixels fixture if available. |
 
 ## Fixtures
 
-- **`synthetic_neuropixels_2_session_fixture`** — new conftest fixture. Two 16-channel SI recordings + sortings with 5 units each; the first 3 units in session B are template-copies of the first 3 units in session A (so UnitMatch should match them with high probability); units 4–5 are random. Built deterministically with a seed.
-- **Tetrode gold-standard is the MEArec-generated `mearec_tetrode_2sessions.nwb` pair** (planted shared templates → known cross-session correspondences). Generated by the Phase 4b fixture step that extends `tests/spikesorting/v3/fixtures/generate_mearec.py`. No user-provided dataset is required to land Phase 4. An optional real-data path remains available via `SPIKESORTING_V3_REAL_NWB_PATH` for supplementary validation but is not a gating fixture.
+- **`mearec_polymer_2sessions.nwb` pair** (gating fixture) — 4-shank polymer probe (same geometry as `mearec_polymer_60s.nwb` from Phase 0); two sessions generated from the same MEArec template set with different `seeds.spiketrain` and a small inter-session drift. Planted shared templates → known cross-session correspondences. Generated by extending `tests/spikesorting/v3/fixtures/generate_mearec.py` in Phase 4b.
+- **`mearec_neuropixels_2sessions.nwb` pair** (informational fixture) — same shape as the polymer pair but for Neuropixels-128. Used by the supplementary Neuropixels test.
+- **`mearec_tetrode_2sessions.nwb` pair** (informational fixture) — linear tetrode probe. Used by the informational tetrode test; results documented in `v3-validation-notes.md`.
+- All three are MEArec-generated; no user-provided gold-standard dataset is required to land Phase 4. An optional real-data path remains available via `SPIKESORTING_V3_REAL_NWB_PATH` for supplementary validation.
 
 ## Review
 
@@ -126,7 +128,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - The "Deliberately not in this phase" list is honored — DeepUnitMatch is not in this PR.
 - Validation slice tests pass; slow / integration tests are marked.
 - The synthetic Neuropixels test produces real UnitMatch output (not a mock).
-- The MEArec-based tetrode validation test (`test_v3_unitmatch_tetrode_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion, or — if it fails — `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md` records the actual AUC and explicitly recommends concat (Phase 3 path) for tetrode cross-day work instead of UnitMatch.
+- The MEArec-based **polymer** validation test (`test_v3_unitmatch_polymer_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion — this is the gate. If it fails, Phase 4 does not ship; the implementer escalates rather than relaxing the threshold. The informational tetrode and Neuropixels tests (`test_v3_unitmatch_tetrode_mearec_ground_truth`, `test_v3_unitmatch_neuropixels_mearec_ground_truth`) run alongside and record their AUCs in `docs/src/Pipelines/SpikeSorting/v3-validation-notes.md` regardless of value.
 - `MatcherProtocol` is implementable by external code without touching v3 internals (verify by writing a 10-line dummy matcher in the test suite).
 - `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict (maximal cliques) by default, transitive only with opt-in via `MatcherParameters.params["tracked_unit_policy"]`. Tests `test_tracked_unit_strict_clique_basic`, `test_tracked_unit_strict_default_rejects_transitive`, and `test_tracked_unit_transitive_opt_in_unifies` exercise all three branches.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
