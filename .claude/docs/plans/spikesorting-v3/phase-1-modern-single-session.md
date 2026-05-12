@@ -98,9 +98,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 
 - **Write integration tests** in `tests/spikesorting/v3/test_phase1_pipeline.py`. See Validation slice for the full table.
 
-- **Parity test against v1 baseline.** New test `test_v3_clusterless_parity` (marked `@pytest.mark.slow`): runs v3 with `clusterless_thresholder` on the same `minirec` slice as the Phase 0 baseline, fetches spike times via `SpikeSortingOutput`, asserts **exact** integer-sample equality unit-by-unit against the baseline pickle. Deterministic sorter → tolerance is zero. If parity fails, the test reports per-unit deltas to aid debugging.
-
-- **Smoke test against v1 MountainSort baseline.** New test `test_v3_mountainsort5_smoke` (marked `@pytest.mark.slow`): runs v3 with MountainSort 5 against `minirec` and asserts: `(a)` `n_units` is within ±50% of v1's `n_units` (MS5 vs MS4, stochastic); `(b)` median firing rate across units is within 30% of v1's; `(c)` total spike count is within 30%. Quantitative tolerances chosen to catch order-of-magnitude bugs without being noise-sensitive.
+- **Sort-correctness validation uses MEArec ground-truth fixtures, not minirec.** Per the revised fixture strategy in Phase 0, minirec is reduced to a plumbing-only regression guard (test rows `test_v3_minirec_plumbing` below). Real sort-correctness lives in `test_v3_mearec_tetrode_ground_truth` and `test_v3_mearec_neuropixels_ground_truth` (Phase 1 validation slice below) which compute precision/recall against planted MEArec units. The v1-comparison parity test moves to `test_v3_real_data_v1_parity` — runs only when `SPIKESORTING_V3_REAL_NWB_PATH` is set (a real dataset with real spikes), with tolerances `±1 sample` for `clusterless_thresholder` and `±30-50%` for stochastic sorters. **No minirec-based parity test is shipped.**
 
 - **Documentation update** (Phase 1 ships user-visible changes, so docs go with it):
   - New `docs/src/Pipelines/SpikeSorting/v3.md` — overview, single-session walkthrough, link to the new notebook (Phase 5 will write the full notebook; Phase 1 ships a minimal end-to-end Python script as the example).
@@ -141,8 +139,9 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 | `test_spike_sorting_output_get_sort_group_info_works_for_v3` | Same, for `get_sort_group_info`. |
 | `test_spike_sorting_output_get_spike_times_works_for_v3` (slow) | `SpikeSortingOutput.get_spike_times(merge_key)` returns spike-time arrays for the v3 sort. Validates the `object_id` column-name convention end-to-end. |
 | `test_curation_v3_object_id_column_name` | `"object_id" in CurationV3.heading.attributes` and `"units_object_id" not in CurationV3.heading.attributes` (regression test for the NWB column-name convention). |
-| `test_sorting_selection_recording_source_present_in_phase_1` | `"recording_source" in SortingSelection.heading.attributes` (regression test for forward-compat schema decision; Phase 3 must NOT have to alter this). |
-| `test_sorting_selection_rejects_concatenated_in_phase_1` | `SortingSelection.insert_selection({"recording_source": "concatenated", ...})` raises `NotImplementedError`; helpful message points at Phase 3. |
+| `test_sorting_selection_concat_fk_declared_in_phase_1` | `"concat_recording_id" in SortingSelection.heading.attributes` and it is nullable (regression test for forward-compat schema; Phase 3 must NOT have to alter this). |
+| `test_sorting_selection_xor_enforced` | `SortingSelection.insert_selection({recording_id: r, concat_recording_id: c, ...})` (both set) raises ValueError; `{recording_id: None, concat_recording_id: None, ...}` (neither set) also raises. Exactly-one-non-null is valid. |
+| `test_sorting_selection_rejects_concatenated_in_phase_1` | `SortingSelection.insert_selection({concat_recording_id: c, recording_id: None, ...})` raises `NotImplementedError`; helpful message points at Phase 3. |
 | `test_sorter_params_mountainsort4_default_row_present` | After `SorterParameters().insert_default()`, `SorterParameters & {"sorter": "mountainsort4"}` has at least one row. |
 | `test_sorter_params_mountainsort4_validation` (slow) | Insert a custom MS4 params row with `detect_sign=0` (invalid in v1 too); raises. Valid `detect_sign=-1` inserts. |
 | `test_sorting_mountainsort4_run` (slow, integration) | Run v3 with MS4 against `minirec`; assert `Sorting & key` row produced; `n_units > 0`. |

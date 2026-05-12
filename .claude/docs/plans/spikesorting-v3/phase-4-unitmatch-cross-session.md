@@ -9,7 +9,7 @@ Adds **sort-then-match** cross-session unit tracking via UnitMatchPy. The design
 - **Phase 4a (technical spike)**: install UnitMatchPy, run it end-to-end against an existing v3 `SortingAnalyzer`, document the actual API surface, the input data layout it expects, and the failure modes. No DataJoint tables. Writes findings into `appendix.md § UnitMatchPy integration notes` (replacing the current speculative content). Confirms or revises the `MatcherProtocol` contract in `shared-contracts.md`.
 - **Phase 4b (schema + implementation)**: locks in `MatcherParameters`, `UnitMatchSelection` (+ `MemberCuration` part), `UnitMatch` (+ `Pair` part), and `TrackedUnit` (+ `Member` part) based on what 4a discovered. Includes the tetrode validation gate.
 
-The matcher contract was overly strict in its earlier form. **Refined contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v3 derives from the `SortingAnalyzer` and writes into a matcher-specific on-disk layout (this is what UnitMatchPy's `KSDir`/`RawDataDir` style inputs actually want — pre-extracted artifacts, not raw recordings). The "must not depend on raw recording data" invariant becomes: the v3 wrapper extracts what the matcher needs from the analyzer and feeds the matcher a self-contained directory; the wrapper never hands raw NWB paths to the matcher.
+The matcher contract was overly strict in its earlier form. **Refined contract** (see updated `shared-contracts.md § MatcherProtocol`): a matcher consumes **pre-extracted per-unit waveform arrays + channel positions** that v3 derives from the `SortingAnalyzer` and writes into a matcher-specific on-disk layout (the exact layout is pinned by the Phase 4a spike — do not encode UnitMatchPy-specific directory or file names in shared-contracts before 4a runs). The "must not depend on raw recording data" invariant becomes: the v3 wrapper extracts what the matcher needs from the analyzer and feeds the matcher a self-contained directory; the wrapper never hands raw NWB paths to the matcher.
 
 **Inputs to read first:**
 
@@ -51,17 +51,13 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Implement `matcher_protocol.py`** — the protocol + registry per [shared-contracts.md § MatcherProtocol](shared-contracts.md#matcherprotocol--cross-session-unit-matching-plugin-interface) (revised by 4a). This is pure Python with no DataJoint dependency; tests should be importable standalone.
 
-- **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper.
+- **Implement `_unitmatch_backend.py`** — the UnitMatch wrapper. **Follow the API discovered in Phase 4a**; do not implement against speculative function names or input layouts. Reference: `appendix.md § UnitMatchPy integration notes` (rewritten at the end of Phase 4a to capture the actual API). Required behavior, independent of the specific API surface:
   - Subclass `MatcherProtocol`, `name = "unitmatch"`.
   - `match(session_analyzers, params) -> list[MatchPair]`:
-    1. For each `SessionAnalyzer`, extract template waveforms with two-halves split (UnitMatch needs this for cross-validation). Use `analyzer.get_extension("waveforms").get_unit_waveforms(unit_id)` and split each unit's waveforms into two halves by index.
-    2. Build the input dict for UnitMatch's `MakeMatchTable()`:
-       - `KSDir` — per-session output directories (one per session; UnitMatch reads these for cluster info).
-       - `RawDataDir` — actually not strictly required if waveforms are pre-extracted.
-       - `WaveformParameters` — derived from analyzer parameters.
-    3. Pre-extract waveforms to a temp directory in the UnitMatch-expected layout (`channel_pos.npy`, `RawWaveforms/Unit{id}_RawSpikes.npy` per session).
-    4. Call `um.MakeMatchTable(um_config)`.
-    5. Parse the result table into `MatchPair` objects, preserving session keys.
+    1. For each `SessionAnalyzer`, extract per-unit waveforms from `analyzer.get_extension("waveforms")` and the channel positions from `analyzer.get_channel_locations()` (or the equivalent surface 4a discovered).
+    2. Write the matcher's expected input layout to a temp directory (the exact files / dtypes / shapes are pinned by 4a).
+    3. Call the actual UnitMatchPy entry point (name + signature pinned by 4a).
+    4. Parse the result table into `MatchPair` objects, preserving session keys.
   - Handle the **degenerate single-session case** — return `[]` immediately, no UnitMatch call.
 
 - **Implement `_concat_identity_backend.py`** — for SessionGroups whose sorting came from `ConcatenatedRecording` (Phase 3). The "matches" are identity-mappings: every unit ID in the concat sort corresponds to itself across sessions. This is a degenerate but legitimate matcher case so users on the Phase 3 chronic path get the same `TrackedUnit` downstream interface.
@@ -77,18 +73,14 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **Helper for building `UnitMatchSelection.MemberCuration` rows**: `UnitMatchSelection.insert_selection(session_group_name, matcher_params_name, curation_choices: dict[member_index, curation_key]) -> dict`. The `curation_choices` argument maps each member's `member_index` to an explicit `{"sorting_id": ..., "curation_id": ...}` key. Helper validates that every member has a choice and raises clearly if any are missing. Returns the unitmatch_id PK dict per the [shared-contracts insert_selection convention](shared-contracts.md#insert_selection-return-value-normalization).
 
-- **Tetrode validation gate — MEArec ground-truth path** (preferred; deterministic and reproducible). The Phase-0-generated MEArec fixtures, plus a new Phase 4b fixture-generation step, give us absolute ground-truth tetrode validation without depending on lab-provided gold-standard data:
-  - **New fixture in Phase 4b**: `mearec_tetrode_2sessions.nwb` pair — two synthetic NWB files generated from the SAME MEArec template set with different `seeds.spiketrain` and a small drift between sessions, producing ~6 shared "biological units" plus 2-3 session-unique units per session.
-  - **Validation test** `test_v3_unitmatch_tetrode_mearec_ground_truth` (slow, integration): run v3 sort + curation on both sessions, run UnitMatch, compute ROC of match probability vs ground-truth correspondence (planted in the Units table).
-    - Self-matches (gold positive): pairs of (session A unit, session B unit) that share the same MEArec template ID.
-    - Random pairs (gold negative): pairs that share no template.
-  - **Pass criterion**: AUC > 0.85 across the synthetic tetrode pair.
-  - If the test fails the pass criterion, Phase 4 STILL ships — but:
-    - `MatcherParameters` documentation marks `unitmatch` as "validated on Neuropixels; tetrode reliability documented at <link to MEArec AUC report>".
-    - The default preset bundle for tetrodes (in Phase 5 `PRESETS` dict) routes through Phase 3 concat (when same-day) or warns that cross-day tetrode matching is unreliable.
-  - Output is a deterministic AUC number — no lab dataset dependency, runs in CI, regressable.
+- **Primary validation gate is Neuropixels**, not tetrode. The Frank lab does NOT currently do multi-day tetrode sorting — that workflow is theoretical for this lab — so a tetrode UnitMatch AUC isn't a meaningful gate on shipping Phase 4. The gating test is `test_v3_unitmatch_neuropixels_mearec_ground_truth`:
+  - Uses the Phase-0-generated `mearec_neuropixels_60s.nwb` together with a new Phase 4b fixture `mearec_neuropixels_2sessions.nwb` (generated from the same MEArec Neuropixels template set with different `seeds.spiketrain` and a small inter-session drift).
+  - Runs v3 sort + curation on both sessions, runs UnitMatch, computes ROC of match probability vs ground-truth template correspondence.
+  - **Pass criterion**: AUC > 0.85.
 
-- **Optional supplementary check on real-lab data** (kept as a smoke test, not a gate): if `SPIKESORTING_V3_REAL_NWB_PATH` is set AND points to a multi-day tetrode dataset with manual cross-day correspondences, `validate_tetrode_unitmatch.py` (standalone CLI script, not a pytest test) reports AUC on the real data alongside the MEArec AUC. Provides empirical real-world confirmation but is NOT what gates Phase 4 shipping.
+- **Tetrode validation is informational only** (not a gate). Generate `mearec_tetrode_2sessions.nwb` and run the same matcher as a documentation test (`test_v3_unitmatch_tetrode_mearec_ground_truth`), but the result feeds `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md` rather than blocking the PR. Whatever AUC the test produces gets recorded in that doc; users reading the doc see the actual tetrode performance and can decide whether UnitMatch is appropriate for any future tetrode multi-day work.
+
+- **Optional real-data supplementary check**: if `SPIKESORTING_V3_REAL_NWB_PATH` is set AND points to a multi-session dataset with manual cross-session correspondences, `validate_unitmatch.py` (standalone CLI script, not a pytest test) reports AUC on the real data alongside the MEArec AUC. Provides empirical real-world confirmation but is NOT what gates Phase 4 shipping.
 
 - **Validation in code (`make()`)**: in `UnitMatch.make()`, log a warning if `session_analyzers[0].analyzer.get_extension("templates")` has fewer than 16 channels per unit (a heuristic that catches tetrode usage). The warning includes a pointer to the tetrode validation document.
 
@@ -101,7 +93,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 
 - **DeepUnitMatch**. The `MatcherProtocol` design accepts it as a future plugin; Phase 4.1+ implements `_deepunitmatch_backend.py` separately. Not in this PR.
 - **Drift correction inside the matcher**. UnitMatch does its own rigid-shift estimation; v3 does not pre-correct drift on inputs to UnitMatch.
-- **Across-multi-day concatenation**. Phase 3 multi-day path is documented as future; this phase does not enable it via UnitMatch as a workaround.
+- **Replacing multi-day concat with UnitMatch as a workaround**. Phase 3 supports multi-day concat behind `allow_multi_day=True` (with explicit motion preset). Phase 4 is the **recommended** cross-day workflow, but does not remove Phase 3's opt-in path — they coexist.
 - **Cross-probe matching**. UnitMatch assumes one probe across sessions in a group. Multi-probe is out of scope.
 - **Curation propagation across sessions**. Phase 4 produces match pairs; if a user manually curates session A's unit 5 as `noise`, that label does NOT propagate to session B's matched unit. Curation-propagation tooling is a future feature.
 
@@ -123,7 +115,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 ## Fixtures
 
 - **`synthetic_neuropixels_2_session_fixture`** — new conftest fixture. Two 16-channel SI recordings + sortings with 5 units each; the first 3 units in session B are template-copies of the first 3 units in session A (so UnitMatch should match them with high probability); units 4–5 are random. Built deterministically with a seed.
-- **Tetrode gold-standard dataset** — provided by user during Phase 4 implementation; path via env var `SPIKESORTING_V3_TETRODE_GOLD_PATH`.
+- **Tetrode gold-standard is the MEArec-generated `mearec_tetrode_2sessions.nwb` pair** (planted shared templates → known cross-session correspondences). Generated by the Phase 4b fixture step that extends `tests/spikesorting/v3/fixtures/generate_mearec.py`. No user-provided dataset is required to land Phase 4. An optional real-data path remains available via `SPIKESORTING_V3_REAL_NWB_PATH` for supplementary validation but is not a gating fixture.
 
 ## Review
 
@@ -132,7 +124,7 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - The "Deliberately not in this phase" list is honored — DeepUnitMatch is not in this PR.
 - Validation slice tests pass; slow / integration tests are marked.
 - The synthetic Neuropixels test produces real UnitMatch output (not a mock).
-- The tetrode validation script has been run by the implementer against the user-provided gold-standard dataset; results are documented in `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md`. If AUC is below 0.85, the doc explicitly recommends concat for tetrodes.
+- The MEArec-based tetrode validation test (`test_v3_unitmatch_tetrode_mearec_ground_truth`) runs in CI and passes its AUC > 0.85 criterion, or — if it fails — `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md` records the actual AUC and explicitly recommends concat (Phase 3 path) for tetrode cross-day work instead of UnitMatch.
 - `MatcherProtocol` is implementable by external code without touching v3 internals (verify by writing a 10-line dummy matcher in the test suite).
 - `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict (maximal cliques) by default, transitive only with opt-in via `MatcherParameters.params["tracked_unit_policy"]`. Tests `test_tracked_unit_strict_clique_basic`, `test_tracked_unit_strict_default_rejects_transitive`, and `test_tracked_unit_transitive_opt_in_unifies` exercise all three branches.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.

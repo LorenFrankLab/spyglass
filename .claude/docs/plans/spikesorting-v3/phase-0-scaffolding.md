@@ -44,7 +44,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
   - `src/spyglass/spikesorting/v3/unit_matching.py` (Phase 4)
   - `src/spyglass/spikesorting/v3/matcher_protocol.py` (Phase 4)
   - `src/spyglass/spikesorting/v3/figpack_curation.py` (Phase 5)
-  - `src/spyglass/spikesorting/v3/pipeline.py` (Phase 5)
+  - `src/spyglass/spikesorting/v3/pipeline.py` (Phase 1 ships minimal `run_v3_pipeline()`; Phase 5 extends with metrics / concat / UnitMatch / FigPack)
   - `src/spyglass/spikesorting/v3/_params/__init__.py`
   - `src/spyglass/spikesorting/v3/_params/preprocessing.py` (this phase — see next task)
   - `src/spyglass/spikesorting/v3/utils.py` (this phase — see next task)
@@ -114,7 +114,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 
 - **Add a sanity test for scaffolding** in `tests/spikesorting/v3/test_scaffold.py`:
   - `test_module_imports` — `from spyglass.spikesorting import v3` succeeds.
-  - `test_si_version` — `import spikeinterface as si; assert si.__version__ >= "0.104"`.
+  - `test_si_version_min` — `import spikeinterface as si; from packaging.version import Version; assert Version(si.__version__) >= Version("0.99.1")`. Phase 0 does NOT upgrade SI, so the floor stays at the current v1 floor.
   - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
   - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v3_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs({}) == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (the defaults filled in from SI's global).
 
@@ -124,7 +124,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 
 - **No new DataJoint tables.** Tables ship in Phases 1–5.
 - **No removal of v1 source.** v1 continues to run, with whatever bugs the SI 0.99→0.104 jump exposes; see Phase 1 for the SI-API repairs to v1 (which we **don't** make — v1 stays as-is, and a follow-up issue tracks v1 SI-0.104 compatibility separately).
-- **No pipeline orchestrator.** `run_v3_pipeline()` is Phase 5.
+- **No `run_v3_pipeline()` orchestrator body** — `pipeline.py` is created as an empty stub in Phase 0. Phase 1 ships the minimal orchestrator (recording → artifact → sorting → initial curation → merge); Phase 5 extends with metrics / concat / UnitMatch / FigPack.
 - **No matcher protocol implementation.** Phase 0 doesn't even create `matcher_protocol.py`'s contents — just an empty stub file.
 
 ## Validation slice

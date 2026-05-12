@@ -331,7 +331,7 @@ rec_key = RecordingSelection.insert_selection({...})  # returns {"recording_id":
 # When inserting the next stage, splat the PK plus add new FK fields:
 sort_key = SortingSelection.insert_selection({
     **rec_key,                                # provides recording_id
-    "recording_source": "single",             # NEW field for SortingSelection
+    "concat_recording_id": None,              # XOR: this is the single-recording path; concat FK left NULL
     "sorter": "mountainsort5",
     "sorter_params_name": "default",
 })

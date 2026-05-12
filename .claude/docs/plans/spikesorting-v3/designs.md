@@ -794,7 +794,10 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         -> Session
         -> SortGroupV3
         -> IntervalList
-        recording_date: date  # metadata; used by ConcatenatedRecording to pick a default preset
+        -> LabTeam                          # per-member team (members may differ
+                                            # across collaborations)
+        recording_date: date                # metadata; used by ConcatenatedRecording
+                                            # to detect multi-day groups
         """
 
     @classmethod
@@ -905,7 +908,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
                 "sort_group_id": m["sort_group_id"],
                 "interval_list_name": m["interval_list_name"],
                 "preproc_params_name": (PreprocessingParameters & key).fetch1("preproc_params_name"),
-                "team_name": (SessionGroup.Member & m).fetch1("team_name"),
+                "team_name": m["team_name"],  # carried on the Member part row
             }
             rec_key = RecordingSelection.insert_selection(rec_sel_key)
             if not (Recording & rec_key):
@@ -956,12 +959,19 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # Track segment boundaries for back-mapping spike times to sessions
         cumulative = np.cumsum([r.get_total_duration() for r in recordings])
 
+        # `key` already carries `concat_recording_id` inherited from
+        # the upstream ConcatenatedRecordingSelection row (declared in
+        # Phase 1) — do NOT mint a new UUID here. The Selection table
+        # is what mints `concat_recording_id`; this Computed table
+        # inherits it via `-> ConcatenatedRecordingSelection`.
         self.insert1({
             **key,
-            "concatenated_recording_id": uuid.uuid4(),
             "binary_cache_path": cache_path,
-            ...
+            "n_channels": concat_recording.get_num_channels(),
+            "sampling_frequency": float(concat_recording.get_sampling_frequency()),
+            "total_duration_s": float(concat_recording.get_total_duration()),
             "member_segment_boundaries": cumulative.tolist(),
+            "cache_hash": _hash_binary_cache(cache_path),
         })
 
     def get_recording(self, key) -> si.BaseRecording:
@@ -977,7 +987,7 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
 **Key design points**:
 
-- **Multi-day in scope from Phase 3.** `SessionGroup.create_group` does not gate on date; `ConcatenatedRecording` auto-selects `dredge_fast` for multi-day groups and `rigid_fast` for single-day groups via the `preset: 'auto'` value on `MotionCorrectionParameters`. Users can override the preset explicitly.
+- **Multi-day is opt-in, not the recommended default.** `SessionGroup.create_group(..., allow_multi_day=True)` is required for multi-date members; the default rejects them with a pointer to Phase 4 UnitMatch as the recommended cross-day workflow. `ConcatenatedRecording` does NOT auto-dispatch DREDge — `preset='auto'` resolves to `rigid_fast` for single-day and raises on multi-day (caller must pick an explicit preset). Multi-day concat is experimental and remains in scope behind the opt-in flag because the schema cost of supporting it is zero.
 - **Recording cache reuse** — `ConcatenatedRecording.make()` reads from already-populated `Recording` rows for each member, NOT from raw NWB. Avoids preprocessing twice.
 - **Segment boundaries** are persisted so spike times can be back-mapped to per-session sortings if needed.
 
@@ -1240,7 +1250,7 @@ class FigPackCuration(SpyglassMixin, dj.Computed):
 
 ## `run_v3_pipeline()` Orchestrator
 
-Phase 5. The single function that compresses 5 inserts + 5 populates into one call.
+**Phase 1 ships the minimal version** (recording → artifact → sorting → initial curation → merge registration, 3 presets — see Phase 1's task list). **Phase 5 extends it** with metrics, concat, UnitMatch, FigPack, and the broader preset set. The code below is the Phase 5 final shape; Phase 1's version is a subset of these stages with no `auto_curate`/`session_group_name`/`unit_match`/`figpack` parameters.
 
 ```python
 def run_v3_pipeline(

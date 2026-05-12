@@ -46,18 +46,18 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
     7. `get_recording(key)` reads the cache.
     8. `split_sorting_by_session(sorting, key) -> dict[session_key, BaseSorting]` — back-maps spike times.
 
-- **Lift the `'concatenated'` restriction in `SortingSelection.insert_selection()`**. NO schema changes — Phase 1 declared the `recording_source` discriminator and the loose `recording_id` FK in their final shape (see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility)). Phase 3's only modification to `sorting.py`:
-  - Remove the `raise NotImplementedError("ConcatenatedRecording requires Phase 3")` guard that Phase 1 installed for `recording_source='concatenated'`.
-  - Add validation: when `recording_source='concatenated'`, verify `recording_id` exists in `ConcatenatedRecording`.
+- **Lift the concat-FK restriction in `SortingSelection.insert_selection()`**. NO schema changes — Phase 1 declared both nullable typed FKs (`recording_id` → `Recording` and `concat_recording_id` → `ConcatenatedRecording`) in their final shape (see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility)). Phase 3's only modification to `sorting.py`:
+  - Remove the `raise NotImplementedError("Concat path requires Phase 3")` guard that Phase 1 installed for the `concat_recording_id`-non-NULL case.
+  - The XOR validation (exactly one of `recording_id` / `concat_recording_id` must be non-NULL) stays unchanged from Phase 1.
 
 - **Update `Sorting.make()`** to dispatch via `_resolve_recording(key)`:
   ```python
   def _resolve_recording(sel: dict) -> si.BaseRecording:
-      if sel["recording_source"] == "single":
-          return (Recording & {"recording_id": sel["recording_id"]}).get_recording(...)
-      elif sel["recording_source"] == "concatenated":
-          return (ConcatenatedRecording & {"recording_id": sel["recording_id"]}).get_recording(...)
-      raise ValueError(f"Unknown recording_source: {sel['recording_source']}")
+      if sel["recording_id"] is not None:
+          return (Recording & {"recording_id": sel["recording_id"]}).get_recording({"recording_id": sel["recording_id"]})
+      elif sel["concat_recording_id"] is not None:
+          return (ConcatenatedRecording & {"concat_recording_id": sel["concat_recording_id"]}).get_recording({"concat_recording_id": sel["concat_recording_id"]})
+      raise ValueError("Neither recording_id nor concat_recording_id is set on SortingSelection row — XOR validator was bypassed")
   ```
   This is a Phase 3 *method-body* change to existing `Sorting.make()`; not a schema change.
 
@@ -124,8 +124,8 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of `se.read_nwb_recording` raising if called) — it consumes the cached binary. |
 | `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; binary cache hashes differ. |
 | `test_concatenated_recording_multi_day_with_explicit_preset` (slow) | With `preset="dredge_fast"` and an `allow_multi_day=True` group, `ConcatenatedRecording.populate()` succeeds and the materialized recording differs from a `preset="rigid_fast"` run (motion correction was applied). |
-| `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"recording_source": "concatenated", "recording_id": concat_uuid, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
-| `test_sorting_selection_validates_recording_source_matches_id` | `recording_source="concatenated"` with a `recording_id` that exists only in `Recording` (not `ConcatenatedRecording`) raises clearly. |
+| `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"concat_recording_id": concat_uuid, "recording_id": None, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
+| `test_sorting_selection_xor_still_enforced` | After Phase 3, the XOR validator still rejects both-NULL and both-non-NULL combinations of `recording_id` / `concat_recording_id`. |
 | `test_sorting_selection_schema_unchanged_from_phase_1` | `SortingSelection.heading.attributes` is unchanged across Phase 1 and Phase 3 (no migration). |
 | `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
