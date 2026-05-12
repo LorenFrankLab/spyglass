@@ -1400,7 +1400,7 @@ class Fix1513Status(SpyglassMixin, dj.Computed):
     reviewed_at   : datetime
     repopulated=0 : tinyint       # 1 after CuratedSpikeSorting confirmed
     notes=''      : varchar(500)
-    label_diff=NULL : longblob    # {old_labels, new_labels} for keep/skip audit
+    label_diff=NULL : longblob    # dict of old_labels/new_labels for keep/skip audit
     """
 
     # Class-level permission cache — persists across populate() calls.
