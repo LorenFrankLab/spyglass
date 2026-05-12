@@ -13,6 +13,8 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 - [Job-Kwargs Resolution](#job-kwargs-resolution)
 - [Curation Label Enum](#curation-label-enum)
 - [`insert_selection()` Return-Value Normalization](#insert_selection-return-value-normalization)
+- [Unit-Level Brain Region Tracing](#unit-level-brain-region-tracing)
+- [Zero-Migration Schema Forward-Compatibility](#zero-migration-schema-forward-compatibility)
 
 ---
 
@@ -350,3 +352,94 @@ Per Critical Issue #1 in the plan self-review: `SpikeSortingOutput` keeps a `sou
 3. Extends `get_spike_times()` if and only if `CurationV3` uses a different units-object-name. Per the NWB-column convention above, it does NOT, so `get_spike_times()` requires no changes — but a test must verify this.
 
 **Invariant — do not weaken**: All five dispatch methods on `SpikeSortingOutput` (`get_recording`, `get_sorting`, `get_sort_group_info`, `get_spike_times`, `get_firing_rate`) must work on a v3-sourced `merge_id` without modification. Phase 1's validation slice includes a test for each.
+
+---
+
+## Unit-Level Brain Region Tracing
+
+**Why this contract exists**: v1's `CurationV1.get_sort_group_info` joins via `SortGroup.SortGroupElectrode * Electrode * BrainRegion` and samples ONE electrode per sort group (`fetch(limit=1)` at [src/spyglass/spikesorting/v1/curation.py:283-302](src/spyglass/spikesorting/v1/curation.py#L283-L302)). For Frank-lab tetrodes (4 channels, almost always one region) this usually works; for polymer probes spanning CA1+CA3 within one shank it under-reports. Tracing a curated unit back to a brain region is, per the user, "incredibly hard" in v1. v3 fixes this by **persisting per-unit peak channel and brain region at sort time**.
+
+**The mechanism**:
+
+Phase 1's `Sorting` table has a part table `Sorting.Unit` with one row per sorted unit, populated at the end of `Sorting.make()`. The peak channel is computed from the `SortingAnalyzer`'s `templates` extension (the channel with maximum absolute template amplitude per unit). The brain region is then looked up from `Electrode * BrainRegion` for that channel within the sort group.
+
+```python
+class Unit(SpyglassMixinPart):
+    """Per-unit metadata persisted at sort time.
+
+    Why a part table and not derived-on-the-fly: walking templates +
+    Electrode joins on every fetch is slow; persisting at sort time
+    is cheap (already have the analyzer in memory) and gives
+    SpikeSortingOutput.get_sort_group_info() a constant-time path.
+    """
+    definition = """
+    -> master
+    unit_id: int                       # SpikeInterface unit ID
+    ---
+    -> Electrode                       # the unit's peak-amplitude channel
+    -> [nullable] BrainRegion          # brain region of the peak channel; nullable for channels without region info
+    peak_amplitude_uV: float           # of the unit's template on the peak channel
+    n_spikes: int
+    """
+```
+
+`Electrode` and `BrainRegion` exist in `spyglass.common.common_ephys`; the FKs require no schema changes upstream.
+
+**The accessor surface**:
+
+```python
+# On Sorting:
+Sorting.get_unit_brain_regions(key) -> pd.DataFrame  # cols: unit_id, electrode_id, region_name, peak_amplitude_uV
+
+# On CurationV3 — same signature, filters by curation_label if asked:
+CurationV3.get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
+# include_labels defaults to None (return all); pass a list to filter.
+
+# On SpikeSortingOutput — delegates through the source class dispatch:
+SpikeSortingOutput.get_unit_brain_regions(merge_key) -> pd.DataFrame
+
+# On TrackedUnit — per-session brain regions for the matched units:
+TrackedUnit.get_unit_brain_regions(tracked_unit_key) -> pd.DataFrame  # cols: sorting_id, unit_id, region_name
+```
+
+**Invariants — do not weaken**:
+
+- `Sorting.Unit` is populated in the SAME `make()` call that creates the `Sorting` row. No "compute brain region later" — the brain region is a fact about the sort, not a separate stage.
+- `Sorting.Unit.brain_region` is nullable: some Spyglass installs don't populate `BrainRegion` for every electrode. Downstream code MUST handle `None` brain region gracefully.
+- `Sorting.get_unit_brain_regions` is a constant-time lookup against the part table (no template recomputation, no analyzer load).
+- Multi-region sort groups (polymer probes) are NOT collapsed; each unit's region reflects ITS peak channel, not the sort group's modal region.
+- Phase 1's `CurationV3` MUST also have a `Unit` part table mirroring `Sorting.Unit` so that curated unit removals (merges) are correctly reflected in the brain-region query without re-walking templates. `CurationV3.Unit` is populated by `CurationV3.insert_curation` from `Sorting.Unit` plus the merge_groups.
+
+**`SpikeSortingOutput.get_sort_group_info` extension**: per the [SpikeSortingOutput Part-Table Convention](#spikesortingoutput-part-table-convention-for-v3), `CurationV3` must implement `get_sort_group_info(key)`. The v3 version returns a DataFrame with **all** electrodes in the sort group joined to BrainRegion (NOT `fetch(limit=1)`), so callers using `get_sort_group_info` against a v3 merge_id get correct multi-region output. v1's `get_sort_group_info` remains as-is (existing behavior, existing users).
+
+---
+
+## Zero-Migration Schema Forward-Compatibility
+
+This contract enforces the user's binding constraint: every v3 table is designed in its final shape in the phase that introduces it. No `Table.alter()` calls across phases.
+
+**The forward-compatibility decisions baked into Phase 1**:
+
+| Phase 1 table | Forward-compat feature | What it anticipates |
+|---|---|---|
+| `SortingSelection` | Has `recording_source: enum('single', 'concatenated')` from day 1; `concatenated_recording_id: uuid` FK nullable | Phase 3's `ConcatenatedRecording`. In Phase 1, only `recording_source='single'` is accepted; `concatenated_recording_id` is always NULL. |
+| `SortingSelection` | `artifact_id: uuid` is nullable (NOT a PK component) | Concat sorts skip artifact detection until a concat-specific path is added (Phase 3 or 6). |
+| `SortingSelection` | `recording_id: uuid` is a regular FK column, not part of a multi-column PK | Allows recording_id to point at either `Recording` or `ConcatenatedRecording` rows via the `recording_source` discriminator. The FK is "loose" — DataJoint can't enforce against two tables — so the validator in `insert_selection()` checks `recording_source` against the matching upstream table. |
+| `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
+| `CurationV3.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV3.Unit` from `Sorting.Unit` row count. |
+| `CurationV3.object_id` (not `units_object_id`) | Column name matches v1 convention | `SpikeSortingOutput.get_spike_times` dispatch works unchanged. |
+
+**The forward-compatibility decisions baked into Phase 3**:
+
+| Phase 3 table | Forward-compat feature | What it anticipates |
+|---|---|---|
+| `SessionGroup` + `SessionGroup.Member` | No `allow_multi_day` constraint; `recording_date` is metadata, not a gate | Multi-day is in-scope from the start (per resolved decision #4). Phase 4 reuses this table without changes. |
+
+**Tables that are pure ADD (new tables, no migration needed)**:
+
+- Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`, `AnalyzerCuration`.
+- Phase 3: `MotionCorrectionParameters`, `ConcatenatedRecording` (the FK from `SortingSelection` was added in Phase 1 as nullable).
+- Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
+- Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
+
+**Invariant — do not weaken**: A reviewer of any Phase N PR must check that NO existing v3 table from Phase M<N is modified except by adding rows to its `contents` (for Lookup tables) or by adding rows via `make()` (for Computed tables). Adding columns, changing types, renaming columns, or altering FK structures is FORBIDDEN. Phase 1's forward-compatibility decisions above are the contract that lets this work.

@@ -31,7 +31,7 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 - **Implement `_params/` Pydantic models** for every Lookup table this phase introduces:
   - `_params/artifact_detection.py` — `ArtifactDetectionParamsSchema` with the same fields as v1's defaults plus `detect: bool`.
-  - `_params/sorter.py` — one Pydantic model per supported sorter (`MountainSort5Schema`, `Kilosort4Schema`, `SpykingCircus2Schema`, `Tridesclous2Schema`, `ClusterlessThresholderSchema`) + `_get_sorter_schema(sorter_name) -> type[BaseModel]` dispatch helper. Field defaults from [appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params).
+  - `_params/sorter.py` — one Pydantic model per supported sorter (`MountainSort4Schema`, `MountainSort5Schema`, `Kilosort4Schema`, `SpykingCircus2Schema`, `Tridesclous2Schema`, `ClusterlessThresholderSchema`) + `_get_sorter_schema(sorter_name) -> type[BaseModel]` dispatch helper. **MS4 schema fields** mirror v1's defaults at [src/spyglass/spikesorting/v1/sorting.py](src/spyglass/spikesorting/v1/sorting.py) (`mountain_default` block) without the runtime `tempdir` field-mutation hack. **MS5 schema** uses the defaults from [appendix.md § MountainSort 5 install + params](appendix.md#mountainsort-5-install--params).
 
 - **Implement `recording.py`** — full content per [designs.md § PreprocessingParameters + RecordingSelection + Recording](designs.md#preprocessingparameters--recordingselection--recording). Specific tasks:
   - `SortGroupV3` Manual table per [designs.md § SortGroupV3](designs.md#sortgroupv3); `set_group_by_shank()` raises on overwrite without `force=True`.
@@ -41,18 +41,25 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 
 - **Implement `artifact.py`** — `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` per [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection). Note the design has a real `ArtifactDetectionSelection` Manual table (UUID `artifact_id` PK; FKs Recording + ArtifactDetectionParameters). `ArtifactDetection` is Computed and keys off the Selection — required so DataJoint populate-restriction semantics work (`ArtifactDetection.populate({"recording_id": X})` resolves via the Selection table's join, not against a UUID-only PK). Artifact intervals live on `ArtifactDetection.Interval` part table (NOT `IntervalList`). Helper `ArtifactDetection.get_artifact_removed_intervals(key) -> np.ndarray` returns the valid-time intervals for use by `Sorting.make()`.
 
-- **Implement `sorting.py`** — `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
+- **Implement `sorting.py`** — `RecordingSource`, `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
+  - **`RecordingSource` Lookup table** with `enum('single', 'concatenated')` contents inserted via `insert_default()`. Required from Phase 1 because `SortingSelection` FKs it — see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility).
+  - **`SortingSelection` schema is FINAL in Phase 1** per the zero-migration policy. Columns: `sorting_id` PK; `-> RecordingSource`; `recording_id: uuid` (loose FK validated in `insert_selection()`); `-> SorterParameters`; `artifact_id=NULL: uuid`. Phase 1's `insert_selection` accepts only `recording_source='single'` and validates `recording_id` against `Recording`; passing `'concatenated'` raises `NotImplementedError("ConcatenatedRecording requires Phase 3")`. Phase 3 lifts this restriction WITHOUT altering the schema.
   - `Sorting.make()` uses `sis.run_sorter()` then immediately `sic.remove_excess_spikes()` (still in SI 0.104).
   - After sort, builds a `SortingAnalyzer(format="binary_folder", sparse=True)` per the shared contract.
   - Computes `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time. Other extensions deferred to `AnalyzerCuration` (Phase 2).
-  - Writes the units NWB via `AnalysisNwbfile().build(...)`. Stores both `analysis_file_name` + `analyzer_folder` on the row.
-  - `Sorting.get_analyzer(key)` recomputes if folder missing (mirrors v1's `SpikeSortingRecording.get_recording` pattern at [src/spyglass/spikesorting/v1/recording.py:475-712](src/spyglass/spikesorting/v1/recording.py#L475-L712)).
-  - Default `SorterParameters` rows: `("mountainsort5", "franklab_tetrode_30kHz")`, `("kilosort4", "franklab_neuropixels_default")`, `("clusterless_thresholder", "default")`, `("spykingcircus2", "default")`, `("tridesclous2", "default")`. MS4 wrapper NOT added (see Open Question #1 in overview).
+  - Writes the units NWB via `AnalysisNwbfile().build(...)`. Stores `analysis_file_name`, `object_id`, `analyzer_folder` on the row.
+  - `Sorting.get_analyzer(key)` recomputes if folder missing.
+  - **Populate `Sorting.Unit` part table** at the end of `make()`. For each unit: peak channel from `analyzer.get_extension("templates").get_unit_template(unit_id)` (channel with max abs amplitude); brain region via `(Electrode * BrainRegion & {"electrode_id": peak_ch})`. Brain region is NULL if no row exists. Per-unit `peak_amplitude_uV` recorded. See [shared-contracts.md § Unit-Level Brain Region Tracing](shared-contracts.md#unit-level-brain-region-tracing).
+  - `Sorting.get_unit_brain_regions(key) -> pd.DataFrame` method as a constant-time `Sorting.Unit * Electrode * BrainRegion` join.
+  - Default `SorterParameters` rows include **MountainSort 4** alongside MS5: `("mountainsort4", "franklab_tetrode_hippocampus_30kHz_ms4")`, `("mountainsort5", "franklab_tetrode_hippocampus_30kHz_ms5")`, `("kilosort4", "franklab_neuropixels_default")`, `("clusterless_thresholder", "default")`, `("spykingcircus2", "default")`, `("tridesclous2", "default")`. MS4 stays in v3 per resolved decision #1.
 
 - **Implement `curation.py`** — `CurationV3` Manual per [designs.md § CurationV3](designs.md#curationv3). Specific:
   - `insert_curation(sorting_key, parent_curation_id=-1, labels=None, merge_groups=None, apply_merges=False, description="")` validates labels against `CurationLabel` enum, returns single dict.
+  - **Populates `CurationV3.Unit` part table** as part of `insert_curation()` by reading the upstream `Sorting.Unit` rows, applying merge_groups (a merged unit inherits the peak channel and region of the contributing unit with the highest amplitude), and writing labels per unit. See [shared-contracts.md § Unit-Level Brain Region Tracing](shared-contracts.md#unit-level-brain-region-tracing).
   - Auto-registers into `SpikeSortingOutput.CurationV3` after insert.
   - `get_sorting(key, as_dataframe=False)` and `get_merged_sorting(key)` methods analogous to v1's.
+  - `get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame` — constant-time `CurationV3.Unit * Electrode * BrainRegion` join; if `include_labels` is provided, filters by `curation_label IN include_labels`.
+  - `get_sort_group_info(key) -> dj.Table` — returns ALL electrodes in the sort group joined to `Electrode * BrainRegion`, NOT `fetch(limit=1)`. This is the fix for the v1 multi-region under-reporting bug. Returns a DataJoint relation (not a DataFrame) so callers can chain restrictions.
 
 - **Modify `spikesorting_merge.py`** — add new part [per shared-contracts.md § SpikeSortingOutput Part-Table Convention for v3](shared-contracts.md#spikesortingoutput-part-table-convention-for-v3). Specifically:
   - Add `class CurationV3(SpyglassMixinPart)` part to `SpikeSortingOutput`.
@@ -109,6 +116,18 @@ The MVP. Builds the complete single-session sort pipeline: preprocessing → art
 | `test_spike_sorting_output_get_sort_group_info_works_for_v3` | Same, for `get_sort_group_info`. |
 | `test_spike_sorting_output_get_spike_times_works_for_v3` (slow) | `SpikeSortingOutput.get_spike_times(merge_key)` returns spike-time arrays for the v3 sort. Validates the `object_id` column-name convention end-to-end. |
 | `test_curation_v3_object_id_column_name` | `"object_id" in CurationV3.heading.attributes` and `"units_object_id" not in CurationV3.heading.attributes` (regression test for the NWB column-name convention). |
+| `test_sorting_selection_recording_source_present_in_phase_1` | `"recording_source" in SortingSelection.heading.attributes` (regression test for forward-compat schema decision; Phase 3 must NOT have to alter this). |
+| `test_sorting_selection_rejects_concatenated_in_phase_1` | `SortingSelection.insert_selection({"recording_source": "concatenated", ...})` raises `NotImplementedError`; helpful message points at Phase 3. |
+| `test_sorter_params_mountainsort4_default_row_present` | After `SorterParameters().insert_default()`, `SorterParameters & {"sorter": "mountainsort4"}` has at least one row. |
+| `test_sorter_params_mountainsort4_validation` (slow) | Insert a custom MS4 params row with `detect_sign=0` (invalid in v1 too); raises. Valid `detect_sign=-1` inserts. |
+| `test_sorting_mountainsort4_run` (slow, integration) | Run v3 with MS4 against `minirec`; assert `Sorting & key` row produced; `n_units > 0`. |
+| `test_sorting_unit_part_populated` (slow) | After `Sorting.populate(key)`, `Sorting.Unit & key` has one row per unit; `peak_amplitude_uV > 0` on every row; `electrode_id` is one of the sort group's electrodes. |
+| `test_sorting_unit_brain_region_nullable` (slow) | Synthesize a sort group where some channels have no `BrainRegion` row; assert `Sorting.Unit.brain_region` is NULL for those units, populated for others. |
+| `test_sorting_get_unit_brain_regions_returns_dataframe` (slow) | Returned DataFrame has columns `unit_id`, `electrode_id`, `region_name`, `peak_amplitude_uV`, `n_spikes`. |
+| `test_curation_v3_unit_part_populated` | `CurationV3.insert_curation(sort_key, ...)` populates `CurationV3.Unit` with one row per surviving unit (after merges applied); merged unit inherits peak channel from highest-amplitude contributor. |
+| `test_curation_v3_unit_filter_by_label` | `CurationV3.get_unit_brain_regions(key, include_labels=["accept"])` returns only rows with `curation_label == "accept"`. |
+| `test_curation_v3_get_sort_group_info_returns_all_electrodes` | Test fixture with a multi-region sort group (synthetic); `get_sort_group_info(key).fetch("region_name")` returns ALL regions, NOT just one (regression fix vs v1's `fetch(limit=1)`). |
+| `test_spike_sorting_output_get_unit_brain_regions_for_v3` (slow) | `SpikeSortingOutput.get_unit_brain_regions(merge_key)` works on v3 merge_ids and returns the same DataFrame as `CurationV3.get_unit_brain_regions(curation_key)`. |
 | `test_sorted_spikes_group_works_with_v3` (slow) | Insert a `SortedSpikesGroup` row using a v3-sourced merge_id; assert `SortedSpikesGroup.get_spike_times(key)` returns sane numpy arrays. |
 | `test_v3_clusterless_parity` (slow, integration) | Run v3 with `clusterless_thresholder` on `minirec`; fetched spike times exactly match Phase 0 baseline pickle. Deterministic — zero tolerance. |
 | `test_v3_mountainsort5_smoke` (slow, integration) | Run v3 with MountainSort 5 on `minirec`; `n_units` ±50%, median FR ±30%, total spikes ±30% vs v1 baseline. |

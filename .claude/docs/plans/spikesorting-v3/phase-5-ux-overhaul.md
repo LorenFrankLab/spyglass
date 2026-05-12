@@ -1,8 +1,8 @@
-# Phase 5 — UX overhaul: pipeline orchestrator, FigPack, notebook rewrite, v1 sunset roadmap
+# Phase 5 — UX overhaul: pipeline orchestrator, FigPack, notebook rewrite
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#run_v3_pipeline-orchestrator)
 
-The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell notebook → 8-cell notebook), Pydantic-validated parameter presets, FigPack curation as an alternate UI path, the full v3 notebook walkthrough, and the documented sunset criteria for v1.
+The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell notebook → 8-cell notebook), Pydantic-validated parameter presets, FigPack as the v3 curation UI, and the full v3 notebook walkthrough. **v1 is NOT sunset by this plan**; v0 and v1 continue to coexist with v3 indefinitely (per resolved decision in overview).
 
 **Inputs to read first:**
 
@@ -45,23 +45,20 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
   ```
   Validates at preset-registration time that every referenced Lookup row exists (raises a clear error if a parameter set is missing). This catches the typo-at-populate failure mode entirely.
 
-- **FigPack feasibility check FIRST**, before implementing anything. Before writing `figpack_curation.py`, the Phase 5 implementer must:
-  1. Confirm `figpack` is installable from PyPI under the assumed name (check at https://pypi.org/project/figpack/ or the FlatironInstitute repo).
-  2. Verify the assumed `figpack.spike_sorting.build_curation_view(analyzer)` API exists OR document the actual current API (see [appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl)).
+- **FigPack feasibility check FIRST**, before implementing anything. Phase 5 declares FigPack as the v3 curation UI per resolved decision #2 — but the implementer must verify the upstream package is usable before writing the table. Tasks:
+  1. Confirm `figpack` is installable from PyPI under the expected name.
+  2. Verify the `figpack.spike_sorting.build_curation_view(analyzer)` API (or its current equivalent) exists and works.
   3. Test on a single example: build a curation view from a v3 SortingAnalyzer end-to-end and publish to FigPack. Round-trip a known labels dict back via `fetch_curation_from_uri`.
 
-  **Decision branches based on feasibility check:**
-  - **(a) FigPack works as expected** → proceed with the implementation tasks below.
-  - **(b) FigPack API differs but is usable** → implement against the actual API; update [appendix.md § FigPack vs FigURL](appendix.md#figpack-vs-figurl) with the discovered surface.
-  - **(c) FigPack is not usable in Phase 5 timeframe (e.g., API unstable, not yet released, install broken)** → SKIP the FigPack implementation in Phase 5. The plan's UX deliverables (orchestrator, notebook rewrite, presets) ship without it. Add `figpack_curation.py` to a future-work issue. Document the skip in the CHANGELOG entry. FigURL remains the v3 curation UI; it already works via `spyglass.spikesorting.v1.figurl_curation` for v3 curations as long as the v3 curation NWB has the required `curation_label` column (which Phase 1 enforces).
+  **If FigPack is not usable at implementation time**: STOP Phase 5 and escalate to the project owner. Per resolved decision #2, FigPack is the v3 curation UI; the plan does not silently fall back to FigURL. Surface the blocker rather than ship a degraded UI. Possible resolutions (decided by project owner, not the implementer): wait for FigPack release; pin to a specific FigPack commit; add a contribution to upstream FigPack.
 
-- **If FigPack is usable**: implement `figpack_curation.py` per [designs.md § FigPackCuration](designs.md#figpackcuration):
+- **Implement `figpack_curation.py`** per [designs.md § FigPackCuration](designs.md#figpackcuration):
   - `FigPackCurationSelection` Manual + `FigPackCuration` Computed.
   - `make()` uses the verified FigPack API. Publishes view, stores returned URI.
   - `FigPackCuration.fetch_curation_from_uri(uri) -> tuple[dict, list]` — round-trip labels + merge_groups from FigPack back into v3.
-  - Optional dependency: gate `figpack` import with a clear install message if absent.
+  - Gate `figpack` import inside the module with a clear install message if absent (helps users who haven't installed the `spikesorting-v3-curation` extra).
 
-- **Add `figpack` to `pyproject.toml`** as an optional dependency (only if FigPack is implemented):
+- **Add `figpack` to `pyproject.toml`** as an optional dependency:
   ```toml
   optional-dependencies.spikesorting-v3-curation = ["figpack>=X.Y"]
   ```
@@ -88,13 +85,11 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 - **Documentation overhaul**:
   - Promote `docs/src/Pipelines/SpikeSorting/v3.md` from "new pipeline" to "recommended for new work". Add a top banner.
   - Update root README "Quick example" snippet to use `run_v3_pipeline()`.
-  - Mark `docs/src/Pipelines/SpikeSorting/v1.md` (or whatever path the v1 docs live at) with a "legacy" banner — but keep all v1 docs accessible.
-  - Add a new docs page: `docs/src/Pipelines/SpikeSorting/v1-to-v3-migration.md` — for users with v1 sorts wondering what changes for new sorts (TL;DR: v1 stays accessible; new sorts go to v3 via `run_v3_pipeline`).
-  - CHANGELOG.md: "v3 spike sorting is the recommended path. `run_v3_pipeline()` reduces typical sort setup to a single function call. FigPack curation added. v1 remains supported indefinitely (no removal in this release)."
+  - Keep `docs/src/Pipelines/SpikeSorting/v1.md` accessible and live; do NOT mark v1 as deprecated. v0 and v1 remain populated paths for legacy data.
+  - Add a new docs page: `docs/src/Pipelines/SpikeSorting/choosing-v1-vs-v3.md` — for users deciding which path to use. TL;DR: existing v1 sorts stay queryable through v1; new sorts go to v3 via `run_v3_pipeline`.
+  - CHANGELOG.md: "v3 spike sorting is the recommended path for new work. `run_v3_pipeline()` reduces typical sort setup to a single function call. FigPack is the v3 curation UI. v0 and v1 remain supported indefinitely."
 
-- **v1 sunset trigger documentation** (NOT v1 removal — documentation of WHEN v1 might be removed):
-  - New section in `docs/src/Pipelines/SpikeSorting/v1.md` titled "Sunset criteria": "v1 source will be deprecated when (a) v3 has been the default in docs for ≥6 months, (b) no v1 populate calls have been observed in production logs for ≥3 months (measured via a query in `spyglass.spikesorting.v1.SpikeSortingRecording.populate()` log mining), and (c) all lab production data has either been re-sorted in v3 or is read-only legacy archive."
-  - Actual v1 removal is **a future plan**, NOT in this scope. The Phase 5 PR explicitly documents this.
+- **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v3 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
 
 - **End-to-end integration test** `tests/spikesorting/v3/test_run_pipeline.py`:
   - `test_run_v3_pipeline_minirec_clusterless` — calls `run_v3_pipeline(...)`, asserts manifest has all 5 stages + valid merge_id, downstream `SpikeSortingOutput.get_spike_times(...)` returns the same units that direct v3 path would (Phase 1's parity test, but through the orchestrator).
@@ -105,11 +100,10 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 
 ## Deliberately not in this phase
 
-- **No v1 source removal.** Documented sunset criteria only.
-- **No FigURL deprecation in v3.** v3 ships with FigPack ADDED, not FigURL replaced. FigURL stays usable.
-- **No multi-day chronic support.** Phase 3's documented limitation stays.
-- **No DeepUnitMatch.** Phase 4 still ships only UnitMatch.
-- **No automated metrics on lab production data.** The "no v1 populates in 3 months" sunset criterion is documented but not instrumented in this PR.
+- **No v0/v1 source removal.** Per resolved decision in overview, v0 and v1 stay in-tree indefinitely; this plan never sunsets them. v3 does not back-port to v1's FigURL flow either.
+- **No DeepUnitMatch.** Phase 4 ships only UnitMatch; DeepUnitMatch is future work via the same `MatcherProtocol` plugin.
+- **No v1-to-v3 data migration tooling.** Users keep using v1 for their existing v1 sorts; new sorts go through v3. Whether to write a one-shot "convert v1 CurationV1 row to a v3 CurationV3 row" helper is decided separately.
+- **No schema changes to existing v3 tables.** Per the zero-migration policy, Phase 5 only ADDS new tables (`FigPackCurationSelection`, `FigPackCuration`, and the `_params/preset.py` registrations). Any change to Phase 1–4 table definitions is forbidden.
 
 ## Validation slice
 
@@ -135,11 +129,13 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
-- The "Deliberately not in this phase" list is honored — v1 is NOT removed in this PR.
+- The "Deliberately not in this phase" list is honored — v1 is NOT removed, no v0/v1 schema touched, no existing v3 table altered.
 - Validation slice tests pass; slow / integration tests are marked.
 - `notebooks/13_Spike_SortingV3.ipynb` is ≤10 code cells (verify by running `jq '.cells | map(select(.cell_type == "code")) | length' notebooks/13_Spike_SortingV3.ipynb`).
 - `run_v3_pipeline()` is idempotent (the manifest comparison test passes).
-- All docs tasks landed: v3.md banner, README snippet, migration page, sunset criteria documented in v1.md.
-- CHANGELOG.md mentions Phase 5 deliverables.
-- Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source removed.
+- FigPack feasibility was verified before implementation began (or the project owner was escalated if FigPack proved unusable — no silent fallback).
+- All docs tasks landed: v3.md banner, README snippet, `choosing-v1-vs-v3.md` decision page.
+- CHANGELOG.md mentions Phase 5 deliverables (orchestrator, FigPack, notebook rewrite).
+- Sanity: `git diff src/spyglass/spikesorting/v0/ src/spyglass/spikesorting/v1/` is empty — no v0/v1 source touched.
+- Sanity: `git diff` against any Phase 1–4 table `definition` strings is empty — zero-migration policy honored.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.

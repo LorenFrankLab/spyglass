@@ -22,12 +22,17 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 ## Tasks
 
 - **Implement `_params/motion_correction.py`** Pydantic models:
-  - `MotionCorrectionParamsSchema` with `preset: Literal["rigid_fast", "kilosort_like", "dredge_fast", "dredge", "medicine", "nonrigid_accurate", "none"]` and `preset_kwargs: dict = {}`.
+  - `MotionCorrectionParamsSchema` with `preset: Literal["auto", "rigid_fast", "kilosort_like", "dredge_fast", "dredge", "medicine", "nonrigid_accurate", "none"]` and `preset_kwargs: dict = {}`. The `"auto"` value triggers the multi-day-aware dispatch in `ConcatenatedRecording.make()`.
 
 - **Implement `session_group.py`** per [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording). Specific:
-  - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is validated at insert by `create_group()`.
-  - `create_group(session_group_name, members, description, allow_multi_day=False)` — atomic insert + Member rows. Raises if dates differ and `allow_multi_day=False`.
-  - `MotionCorrectionParameters` Lookup. Contents: `("rigid_fast_default", {"preset": "rigid_fast"})`, `("none", {"preset": "none"})`, `("dredge_fast_default", {"preset": "dredge_fast"})`.
+  - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is stored as metadata (no gating); `SessionGroup.is_multi_day(key) -> bool` classmethod inspects the members' dates.
+  - `create_group(session_group_name, members, description="")` — atomic insert + Member rows. **Multi-day groups are supported by default**; no `allow_multi_day` flag (per resolved decision #4).
+  - `MotionCorrectionParameters` Lookup. Default rows:
+    - `("auto_default", {"preset": "auto"})` — picks `rigid_fast` for single-day, `dredge_fast` for multi-day; this is the recommended default
+    - `("rigid_fast_default", {"preset": "rigid_fast"})` — force single-day-style preset
+    - `("dredge_fast_default", {"preset": "dredge_fast"})` — force multi-day-style preset
+    - `("dredge_full", {"preset": "dredge"})` — slow but highest accuracy for severe drift
+    - `("none", {"preset": "none"})` — explicit opt-out
   - `ConcatenatedRecording` Computed with `make()` that:
     1. Fetches members in order.
     2. **Reuses cached `Recording` binary outputs per member** rather than re-preprocessing from raw NWB. For each member, look up the matching `RecordingSelection` row (via `insert_selection` idempotency); if `Recording` is not yet populated for that key, call `Recording.populate(rec_key)`; then load the BaseRecording via `Recording.get_recording(rec_key)`. This avoids the silent-divergence risk of preprocessing twice. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
@@ -38,47 +43,20 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
     7. `get_recording(key)` reads the cache.
     8. `split_sorting_by_session(sorting, key) -> dict[session_key, BaseSorting]` — back-maps spike times.
 
-- **Extend `SortingSelection`** in [src/spyglass/spikesorting/v3/sorting.py](src/spyglass/spikesorting/v3/sorting.py) to accept either `Recording` or `ConcatenatedRecording` as the input. Two approaches; pick (b):
+- **Lift the `'concatenated'` restriction in `SortingSelection.insert_selection()`**. NO schema changes — Phase 1 declared the `recording_source` discriminator and the loose `recording_id` FK in their final shape (see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility)). Phase 3's only modification to `sorting.py`:
+  - Remove the `raise NotImplementedError("ConcatenatedRecording requires Phase 3")` guard that Phase 1 installed for `recording_source='concatenated'`.
+  - Add validation: when `recording_source='concatenated'`, verify `recording_id` exists in `ConcatenatedRecording`.
 
-  **(a)** Add a second nullable FK. DataJoint rejects this (FK fields are part of the PK).
-
-  **(b) Polymorphic recording_id**: Introduce a `RecordingSource` Lookup table with `recording_source ∈ {"single", "concatenated"}`. `SortingSelection` carries `(recording_id, recording_source)` and a small `_resolve_recording(key)` helper dispatches to the right loader. This is the cleanest DataJoint-friendly approach.
-
+- **Update `Sorting.make()`** to dispatch via `_resolve_recording(key)`:
   ```python
-  @schema
-  class RecordingSource(SpyglassMixin, dj.Lookup):
-      definition = """
-      recording_source: enum('single', 'concatenated')
-      """
-      contents = [("single",), ("concatenated",)]
-
-  # SortingSelection in Phase 1 was:
-  #   sorting_id: uuid
-  #   ---
-  #   -> Recording
-  #   -> SorterParameters
-  #   -> ArtifactDetection.proj(...)
-  # Phase 3 changes to:
-  @schema
-  class SortingSelection(SpyglassMixin, dj.Manual):
-      definition = """
-      sorting_id: uuid
-      ---
-      recording_id: uuid          # FK either Recording or ConcatenatedRecording, dispatched
-      -> RecordingSource
-      -> SorterParameters
-      artifact_id=NULL: uuid      # FK ArtifactDetection if applicable; None for concat
-      """
+  def _resolve_recording(sel: dict) -> si.BaseRecording:
+      if sel["recording_source"] == "single":
+          return (Recording & {"recording_id": sel["recording_id"]}).get_recording(...)
+      elif sel["recording_source"] == "concatenated":
+          return (ConcatenatedRecording & {"recording_id": sel["recording_id"]}).get_recording(...)
+      raise ValueError(f"Unknown recording_source: {sel['recording_source']}")
   ```
-
-  This is a **breaking schema change**. The migration policy and required `dj_run_migration.py` helper are specified in **[overview.md § Open Questions #8](overview.md#open-questions)** — read that before implementing. Phase 3 cannot ship until the migration approach is confirmed with the project owner. Decision points:
-  - If Phase 1 production rows exist: implement the in-place `Table.alter()` migration script with backfill of `recording_source='single'` and `artifact_id` PK→nullable secondary, plus a dry-run mode that prints SQL without executing.
-  - If Phase 1 has not been adopted in production: simple `alter()` is acceptable (no backfill needed; just an empty table change).
-  - Fallback if migration is rejected: introduce `SortingSelectionV2` as a parallel table; Phase 3 sorts use V2; Phase 1 V1 stays for old data. Adds a one-release deprecation window.
-
-  All three paths are documented; the implementer picks one based on the project owner's decision and notes the choice in the CHANGELOG entry for Phase 3.
-
-- **Update `Sorting.make()`** to call `_resolve_recording(key)` which returns the correct upstream object (Recording or ConcatenatedRecording).
+  This is a Phase 3 *method-body* change to existing `Sorting.make()`; not a schema change.
 
 - **Implement back-mapping helper** `ConcatenatedRecording.split_sorting_by_session(sorting, key)`:
   ```python
@@ -121,26 +99,31 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 
 ## Deliberately not in this phase
 
-- **Multi-day concatenation** — `allow_multi_day=True` exists as a Pydantic flag but is documented as Phase 6 future work. Behavior on multi-day: warning printed, runs anyway, but DREDge motion correction is the only currently-recommended preset (set `preset="dredge"`).
 - **Cross-session unit matching.** Phase 4. This phase produces the concatenated sort; matching across independent sortings is separate.
 - **Multi-probe session groups** — out of scope. Phase 3 assumes one sort_group per member (one shank or tetrode).
 - **GPU motion correction** — uses CPU presets only. KS4-built-in drift handling fires only if user selects KS4 as the sorter (Phase 1 plumbing).
 - **No `Sorting.get_per_session_analyzer()` helper** — out of scope. If a user wants per-session analyzers from a concat sort, they back-map via `split_sorting_by_session` then `create_sorting_analyzer` manually.
+- **No schema changes to `SortingSelection`.** Per the zero-migration policy, this phase only modifies `Sorting.make()` and `SortingSelection.insert_selection()` method bodies; the `definition` string is untouched.
 
 ## Validation slice
 
 | Test | Asserts |
 | --- | --- |
-| `test_session_group_create_same_day` | `create_group(name, [m1, m2])` with same `recording_date` inserts master + 2 part rows. |
-| `test_session_group_create_multi_day_blocked` | `create_group(name, [m1, m2])` with different `recording_date`s raises `ValueError`. |
-| `test_session_group_create_multi_day_allowed_with_flag` | Same as above with `allow_multi_day=True` succeeds; warning logged. |
+| `test_session_group_create_single_day` | `create_group(name, [m1, m2])` with same `recording_date` inserts master + 2 part rows. |
+| `test_session_group_create_multi_day_succeeds` | `create_group(name, [m1, m2])` with different `recording_date`s succeeds with no error and no flag (multi-day is first-class per resolved decision #4). |
+| `test_session_group_is_multi_day_classmethod` | `SessionGroup.is_multi_day(key)` returns False for single-day, True for multi-day. |
 | `test_motion_correction_params_validation` | `MotionCorrectionParameters.insert1({"params": {"preset": "bogus"}})` raises. |
+| `test_motion_correction_preset_auto_dispatches_by_date` (slow) | With `preset="auto"`: single-day SessionGroup → traces match what `rigid_fast` would have produced; multi-day SessionGroup → traces match what `dredge_fast` would have produced. |
 | `test_concatenated_recording_make_basic` (slow) | After populate, binary cache exists; `n_channels` matches all members; `total_duration_s` = sum(member durations); `member_segment_boundaries` length matches members. |
-| `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; binary cache hashes differ (motion correction produces different traces). |
-| `test_sorting_selection_polymorphic_input` | `SortingSelection.insert_selection({"recording_source": "single", "recording_id": rec_uuid, ...})` inserts cleanly; same with `"concatenated"`. Mismatched recording_id/source pairing raises validation error. |
-| `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a `ConcatenatedRecording` row; analyzer folder is created; `n_units > 0`. |
+| `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of `se.read_nwb_recording` raising if called) — it consumes the cached binary. |
+| `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; binary cache hashes differ. |
+| `test_concatenated_recording_multi_day_auto_picks_dredge` (slow) | With `preset="auto"` and multi-day group, the materialized recording matches what `dredge_fast` would have produced (use a separate sanity-pass with `preset="dredge_fast"` as oracle). |
+| `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"recording_source": "concatenated", "recording_id": concat_uuid, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
+| `test_sorting_selection_validates_recording_source_matches_id` | `recording_source="concatenated"` with a `recording_id` that exists only in `Recording` (not `ConcatenatedRecording`) raises clearly. |
+| `test_sorting_selection_schema_unchanged_from_phase_1` | `SortingSelection.heading.attributes` is unchanged across Phase 1 and Phase 3 (no migration). |
+| `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
-| `test_chronic_smoke` (slow, optional) | Two-session chronic concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |
+| `test_multi_day_chronic_smoke` (slow, optional) | Two-session multi-day concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |
 
 ## Fixtures
 
@@ -152,8 +135,7 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent independent reviewer) against the diff. Confirm:
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into Phase 4 (cross-session matching).
-- The `SortingSelection` schema migration is documented in CHANGELOG.md with the migration script path noted.
-- If v3 has shipped externally, the breaking-schema-change concern (Open Question #8 in overview.md) is resolved BEFORE this PR is opened — either with confirmation that the migration is acceptable, or with a backwards-compatible alternative (`SortingSelectionV2` rather than altering).
-- Multi-day blocking + override behave as specified — test cases cover both paths.
+- **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v3/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
+- Multi-day support works end-to-end without any opt-in flag (`SessionGroup.create_group` accepts multi-day input by default; `ConcatenatedRecording` auto-selects DREDge).
 - Memory/runtime smoke test is a real measurement (not a mocked metric).
-- Documentation tasks landed.
+- Documentation tasks landed; CHANGELOG mentions multi-day as a feature.

@@ -299,8 +299,13 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
     params_schema_version=1: int
     """
     # Per-sorter Pydantic schemas in spyglass.spikesorting.v3._params.sorter
-    # Contents: mountainsort5 default, kilosort4 default, spykingcircus2 default,
-    # tridesclous2 default, clusterless_thresholder default.
+    # Contents (Phase 1 default rows):
+    #   ('mountainsort4', 'franklab_tetrode_hippocampus_30kHz_ms4', ...)  # MS4 stays in v3
+    #   ('mountainsort5', 'franklab_tetrode_hippocampus_30kHz_ms5', ...)
+    #   ('kilosort4',     'franklab_neuropixels_default', ...)
+    #   ('spykingcircus2', 'default', ...)
+    #   ('tridesclous2',   'default', ...)
+    #   ('clusterless_thresholder', 'default', ...)
 
     @classmethod
     def insert1(cls, row: dict, **kwargs):
@@ -311,21 +316,53 @@ class SorterParameters(SpyglassMixin, dj.Lookup):
 
 
 @schema
+class RecordingSource(SpyglassMixin, dj.Lookup):
+    """Discriminator for SortingSelection's polymorphic recording input.
+
+    Phase 1 only accepts 'single'; Phase 3 enables 'concatenated' (the
+    table exists from Phase 1 so SortingSelection's FK to it works).
+    """
+    definition = """
+    recording_source: enum('single', 'concatenated')
+    """
+    contents = [("single",), ("concatenated",)]
+
+
+@schema
 class SortingSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
-    Note: can FK either Recording (single-session) OR ConcatenatedRecording
-    (cross-session — Phase 3). Phase 1 supports only Recording; Phase 3
-    extends via a polymorphic input recording_id.
+    PHASE 1 + PHASE 3 final schema. The forward-compatibility design
+    (per shared-contracts § Zero-Migration Schema Forward-Compatibility):
+    - `recording_source` discriminates 'single' vs 'concatenated'.
+    - `recording_id` is a "loose" UUID FK; the validator in
+      insert_selection() checks it against `Recording` or
+      `ConcatenatedRecording` depending on `recording_source`.
+    - `artifact_id` is nullable (NOT a PK component) — concat sorts may
+      skip artifact detection in Phase 3.
+
+    Phase 1: only `recording_source='single'` is accepted by
+    insert_selection(); Phase 3 enables 'concatenated'. No alter() needed.
     """
     definition = """
     sorting_id: uuid
     ---
-    -> Recording               # Phase 1: only single-session
+    -> RecordingSource
+    recording_id: uuid          # loose FK; validated by insert_selection
     -> SorterParameters
-    -> ArtifactDetection.proj(artifact_id="artifact_id")  # optional via 'none' params
+    artifact_id=NULL: uuid      # FK ArtifactDetection if applicable, else NULL
     """
-    # In Phase 3, Recording becomes nullable and ConcatenatedRecording is added as alt FK.
+
+    @classmethod
+    def insert_selection(cls, key: dict) -> dict:
+        """Validates recording_source vs recording_id matches an existing
+        Recording row (source='single') or ConcatenatedRecording row
+        (source='concatenated'). Raises ValueError on mismatch.
+        Also validates that 'concatenated' source is supported in the
+        current Phase (Phase 1 raises NotImplementedError; Phase 3
+        lifts that restriction).
+        """
+        ...
 
 
 @schema
@@ -340,6 +377,23 @@ class Sorting(SpyglassMixin, dj.Computed):
     n_units: int
     time_of_sort: datetime
     """
+
+    class Unit(SpyglassMixinPart):
+        """Per-unit metadata persisted at sort time.
+
+        See shared-contracts § Unit-Level Brain Region Tracing for why
+        this is a part table (not derived on-the-fly) and the accessor
+        surface it powers.
+        """
+        definition = """
+        -> master
+        unit_id: int                       # SpikeInterface unit ID
+        ---
+        -> Electrode                       # peak-amplitude channel for this unit
+        -> [nullable] BrainRegion          # brain region of peak channel (NULL if not annotated)
+        peak_amplitude_uV: float
+        n_spikes: int
+        """
 
     def make(self, key):
         sel = (SortingSelection & key).fetch1()
@@ -407,8 +461,30 @@ class Sorting(SpyglassMixin, dj.Computed):
             "time_of_sort": datetime.now(),
         })
 
+        # 6. Persist per-unit peak channel + brain region (Sorting.Unit part).
+        # Templates extension was computed at step 4; this is constant-time.
+        unit_rows = _compute_unit_part_rows(
+            sorting_id=key["sorting_id"],
+            analyzer=analyzer,
+            sort_group_electrodes=sort_group_electrodes,
+        )
+        self.Unit.insert(unit_rows)
+
     def get_sorting(self, key) -> si.BaseSorting:
         ...
+
+    def get_unit_brain_regions(self, key) -> pd.DataFrame:
+        """Returns per-unit brain region (constant-time, reads Sorting.Unit).
+
+        See shared-contracts § Unit-Level Brain Region Tracing.
+        """
+        return (
+            (self.Unit & key) * Electrode * BrainRegion
+        ).fetch(
+            "unit_id", "electrode_id", "region_name", "peak_amplitude_uV",
+            "n_spikes",
+            as_dict=True,
+        )
 
     def get_analyzer(self, key) -> si.SortingAnalyzer:
         """See shared-contracts.md SortingAnalyzer layout.
@@ -449,11 +525,34 @@ class CurationV3(SpyglassMixin, dj.Manual):
     description: varchar(255)
     """
 
+    class Unit(SpyglassMixinPart):
+        """Per-curated-unit metadata mirroring Sorting.Unit.
+
+        Populated by insert_curation() from Sorting.Unit after applying
+        merge_groups. See shared-contracts § Unit-Level Brain Region
+        Tracing.
+        """
+        definition = """
+        -> master
+        unit_id: int
+        ---
+        -> Electrode
+        -> [nullable] BrainRegion
+        peak_amplitude_uV: float
+        n_spikes: int
+        curation_label=NULL: varchar(32)  # one of CurationLabel enum or NULL
+        """
+
     # Required methods to satisfy SpikeSortingOutput.source_class_dict dispatch
     # (see shared-contracts.md `SpikeSortingOutput.source_class_dict Registration`):
     #   get_recording(key) -> si.BaseRecording   (delegates to Sorting.get_recording)
     #   get_sorting(key, as_dataframe=False) -> si.BaseSorting | pd.DataFrame
-    #   get_sort_group_info(key) -> dj.Table     (joins SortGroupV3 * Electrode * BrainRegion)
+    #   get_sort_group_info(key) -> dj.Table     joins SortGroupV3.SortGroupElectrode *
+    #                                            Electrode * BrainRegion across ALL
+    #                                            electrodes in the sort group (NOT
+    #                                            fetch(limit=1) as v1 does).
+    #   get_unit_brain_regions(key, include_labels=None) -> pd.DataFrame
+    #       (reads CurationV3.Unit; optionally filters by curation_label)
 
     @classmethod
     def insert_curation(
@@ -618,8 +717,14 @@ Phase 3. Cross-session bundling for same-day chronic recordings.
 class SessionGroup(SpyglassMixin, dj.Manual):
     """A named bundle of (session, sort_group, interval) tuples to analyze together.
 
-    For Phase 3 (chronic same-day): members must share recording_date.
-    Phase 4 uses the same table for per-session sortings to be matched
+    Members may span multiple recording dates (multi-day chronic);
+    `recording_date` is stored as metadata, not gated. The downstream
+    `ConcatenatedRecording` table picks a motion-correction preset based
+    on whether members are single- or multi-day:
+      single-day → preset 'rigid_fast' (default)
+      multi-day  → preset 'dredge_fast' (default; user can override)
+
+    Phase 4 reuses the same table for per-session sortings to be matched
     across sessions.
     """
     definition = """
@@ -636,7 +741,7 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         -> Session
         -> SortGroupV3
         -> IntervalList
-        recording_date: date  # for inter-session ordering, validated on insert
+        recording_date: date  # metadata; used by ConcatenatedRecording to pick a default preset
         """
 
     @classmethod
@@ -645,23 +750,27 @@ class SessionGroup(SpyglassMixin, dj.Manual):
         session_group_name: str,
         members: list[dict],
         description: str = "",
-        allow_multi_day: bool = False,
     ) -> None:
-        """Atomic-style create. Validates recording_date consistency.
+        """Atomic-style create.
 
-        members: list of {"nwb_file_name", "sort_group_id", "interval_list_name", "recording_date"}.
+        members: list of dicts with keys
+            nwb_file_name, sort_group_id, interval_list_name, recording_date.
+
+        Multi-day is supported by default. The recording_date metadata
+        flows through to ConcatenatedRecording, which picks a stricter
+        motion-correction preset for multi-day groups.
         """
-        dates = {m["recording_date"] for m in members}
-        if len(dates) > 1 and not allow_multi_day:
-            raise ValueError(
-                f"Members span {len(dates)} distinct dates; "
-                f"multi-day groups require allow_multi_day=True (Phase 6 hardening required)."
-            )
         cls.insert1({"session_group_name": session_group_name, "description": description})
         cls.Member.insert([
             {**m, "session_group_name": session_group_name, "member_index": i}
             for i, m in enumerate(members)
         ])
+
+    @classmethod
+    def is_multi_day(cls, key: dict) -> bool:
+        """True if the group's members span ≥2 distinct recording_dates."""
+        dates = (cls.Member & key).fetch("recording_date")
+        return len(set(dates)) > 1
 
 
 @schema
@@ -711,10 +820,16 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # Concatenate (mono-segment)
         concat_recording = concatenate_recordings(recordings)
 
-        # Motion correction (optional)
+        # Motion correction. Default preset depends on whether the
+        # group is multi-day (dredge_fast handles inter-session jumps)
+        # or single-day (rigid_fast handles within-day mild drift).
         motion_params = (MotionCorrectionParameters & key).fetch1("params")
-        if motion_params["preset"] != "none":
-            concat_recording = correct_motion(concat_recording, preset=motion_params["preset"])
+        if motion_params["preset"] == "auto":
+            preset = "dredge_fast" if SessionGroup.is_multi_day(key) else "rigid_fast"
+        else:
+            preset = motion_params["preset"]
+        if preset != "none":
+            concat_recording = correct_motion(concat_recording, preset=preset)
 
         # Materialize
         cache_path = _binary_cache_path(key, prefix="concat")
@@ -744,8 +859,8 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
 
 **Key design points**:
 
-- **Same-day enforcement** by default; multi-day requires explicit flag. Phase 3 ships single-day; multi-day is a future hardening pass.
-- **Motion correction is mandatory** for concat (lazy preset='rigid_fast' default; 'none' is opt-in for cases where the user knows the probe didn't move).
+- **Multi-day in scope from Phase 3.** `SessionGroup.create_group` does not gate on date; `ConcatenatedRecording` auto-selects `dredge_fast` for multi-day groups and `rigid_fast` for single-day groups via the `preset: 'auto'` value on `MotionCorrectionParameters`. Users can override the preset explicitly.
+- **Recording cache reuse** — `ConcatenatedRecording.make()` reads from already-populated `Recording` rows for each member, NOT from raw NWB. Avoids preprocessing twice.
 - **Segment boundaries** are persisted so spike times can be back-mapped to per-session sortings if needed.
 
 ---
