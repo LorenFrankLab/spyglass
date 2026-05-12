@@ -75,11 +75,10 @@ class Recording(SpyglassMixin, dj.Computed):
     ---
     -> AnalysisNwbfile
     object_id: varchar(40)
-    binary_cache_path: varchar(255)
     n_channels: int
     sampling_frequency: float
     duration_s: float
-    cache_hash: char(32)
+    cache_hash: char(64)
     """
 
 
@@ -183,12 +182,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     definition = """
     -> ConcatenatedRecordingSelection
     ---
-    binary_cache_path: varchar(255)
+    -> AnalysisNwbfile
+    object_id: varchar(40)
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
     member_segment_boundaries: blob
-    cache_hash: char(32)
+    cache_hash: char(64)
     """
 
 
@@ -328,7 +328,7 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     -> Recording
     ---
     nwb_deps=null: blob
-    cache_hash: char(32)
+    cache_hash: char(64)
     """
 
 

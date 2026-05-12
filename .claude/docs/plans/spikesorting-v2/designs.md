@@ -166,11 +166,11 @@ class SortGroupV2(SpyglassMixin, dj.Manual):
 
 ## PreprocessingParameters + RecordingSelection + Recording
 
-The recording preprocessing stage. Materializes a binary cache that the sorter consumes.
+The recording preprocessing stage. Materializes the preprocessed recording NWB-resident inside an `AnalysisNwbfile`; see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format).
 
 ```python
 from spyglass.spikesorting.v2._params.preprocessing import PreprocessingParamsSchema
-from spyglass.spikesorting.v2.utils import _validate_params, _resolved_job_kwargs, _binary_cache_path
+from spyglass.spikesorting.v2.utils import _validate_params, _resolved_job_kwargs, _hash_nwb_recording
 
 @schema
 class PreprocessingParameters(SpyglassMixin, dj.Lookup):
@@ -224,21 +224,23 @@ class RecordingSelection(SpyglassMixin, dj.Manual):
 
 @schema
 class Recording(SpyglassMixin, dj.Computed):
-    """Preprocessed recording, materialized to a binary cache + NWB metadata.
+    """Preprocessed recording, materialized NWB-resident inside an AnalysisNwbfile.
 
-    Heavy data: a SpikeInterface binary folder on disk.
-    DataJoint row carries the AnalysisNwbfile (metadata + electrodes table) plus the cache path.
+    Heavy data: an `ElectricalSeries` written to the analysis NWB
+    (HDF5 by default; Zarr opt-in per Phase 0 benchmark). All cleanup,
+    export, kachery, FigPack, and recompute machinery keys off the
+    `AnalysisNwbfile` row. There is NO parallel binary sidecar — see
+    [shared-contracts.md § Recording Cache Format].
     """
     definition = """
     -> RecordingSelection
     ---
     -> AnalysisNwbfile
     object_id: varchar(40)              # of the ProcessedElectricalSeries inside the analysis NWB
-    binary_cache_path: varchar(255)     # relative path under SPYGLASS_TEMP_DIR
     n_channels: int
     sampling_frequency: float
     duration_s: float
-    cache_hash: char(32)                # MD5 of binary cache for integrity
+    cache_hash: char(64)                # SHA-256 over ElectricalSeries.data bytes
     """
 
     def make(self, key):
@@ -270,77 +272,82 @@ class Recording(SpyglassMixin, dj.Computed):
             recording, params.to_pre_motion_dict()
         )
 
-        # 4. Materialize to binary cache
-        cache_path = _binary_cache_path(key)  # e.g. {tmp}/spikesorting_v2/binary/{recording_id}.bin
-        job_kwargs = _resolved_job_kwargs(key)
-        recording_processed.save(folder=cache_path, format="binary", overwrite=True, **job_kwargs)
-
-        # 5. Write metadata NWB (electrodes + ProcessedElectricalSeries reference)
+        # 4. Materialize NWB-resident: write the preprocessed recording
+        # as an ElectricalSeries inside an AnalysisNwbfile. Backend
+        # (HDF5 / Zarr) is determined by AnalysisNwbfile's configuration;
+        # Recording's schema is identical in both cases.
         nwb_file_name = sel["nwb_file_name"]
         with AnalysisNwbfile().build(nwb_file_name) as builder:
-            object_id = builder.add_processed_electrical_series_reference(
-                recording_processed, table_name="processed_electrical_series"
+            object_id = builder.add_processed_electrical_series(
+                recording_processed,
+                series_name="preprocessed_electrical_series",
+                **_resolved_job_kwargs(key),  # chunked writes for large recordings
             )
             analysis_file_name = builder.analysis_file_name
 
-        # 6. Hash + insert
+        # 5. Hash + insert. cache_hash is over the ElectricalSeries data
+        # bytes (not the NWB file as a whole), so it is stable across
+        # backend rewrites and across irrelevant metadata changes.
         self.insert1({
             **key,
             "analysis_file_name": analysis_file_name,
             "object_id": object_id,
-            "binary_cache_path": cache_path,
             "n_channels": recording_processed.get_num_channels(),
             "sampling_frequency": float(recording_processed.get_sampling_frequency()),
             "duration_s": float(recording_processed.get_total_duration()),
-            "cache_hash": _hash_binary_cache(cache_path),
+            "cache_hash": _hash_nwb_recording(analysis_file_name, object_id),
         })
 
     def get_recording(self, key) -> si.BaseRecording:
-        """Load the cached preprocessed recording.
+        """Load the preprocessed recording from the AnalysisNwbfile.
 
-        Binary cache is a regeneratable side artifact. If missing, we
-        REBUILD THE CACHE FOLDER ONLY — we do NOT delete the Recording
-        row (which would cascade to Sorting, CurationV2, downstream
-        SpikeSortingOutput rows, etc.).
+        Wraps `se.read_nwb_recording(analysis_nwb_path,
+        electrical_series_path=...)`. If the AnalysisNwbfile content is
+        missing on disk, REBUILD VIA AnalysisNwbfile's existing recompute
+        path (Phase 2's `RecordingArtifactRecompute*` tables) — we do NOT
+        delete the Recording row.
         """
         row = (self & key).fetch1()
-        if not Path(row["binary_cache_path"]).exists():
-            self._rebuild_binary_cache(key)
-        return si.load(row["binary_cache_path"])
+        nwb_path = AnalysisNwbfile.get_abs_path(row["analysis_file_name"])
+        if not Path(nwb_path).exists() or not _electrical_series_present(
+            nwb_path, row["object_id"]
+        ):
+            self._rebuild_nwb_artifact(key)
+        return se.read_nwb_recording(
+            nwb_path,
+            electrical_series_path=f"processing/ecephys/{row['object_id']}",
+        )
 
-    def _rebuild_binary_cache(self, key) -> None:
-        """Reconstruct the binary cache from upstream Raw + params.
+    def _rebuild_nwb_artifact(self, key) -> None:
+        """Reconstruct the NWB ElectricalSeries from upstream Raw + params.
 
         Does NOT touch the DataJoint row. Reads RecordingSelection +
-        PreprocessingParameters, re-applies the pre_motion stage
-        of the preprocessing pipeline, materializes to the recorded
-        binary_cache_path. Verifies the resulting cache_hash matches
-        the stored hash; logs a warning if it differs (likely
-        SI / numerical drift; the analyzer & downstream curation
-        rows may need scrutiny).
+        PreprocessingParameters, re-applies the pre_motion stage of the
+        preprocessing pipeline, writes a fresh ElectricalSeries into the
+        same `analysis_file_name`. Verifies the regenerated `cache_hash`
+        matches the stored hash; logs a warning if it differs (likely
+        SI / numerical drift — the analyzer and downstream curation rows
+        may need scrutiny). Phase 2's `RecordingArtifactRecompute` table
+        is the canonical recompute surface; this helper is the in-place
+        fallback used when downstream populate() hits a missing artifact.
         """
         ...
 ```
 
-**Storage design is provisional — gated on the Phase 0 storage benchmark.** The design drafted below assumes a binary cache outside `AnalysisNwbfile`, but the choice between binary-cache vs NWB-only storage is decided by the measured outcome of the Phase 0 benchmark + integration check (see phase-0-scaffolding.md § Storage benchmark). Two possible designs:
+**Storage decision is settled — see [shared-contracts.md § Recording Cache Format](shared-contracts.md#recording-cache-format)**. The canonical artifact lives in `AnalysisNwbfile`; Phase 0's benchmark picks the AnalysisNwbfile backend (HDF5 / Zarr), not the schema. Binary sidecar storage is explicitly out of MVP. The schema above is final-shape under the zero-migration policy.
 
-- **(A) Binary cache** (drafted below): faster sorter ingestion if the SI community folklore is right; adds a parallel artifact universe outside `AnalysisNwbfile` that needs its own cleanup, hashing, recompute, export, and FigPack integration.
-- **(B) NWB-only** (fallback): mirrors v1's `SpikeInterfaceRecordingDataChunkIterator` path. Single canonical artifact reuses all existing Spyglass `AnalysisNwbfile` machinery (cleanup, export, kachery, recompute). Sorters that prefer binary materialize a per-sort tmpdir via `recording.save(format="binary", folder=tmpdir)` at sort time.
+**Key design points**:
 
-The Phase 0 benchmark's decision-matrix output picks (A) or (B). If (B), the `binary_cache_path` and `cache_hash` columns below disappear and `Recording.make()` uses the `AnalysisNwbfile.build()` pattern for the preprocessed recording.
-
-**Key design points (under option A)**:
-
-- **Binary cache, not NWB-wrapped raw bytes.** Faster sort-time access at the cost of a parallel artifact universe.
-- **One cache per `recording_id`.** Subsequent sorting tries with different `SorterParameters` reuse the same cache. v1 re-materialized per sort.
-- **Hash for integrity.** `cache_hash` enables lightweight missing-cache detection in Phase 1 and feeds Phase 2's v2 `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
+- **One canonical NWB-resident artifact per `recording_id`.** Subsequent sorting tries with different `SorterParameters` read the same `ElectricalSeries` via `se.read_nwb_recording`. v1 re-materialized per sort.
+- **Hash for integrity.** `cache_hash` (SHA-256 over `ElectricalSeries.data`) enables lightweight missing-artifact detection in Phase 1 and feeds Phase 2's `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
+- **Backend transparency.** HDF5 and Zarr produce the same row shape; flipping the default is a config change, not a migration.
 - **No SortingAnalyzer yet.** That comes after sorting, in `Sorting.make()`.
 
 ---
 
 ## ArtifactDetectionParameters + ArtifactDetection
 
-Mirrors v1's structure but consumes the v2 binary cache. Inserts artifact intervals into `IntervalList` *without* `skip_duplicates=True` (per Non-Negotiable #6 in `custom_pipeline_authoring.md`).
+Mirrors v1's structure but consumes the v2 NWB-resident `Recording` artifact (via `Recording.get_recording(key)`). Inserts artifact intervals into `IntervalList` *without* `skip_duplicates=True` (per Non-Negotiable #6 in `custom_pipeline_authoring.md`).
 
 ```python
 @schema
@@ -769,7 +776,7 @@ class Sorting(SpyglassMixin, dj.Computed):
 
         Does NOT touch the DataJoint row. Reads the SortingSelection,
         loads the preprocessed recording (which may itself recompute
-        its binary cache via Recording.get_recording's same pattern),
+        its NWB artifact via Recording.get_recording's same pattern),
         loads the sorting from the units NWB stored on the row, then
         builds a fresh SortingAnalyzer at the recorded analyzer_folder
         path. Computes the same core extensions as Sorting.make()
@@ -1029,7 +1036,7 @@ class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
     -> Recording
     ---
     nwb_deps=null: blob
-    cache_hash: char(32)
+    cache_hash: char(64)
     """
 
 
@@ -1120,7 +1127,7 @@ class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
 
 **Design points**:
 
-- `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v2's `Recording` artifact with v2-specific table names. It verifies that a deleted or moved binary cache can be regenerated from the stored `RecordingSelection` lineage and current environment.
+- `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v2's `Recording` artifact with v2-specific table names. It verifies that a deleted, corrupted, or backend-rewritten NWB `ElectricalSeries` can be regenerated from the stored `RecordingSelection` lineage and current environment, and that the regenerated content hash matches the stored `cache_hash`.
 - `SortingAnalyzerRecompute*` applies the same lifecycle to the SortingAnalyzer folder: inventory extension metadata and content hashes, regenerate from `SortingSelection`, compare, then allow deletion only after `matched=1`.
 - `delete_files()` is never allowed to delete artifacts for `matched=0`. Storage reclamation is a verified workflow, not a cleanup shortcut.
 - These tables are Phase 2 pure additions in the zero-migration contract. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
@@ -1244,27 +1251,30 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Virtual concatenated recording across SessionGroup members.
 
     Phase 1: declared but make() raises NotImplementedError("Phase 3").
-    Phase 3: make() implements the cache materialization.
+    Phase 3: make() implements the artifact materialization.
 
-    Materializes one binary cache for the full concatenation. Downstream
-    SortingSelection FKs the Selection table (concat_recording_id UUID),
-    not this Computed table directly.
+    Materializes one NWB-resident artifact (the post-motion-corrected,
+    post-whitening concatenated `ElectricalSeries`) per concat group.
+    Downstream `SortingSelection` FKs the Selection table
+    (`concat_recording_id` UUID), not this Computed table directly.
+    See [shared-contracts.md § Recording Cache Format].
     """
     definition = """
     -> ConcatenatedRecordingSelection
     ---
-    binary_cache_path: varchar(255)
+    -> AnalysisNwbfile
+    object_id: varchar(40)
     n_channels: int
     sampling_frequency: float
     total_duration_s: float
     member_segment_boundaries: blob   # list[float], cumulative member end times
-    cache_hash: char(32)
+    cache_hash: char(64)
     """
 
     def make(self, key):
         members = (SessionGroup.Member & key).fetch(as_dict=True, order_by="member_index")
 
-        # Reuse cached PRE-MOTION Recording binary caches per member.
+        # Reuse cached PRE-MOTION Recording NWB artifacts per member.
         # Recording.make() materializes filter + CMR only (no whitening) —
         # safe input for motion correction. See shared-contracts §
         # Pydantic Parameter Schema Convention.
@@ -1319,9 +1329,16 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
             from spikeinterface.preprocessing import apply_preprocessing_pipeline
             concat_recording = apply_preprocessing_pipeline(concat_recording, post_motion_dict)
 
-        # Materialize
-        cache_path = _binary_cache_path(key, prefix="concat")
-        concat_recording.save(folder=cache_path, format="binary", **_resolved_job_kwargs(key))
+        # Materialize NWB-resident. Anchor parent NWB = first member's
+        # nwb_file_name (deterministic; see _resolve_analysis_parent_nwb_file_name).
+        parent_nwb = members[0]["nwb_file_name"]
+        with AnalysisNwbfile().build(parent_nwb) as builder:
+            object_id = builder.add_processed_electrical_series(
+                concat_recording,
+                series_name="concatenated_electrical_series",
+                **_resolved_job_kwargs(key),
+            )
+            analysis_file_name = builder.analysis_file_name
 
         # Track segment boundaries for back-mapping spike times to sessions
         cumulative = np.cumsum([r.get_total_duration() for r in recordings])
@@ -1333,12 +1350,13 @@ class ConcatenatedRecording(SpyglassMixin, dj.Computed):
         # inherits it via `-> ConcatenatedRecordingSelection`.
         self.insert1({
             **key,
-            "binary_cache_path": cache_path,
+            "analysis_file_name": analysis_file_name,
+            "object_id": object_id,
             "n_channels": concat_recording.get_num_channels(),
             "sampling_frequency": float(concat_recording.get_sampling_frequency()),
             "total_duration_s": float(concat_recording.get_total_duration()),
             "member_segment_boundaries": cumulative.tolist(),
-            "cache_hash": _hash_binary_cache(cache_path),
+            "cache_hash": _hash_nwb_recording(analysis_file_name, object_id),
         })
 
     def get_recording(self, key) -> si.BaseRecording:

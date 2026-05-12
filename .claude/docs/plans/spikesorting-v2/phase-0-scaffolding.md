@@ -15,7 +15,8 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 **Contracts referenced:**
 
 - [Pydantic Parameter Schema Convention](shared-contracts.md#pydantic-parameter-schema-convention) — Phase 0 sets up the `_params/` package shell with one example model (`PreprocessingParamsSchema`) so subsequent phases extend rather than invent.
-- [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — Phase 0 introduces the `_analyzer_path()` and `_binary_cache_path()` helpers.
+- [SortingAnalyzer Storage Layout](shared-contracts.md#sortinganalyzer-storage-layout) — Phase 0 introduces the `_analyzer_path()` helper.
+- [Recording Cache Format](shared-contracts.md#recording-cache-format) — Phase 0 introduces the `_hash_nwb_recording()` helper and decides the AnalysisNwbfile backend (HDF5 / Zarr) via the storage benchmark.
 - [Job-Kwargs Resolution](shared-contracts.md#job-kwargs-resolution) — Phase 0 introduces `_resolved_job_kwargs()`.
 
 **Designs referenced:** none — this phase is scaffolding.
@@ -48,23 +49,29 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 
 - **Draft schema validation artifact** at `.claude/docs/plans/spikesorting-v2/draft_schemas/` (and the working draft at `src/spyglass/spikesorting/v2/_draft.py` for the validation pass). Phase 0 produces this draft as a single Python file declaring every v2 table's `definition` string (with `make()` bodies raising `NotImplementedError`). It is NOT decorated with `@schema` — it exists for `code_graph.py` static analysis only, not for DataJoint runtime. The draft is git-rm'd or split into the per-module Phase 1 / 2 / 3 / 4 / 5 files once those phases implement the real tables. **Until the file is removed, NO automated process should import it** — comment headers and the `_draft.py` filename signal "scaffolding, not production."
 
-- **Storage benchmark + integration check** (decision gate for Phase 1's `Recording` design). The plan's draft `Recording` design materializes a binary cache outside the `AnalysisNwbfile` system, on the assumption that binary reads are faster than the v1 NWB-wrapped path for sort-time access. **This is folklore from the SI community, not measured for our pipeline.** Before Phase 1 ships, run a one-shot benchmark + integration check that drives the storage choice:
-  1. **Performance**: against the Phase-0-generated `mearec_polymer_60s.nwb` fixture (or a real-data slice via `SPIKESORTING_V2_REAL_NWB_PATH` if available), measure end-to-end sort wall-time for KS4 + MS5 + clusterless_thresholder under both storage backends:
-     - (a) NWB-wrapped recording via `SpikeInterfaceRecordingDataChunkIterator` (v1's path through `AnalysisNwbfile`).
-     - (b) Binary folder via `recording.save(folder=..., format="binary")`.
-     For each sorter × storage combination, record: wall-time, peak RSS, total bytes read from disk. Report as a table in `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md`.
-  2. **Integration**: regardless of performance, verify that the binary-cache path is compatible with Spyglass's storage management. Specifically:
-     - **`AnalysisNwbfile.cleanup`**: the binary cache lives outside the `AnalysisNwbfile` tracking. Confirm whether `cleanup` correctly preserves the cache vs accidentally deletes it; or whether v2 needs a parallel cleanup path. If cleanup is unaware of the binary cache, files orphan on every delete cycle.
-     - **`export.py` / paper-snapshot export**: existing export tooling bundles `AnalysisNwbfile` rows for DANDI / paper snapshots. Binary caches are NOT analysis NWBs — confirm they get bundled (or document that they don't, and that downstream consumers must regenerate via `Recording.get_recording`'s rebuild path on the importing side).
-     - **Kachery sharing**: same question — does kachery push the binary cache, or only the AnalysisNwbfile?
-     - **FigURL / FigPack**: confirm the curation-UI generator can construct its view from a binary-cache-backed `BaseRecording`. If FigPack expects an NWB path, that's a hard incompatibility.
-     - **Phase 2 recompute/storage-reclamation machinery**: if binary cache lives outside `AnalysisNwbfile`, the existing `cache_hash` column on `Recording` handles Phase 1 missing-cache detection and feeds Phase 2's v2-specific version of v1's `RecordingRecompute` pattern. Verify the hash is stable across SI version drift.
+- **Storage benchmark + integration check** (decision gate for Phase 1's `Recording` design — picks the *AnalysisNwbfile backend*, not the schema). The MVP commits to **NWB-resident** storage: the canonical preprocessed-recording artifact lives inside an `AnalysisNwbfile`, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. This bias holds unless a third path is measured to be a *large* win AND its sidecar lifecycle is explicitly implemented. The benchmark answers a narrower question: **HDF5 or Zarr for the AnalysisNwbfile backend, and would a binary sidecar be worth scoping as a future optimization?**
+
+  1. **Three formats measured** against the Phase-0-generated `mearec_polymer_60s.nwb` fixture (or a real-data slice via `SPIKESORTING_V2_REAL_NWB_PATH` if available). For each sorter × format combination, record wall-time, peak RSS, and total bytes read from disk. Report as a table in `docs/src/Pipelines/SpikeSorting/v2-storage-benchmark.md`:
+     - (a) **NWB-HDF5** — Spyglass's current `AnalysisNwbfile` backend (PyNWB → `NWBHDF5IO`), consumed at sort time via `SpikeInterfaceRecordingDataChunkIterator` (v1's path). **Default candidate**; zero new infrastructure.
+     - (b) **NWB-Zarr** — same `AnalysisNwbfile` row plumbing, but the file is written/read via `NWBZarrIO` (`hdmf-zarr`). Requires a small Phase 0 spike to confirm `AnalysisNwbfile.build()` can be taught to write Zarr; if not tractable in Phase 0 scope, (b) is ruled out with a note and the benchmark falls back to (a) vs (c).
+     - (c) **SI binary folder** — `recording.save(folder=..., format="binary")` outside `AnalysisNwbfile`. **Informational only — not a candidate for v2 MVP.** Measured so we know whether a future sidecar-storage opt-in would be worth the lifecycle cost.
+     Run KS4 + MS5 + clusterless_thresholder against each format. Sorters that internally prefer binary materialize a per-sort tmpdir via `recording.save(format="binary", folder=tmpdir)` regardless of which canonical format wins — that path is unconditional and unrelated to canonical storage.
+
+  2. **Integration check — NWB-resident reuses existing Spyglass machinery**. Because the canonical artifact stays inside `AnalysisNwbfile`, cleanup, `export.py`, kachery, FigPack, and the v2 recompute tables (Phase 2) all reuse the v1 path. The only outstanding integration question is per backend:
+     - **(a) HDF5**: no integration work; reuses v1's exact lifecycle.
+     - **(b) Zarr**: scope the `AnalysisNwbfile.build()` + `AnalysisNwbfile.cleanup` changes needed to support a Zarr backend. If the scope exceeds ~1 day of focused work, defer Zarr to a separate follow-up project and pick HDF5.
+     - **(c) Binary sidecar**: **explicitly out of MVP**. If a future maintainer wants to land binary as an optimization, they own the sidecar lifecycle in full (a `BinaryCache` opt-in table outside `Recording`, parallel cleanup, parallel export, kachery push, FigPack adapter, recompute hash). Do not partially implement.
+
   3. **Decision matrix recorded in `v2-storage-benchmark.md`**:
-     | Outcome | Choice |
+     | Measured outcome | Phase 1 default |
      |---|---|
-     | Binary >2× faster AND all integration checks pass | Keep the binary-cache design as drafted |
-     | Binary <2× faster OR any integration check fails | **Revise Phase 1 to NWB-only storage** — Recording.make() writes the preprocessed recording via `AnalysisNwbfile` (mirroring v1 at `recording.py:475-712`). Sort-time sorters that prefer binary materialize their own tmpdir at sort time via `recording.save(format="binary", folder=tmpdir)`. The dual-storage cost is gone, recompute uses the existing `AnalysisNwbfile` machinery, and the storage decision is grounded in measurement. |
-  4. **Phase 1 cannot ship until this benchmark is run.** The Phase 1 `Recording` design (designs.md § Recording) is conditional on the benchmark outcome — see the "Storage design is provisional" note there. Phase 0's task list includes the script `tests/spikesorting/v2/benchmark_storage.py` that runs the measurements and emits the markdown table.
+     | NWB-Zarr clearly wins (>1.5× faster than HDF5) AND Zarr-backend `AnalysisNwbfile` work is in scope | Zarr; ship the `AnalysisNwbfile` Zarr change as a Phase 1 prereq |
+     | Zarr work out of scope, OR HDF5 within ~20% of Zarr | **HDF5 (default)** — zero new infra, minimal risk |
+     | Binary sidecar shows >2× win over best NWB option | Record the data point in `v2-storage-benchmark.md`; do NOT change the Phase 1 default. Binary stays out-of-MVP unless a follow-up project scopes the full sidecar lifecycle |
+
+  4. **Phase 1 schema is invariant under this decision.** The `Recording` row's columns are `analysis_file_name` + `object_id` + `cache_hash` regardless of HDF5 vs Zarr — both backends write through `AnalysisNwbfile` and surface the same identifiers. The benchmark outcome flips a default constant (`SPYGLASS_ANALYSIS_NWB_FORMAT`-style config), not the schema. Zero-migration policy is preserved.
+
+  5. **Phase 1 cannot ship until this benchmark is run.** Phase 0's task list includes the script `tests/spikesorting/v2/benchmark_storage.py` that runs the three-format measurements and emits the markdown table.
 
 - **Create the v2 module skeleton.** Make the following empty/stub files; each has a one-line docstring and an empty `# Implemented in Phase N` comment:
   - `src/spyglass/spikesorting/v2/__init__.py`
@@ -89,9 +96,8 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 - **Implement `utils.py` with the shared helpers**:
   - `_validate_params(model_cls, params) -> dict` — Pydantic dispatch.
   - `_analyzer_path(key) -> Path` — resolves to `{SPYGLASS_TEMP_DIR}/spikesorting_v2/analyzers/{sorting_id}.analyzer/`. Reads `SPYGLASS_TEMP_DIR` from `dj.config['custom']['spikesorting_v2']['temp_dir']` falling back to `dj.config['stores']['raw']['location']` plus `/spikesorting_v2_temp`.
-  - `_binary_cache_path(key, prefix="recording") -> Path` — resolves the binary cache directory for `Recording` (`prefix="recording"`) or `ConcatenatedRecording` (`prefix="concat"`).
   - `_resolved_job_kwargs(key) -> dict` — merge from `(1) Lookup row's job_kwargs field` (if set), `(2) dj.config['custom']['spikesorting_v2_job_kwargs']`, `(3) si.get_global_job_kwargs()`. Returns the merged dict ready to splat into `analyzer.compute(**kwargs)`.
-  - `_hash_binary_cache(path) -> str` — MD5 over the contents of the `traces_cached_seg*.raw` files. Skip the JSON manifest (changes with timestamps).
+  - `_hash_nwb_recording(analysis_file_name, object_id) -> str` — content hash (SHA-256) over the `ElectricalSeries.data` bytes inside the AnalysisNwbfile identified by `analysis_file_name` and `object_id`. Backend-agnostic (works for HDF5 or Zarr-backed NWBs). The hash anchors Phase 1's missing-artifact detection and feeds Phase 2's `RecordingArtifactRecompute*` machinery.
 
 - **Add the MEArec ground-truth fixture generation infrastructure.** This is the primary validation oracle for v2 (minirec does not contain enough real spikes to be a useful sort-correctness baseline — see "fixture strategy" below). Components:
   - **Optional dep**: add `MEArec>=1.9` and `neuroconv[mearec]` to a new optional extra in `pyproject.toml`:
@@ -170,7 +176,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 | `test_resolved_job_kwargs_merge` | DataJoint config override is respected; defaults fill in from SI global. |
 | `test_resolved_job_kwargs_lookup_override` | Per-row `job_kwargs` field wins over config. |
 | `test_analyzer_path_format` | `_analyzer_path({"sorting_id": UUID("...")})` returns a Path ending in `{uuid}.analyzer`. |
-| `test_hash_binary_cache_stable` (slow) | Synthesizing a 2-second SI binary recording, hashing it twice, asserts deterministic output. Mark `@pytest.mark.slow`. |
+| `test_hash_nwb_recording_stable` (slow) | Synthesize a 2-second SI recording, write it as an ElectricalSeries inside a temporary `AnalysisNwbfile` (HDF5; also Zarr if installed), call `_hash_nwb_recording(analysis_file_name, object_id)` twice, assert deterministic output. Mark `@pytest.mark.slow`. |
 | `test_v1_baseline_capture_runs_on_real_data` (slow, integration, env-var-gated) | If `SPIKESORTING_V2_REAL_NWB_PATH` is set, run `baseline_capture.py` against that dataset; assert all three output files are produced and non-empty. **Skipped with explicit message if the env var is unset** — minirec has no real spikes, so a baseline captured against it would be useless. Mark `@pytest.mark.slow`. |
 | `test_v1_test_suite_still_passes_under_current_si` (integration) | Phase 0 does NOT upgrade SI, so v1 tests should still pass cleanly. Regression guard: if any v1 test fails after this Phase 0 PR, something else broke. |
 
@@ -178,7 +184,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 
 - **`minirec`** — existing v1 fixture; reused. No changes needed.
 - **`tests/spikesorting/v2/conftest.py`** introduces:
-  - `synthetic_si_recording_2s` — a synthetic 2-second 4-channel 30 kHz SI recording with 10 injected spikes per channel, deterministic seed. Built via `si.generate_recording(num_channels=4, sampling_frequency=30000, durations=[2.0], seed=0)`. Used by `test_hash_binary_cache_stable`.
+  - `synthetic_si_recording_2s` — a synthetic 2-second 4-channel 30 kHz SI recording with 10 injected spikes per channel, deterministic seed. Built via `si.generate_recording(num_channels=4, sampling_frequency=30000, durations=[2.0], seed=0)`. Used by `test_hash_nwb_recording_stable`.
 - **Baseline artifacts directory**: `tests/spikesorting/v2/baselines/` (gitignored except for `.gitkeep`); `baseline_capture.py` writes into this directory.
 
 ## Review

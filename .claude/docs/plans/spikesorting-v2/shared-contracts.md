@@ -23,13 +23,15 @@ Cross-phase contracts. Any phase that references one of these MUST follow the sp
 
 Every v2 stage that produces a `SortingAnalyzer` writes it to disk in this layout. Phase 1 introduces the convention; Phases 2, 3, 4 consume it.
 
+**Scope — what this contract is about**: the per-sort scratch folder that holds waveforms, templates, quality-metric extensions, and other SI-extension outputs. The SortingAnalyzer is **regeneratable from `Sorting` row's recording + sort**; it is not the canonical artifact. This is **distinct** from the [Recording Cache Format](#recording-cache-format) contract below — the Recording cache stores the preprocessed *input* recording inside an `AnalysisNwbfile`, while the SortingAnalyzer is per-sort scratch outside `AnalysisNwbfile`.
+
 **On-disk path** (computed by `_analyzer_path(key)` helper in `spyglass.spikesorting.v2.utils`):
 
 ```
 {config["SPYGLASS_TEMP_DIR"]}/spikesorting_v2/analyzers/{sorting_id}.analyzer/
 ```
 
-**Format**: `"binary_folder"` (NOT zarr — binary is faster on local NVMe and SpikeInterface supports it as a first-class format).
+**Format**: `"binary_folder"` — SI's first-class folder layout for SortingAnalyzer extensions. This choice is **independent** of the Recording cache format (Phase 0 picks NWB-HDF5 or NWB-Zarr for that); the analyzer stays in `binary_folder` because (i) it is regeneratable scratch, (ii) it has its own Phase 2 recompute machinery (`SortingAnalyzerRecompute*`), and (iii) SI's analyzer API is built around the folder layout.
 
 **Sparsity**: `sparse=True` (the SI 0.101+ default; recompute storage saves 5-10× on dense probes).
 
@@ -66,6 +68,26 @@ analyzer.compute(
 
 ---
 
+## Recording Cache Format
+
+The canonical preprocessed recording produced by `Recording.make()` and `ConcatenatedRecording.make()` lives **inside an `AnalysisNwbfile`** — NWB-resident, reusing Spyglass's existing cleanup, export, kachery, FigPack, and recompute machinery. This is distinct from the [SortingAnalyzer Storage Layout](#sortinganalyzer-storage-layout) above (which is per-sort scratch in `binary_folder` format).
+
+**Persistence on the DataJoint row** (final shape — see [overview.md § Zero-migration policy](overview.md#scope-and-dependency-policy)):
+
+- `-> AnalysisNwbfile` — Spyglass's existing analysis-NWB tracking table; cleanup / export / kachery / recompute all key off this FK.
+- `object_id: varchar(40)` — the `ElectricalSeries` HDF5/Zarr object identifier inside the NWB.
+- `cache_hash: char(64)` — SHA-256 over the `ElectricalSeries.data` bytes, backend-agnostic. Anchors missing-artifact detection (Phase 1) and feeds `RecordingArtifactRecompute*` (Phase 2).
+
+No `binary_cache_path` column. Binary sidecar storage is **explicitly out of MVP** — see [phase-0-scaffolding.md § Storage benchmark](phase-0-scaffolding.md). If a future maintainer measures a large win and scopes the full sidecar lifecycle, that work adds a separate opt-in table; it does NOT modify `Recording`'s columns.
+
+**Backend (HDF5 vs Zarr)** is a property of `AnalysisNwbfile.build()`, not of `Recording`'s schema. Phase 0's three-format benchmark picks the default (HDF5 by default; Zarr only if it shows a clear measured win AND the `AnalysisNwbfile.build()` Zarr-backend change is in scope as a Phase 1 prereq).
+
+**Sort-time materialization of binary**: sorters that internally consume `recording.save(format="binary", folder=tmpdir)` keep doing so — that is per-sort scratch managed inside `Sorting.make()`, unrelated to the canonical recording artifact.
+
+**Invariant — do not weaken**: every v2 Recording (single-session or concatenated) is reachable through one `AnalysisNwbfile` row. No parallel artifact universe. Reasoning: dual-storage lifecycle costs (cleanup, export, kachery, FigPack, recompute) were repeatedly underestimated in v1, and the Phase 0 review explicitly rejected re-introducing them in v2 without measured justification.
+
+---
+
 ## Pydantic Parameter Schema Convention
 
 Every Parameters Lookup table in v2 stores a `params` blob whose shape is validated by a Pydantic model. The model lives in `src/spyglass/spikesorting/v2/_params/<table_name>.py` and is invoked at `insert_selection()` time.
@@ -99,7 +121,8 @@ class PreprocessingParamsSchema(BaseModel):
     structure DREDge / medicine need to estimate motion):
 
     Stage 1 — pre_motion (filter + reference): materialized to the
-        `Recording` binary cache. This is what gets cached.
+        `Recording` NWB-resident artifact (the `ElectricalSeries`
+        inside the `AnalysisNwbfile`). This is what gets cached.
     Stage 2 — post_motion (whitening): applied lazily AFTER motion
         correction by `Sorting.make()` (single-rec path) or
         `ConcatenatedRecording.make()` (concat path).
