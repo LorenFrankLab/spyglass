@@ -436,23 +436,26 @@ This contract enforces the user's binding constraint: every v3 table is designed
 
 | Phase 1 table | Forward-compat feature | What it anticipates |
 |---|---|---|
-| `SortingSelection` | Has `recording_source: enum('single', 'concatenated')` from day 1; `concatenated_recording_id: uuid` FK nullable | Phase 3's `ConcatenatedRecording`. In Phase 1, only `recording_source='single'` is accepted; `concatenated_recording_id` is always NULL. |
-| `SortingSelection` | `artifact_id: uuid` is nullable (NOT a PK component) | Concat sorts skip artifact detection until a concat-specific path is added (Phase 3 or 6). |
-| `SortingSelection` | `recording_id: uuid` is a regular FK column, not part of a multi-column PK | Allows recording_id to point at either `Recording` or `ConcatenatedRecording` rows via the `recording_source` discriminator. The FK is "loose" — DataJoint can't enforce against two tables — so the validator in `insert_selection()` checks `recording_source` against the matching upstream table. |
+| `SessionGroup` + `SessionGroup.Member` | Declared in Phase 1; Manual tables, no `make()` | Phase 3 / Phase 4 reuse. Phase 1 ships the schema so Phase 3's `ConcatenatedRecording` FK target exists from day one. |
+| `MotionCorrectionParameters` | Declared in Phase 1 with `contents` rows | Phase 3 reads from this Lookup; declaring it now lets `ConcatenatedRecordingSelection` FK it from Phase 1. |
+| `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
+| `ConcatenatedRecording` | Declared in Phase 1; `make()` body raises `NotImplementedError("Phase 3")` | Final schema; Phase 3 only fills in the `make()` body. Test in Phase 1 asserts `populate()` raises. |
+| `SortingSelection` | Two NULLABLE typed FKs declared in Phase 1: `-> [nullable] Recording`, `-> [nullable] ConcatenatedRecording`. XOR enforced in `insert_selection()`. | Both FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError`; Phase 3 lifts that runtime gate without touching the schema. |
+| `SortingSelection` | `artifact_id: uuid` is nullable (NOT a PK component) | Concat sorts skip artifact detection. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV3.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV3.Unit` from `Sorting.Unit` row count. |
 | `CurationV3.object_id` (not `units_object_id`) | Column name matches v1 convention | `SpikeSortingOutput.get_spike_times` dispatch works unchanged. |
 
-**The forward-compatibility decisions baked into Phase 3**:
+**Phase 3 is method-body-only changes** (no `definition`-string edits):
 
-| Phase 3 table | Forward-compat feature | What it anticipates |
-|---|---|---|
-| `SessionGroup` + `SessionGroup.Member` | No `allow_multi_day` constraint; `recording_date` is metadata, not a gate | Multi-day is in-scope from the start (per resolved decision #4). Phase 4 reuses this table without changes. |
+- `ConcatenatedRecording.make()` body filled in (Phase 1 raised `NotImplementedError`; Phase 3 lifts that).
+- `SortingSelection.insert_selection()` body: drops the `concat_recording_id` rejection.
+- `SessionGroup.create_group` body: enforces `allow_multi_day=True` gate (the schema was declared in Phase 1; the validation is added in Phase 3).
+- No new tables are introduced in Phase 3.
 
-**Tables that are pure ADD (new tables, no migration needed)**:
+**Tables that are pure ADD (new tables in later phases, no migration needed)**:
 
 - Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`, `AnalyzerCuration`.
-- Phase 3: `MotionCorrectionParameters`, `ConcatenatedRecording` (the FK from `SortingSelection` was added in Phase 1 as nullable).
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
 

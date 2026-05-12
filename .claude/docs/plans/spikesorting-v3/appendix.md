@@ -33,7 +33,7 @@ Direct replacements when porting code from v1 to v3. Sources:
 | `we.compute_quality_metrics(...)` | `from spikeinterface.qualitymetrics import compute_quality_metrics; compute_quality_metrics(analyzer, ...)` | Takes an analyzer, not a we. |
 | `return_scaled=True` | `return_in_uV=True` | Renamed across the API. |
 | `is_scaled` | `is_in_uV` | |
-| Manual chain: `bandpass → cmr → whiten` | `PreprocessingPipeline({"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}}).apply(recording)` | Declarative; serializable. New in 0.103. |
+| Manual chain: `bandpass → cmr → whiten` | `apply_preprocessing_pipeline(recording, {"bandpass_filter": {...}, "common_reference": {...}, "whiten": {...}})` | Declarative; serializable. New in 0.103. Import from `spikeinterface.preprocessing`. **Note**: v3 splits this into pre-motion (`bandpass + cmr`) and post-motion (`whiten`) stages — see `shared-contracts.md § Pydantic Parameter Schema Convention`. |
 | `sic.MergeUnitsSorting(sorting, merge_groups)` | `from spikeinterface.curation import apply_merges_to_sorting; apply_merges_to_sorting(sorting, merge_groups)` | Added 0.101. |
 | `sic.remove_excess_spikes(sorting, recording)` | Same name, same module. | Still present in 0.104. |
 | Auto-merge: `get_potential_auto_merge(we, ...)` | `compute_merge_unit_groups(analyzer, preset=...)` | Modern signature; preset-based. |
@@ -191,10 +191,10 @@ Sources:
 
 **FigPack** (SI 0.104's curation UI successor) is positioned to supersede FigURL. Repo: https://github.com/flatironinstitute/figpack (verify URL at Phase 5 implementation time; package name may differ).
 
-**Migration policy**:
-- Phase 1 ships v3 with **FigURL** as the curation UI (proven, lab-familiar).
-- Phase 5 adds **FigPack** as an alternate path.
-- Default switches to FigPack only after one release of side-by-side usage.
+**Migration policy** (per resolved decision #2 in `overview.md`):
+- Phase 1 ships v3 with NO curation UI table — users curate by editing `CurationV3` rows directly in Python.
+- Phase 5 introduces **FigPack** as v3's curation UI, gated by a Phase 5a feasibility check. If FigPack proves unusable at Phase 5 implementation time, Phase 5 stops and escalates to the project owner — there is no silent FigURL fallback for v3.
+- v1's FigURL stays usable for v1 data only; it is NOT extended to v3 curations.
 
 ---
 

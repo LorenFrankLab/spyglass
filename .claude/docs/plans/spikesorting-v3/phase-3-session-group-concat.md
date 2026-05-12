@@ -2,7 +2,7 @@
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#sessiongroup--concatenatedrecording)
 
-Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-and-sort workflow (`ConcatenatedRecording` → existing Phase 1 `Sorting`). Default scope is **same-day only**; multi-day requires an explicit override flag and is documented as out-of-MVP. This phase is the foundation for both the chronic same-day workflow and (in Phase 4) the per-session-then-match workflow.
+Implements the concatenate-and-sort workflow on top of the SessionGroup / ConcatenatedRecording schema that Phase 1 already declared. Phase 3 is method-body-only: fills in `ConcatenatedRecording.make()`, lifts `SortingSelection.insert_selection`'s `concat_recording_id` rejection, and adds `SessionGroup.create_group`'s `allow_multi_day` validation logic. **Default scope is same-day**; multi-day requires `allow_multi_day=True` and an explicit (non-`auto`) motion-correction preset. For cross-day analyses the recommended path is Phase 4 sort-then-match (UnitMatch), not concat — concat-across-days is experimental.
 
 **Inputs to read first:**
 
@@ -24,7 +24,10 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 - **Implement `_params/motion_correction.py`** Pydantic models:
   - `MotionCorrectionParamsSchema` with `preset: Literal["auto", "rigid_fast", "kilosort_like", "dredge_fast", "dredge", "medicine", "nonrigid_accurate", "none"]` and `preset_kwargs: dict = {}`. The `"auto"` value triggers the multi-day-aware dispatch in `ConcatenatedRecording.make()`.
 
-- **Implement `session_group.py`** per [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording). Specific:
+- **Implement `ConcatenatedRecording.make()`** and lift the `NotImplementedError` guard that Phase 1 installed. The table's `definition` is unchanged from Phase 1 (zero-migration policy).
+- **Lift the `concat_recording_id` rejection in `SortingSelection.insert_selection()`** so users can now register a sort against a `ConcatenatedRecording`. Method body change only; no schema change.
+- **Extend `SessionGroup.create_group` to enforce `allow_multi_day=True`** for multi-date members. The `SessionGroup` Manual + `Member` Part schemas were declared in Phase 1; this phase adds the `create_group` classmethod logic on top.
+- **Existing `session_group.py` tasks** (these were Phase 3's original scope and now describe extending the Phase-1-declared schema rather than introducing it):
   - `SessionGroup` Manual with `Member` Part. `recording_date` on each Member is stored as metadata; `SessionGroup.is_multi_day(key) -> bool` classmethod inspects the members' dates.
   - `create_group(session_group_name, members, description="", allow_multi_day=False)` — atomic insert + Member rows. **Same-day is the default**; multi-day requires `allow_multi_day=True` and an explicit motion-correction preset on the downstream `ConcatenatedRecording` (no auto-DREDge). The error message for multi-day-without-opt-in points users at Phase 4 sort-then-match as the recommended cross-day path.
   - `MotionCorrectionParameters` Lookup. Default rows:
@@ -120,7 +123,7 @@ Adds the cross-session bundling primitive (`SessionGroup`) and the concatenate-a
 | `test_concatenated_recording_make_basic` (slow) | After populate, binary cache exists; `n_channels` matches all members; `total_duration_s` = sum(member durations); `member_segment_boundaries` length matches members. |
 | `test_concatenated_recording_reuses_recording_cache` (slow) | If `Recording` is already populated for each member, `ConcatenatedRecording.make()` does NOT re-read raw NWB (assert via mock of `se.read_nwb_recording` raising if called) — it consumes the cached binary. |
 | `test_concatenated_recording_motion_correct_applied` (slow) | Populate with `preset="rigid_fast"` vs `preset="none"`; binary cache hashes differ. |
-| `test_concatenated_recording_multi_day_auto_picks_dredge` (slow) | With `preset="auto"` and multi-day group, the materialized recording matches what `dredge_fast` would have produced (use a separate sanity-pass with `preset="dredge_fast"` as oracle). |
+| `test_concatenated_recording_multi_day_with_explicit_preset` (slow) | With `preset="dredge_fast"` and an `allow_multi_day=True` group, `ConcatenatedRecording.populate()` succeeds and the materialized recording differs from a `preset="rigid_fast"` run (motion correction was applied). |
 | `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"recording_source": "concatenated", "recording_id": concat_uuid, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
 | `test_sorting_selection_validates_recording_source_matches_id` | `recording_source="concatenated"` with a `recording_id` that exists only in `Recording` (not `ConcatenatedRecording`) raises clearly. |
 | `test_sorting_selection_schema_unchanged_from_phase_1` | `SortingSelection.heading.attributes` is unchanged across Phase 1 and Phase 3 (no migration). |
@@ -139,6 +142,6 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - Every task in this phase is implemented as specified.
 - The "Deliberately not in this phase" list is honored — no scope creep into Phase 4 (cross-session matching).
 - **No schema changes to `SortingSelection`.** Git diff against `src/spyglass/spikesorting/v3/sorting.py` shows changes ONLY inside method bodies — the `definition` string is byte-identical to Phase 1. The `test_sorting_selection_schema_unchanged_from_phase_1` test passes.
-- Multi-day support works end-to-end without any opt-in flag (`SessionGroup.create_group` accepts multi-day input by default; `ConcatenatedRecording` auto-selects DREDge).
+- Multi-day support is gated behind `allow_multi_day=True` AND an explicit non-`auto` motion-correction preset (no silent DREDge dispatch). `test_session_group_create_multi_day_rejected_by_default` and `test_motion_correction_preset_auto_rejects_multi_day` pass.
 - Memory/runtime smoke test is a real measurement (not a mocked metric).
 - Documentation tasks landed; CHANGELOG mentions multi-day as a feature.

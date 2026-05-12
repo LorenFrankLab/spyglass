@@ -49,9 +49,16 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 
 - **Implement `artifact.py`** — `ArtifactDetectionParameters`, `ArtifactDetectionSelection`, `ArtifactDetection` per [designs.md § ArtifactDetectionParameters + ArtifactDetection](designs.md#artifactdetectionparameters--artifactdetection). Note the design has a real `ArtifactDetectionSelection` Manual table (UUID `artifact_id` PK; FKs Recording + ArtifactDetectionParameters). `ArtifactDetection` is Computed and keys off the Selection — required so DataJoint populate-restriction semantics work (`ArtifactDetection.populate({"recording_id": X})` resolves via the Selection table's join, not against a UUID-only PK). Artifact intervals live on `ArtifactDetection.Interval` part table (NOT `IntervalList`). Helper `ArtifactDetection.get_artifact_removed_intervals(key) -> np.ndarray` returns the valid-time intervals for use by `Sorting.make()`.
 
-- **Implement `sorting.py`** — `RecordingSource`, `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
-  - **`RecordingSource` Lookup table** with `enum('single', 'concatenated')` contents inserted via `insert_default()`. Required from Phase 1 because `SortingSelection` FKs it — see [shared-contracts.md § Zero-Migration Schema Forward-Compatibility](shared-contracts.md#zero-migration-schema-forward-compatibility).
-  - **`SortingSelection` schema is FINAL in Phase 1** per the zero-migration policy. Columns: `sorting_id` PK; `-> RecordingSource`; `recording_id: uuid` (loose FK validated in `insert_selection()`); `-> SorterParameters`; `artifact_id=NULL: uuid`. Phase 1's `insert_selection` accepts only `recording_source='single'` and validates `recording_id` against `Recording`; passing `'concatenated'` raises `NotImplementedError("ConcatenatedRecording requires Phase 3")`. Phase 3 lifts this restriction WITHOUT altering the schema.
+- **Declare the concat-scaffolding tables in Phase 1** (zero-migration policy: every FK target must exist in the phase that introduces the FK). This includes:
+  - `SessionGroup` (Manual) + `SessionGroup.Member` (Part) — full schema per [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording). Phase 1 inserts no `make()` for these — they're Manual; users can insert rows but the concat workflow is gated downstream.
+  - `MotionCorrectionParameters` (Lookup) — full schema + `contents` rows.
+  - `ConcatenatedRecordingSelection` (Manual, UUID PK) — full schema.
+  - `ConcatenatedRecording` (Computed) — DECLARED with full `definition`, but `make()` raises `NotImplementedError("ConcatenatedRecording.make() is implemented in Phase 3")`. The schema is final from Phase 1 so `SortingSelection` can FK it; the populate is deferred.
+
+  Test added to validation slice: `test_concatenated_recording_make_raises_in_phase_1` asserts `.populate()` raises `NotImplementedError` until Phase 3 ships.
+
+- **Implement `sorting.py`** — `SorterParameters`, `SortingSelection`, `Sorting` per [designs.md § SorterParameters + SortingSelection + Sorting](designs.md#sorterparameters--sortingselection--sorting). Specific points:
+  - **`SortingSelection` schema is FINAL in Phase 1** per the zero-migration policy. Columns: `sorting_id` PK; `-> [nullable] Recording` (adds `recording_id`); `-> [nullable] ConcatenatedRecording` (adds `concat_recording_id`); `-> SorterParameters`; `artifact_id=NULL: uuid`. XOR enforced in `insert_selection()`: exactly one of the two recording FKs must be non-NULL. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError("Concat path requires Phase 3")` even though the FK is structurally valid; the validator gate is what changes in Phase 3, not the schema.
   - `Sorting.make()` uses `sis.run_sorter()` then immediately `sic.remove_excess_spikes()` (still in SI 0.104).
   - After sort, builds a `SortingAnalyzer(format="binary_folder", sparse=True)` per the shared contract.
   - Computes `random_spikes`, `noise_levels`, `templates`, `waveforms` at sort time. Other extensions deferred to `AnalyzerCuration` (Phase 2).
@@ -105,7 +112,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 - **No metric-based curation.** `AnalyzerCuration` is Phase 2.
 - **No session groups / concatenation.** Phase 3.
 - **No cross-session matching.** Phase 4.
-- **No `run_v3_pipeline()` orchestrator.** Phase 5.
+- **No FULL orchestrator with metrics / concat / UnitMatch / FigPack.** Phase 1's minimal `run_v3_pipeline()` covers only recording → artifact → sorting → initial curation → merge. Phase 5 extends it with the additional stages.
 - **No FigPack / FigURL curation table for v3.** Phase 5 ships FigPack; if a user needs UI curation in Phase 1, they edit a `CurationV3` row in Python.
 - **No removal of v1 source.** v1 stays in tree.
 - **No recompute table for the binary cache.** Stash this as a Phase 6 follow-up if cache management becomes painful.

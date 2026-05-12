@@ -115,7 +115,7 @@ Output of this sub-phase is documentation + a working notebook, NOT new tables. 
 | `test_unitmatch_backend_single_session_degenerate` | A `SessionGroup` with 1 Member produces 0 `MatchPair`s; no UnitMatch call attempted. |
 | `test_unitmatch_backend_two_sessions_synthetic` (slow) | Synthetic 2-session Neuropixels-shaped fixture (16-channel sort group, 5 units per session, half are "same neuron"): UnitMatch returns match probabilities high (>0.7) for true positives and low (<0.3) for random pairs. |
 | `test_unit_match_make_writes_part_rows` (slow) | After `UnitMatch.populate()`, `UnitMatch.Pair & key` has expected number of rows. |
-| `test_tracked_unit_connected_components` | Synthetic pair list with three sessions and known clusters; `TrackedUnit.make()` produces expected number of biological-unit components. |
+| `test_tracked_unit_strict_clique_basic` | Synthetic pair list with three sessions where ALL pairwise edges between three units exceed threshold (true clique); `TrackedUnit.make()` in default strict mode produces exactly 1 component containing all three. |
 | `test_tracked_unit_strict_default_rejects_transitive` | Pairs A↔B (high), B↔C (high), A↔C (low). Default `tracked_unit_policy="strict"` (maximal cliques) produces ≥2 components (NOT 1) — A and C cannot be lumped without a direct above-threshold edge. Test asserts >1 component and asserts no component contains both A and C. |
 | `test_tracked_unit_transitive_opt_in_unifies` | Same input as above; with `tracked_unit_policy="transitive"`, connected-components yields 1 component with `n_transitive_only_edges == 1` (the A↔C edge missing). |
 | `test_tetrode_warning_logged` | Running UnitMatch on a SessionGroup with ≤4 channels per unit logs a warning string containing "tetrode". |
@@ -135,6 +135,6 @@ Before opening the PR for this phase, dispatch `code-reviewer` (or equivalent in
 - The synthetic Neuropixels test produces real UnitMatch output (not a mock).
 - The tetrode validation script has been run by the implementer against the user-provided gold-standard dataset; results are documented in `docs/src/Pipelines/SpikeSorting/v3-tetrode-notes.md`. If AUC is below 0.85, the doc explicitly recommends concat for tetrodes.
 - `MatcherProtocol` is implementable by external code without touching v3 internals (verify by writing a 10-line dummy matcher in the test suite).
-- `TrackedUnit` graph algorithm is documented (transitive closure has known semantics; test `test_tracked_unit_handles_inconsistent_matches` documents the choice).
+- `TrackedUnit` graph algorithm matches the binding policy in `designs.md` — strict (maximal cliques) by default, transitive only with opt-in via `MatcherParameters.params["tracked_unit_policy"]`. Tests `test_tracked_unit_strict_clique_basic`, `test_tracked_unit_strict_default_rejects_transitive`, and `test_tracked_unit_transitive_opt_in_unifies` exercise all three branches.
 - Docstrings, test names, and module names don't reference this plan, phase numbers, or files inside `.claude/docs/plans/`.
 - `unitmatchpy` is gated as an optional dependency (`pip install -e ".[spikesorting-v3-matching]"`). Import-time guard in `_unitmatch_backend.py` raises `ImportError` with the install command if missing.

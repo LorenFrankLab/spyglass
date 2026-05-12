@@ -21,8 +21,8 @@ What v3 touches in the existing tree and what is preserved.
 
 **Existing files MODIFIED**:
 
-- [src/spyglass/spikesorting/spikesorting_merge.py:34-150](src/spyglass/spikesorting/spikesorting_merge.py#L34-L150) — `SpikeSortingOutput`: add new part `class CurationV3(SpyglassMixinPart)` FK'ing `spyglass.spikesorting.v3.curation.CurationV3`. Update `_get_restricted_merge_ids_v1` analog `_get_restricted_merge_ids_v3` and route through `get_restricted_merge_ids(sources=[...])` so `'v3'` is a valid source string.
-- [pyproject.toml:62](pyproject.toml#L62) — `spikeinterface>=0.99.1,<0.100` → `spikeinterface>=0.104,<0.105`. Add `pydantic>=2.0`, `mountainsort5`, `unitmatchpy>=3.3`. Pin `zarr<3.0` (until SI #4014 lands).
+- [src/spyglass/spikesorting/spikesorting_merge.py:34-150](src/spyglass/spikesorting/spikesorting_merge.py#L34-L150) — `SpikeSortingOutput`: add new part `class CurationV3(SpyglassMixinPart)` FK'ing `spyglass.spikesorting.v3.curation.CurationV3`. Update `_get_restricted_merge_ids_v1` analog `_get_restricted_merge_ids_v3` and route through `get_restricted_merge_ids(sources=[...])` so `'v3'` is a valid source string. Modification happens in Phase 1.
+- [pyproject.toml](pyproject.toml) — **Phase 0** adds only `pydantic>=2.0` and `zarr<3.0` to `dependencies`. **The `spikeinterface` pin bump (>=0.104,<0.105) is a separate prerequisite work item** (see Phase 0's "SI 0.104 upgrade gating" tasks), NOT done in Phase 0. The bump happens immediately before Phase 1 lands, alongside the v1 port that makes the bump non-breaking. `mountainsort5>=0.5` and the optional `spikesorting-v3-matching = ["unitmatchpy>=3.3"]` extra ship in the same prerequisite PR.
 
 **Existing files PRESERVED unchanged**:
 
@@ -56,14 +56,14 @@ What v3 touches in the existing tree and what is preserved.
 
 ### Dependency policy
 
-| Dependency | From | To | Reason |
-| --- | --- | --- | --- |
-| `spikeinterface` | `>=0.99.1,<0.100` | `>=0.104,<0.105` | SortingAnalyzer, PreprocessingPipeline, modern curation primitives. |
-| `pydantic` | (not pinned) | `>=2.0` | Parameter schema validation. |
-| `mountainsort5` | (absent) | `>=0.5` | Replaces MS4 for new sorts. MS4 wrapper stays accessible via v1. |
-| `unitmatchpy` | (absent) | `>=3.3` | Phase 4. Optional dependency. |
-| `zarr` | (transitive) | `<3.0` | SI #4014 not yet landed; v3 archival uses Zarr v2. |
-| `mountainsort4` | present | unchanged | v1 still uses it; remove only when v1 is sunset. |
+| Dependency | From | To | When | Reason |
+| --- | --- | --- | --- | --- |
+| `pydantic` | (not pinned) | `>=2.0` | Phase 0 | Parameter schema validation. |
+| `zarr` | (transitive) | `<3.0` | Phase 0 | SI #4014 not yet landed; v3 archival uses Zarr v2. |
+| `spikeinterface` | `>=0.99.1,<0.100` | `>=0.104,<0.105` | **Prerequisite PR before Phase 1** | SortingAnalyzer, PreprocessingPipeline, modern curation primitives. Bumping this breaks v1's `extract_waveforms` calls — the same prerequisite PR ports v1 to `create_sorting_analyzer` so the bump is non-breaking. |
+| `mountainsort5` | (absent) | `>=0.5` | Same prerequisite PR | Additional sorter; v3 keeps MS4 too. |
+| `unitmatchpy` | (absent) | `>=3.3` | Phase 4 (optional extra) | Cross-session matching. |
+| `mountainsort4` | present | unchanged | n/a | v1 + v3 both ship MS4 wrapper. |
 
 All v3 additions are made via the existing `pyproject.toml`. Optional deps (`unitmatchpy`, `mountainsort5` when not installed) gate at import time with a clear error pointing to the install command.
 

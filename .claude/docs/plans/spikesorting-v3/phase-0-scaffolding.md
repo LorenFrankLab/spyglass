@@ -73,7 +73,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
   - `test_preprocessing_params_schema_default` — `PreprocessingParamsSchema().model_dump()` returns the expected dict shape; `model_validate({"bandpass_filter": {"freq_min": -1}})` raises `ValidationError`.
   - `test_resolved_job_kwargs_merge` — set `dj.config['custom']['spikesorting_v3_job_kwargs'] = {"n_jobs": 4}`; assert `_resolved_job_kwargs({}) == {"n_jobs": 4, "chunk_duration": "1s", "progress_bar": True}` (the defaults filled in from SI's global).
 
-- **Documentation update.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v3 spike sorting scaffolding (#PR-NUMBER): SpikeInterface upgraded to 0.104; new v3 module tree introduced; v1 remains the production path." No CLAUDE.md changes in this phase.
+- **Documentation update.** Add a short section to [CHANGELOG.md](CHANGELOG.md) under an "Unreleased" heading: "v3 spike sorting scaffolding (#PR-NUMBER): new `spyglass.spikesorting.v3` module tree with empty stubs; Pydantic and Zarr pins added; v1 remains the production path. The SpikeInterface 0.104 upgrade is a separate prerequisite PR (see Phase 0's gating tasks)." No CLAUDE.md changes in this phase.
 
 ## Deliberately not in this phase
 

@@ -342,28 +342,34 @@ class SortingSelection(SpyglassMixin, dj.Manual):
     """One row per (recording, sorter, artifact detection) tuple.
 
     PHASE 1 + PHASE 3 final schema. The forward-compatibility design
-    uses two NULLABLE typed FKs (not a loose polymorphic UUID — per
-    review feedback). Exactly one must be non-null; XOR is validated
-    in insert_selection().
+    uses two NULLABLE typed FKs (one per recording source) with XOR
+    enforced in insert_selection(). Both FK targets are real Manual
+    tables whose UUID is their PK (mirrors Recording's PK shape).
 
-    Phase 1: only `single_recording_id` is accepted by insert_selection().
-    Phase 3: `concat_recording_id` is also accepted. No alter() needed
-    because both FKs were declared (nullable) in Phase 1.
+    Phase 1 declares ConcatenatedRecordingSelection so this FK is valid
+    from day one; Phase 1's insert_selection() rejects concat_recording_id
+    with NotImplementedError. Phase 3 lifts the guard. No alter() needed.
     """
     definition = """
     sorting_id: uuid
     ---
-    -> [nullable] Recording                     # single-session path
-    -> [nullable] ConcatenatedRecording         # cross-session path (Phase 3)
+    -> [nullable] Recording                     # single-session path; FK PK 'recording_id'
+    -> [nullable] ConcatenatedRecording         # cross-session path; FK PK 'concat_recording_id'
     -> SorterParameters
     artifact_id=NULL: uuid                      # FK ArtifactDetection if applicable
     """
-    # Note: `-> [nullable] Recording` declares a nullable FK on this
-    # table's secondary attributes; DataJoint generates a `recording_id`
-    # column that may be NULL. `-> [nullable] ConcatenatedRecording`
-    # generates a `concat_recording_id` column (renamed if needed via
-    # `.proj(concat_recording_id='recording_id')` to avoid clash — see
-    # designs.md note below on the rename).
+    # FK column names: `-> [nullable] Recording` adds column `recording_id`
+    # to this table (Recording's PK, inherited from RecordingSelection).
+    # `-> [nullable] ConcatenatedRecording` adds column `concat_recording_id`
+    # (ConcatenatedRecording's PK, inherited from ConcatenatedRecordingSelection).
+    # Both PKs are UUIDs in their respective parent tables; column names
+    # are already distinct, so no .proj rename is needed.
+    #
+    # FK targets the COMPUTED table (not the Selection table) so a
+    # SortingSelection row can only be inserted after the upstream
+    # recording has been populated — matches v1's pattern (v1
+    # SpikeSortingSelection FKs SpikeSortingRecording, not
+    # SpikeSortingRecordingSelection).
 
     @classmethod
     def insert_selection(cls, key: dict) -> dict:
@@ -375,19 +381,6 @@ class SortingSelection(SpyglassMixin, dj.Manual):
         Returns a single PK-only dict per shared-contracts.
         """
         ...
-
-# DataJoint FK column-name handling: `-> [nullable] Recording` produces
-# column `recording_id`; `-> [nullable] ConcatenatedRecording` ALSO
-# produces `recording_id` (it's the PK of that table). To disambiguate,
-# Phase 1's definition string uses the proj-rename pattern documented
-# in merge_methods.md:
-#
-#     -> [nullable] Recording.proj(recording_id='recording_id')
-#     -> [nullable] ConcatenatedRecording.proj(concat_recording_id='recording_id')
-#
-# Both FKs are real and enforced by DataJoint when their respective
-# discriminator column is non-NULL. No loose UUID validation needed
-# beyond the XOR check in insert_selection().
 
 
 @schema
@@ -850,18 +843,46 @@ class SessionGroup(SpyglassMixin, dj.Manual):
 
 
 @schema
+class ConcatenatedRecordingSelection(SpyglassMixin, dj.Manual):
+    """One row per (SessionGroup, PreprocessingParameters, MotionCorrectionParameters) tuple.
+
+    PHASE 1 declares this table so SortingSelection can FK it from Phase 1.
+    Phase 3 fills in ConcatenatedRecording.make() behind it; until then,
+    ConcatenatedRecording.populate() raises NotImplementedError but the
+    schema is final (zero-migration policy).
+
+    UUID PK exists so downstream FKs are single-column (mirrors
+    RecordingSelection / Recording from Phase 1).
+    """
+    definition = """
+    concat_recording_id: uuid
+    ---
+    -> SessionGroup
+    -> PreprocessingParameters
+    -> MotionCorrectionParameters
+    """
+
+    @classmethod
+    def insert_selection(cls, key: dict) -> dict:
+        """Find-existing-or-insert; returns single PK-only dict per the
+        shared-contracts insert_selection convention."""
+        ...
+
+
+@schema
 class ConcatenatedRecording(SpyglassMixin, dj.Computed):
     """Virtual concatenated recording across SessionGroup members.
 
+    Phase 1: declared but make() raises NotImplementedError("Phase 3").
+    Phase 3: make() implements the cache materialization.
+
     Materializes one binary cache for the full concatenation. Downstream
-    SortingSelection can FK this in place of Recording (Phase 3 extends).
+    SortingSelection FKs the Selection table (concat_recording_id UUID),
+    not this Computed table directly.
     """
     definition = """
-    -> SessionGroup
-    -> PreprocessingParameters
-    -> MotionCorrectionParameters     # NEW Lookup table in Phase 3
+    -> ConcatenatedRecordingSelection
     ---
-    concatenated_recording_id: uuid
     binary_cache_path: varchar(255)
     n_channels: int
     sampling_frequency: float
@@ -1099,9 +1120,16 @@ class TrackedUnit(SpyglassMixin, dj.Computed):
         """Derive tracked units from pairwise UnitMatch.Pair rows.
 
         Algorithm: build a graph where nodes are (sorting_id, unit_id)
-        pairs and edges are matches with probability above threshold;
-        connected components are tracked units. Threshold is on the
-        matcher parameters (e.g. 0.5 for unitmatch).
+        pairs and edges are matches with probability above threshold.
+        Dispatch by `tracked_unit_policy` on MatcherParameters:
+          - "strict" (default): maximal cliques. A tracked unit requires
+            every pairwise edge in its node set above threshold —
+            rejects transitive-only matches.
+          - "transitive" (opt-in): connected components, with
+            `n_transitive_only_edges` reported per component as a
+            secondary attribute.
+        Threshold and policy come from the matcher's params (e.g. 0.5
+        for unitmatch). See the policy explainer immediately below.
         """
         ...
 ```
