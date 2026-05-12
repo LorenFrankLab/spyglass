@@ -552,15 +552,20 @@ class Sorting(SpyglassMixin, dj.Computed):
         the underlying Electrode rows use the synthetic `BrainRegion`
         row named "Unknown" rather than NULL.
 
-        Note on concat-sort `Electrode` anchoring: `Electrode` is keyed
-        by `(nwb_file_name, electrode_id)` ([common_ephys.py:72](src/spyglass/common/common_ephys.py#L72))
-        via the ElectrodeGroup → Session chain. For SINGLE-recording
-        sorts the Electrode FK is unambiguous. For CONCAT sorts, the
-        unit's peak channel maps to one electrode_id within the probe,
-        but that electrode_id has N Electrode rows — one per
-        SessionGroup.Member. v3 anchors `Sorting.Unit -> Electrode` to
-        the FIRST member's Electrode row (deterministic; same rule as
-        the AnalysisNwbfile parent anchor in Phase 3). Per-session
+        Note on concat-sort `Electrode` anchoring: `Electrode` inherits
+        the full `ElectrodeGroup` key plus `electrode_id`
+        ([common_ephys.py:72](src/spyglass/common/common_ephys.py#L72)).
+        Because `ElectrodeGroup` is keyed by Session plus
+        `electrode_group_name` ([common_ephys.py:31](src/spyglass/common/common_ephys.py#L31)),
+        implementers must carry the full `Electrode` FK from
+        `SortGroupV3.SortGroupElectrode`, not reconstruct by
+        `electrode_id` alone. For SINGLE-recording sorts the Electrode
+        FK is unambiguous. For CONCAT sorts, the unit's peak channel
+        maps to one electrode_id within the probe, but that electrode_id
+        has N Electrode rows — one per SessionGroup.Member. v3 anchors
+        `Sorting.Unit -> Electrode` to the FIRST member's Electrode row
+        (deterministic; same rule as the AnalysisNwbfile parent anchor
+        in Phase 3). Per-session
         brain regions for tracked units are derived not from
         `Sorting.Unit` but from `TrackedUnit.Member` walking back
         through `CurationV3 -> SortingSelection ->
@@ -791,7 +796,7 @@ class CurationV3(SpyglassMixin, dj.Manual):
                                   # NWB Column-Name Convention (CurationV1 parity).
                                   # v1 CurationV1 uses varchar(72) — match for parity.
     merges_applied=0: bool
-    metrics_source: enum('manual', 'analyzer_curation', 'figpack', 'imported') = 'manual'
+    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'imported')
                                   # provenance of any metrics blob attached to
                                   # this curation. Addresses Spyglass GitHub
                                   # issue #939 (CurationV1 does not track a
@@ -1589,7 +1594,10 @@ def run_v3_pipeline(
         })
         ConcatenatedRecording.populate(concat_key)
         manifest["stages"].append({"stage": "concat_recording", "key": concat_key})
-        recording_fk = {"concat_recording_id": concat_key["concat_recording_id"]}
+        recording_fk = {
+            "recording_id": None,
+            "concat_recording_id": concat_key["concat_recording_id"],
+        }
     else:
         rec_key = RecordingSelection.insert_selection({
             "nwb_file_name": nwb_file_name,
@@ -1600,11 +1608,14 @@ def run_v3_pipeline(
         })
         Recording.populate(rec_key)
         manifest["stages"].append({"stage": "recording", "key": rec_key})
-        recording_fk = {"recording_id": rec_key["recording_id"]}
+        recording_fk = {
+            "recording_id": rec_key["recording_id"],
+            "concat_recording_id": None,
+        }
 
     # --- 2. Artifact detection (single-recording path only in Phase 1; concat
     #        path uses skip_artifact=True until cross-recording artifact lands) ---
-    if not skip_artifact and "recording_id" in recording_fk:
+    if not skip_artifact and recording_fk["recording_id"] is not None:
         artifact_key = ArtifactDetectionSelection.insert_selection({
             **recording_fk,
             "artifact_params_name": preset_dict["artifact"],
@@ -1613,7 +1624,7 @@ def run_v3_pipeline(
         manifest["stages"].append({"stage": "artifact_detection", "key": artifact_key})
         artifact_fk = {"artifact_id": artifact_key["artifact_id"]}
     else:
-        artifact_fk = {}  # no artifact FK on this SortingSelection row
+        artifact_fk = {"artifact_id": None}
 
     # --- 3. Sorting ---
     sort_key = SortingSelection.insert_selection({

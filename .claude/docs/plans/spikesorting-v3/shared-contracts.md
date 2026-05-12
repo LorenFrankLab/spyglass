@@ -460,6 +460,7 @@ This contract enforces the user's binding constraint: every v3 table is designed
 | `SortingSelection` | Nullable `-> ArtifactDetection` FK (the inherited `artifact_id` is NOT a PK component) | Concat sorts skip artifact detection. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV3.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV3.Unit` from `Sorting.Unit` row count. |
+| `CurationV3.UnitLabel` | Part table present in Phase 1 | Phase 2/5 label filtering and Phase 4 matchable-unit selection rely on queryable multi-label rows. No later label-table migration is allowed. |
 | `CurationV3.object_id` (not `units_object_id`) | Column name matches v1 convention | `SpikeSortingOutput.get_spike_times` dispatch works unchanged. |
 
 **Phase 3 is method-body-only changes** (no `definition`-string edits):

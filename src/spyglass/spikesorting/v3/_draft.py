@@ -253,7 +253,7 @@ class CurationV3(SpyglassMixin, dj.Manual):
     -> AnalysisNwbfile
     object_id: varchar(72)
     merges_applied=0: tinyint
-    metrics_source: enum('manual', 'analyzer_curation', 'figpack', 'imported')
+    metrics_source = 'manual': enum('manual', 'analyzer_curation', 'figpack', 'imported')
     description: varchar(255)
     """
 
