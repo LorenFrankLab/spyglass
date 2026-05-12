@@ -175,7 +175,7 @@ from spyglass.spikesorting.v3.utils import _validate_params, _resolved_job_kwarg
 @schema
 class PreprocessingParameters(SpyglassMixin, dj.Lookup):
     definition = """
-    preproc_params_name: varchar(64)
+    preproc_params_name: varchar(128)              # matches v1's varchar(200) ballpark
     ---
     params: blob                # SI PreprocessingPipeline dict, validated by PreprocessingParamsSchema
     params_schema_version=1: int
@@ -455,8 +455,8 @@ The sort itself. Writes both the units NWB and the SortingAnalyzer binary folder
 @schema
 class SorterParameters(SpyglassMixin, dj.Lookup):
     definition = """
-    sorter: varchar(32)
-    sorter_params_name: varchar(64)
+    sorter: varchar(64)                            # wider than draft's 32; v1 uses 200
+    sorter_params_name: varchar(128)               # wider than draft's 64; v1 uses 200
     ---
     params: blob
     params_schema_version=1: int
@@ -786,9 +786,10 @@ class CurationV3(SpyglassMixin, dj.Manual):
     ---
     parent_curation_id=-1: int
     -> AnalysisNwbfile
-    object_id: varchar(40)        # of the curated units table in the analysis NWB
-                                  # name MUST be `object_id` per shared-contracts
-                                  # NWB Column-Name Convention (CurationV1 parity)
+    object_id: varchar(72)        # of the curated units table in the analysis NWB.
+                                  # MUST be `object_id` per shared-contracts
+                                  # NWB Column-Name Convention (CurationV1 parity).
+                                  # v1 CurationV1 uses varchar(72) — match for parity.
     merges_applied=0: bool
     metrics_source: enum('manual', 'analyzer_curation', 'figpack', 'imported') = 'manual'
                                   # provenance of any metrics blob attached to
