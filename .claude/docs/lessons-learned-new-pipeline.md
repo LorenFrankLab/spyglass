@@ -104,7 +104,7 @@ Catches: typos, wrong types, missing required fields, out-of-range values, JSON-
 ## Storage / artifact-management lessons
 
 - **Treat "binary cache vs NWB-wrapped" as a measured decision, not a belief.** v3 plan deferred this to a Phase 0 benchmark with an explicit decision matrix; both storage designs are documented conditionally. Folklore from external communities (SI's "binary is faster") doesn't transfer without measurement.
-- **Recompute machinery is real production infrastructure**, not a nice-to-have. v1's `RecordingRecompute` (env-tracked deterministic-recompute verification + `delete_files(matched=1)` storage reclamation) is what makes "delete X TB of old caches; regenerate on demand" safe. v3 ports the three-table pattern.
+- **Recompute machinery is real production infrastructure**, not a nice-to-have. v1's `RecordingRecompute` (env-tracked deterministic-recompute verification + `delete_files(matched=1)` storage reclamation) is what makes "delete X TB of old caches; regenerate on demand" safe. v3 ports the three-table pattern, but uses v3-specific table names (`RecordingArtifactRecompute*`, `SortingAnalyzerRecompute*`) so the new artifact contracts do not collide with v0/v1 recompute tables.
 - **Side artifacts (binary caches, analyzer folders) need rebuild-without-delete helpers.** The v3 `Recording.get_recording()` and `Sorting.get_analyzer()` regenerate missing files via private `_rebuild_*` methods, NEVER via `(self & key).delete_quick(); self.populate(key)` — which would cascade through downstream curation / merge rows and destroy provenance.
 
 ## NWB / ingestion lessons

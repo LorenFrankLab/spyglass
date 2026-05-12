@@ -6,7 +6,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 
 **Inputs to read first:**
 
-- All files implemented in Phases 1–4. Phase 5 doesn't add new tables; it adds convenience layers on top.
+- All files implemented in Phases 1–4. Phase 5 adds only its own FigPack tables (`FigPackCurationSelection`, `FigPackCuration`) and preset registrations; it must not alter any Phase 1–4 table definitions.
 - [notebooks/10_Spike_SortingV1.ipynb](notebooks/10_Spike_SortingV1.ipynb) — the v1 notebook v3 replaces.
 - [notebooks/11_Spike_Sorting_Analysis.ipynb](notebooks/11_Spike_Sorting_Analysis.ipynb) — downstream consumer notebook; should work unchanged with v3 outputs.
 - [src/spyglass/spikesorting/v1/figurl_curation.py](src/spyglass/spikesorting/v1/figurl_curation.py) — FigURL pattern to mirror in FigPack.
@@ -118,6 +118,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 | `test_run_v3_pipeline_manifest_complete` | Manifest contains entries for all 5 stages (recording, artifact, sorting, initial_curation, auto_curation) and a final `merge_id`. |
 | `test_register_preset_catches_typos` | Registering a preset with `preproc_params_name="defaut"` (typo) raises clearly. |
 | `test_figpack_curation_make_publishes_uri` (slow, integration; optional) | Skipped if `figpack` not installed; otherwise asserts `FigPackCuration.populate(key)` returns a non-empty URI. |
+| `test_figpack_zero_unit_sorting` (slow, optional) | A zero-unit `CurationV3` either publishes an empty FigPack view or raises a clear `EmptySortingError`; it never fails with missing-column `KeyError`. |
 | `test_figpack_round_trip_labels` (slow, integration; optional) | Publish a FigPack view with known labels; `fetch_curation_from_uri()` recovers them. |
 | `test_v3_notebook_executes` (slow, integration) | `jupytext` executes `notebooks/13_Spike_SortingV3.ipynb` against `minirec` with no errors. Cell count ≤10 verified programmatically. |
 | `test_cross_session_notebook_executes` (slow, integration, optional) | Executes `notebooks/14_Spike_Sorting_CrossSession.ipynb` if a multi-session fixture is available. |

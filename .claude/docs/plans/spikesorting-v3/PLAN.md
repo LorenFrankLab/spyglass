@@ -18,11 +18,11 @@ For agent invocation, **load only the slice you need**:
 
 - [overview.md](overview.md) — goals, non-goals, integration points, risks, rollout strategy, open questions.
 - [shared-contracts.md](shared-contracts.md) — SortingAnalyzer layout convention, Pydantic parameter schema, MatcherProtocol plugin interface.
-- [designs.md](designs.md) — schema designs for each v3 table (Recording, Sorting, Curation, MetricCuration, SessionGroup, UnitMatch).
+- [designs.md](designs.md) — schema designs for each v3 table (Recording, Sorting, Curation, AnalyzerCuration, Recompute, SessionGroup, UnitMatch).
 - Phases (each ships as a separable PR):
   - [phase-0-scaffolding.md](phase-0-scaffolding.md) — module layout, SI ≥0.104 dep migration, baseline-capture fixtures for v1 parity.
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV3` part.
-  - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`.
+  - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`, plus recompute verification tables for storage reclamation.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
   - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate, with Neuropixels/tetrode informational checks.
   - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v3_pipeline()` API, FigPack curation, notebook rewrite, v1/v3 path-selection docs.

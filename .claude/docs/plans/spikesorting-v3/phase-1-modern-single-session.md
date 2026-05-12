@@ -125,7 +125,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 - **No FULL orchestrator with metrics / concat / UnitMatch / FigPack.** Phase 1's minimal `run_v3_pipeline()` covers only recording → artifact → sorting → initial curation → merge. Phase 5 extends it with the additional stages.
 - **No FigPack / FigURL curation table for v3.** Phase 5 ships FigPack; if a user needs UI curation in Phase 1, they edit a `CurationV3` row in Python.
 - **No removal of v1 source.** v1 stays in tree.
-- **No recompute table for the binary cache.** Stash this as a Phase 6 follow-up if cache management becomes painful.
+- **No recompute table implementation in Phase 1.** Phase 1 exposes `Recording.get_recording()` and `Sorting.get_analyzer()` missing-artifact rebuild helpers. Phase 2 adds the explicit `RecordingArtifactRecompute*` / `SortingAnalyzerRecompute*` verification and safe-deletion tables, so this is a sequencing boundary, not a deferral out of the v3 plan.
 - **No automated import of v1 curations into v3.** Different question; if needed, handle in a separate `legacy_import.py` module later.
 
 ## Validation slice
@@ -142,6 +142,7 @@ The first task of this phase (after prerequisites land) is to verify the new SI 
 | `test_sorter_params_dispatched_pydantic_schemas` | `SorterParameters.insert1({"sorter": "mountainsort5", "params": {"scheme": "5"}})` raises (invalid scheme); valid `scheme="2"` inserts cleanly. |
 | `test_sorting_make_produces_analyzer_folder` (slow) | After `Sorting.populate(key)`, analyzer folder exists on disk; `load_sorting_analyzer(row.analyzer_folder).get_extension("waveforms")` returns non-None. |
 | `test_sorting_get_analyzer_recomputes_on_missing_folder` (slow) | Delete analyzer folder. `Sorting.get_analyzer(key)` recomputes and returns a loadable analyzer. |
+| `test_v3_empty_sorting_phase1` | A zero-unit sorting populates cleanly: `Sorting.populate()` succeeds with `n_units=0`, `Sorting.Unit` has zero rows, `CurationV3.insert_curation(sort_key, labels={})` succeeds, and `CurationV3.Unit` / `CurationV3.UnitLabel` have zero rows. |
 | `test_curation_v3_auto_registers_in_merge` | After `CurationV3.insert_curation(...)`, `SpikeSortingOutput.CurationV3 & key` has one row. |
 | `test_curation_v3_label_enum_enforced` | `CurationV3.insert_curation(labels={1: ["typo_label"]})` raises `ValueError`. `labels={1: ["accept", "mua"]}` succeeds and inserts two `CurationV3.UnitLabel` rows. |
 | `test_spike_sorting_output_routes_v3_in_get_restricted_merge_ids` | `SpikeSortingOutput.get_restricted_merge_ids(key, sources=['v3'])` returns the v3-sourced merge_ids only; `sources=['v1', 'v3']` returns both. |

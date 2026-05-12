@@ -270,7 +270,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 - Mitigation: Phase 1 (Modern Single-Session) is independently shippable and replaces v1's biggest pain (WaveformExtractor → SortingAnalyzer migration). Phases 2-5 are optional additions.
 
 **Risk 6**: SortingAnalyzer folder management at scale — chronic recording analyzer can be 50 GB+.
-- Mitigation: Same `RecordingRecompute` pattern from v1 — recompute table for analyzer cache; delete + recompute for storage reclamation.
+- Mitigation: Phase 1 stores analyzer paths and hashes rather than table blobs; Phase 2 adds `RecordingArtifactRecompute*` and `SortingAnalyzerRecompute*` verification tables so storage reclamation is explicit and gated on successful round-trip checks.
 
 **Risk 7**: UnitMatch may not transfer cleanly from Neuropixels-published examples to Frank-lab polymer/tetrode use cases.
 - Mitigation: Phase 4 gates on a MEArec polymer-probe fixture, because polymer is the lab-relevant standard for this workflow. Neuropixels and tetrode AUCs are recorded as informational checks; if tetrode features collapse, tetrode users are routed to concat-and-sort or future validation work rather than promised UnitMatch support.
@@ -294,7 +294,7 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 
 - **Phase 0**: Project scaffold, deps, baseline-capture infra. ~1 PR.
 - **Phase 1**: Modern single-session sorting (SortingAnalyzer + SI 0.104). MVP — replaces v1 happy path. ~2-3 PRs.
-- **Phase 2**: AnalyzerCuration (metrics + auto-merge + burst-pair consolidated). 1 PR.
+- **Phase 2**: AnalyzerCuration (metrics + auto-merge + burst-pair consolidated) plus Recording/Sorting recompute verification for storage reclamation. 1-2 PRs.
 - **Phase 3**: SessionGroup + ConcatenatedRecording (same-day chronic). 1-2 PRs.
 - **Phase 4**: UnitMatch cross-session matching. 1-2 PRs (1 for matcher plugin scaffold + UnitMatch, 1 for tetrode validation).
 - **Phase 5**: UX overhaul — `run_v3_pipeline()`, FigPack, parameter Pydantic validation, notebook rewrite. 1-2 PRs.

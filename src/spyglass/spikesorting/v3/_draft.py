@@ -21,6 +21,7 @@ from spyglass.common import (
     Electrode,
     LabTeam,
     BrainRegion,
+    UserEnvironment,
 )
 from spyglass.common.common_nwbfile import AnalysisNwbfile
 from spyglass.spikesorting.spikesorting_merge import SpikeSortingOutput
@@ -320,6 +321,95 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
     merge_suggestions_object_id: varchar(40)
     proposed_labels_object_id: varchar(40)
     """
+
+
+class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
+    definition = """
+    -> Recording
+    ---
+    nwb_deps=null: blob
+    cache_hash: char(32)
+    """
+
+
+class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> RecordingArtifactVersions
+    -> UserEnvironment
+    rounding=4: int
+    ---
+    logged_at_creation=0: tinyint
+    xfail_reason=NULL: varchar(127)
+    """
+
+
+class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
+    definition = """
+    -> RecordingArtifactRecomputeSelection
+    ---
+    matched: tinyint
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: tinyint
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
+
+
+class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
+    definition = """
+    -> Sorting
+    ---
+    si_deps=null: blob
+    analyzer_manifest=null: blob
+    analyzer_hash: char(32)
+    """
+
+
+class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> SortingAnalyzerVersions
+    -> UserEnvironment
+    rounding=4: int
+    ---
+    logged_at_creation=0: tinyint
+    xfail_reason=NULL: varchar(127)
+    """
+
+
+class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
+    definition = """
+    -> SortingAnalyzerRecomputeSelection
+    ---
+    matched: tinyint
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: tinyint
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
 
 
 # ============================================================================

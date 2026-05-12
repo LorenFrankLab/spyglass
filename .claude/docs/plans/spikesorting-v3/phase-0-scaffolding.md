@@ -58,7 +58,7 @@ This phase establishes the foundation: empty module structure, baseline-capture 
      - **`export.py` / paper-snapshot export**: existing export tooling bundles `AnalysisNwbfile` rows for DANDI / paper snapshots. Binary caches are NOT analysis NWBs — confirm they get bundled (or document that they don't, and that downstream consumers must regenerate via `Recording.get_recording`'s rebuild path on the importing side).
      - **Kachery sharing**: same question — does kachery push the binary cache, or only the AnalysisNwbfile?
      - **FigURL / FigPack**: confirm the curation-UI generator can construct its view from a binary-cache-backed `BaseRecording`. If FigPack expects an NWB path, that's a hard incompatibility.
-     - **v1's `RecordingRecompute` machinery**: the v3 equivalent (Phase 2 task) needs an integrity check. If binary cache lives outside `AnalysisNwbfile`, the existing `cache_hash` column on `Recording` handles this — but verify the hash is stable across SI version drift.
+     - **Phase 2 recompute/storage-reclamation machinery**: if binary cache lives outside `AnalysisNwbfile`, the existing `cache_hash` column on `Recording` handles Phase 1 missing-cache detection and feeds Phase 2's v3-specific version of v1's `RecordingRecompute` pattern. Verify the hash is stable across SI version drift.
   3. **Decision matrix recorded in `v3-storage-benchmark.md`**:
      | Outcome | Choice |
      |---|---|

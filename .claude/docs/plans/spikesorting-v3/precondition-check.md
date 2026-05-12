@@ -68,10 +68,11 @@ Review the JSON `warnings` block on every `path` run. Any unaccounted `heuristic
 
 - **Draft FK structure parses, with the accounted ambiguities below.** Nullable XOR FKs on SortingSelection (Recording / ConcatenatedRecording) and ArtifactDetectionSelection (Recording / SharedArtifactGroup) parse correctly.
 - **Full ancestor walks**: `SortingSelection`'s `--up` traversal reaches Raw, Session, Nwbfile, Electrode, BrainRegion, LabTeam, Probe — all upstream Spyglass tables resolve. `UnitMatch`'s `--up` walks back through CurationV3 → Sorting → SortingSelection → both Recording and ConcatenatedRecording paths.
-- **Descendant walks**: `CurationV3`'s `--down` shows the full Phase 2/4/5 dependency tree (CurationV3.UnitLabel, AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member).
+- **Descendant walks**: `CurationV3`'s `--down` shows the curation-dependent Phase 2/4/5 dependency tree (CurationV3.UnitLabel, AnalyzerCuration, UnitMatchSelection.MemberCuration, FigPackCurationSelection, TrackedUnit.Member). `Recording` / `Sorting` down-walks additionally show the Phase 2 recompute tables (`RecordingArtifactRecompute*`, `SortingAnalyzerRecompute*`).
 - **No unresolved imports and no FK cycles.**
 - **Accounted code-graph ambiguities**:
   - `AnalysisNwbfile` exists in both `spyglass/common/common_nwbfile.py:630` and `spyglass/common/custom_nwbfile.py:30`. The v3 production design imports and FK's the core common table (`spyglass.common.common_nwbfile.AnalysisNwbfile`); code-graph path walks may emit a `heuristic_resolution` warning and select the custom table. Treat that warning as expected only when this exact target pair appears.
   - `ArtifactDetection`, `ArtifactDetectionSelection`, and `ArtifactDetectionParameters` exist in v0, v1, and the v3 draft. For draft walks rooted in `spyglass/spikesorting/v3/_draft.py`, same-package resolution to the v3 draft classes is expected. Treat any other same-name resolution as a blocker.
+  - v0/v1 define `RecordingRecompute*`, but v3 intentionally uses `RecordingArtifactRecompute*` names to avoid class-name collisions. `SortingAnalyzerRecompute*` is v3-only. Any code-graph warning that resolves a v3 `RecordingArtifact*` / `SortingAnalyzer*` FK to a v0/v1 recompute class is a blocker.
 
 The draft schemas are structurally implementable as written. Phase 0 splits this single file into the per-module Phase 1/2/3/4/5 files; the structural validation carries over.

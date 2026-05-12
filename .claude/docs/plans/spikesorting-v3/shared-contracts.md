@@ -472,7 +472,7 @@ This contract enforces the user's binding constraint: every v3 table is designed
 
 **Tables that are pure ADD (new tables in later phases, no migration needed)**:
 
-- Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`, `AnalyzerCuration`.
+- Phase 2: `QualityMetricParameters`, `AutoCurationRules`, `AnalyzerCurationSelection`, `AnalyzerCuration`, `RecordingArtifactVersions`, `RecordingArtifactRecomputeSelection`, `RecordingArtifactRecompute`, `RecordingArtifactRecompute.Name`, `RecordingArtifactRecompute.Hash`, `SortingAnalyzerVersions`, `SortingAnalyzerRecomputeSelection`, `SortingAnalyzerRecompute`, `SortingAnalyzerRecompute.Name`, `SortingAnalyzerRecompute.Hash`.
 - Phase 4: `MatcherParameters`, `UnitMatchSelection`, `UnitMatchSelection.MemberCuration`, `UnitMatch`, `UnitMatch.Pair`, `TrackedUnit`, `TrackedUnit.Member`.
 - Phase 5: `FigPackCurationSelection`, `FigPackCuration`, plus all `_params/preset.py` registrations.
 
@@ -491,7 +491,7 @@ Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edg
 - The analysis NWB units table is written with zero rows but the table object exists (column schema present).
 - `AnalyzerCuration.populate()` succeeds; metric/merge/label DataFrames have zero rows.
 - `FigPackCuration.populate()` either succeeds with an empty view or raises a clear `EmptySortingError` — NEVER a `KeyError` on a missing column.
-- Phase 1 test: `test_v3_empty_sorting_end_to_end` synthesizes a recording that produces zero clusterless events, runs the whole pipeline, asserts no exception.
+- Phase-specific tests cover this invariant: Phase 1 `test_v3_empty_sorting_phase1` for Sorting/Curation, Phase 2 `test_analyzer_curation_zero_unit_sorting`, and Phase 5 `test_figpack_zero_unit_sorting`.
 
 **Invariant 2 — NaN-bearing quality metrics MUST be sanitized before serialization.** SI's `compute_quality_metrics` legitimately returns `nan` for units with insufficient spikes (e.g., `nn_isolation`, `nn_noise_overlap` require ≥10 spikes). `AnalyzerCuration.make()` must:
 
@@ -506,4 +506,4 @@ Derived from a sweep of Spyglass v1 spike-sorting GitHub issues — the same edg
 
 **Invariant 4 — `CurationV3.insert_curation` requires explicit `labels` argument.** Per the v1 bug pattern where `labels=None` produced NWB files missing the `curation_label` column (which then broke FigURL/FigPack URI generation): v3's `insert_curation` makes `labels` required (no default `None`), and an empty dict `{}` is an explicit valid input. The NWB writer still materializes the `curation_label` column, using empty lists for unlabeled units; the DataJoint schema stores labels in `CurationV3.UnitLabel`, with zero rows when `labels={}`. Static analysis (mypy / runtime check) enforces this.
 
-**Invariant — do not weaken**: All four invariants are tested in Phase 1 or Phase 2 validation slices. Disabling these tests in CI requires a justified note in the PR.
+**Invariant — do not weaken**: All four invariants are tested in the relevant Phase 1, Phase 2, or Phase 5 validation slices. Disabling these tests in CI requires a justified note in the PR.

@@ -333,7 +333,7 @@ The Phase 0 benchmark's decision-matrix output picks (A) or (B). If (B), the `bi
 
 - **Binary cache, not NWB-wrapped raw bytes.** Faster sort-time access at the cost of a parallel artifact universe.
 - **One cache per `recording_id`.** Subsequent sorting tries with different `SorterParameters` reuse the same cache. v1 re-materialized per sort.
-- **Hash for integrity.** `cache_hash` enables a v3 equivalent of `RecordingRecompute` (Phase 2 task).
+- **Hash for integrity.** `cache_hash` enables lightweight missing-cache detection in Phase 1 and feeds Phase 2's v3 `RecordingArtifactRecompute*` tables without changing the `Recording` schema.
 - **No SortingAnalyzer yet.** That comes after sorting, in `Sorting.make()`.
 
 ---
@@ -1007,6 +1007,115 @@ class AnalyzerCuration(SpyglassMixin, dj.Computed):
 
 ---
 
+## RecordingArtifactRecompute + SortingAnalyzerRecompute
+
+Phase 2. Verified regeneration and storage reclamation for large v3 artifacts.
+
+```python
+@schema
+class RecordingArtifactVersions(SpyglassMixin, dj.Computed):
+    definition = """
+    -> Recording
+    ---
+    nwb_deps=null: blob
+    cache_hash: char(32)
+    """
+
+
+@schema
+class RecordingArtifactRecomputeSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> RecordingArtifactVersions
+    -> UserEnvironment
+    rounding=4: int
+    ---
+    logged_at_creation=0: bool
+    xfail_reason=NULL: varchar(127)
+    """
+
+
+@schema
+class RecordingArtifactRecompute(SpyglassMixin, dj.Computed):
+    definition = """
+    -> RecordingArtifactRecomputeSelection
+    ---
+    matched: bool
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: bool
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
+
+
+@schema
+class SortingAnalyzerVersions(SpyglassMixin, dj.Computed):
+    definition = """
+    -> Sorting
+    ---
+    si_deps=null: blob
+    analyzer_manifest=null: blob
+    analyzer_hash: char(32)
+    """
+
+
+@schema
+class SortingAnalyzerRecomputeSelection(SpyglassMixin, dj.Manual):
+    definition = """
+    -> SortingAnalyzerVersions
+    -> UserEnvironment
+    rounding=4: int
+    ---
+    logged_at_creation=0: bool
+    xfail_reason=NULL: varchar(127)
+    """
+
+
+@schema
+class SortingAnalyzerRecompute(SpyglassMixin, dj.Computed):
+    definition = """
+    -> SortingAnalyzerRecomputeSelection
+    ---
+    matched: bool
+    err_msg=NULL: varchar(255)
+    created_at=NULL: datetime
+    deleted=0: bool
+    """
+
+    class Name(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        missing_from: enum('old', 'new')
+        """
+
+    class Hash(SpyglassMixinPart):
+        definition = """
+        -> master
+        name: varchar(255)
+        """
+```
+
+**Design points**:
+
+- `RecordingArtifactRecompute*` ports the v1 `RecordingRecompute` pattern to v3's `Recording` artifact with v3-specific table names. It verifies that a deleted or moved binary cache can be regenerated from the stored `RecordingSelection` lineage and current environment.
+- `SortingAnalyzerRecompute*` applies the same lifecycle to the SortingAnalyzer folder: inventory extension metadata and content hashes, regenerate from `SortingSelection`, compare, then allow deletion only after `matched=1`.
+- `delete_files()` is never allowed to delete artifacts for `matched=0`. Storage reclamation is a verified workflow, not a cleanup shortcut.
+- These tables are Phase 2 pure additions in the zero-migration contract. Phase 1 provides opportunistic missing-artifact rebuild helpers; Phase 2 provides auditable recompute records and safe deletion.
+
+---
+
 ## SessionGroup + ConcatenatedRecording
 
 Phase 3. Cross-session bundling for same-day chronic recordings.
@@ -1267,6 +1376,9 @@ class UnitMatchSelection(SpyglassMixin, dj.Manual):
     via the `Member` part table. The plan deliberately rejects an implicit
     "latest curation" lookup — that would make UnitMatch outputs irreproducible
     when a user adds a new curation to one of the source sessions.
+    `insert_selection()` must also verify that each pinned CurationV3 row
+    belongs to the same SessionGroup.Member it is attached to; the independent
+    FKs alone do not prove that relationship.
     """
     definition = """
     unitmatch_id: uuid

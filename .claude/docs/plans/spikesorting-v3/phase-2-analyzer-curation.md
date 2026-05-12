@@ -1,8 +1,8 @@
-# Phase 2 — Analyzer-driven curation (replaces v1 MetricCuration + BurstPair)
+# Phase 2 — Analyzer-driven curation + recompute verification
 
 [← back to PLAN.md](PLAN.md) · [overview](overview.md) · [designs](designs.md#analyzercuration-replaces-v1-metriccuration--burstpair)
 
-Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` table that walks SortingAnalyzer extensions to compute metrics, suggest merges, and produce auto-curation labels. Materializing the suggested labels/merges into a new `CurationV3` row is an explicit user action.
+Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` table that walks SortingAnalyzer extensions to compute metrics, suggest merges, and produce auto-curation labels. Materializing the suggested labels/merges into a new `CurationV3` row is an explicit user action. This phase also ports v1's recompute verification pattern to v3 `Recording` and `Sorting` artifacts so large caches can be deleted only after a successful round-trip check.
 
 **Inputs to read first:**
 
@@ -88,18 +88,18 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
   - `num_spikes`: exact integer match.
   Any metric outside tolerance fails the test with a per-unit diff report.
 
-- **Port v1's `RecordingRecompute` machinery to v3** as `recompute.py`. v1's `recompute.py` ([src/spyglass/spikesorting/v1/recompute.py:1-15, 55-103, 188-230](src/spyglass/spikesorting/v1/recompute.py#L1-L230)) is active production infrastructure (PRs #1470 "Add XFail recompute" and #1588 "Trigger recording recompute in v1.SpikeSorting" landed 2026). v3's `Recording` design includes a `cache_hash` column and a `_rebuild_*` helper for on-miss reconstruction, but **does not yet provide env-tracked deterministic-recompute verification, deliberate storage reclamation, or cross-version archival check**. Phase 2 adds these as a port of v1's three-table pattern, adapted for v3's artifact layout (which is either NWB-only or NWB+binary-cache per the Phase 0 storage benchmark outcome):
-  - **`RecordingRecomputeVersions`** (Computed, FK `Recording`) — inventories pynwb/ndx namespace versions associated with each existing analysis NWB. The `this_env` cached property filters to v3 `Recording` rows compatible with the current PyNWB/namespace stack.
-  - **`RecordingRecomputeSelection`** (Manual, FK `RecordingRecomputeVersions` + `UserEnvironment`) — plans a recompute attempt under a labeled `env_id` with a `rounding` precision (since float arithmetic differs across SI versions). Optional `xfail_reason` to skip known failures.
-  - **`RecordingRecompute`** (Computed, FK `RecordingRecomputeSelection`) — runs the recompute under the labeled env, compares hashes object-by-object (`Hash` part records mismatches; `Name` part records missing objects). `delete_files()` is **gated on `matched=1`** rows only — no silent deletion of files that didn't actually round-trip.
-  - **`SortingRecompute*`** (parallel trio, FKs `Sorting`) — same three-table shape for the SortingAnalyzer folder. Adapted to compare SortingAnalyzer extensions (templates, waveforms, ...) under env drift instead of NWB objects.
-  - **Storage-reclamation workflow** documented in `docs/src/Pipelines/SpikeSorting/v3-storage-management.md`: recompute-verify (`matched=1`) → `delete_files()` reclaims disk → later `Recording.get_recording()` rebuild regenerates. Identical lifecycle to v1's pattern.
-  - Phase 2 validation slice adds: `test_recompute_versions_inventories_correctly`, `test_recompute_matches_under_same_env` (slow), `test_recompute_detects_mismatch_under_different_rounding` (slow), `test_delete_files_only_for_matched` (regression guard — must never delete a file for `matched=0`).
-  - LOC estimate: ~400 LOC ported from v1 with adaptations. The `RecomputeVersions` machinery is the most reusable; `Recompute.make()` body diverges most.
+- **Port v1's `RecordingRecompute` pattern to v3-specific recompute tables** in `recompute.py`. v1's `recompute.py` ([src/spyglass/spikesorting/v1/recompute.py:1-15, 55-103, 189-224, 527-548](src/spyglass/spikesorting/v1/recompute.py#L1-L548)) is active production infrastructure. v3 keeps recompute in Phase 2, not a future phase, because chronic recordings make deliberate storage reclamation part of the MVP reliability story. Phase 2 adds final-shape recompute tables declared in the v3 draft schema:
+  - **`RecordingArtifactVersions`** (Computed, FK `Recording`) — inventories PyNWB/namespace dependencies and records the current `Recording.cache_hash`.
+  - **`RecordingArtifactRecomputeSelection`** (Manual, FK `RecordingArtifactVersions` + `UserEnvironment`) — plans a recompute attempt under a labeled `env_id` with a `rounding` precision and optional `xfail_reason`.
+  - **`RecordingArtifactRecompute`** (Computed, FK `RecordingArtifactRecomputeSelection`) — reruns the recording reconstruction, compares hashes/object names, and records `matched`, `err_msg`, `created_at`, and `deleted`. `delete_files()` is gated on `matched=1` rows only — no deletion of files that did not round-trip.
+  - **`SortingAnalyzerVersions` / `SortingAnalyzerRecomputeSelection` / `SortingAnalyzerRecompute`** — parallel trio for the SortingAnalyzer folder. The comparison inventories analyzer extension metadata and content hashes rather than NWB ElectricalSeries objects.
+  - **Storage-reclamation workflow** documented in `docs/src/Pipelines/SpikeSorting/v3-storage-management.md`: recompute-verify (`matched=1`) → `delete_files()` reclaims disk → later `Recording.get_recording()` or `Sorting.get_analyzer()` rebuilds from the stored selection/parameter lineage.
+  - This is Phase 2 schema, not a later migration. The zero-migration contract lists these tables as Phase 2 pure additions.
 
 - **Documentation update**:
   - Update [docs/src/Pipelines/SpikeSorting/v3.md](docs/src/Pipelines/SpikeSorting/v3.md) (created Phase 1) with a Quality Metrics section.
-  - CHANGELOG.md "Unreleased": "v3 `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. Auto-curation rules driven by Pydantic-validated thresholds; auto-merge via SI 0.104 presets."
+  - Add `docs/src/Pipelines/SpikeSorting/v3-storage-management.md` documenting recompute verification and safe deletion.
+  - CHANGELOG.md "Unreleased": "v3 `AnalyzerCuration` consolidates v1's `MetricCuration` + `BurstPair`. Auto-curation rules driven by Pydantic-validated thresholds; auto-merge via SI 0.104 presets. v3 recompute tables support safe storage reclamation for Recording and SortingAnalyzer artifacts."
 
 ## Deliberately not in this phase
 
@@ -117,12 +117,21 @@ Replaces v1's `MetricCuration` + `BurstPair` with a single `AnalyzerCuration` ta
 | `test_auto_curation_rules_validation` | `AutoCurationRules.insert1({...auto_merge_preset: "bogus_preset"...})` raises. Valid preset inserts. |
 | `test_apply_label_rules_basic` | Synthetic metrics DataFrame with two rules ("snr<2 → noise", "isi_violation>0.05 → mua"); asserts correct labels per unit. |
 | `test_apply_label_rules_order_matters` | Rules in order produce expected labels when a unit matches multiple thresholds; reordering rules changes outcomes for ties. |
+| `test_label_rules_loop_completes_all_rules` | Three rules where rules 2 and 3 both apply to a unit; asserts all matching rules are processed and `return` is outside the rule loop. |
+| `test_label_list_isolation` | Two units match the same multi-label rule; mutating unit A's labels after helper return does not change unit B's labels or the rule definition. |
+| `test_label_dedupe_per_element` | Two rules emit the same label for one unit; final label list contains one copy, not duplicates from list-in-list membership checks. |
 | `test_analyzer_curation_make_writes_three_tables` (slow) | After populate, `AnalyzerCuration & key` row has all three object_ids populated; `fetch_nwb()` returns three pandas DataFrames. |
 | `test_analyzer_curation_metrics_match_si_compute` (slow) | Independently call `compute_quality_metrics(analyzer, ...)` and compare to the fetched `quality_metrics` DataFrame — exact match. |
+| `test_metric_nan_round_trip` | Low-spike unit produces non-finite metrics; DataJoint blob and NWB serialized outputs contain `None` while the in-memory metrics DataFrame preserves NaN semantics. |
+| `test_analyzer_curation_zero_unit_sorting` | Zero-unit `Sorting` row populates `AnalyzerCuration` with empty metric/merge/label tables and no missing-column errors. |
 | `test_analyzer_curation_merge_suggestions_non_empty_on_obvious_split` (slow) | Synthetic sort with two units that are obvious duplicates (same spike times shifted by 1 ms); auto-merge with preset='similarity_correlograms' suggests their merge. |
 | `test_materialize_curation_creates_child` | `AnalyzerCuration.materialize_curation(key)` creates a new `CurationV3` row with `parent_curation_id` pointing to the input curation; auto-registers in `SpikeSortingOutput.CurationV3`. |
 | `test_add_extensions_is_idempotent` (slow) | Call `Sorting.add_extensions(key, ["correlograms"])` twice; second call is a no-op (no recompute). |
 | `test_v3_analyzer_curation_vs_v1` (slow, integration) | Parity vs v1 `MetricCuration` per tolerances above. Reports per-unit diffs on failure. |
+| `test_recompute_versions_inventories_correctly` | `RecordingArtifactVersions` and `SortingAnalyzerVersions` populate for existing v3 `Recording` / `Sorting` rows and record dependency/hash manifests. |
+| `test_recompute_matches_under_same_env` (slow) | Recompute under the current `UserEnvironment`; `RecordingArtifactRecompute.matched == 1` and `SortingAnalyzerRecompute.matched == 1`. |
+| `test_recompute_detects_mismatch_under_different_rounding` (slow) | Force a rounding/hash mismatch; recompute rows record `matched == 0` plus `Name` or `Hash` part rows describing the difference. |
+| `test_delete_files_only_for_matched` | `delete_files()` refuses to delete artifacts for `matched=0` and deletes only after a successful round-trip (`matched=1`). |
 
 ## Fixtures
 
