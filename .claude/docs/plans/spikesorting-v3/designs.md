@@ -322,11 +322,18 @@ class Recording(SpyglassMixin, dj.Computed):
         ...
 ```
 
-**Key design points**:
+**Storage design is provisional — gated on the Phase 0 storage benchmark.** The design drafted below assumes a binary cache outside `AnalysisNwbfile`, but the choice between binary-cache vs NWB-only storage is decided by the measured outcome of the Phase 0 benchmark + integration check (see phase-0-scaffolding.md § Storage benchmark). Two possible designs:
 
-- **Binary cache, not NWB-wrapped raw bytes.** v1 wraps preprocessed traces inside an analysis NWB via `SpikeInterfaceRecordingDataChunkIterator` — this is slow to read for sorting. v3 keeps a separate binary file; the NWB carries only metadata + a pointer.
+- **(A) Binary cache** (drafted below): faster sorter ingestion if the SI community folklore is right; adds a parallel artifact universe outside `AnalysisNwbfile` that needs its own cleanup, hashing, recompute, export, and FigPack integration.
+- **(B) NWB-only** (fallback): mirrors v1's `SpikeInterfaceRecordingDataChunkIterator` path. Single canonical artifact reuses all existing Spyglass `AnalysisNwbfile` machinery (cleanup, export, kachery, recompute). Sorters that prefer binary materialize a per-sort tmpdir via `recording.save(format="binary", folder=tmpdir)` at sort time.
+
+The Phase 0 benchmark's decision-matrix output picks (A) or (B). If (B), the `binary_cache_path` and `cache_hash` columns below disappear and `Recording.make()` uses the `AnalysisNwbfile.build()` pattern for the preprocessed recording.
+
+**Key design points (under option A)**:
+
+- **Binary cache, not NWB-wrapped raw bytes.** Faster sort-time access at the cost of a parallel artifact universe.
 - **One cache per `recording_id`.** Subsequent sorting tries with different `SorterParameters` reuse the same cache. v1 re-materialized per sort.
-- **Hash for integrity.** `cache_hash` enables a v3 equivalent of `RecordingRecompute` in a future phase.
+- **Hash for integrity.** `cache_hash` enables a v3 equivalent of `RecordingRecompute` (Phase 2 task).
 - **No SortingAnalyzer yet.** That comes after sorting, in `Sorting.make()`.
 
 ---
@@ -565,16 +572,19 @@ class Sorting(SpyglassMixin, dj.Computed):
         recording = _resolve_recording(sel)  # see Phase 3 task: dispatch by which FK is non-NULL
 
         # 2. Apply POST-MOTION preprocessing (whitening, if configured).
-        # In the concat path, motion correction already ran inside
-        # ConcatenatedRecording.make() before whitening — both paths
-        # converge here with a whitened recording.
-        from spikeinterface.preprocessing import apply_preprocessing_pipeline
-        preproc_params = PreprocessingParamsSchema.model_validate(
-            _get_preproc_params_for_selection(sel)
-        )
-        post_motion_dict = preproc_params.to_post_motion_dict()
-        if post_motion_dict:
-            recording = apply_preprocessing_pipeline(recording, post_motion_dict)
+        # Single-recording path: Recording cache is pre-motion only, so
+        # Sorting.make() applies post-motion preprocessing here.
+        # Concat path: ConcatenatedRecording.make() already applies the
+        # post-motion stage before materializing its sorter-ready cache.
+        # Do NOT whiten concat recordings a second time.
+        if sel.get("recording_id") is not None:
+            from spikeinterface.preprocessing import apply_preprocessing_pipeline
+            preproc_params = PreprocessingParamsSchema.model_validate(
+                _get_preproc_params_for_selection(sel)
+            )
+            post_motion_dict = preproc_params.to_post_motion_dict()
+            if post_motion_dict:
+                recording = apply_preprocessing_pipeline(recording, post_motion_dict)
 
         # 3. Get artifact-removed intervals (single-recording path only;
         # concat path passes None — artifact detection on the concat is
@@ -624,8 +634,14 @@ class Sorting(SpyglassMixin, dj.Computed):
             **job_kwargs,
         )
 
-        # 5. Write units to analysis NWB (downstream uses this for fetching spike times)
-        nwb_file_name = (RecordingSelection & sel).fetch1("nwb_file_name")
+        # 5. Write units to analysis NWB (downstream uses this for fetching spike times).
+        # AnalysisNwbfile has one required parent Nwbfile FK. For single-recording
+        # sorts this is the RecordingSelection parent. For concat sorts, use the
+        # first SessionGroup.Member as the deterministic parent anchor and store
+        # the full multi-session provenance in the SortingSelection ->
+        # ConcatenatedRecordingSelection -> SessionGroup.Member chain. Do NOT
+        # query RecordingSelection with a concat-only selection row.
+        nwb_file_name = _resolve_analysis_parent_nwb_file_name(sel)
         with AnalysisNwbfile().build(nwb_file_name) as builder:
             object_id = builder.add_units(sorting_obj, table_name="units")
             analysis_file_name = builder.analysis_file_name
@@ -1418,6 +1434,9 @@ def run_v3_pipeline(
     auto_curate: bool = True,                     # Phase 2
     unit_match: bool = False,                     # Phase 4 — requires
                                                   # session_group_name
+    unit_match_curation_choices: dict[int, dict] | None = None,
+                                                  # Phase 4 — explicit
+                                                  # MemberCuration pins
     figpack: bool = False,                        # Phase 5
 ) -> dict:
     """End-to-end v3 pipeline with optional auto-curation, cross-session
@@ -1503,10 +1522,16 @@ def run_v3_pipeline(
     if unit_match:
         if session_group_name is None:
             raise ValueError("unit_match=True requires session_group_name")
+        if unit_match_curation_choices is None:
+            raise ValueError(
+                "unit_match=True requires explicit unit_match_curation_choices "
+                "mapping each SessionGroup.member_index to a CurationV3 key; "
+                "the pipeline never auto-pins the latest curation."
+            )
         um_key = UnitMatchSelection.insert_selection({
             "session_group_name": session_group_name,
             "matcher_params_name": preset_dict["matcher"],
-        }, curation_choices={...})  # auto-pin latest CurationV3 per member
+        }, curation_choices=unit_match_curation_choices)
         UnitMatch.populate(um_key)
         TrackedUnit.populate(um_key)
         manifest["stages"].append({"stage": "unit_match", "key": um_key})

@@ -40,7 +40,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
     2. **Reuses cached `Recording` binary outputs per member** rather than re-preprocessing from raw NWB. For each member, look up the matching `RecordingSelection` row (via `insert_selection` idempotency); if `Recording` is not yet populated for that key, call `Recording.populate(rec_key)`; then load the BaseRecording via `Recording.get_recording(rec_key)`. This avoids the silent-divergence risk of preprocessing twice. See [designs.md § SessionGroup + ConcatenatedRecording](designs.md#sessiongroup--concatenatedrecording) make() body.
     3. `concatenate_recordings(rec_list)` → mono-segment virtual recording.
     4. Applies `correct_motion(rec, preset=...)` if preset != "none".
-    5. Materializes to binary cache via `recording.save(format="binary", **resolved_job_kwargs)`.
+    5. Applies post-motion preprocessing (whitening, if configured) after motion correction, then materializes to binary cache via `recording.save(format="binary", **resolved_job_kwargs)`. This cache is sorter-ready; `Sorting.make()` must not apply post-motion preprocessing again for `concat_recording_id` rows.
     6. Records `member_segment_boundaries` (cumulative sample boundaries) for back-mapping spike times.
     7. `get_recording(key)` reads the cache.
     8. `split_sorting_by_session(sorting, key) -> dict[session_key, BaseSorting]` — back-maps spike times.
@@ -59,6 +59,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
       raise ValueError("Neither recording_id nor concat_recording_id is set on SortingSelection row — XOR validator was bypassed")
   ```
   This is a Phase 3 *method-body* change to existing `Sorting.make()`; not a schema change.
+  Also add `_resolve_analysis_parent_nwb_file_name(sel)`: for single-recording rows it returns the `RecordingSelection.nwb_file_name`; for concat rows it returns the first `SessionGroup.Member.nwb_file_name` as the deterministic `AnalysisNwbfile` parent anchor. The complete multi-session provenance remains queryable through `SortingSelection -> ConcatenatedRecordingSelection -> SessionGroup.Member`; do not query `RecordingSelection` with a concat-only selection row.
 
 - **Implement back-mapping helper** `ConcatenatedRecording.split_sorting_by_session(sorting, key)`:
   ```python
@@ -126,6 +127,7 @@ Implements the concatenate-and-sort workflow on top of the SessionGroup / Concat
 | `test_sorting_selection_phase_3_accepts_concatenated` | After Phase 3 module import, `SortingSelection.insert_selection({"concat_recording_id": concat_uuid, "recording_id": None, ...})` succeeds (regression vs Phase 1's NotImplementedError). |
 | `test_sorting_selection_xor_still_enforced` | After Phase 3, the XOR validator still rejects both-NULL and both-non-NULL combinations of `recording_id` / `concat_recording_id`. |
 | `test_sorting_selection_schema_unchanged_from_phase_1` | `SortingSelection.heading.attributes` is unchanged across Phase 1 and Phase 3 (no migration). |
+| `test_concat_sorting_analysis_parent_anchor` | A concat-backed `Sorting.populate()` builds its analysis NWB using the first `SessionGroup.Member.nwb_file_name` as parent and does not query `RecordingSelection` with a concat-only key. |
 | `test_sorting_against_concatenated_recording` (slow) | Run `Sorting.populate()` on a SortingSelection FK'ing ConcatenatedRecording; analyzer folder created; `n_units > 0`; `Sorting.Unit` populated with brain regions from the per-session electrode metadata. |
 | `test_split_sorting_by_session` (slow) | After concat sort, `split_sorting_by_session(sorting, key)` returns dict with one entry per Member; each entry's spike times fall within that member's time range; unit IDs preserved across members. |
 | `test_multi_day_chronic_smoke` (slow, optional) | Two-session multi-day concat sort completes; memory + runtime within budget. Skipped if `--run-chronic` not passed. |

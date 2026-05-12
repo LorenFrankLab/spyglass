@@ -272,8 +272,8 @@ self.insert1({**key, "analysis_file_name": analysis_file_name, "result_object_id
 **Risk 6**: SortingAnalyzer folder management at scale — chronic recording analyzer can be 50 GB+.
 - Mitigation: Same `RecordingRecompute` pattern from v1 — recompute table for analyzer cache; delete + recompute for storage reclamation.
 
-**Risk 7**: UnitMatch on tetrodes may not work.
-- Mitigation: Phase 4 starts with a tetrode validation gate. If matching degrades, fall back to concat-and-sort for tetrode use case and document the limitation.
+**Risk 7**: UnitMatch may not transfer cleanly from Neuropixels-published examples to Frank-lab polymer/tetrode use cases.
+- Mitigation: Phase 4 gates on a MEArec polymer-probe fixture, because polymer is the lab-relevant standard for this workflow. Neuropixels and tetrode AUCs are recorded as informational checks; if tetrode features collapse, tetrode users are routed to concat-and-sort or future validation work rather than promised UnitMatch support.
 
 ---
 

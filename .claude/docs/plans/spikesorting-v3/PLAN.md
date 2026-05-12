@@ -24,6 +24,6 @@ For agent invocation, **load only the slice you need**:
   - [phase-1-modern-single-session.md](phase-1-modern-single-session.md) — SortingAnalyzer-based single-session sort end-to-end; new `SpikeSortingOutput.CurationV3` part.
   - [phase-2-analyzer-curation.md](phase-2-analyzer-curation.md) — metrics + auto-merge + burst-pair consolidated into `AnalyzerCuration`.
   - [phase-3-session-group-concat.md](phase-3-session-group-concat.md) — `SessionGroup` table + `ConcatenatedRecording` for same-day chronic recordings.
-  - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; tetrode validation gate.
-  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v3_pipeline()` API, FigPack curation, notebook rewrite, v1 sunset roadmap.
+  - [phase-4-unitmatch-cross-session.md](phase-4-unitmatch-cross-session.md) — pluggable matcher backend with UnitMatchPy; polymer validation gate, with Neuropixels/tetrode informational checks.
+  - [phase-5-ux-overhaul.md](phase-5-ux-overhaul.md) — `run_v3_pipeline()` API, FigPack curation, notebook rewrite, v1/v3 path-selection docs.
 - [appendix.md](appendix.md) — SpikeInterface 0.99→0.104 migration cheat sheet, UnitMatchPy integration notes, MountainSort 5 install + sorter param table.

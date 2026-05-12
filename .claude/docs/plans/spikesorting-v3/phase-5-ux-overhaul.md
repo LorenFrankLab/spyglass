@@ -24,7 +24,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 - **EXTEND `pipeline.py`** (Phase 1 shipped a minimal version with 3 presets covering recording → artifact → sorting → initial curation). Phase 5 adds the missing stages and broadens the preset set per [designs.md § `run_v3_pipeline()` Orchestrator](designs.md#run_v3_pipeline-orchestrator):
   - **Add `auto_curate=True` parameter** — wires up Phase 2's `AnalyzerCuration` stage and the materialization step.
   - **Add `session_group_name` parameter (optional)** — when set, the orchestrator routes through Phase 3's `ConcatenatedRecording` instead of `Recording`. Mutually exclusive with the single-session inputs (`sort_group_id` etc.).
-  - **Add `unit_match=False` parameter (optional, requires `session_group_name`)** — wires up Phase 4's UnitMatch path.
+  - **Add `unit_match=False` parameter (optional, requires `session_group_name`)** plus `unit_match_curation_choices` — wires up Phase 4's UnitMatch path while preserving the explicit `MemberCuration` pinning contract. The orchestrator must raise if `unit_match=True` and choices are omitted; it never auto-selects "latest" curations.
   - **Add `figpack=False` parameter (optional)** — wires up the FigPack curation stage below.
   - **Expand `PRESETS`** to include Phase 5's full set:
     - `franklab_tetrode_mountainsort4`, `franklab_tetrode_mountainsort5`, `clusterless_thresholder_default` (carried over from Phase 1)
@@ -95,7 +95,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 - **No v1 sunset criteria.** Per the resolved design decision in [overview.md](overview.md), v0 and v1 stay in-tree indefinitely. Phase 5 simply documents that v3 is the recommended path for new sorts; v1 docs stay live and unmarked-as-deprecated.
 
 - **End-to-end integration test** `tests/spikesorting/v3/test_run_pipeline.py`:
-  - `test_run_v3_pipeline_minirec_clusterless` — calls `run_v3_pipeline(...)`, asserts manifest has all 5 stages + valid merge_id, downstream `SpikeSortingOutput.get_spike_times(...)` returns the same units that direct v3 path would (Phase 1's parity test, but through the orchestrator).
+  - `test_run_v3_pipeline_minirec_clusterless` — calls `run_v3_pipeline(...)`, asserts manifest has all 5 stages + valid merge_id, downstream `SpikeSortingOutput.get_spike_times(...)` returns sane arrays. This is a plumbing/integration guard only; minirec is not a sort-correctness or parity oracle.
   - `test_run_v3_pipeline_idempotent` — call `run_v3_pipeline(...)` twice with identical args; second call returns the same manifest (no duplicate inserts).
   - `test_preset_validation_catches_missing_lookup_rows` — define a preset referencing a nonexistent param name; `register_preset` raises with a clear "row 'foo' not found in PreprocessingParameters" message.
 
@@ -113,7 +113,7 @@ The capstone phase. Adds the `run_v3_pipeline()` convenience function (35-cell n
 | Test | Asserts |
 | --- | --- |
 | `test_preset_schema_validation` | `PresetSchema(preproc_params_name="bogus", ...)` succeeds at construction but `register_preset(name, dict)` raises because the Lookup row doesn't exist. Valid preset registers cleanly. |
-| `test_run_v3_pipeline_minirec_clusterless` (slow, integration) | Single call produces a valid merge_id; spike times match Phase 1 parity baseline. |
+| `test_run_v3_pipeline_minirec_clusterless` (slow, integration) | Single call produces a valid merge_id; downstream spike-time fetch works. Does NOT assert sort correctness or parity against minirec. |
 | `test_run_v3_pipeline_idempotent` | Two calls with identical args return identical manifests. No duplicate rows inserted (count check on every Selection table before/after second call). |
 | `test_run_v3_pipeline_manifest_complete` | Manifest contains entries for all 5 stages (recording, artifact, sorting, initial_curation, auto_curation) and a final `merge_id`. |
 | `test_register_preset_catches_typos` | Registering a preset with `preproc_params_name="defaut"` (typo) raises clearly. |

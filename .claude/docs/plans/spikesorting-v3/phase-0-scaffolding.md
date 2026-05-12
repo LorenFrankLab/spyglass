@@ -34,6 +34,24 @@ This phase establishes the foundation: empty module structure, baseline-capture 
 
 - **Set up a dual-environment development convention** documented in the v3-migration-prereqs page: v3 development happens in a virtualenv with SI 0.104 pre-installed (overriding the pyproject pin); v1 work continues in the default env. This lets v3 scaffolding land without breaking v1 users. CI gains a new job `pytest-v3` that runs only `tests/spikesorting/v3/` under SI 0.104; the existing `pytest` job stays on the current pin until the prerequisite port lands.
 
+- **Storage benchmark + integration check** (decision gate for Phase 1's `Recording` design). The plan's draft `Recording` design materializes a binary cache outside the `AnalysisNwbfile` system, on the assumption that binary reads are faster than the v1 NWB-wrapped path for sort-time access. **This is folklore from the SI community, not measured for our pipeline.** Before Phase 1 ships, run a one-shot benchmark + integration check that drives the storage choice:
+  1. **Performance**: against the Phase-0-generated `mearec_polymer_60s.nwb` fixture (or a real-data slice via `SPIKESORTING_V3_REAL_NWB_PATH` if available), measure end-to-end sort wall-time for KS4 + MS5 + clusterless_thresholder under both storage backends:
+     - (a) NWB-wrapped recording via `SpikeInterfaceRecordingDataChunkIterator` (v1's path through `AnalysisNwbfile`).
+     - (b) Binary folder via `recording.save(folder=..., format="binary")`.
+     For each sorter × storage combination, record: wall-time, peak RSS, total bytes read from disk. Report as a table in `docs/src/Pipelines/SpikeSorting/v3-storage-benchmark.md`.
+  2. **Integration**: regardless of performance, verify that the binary-cache path is compatible with Spyglass's storage management. Specifically:
+     - **`AnalysisNwbfile.cleanup`**: the binary cache lives outside the `AnalysisNwbfile` tracking. Confirm whether `cleanup` correctly preserves the cache vs accidentally deletes it; or whether v3 needs a parallel cleanup path. If cleanup is unaware of the binary cache, files orphan on every delete cycle.
+     - **`export.py` / paper-snapshot export**: existing export tooling bundles `AnalysisNwbfile` rows for DANDI / paper snapshots. Binary caches are NOT analysis NWBs — confirm they get bundled (or document that they don't, and that downstream consumers must regenerate via `Recording.get_recording`'s rebuild path on the importing side).
+     - **Kachery sharing**: same question — does kachery push the binary cache, or only the AnalysisNwbfile?
+     - **FigURL / FigPack**: confirm the curation-UI generator can construct its view from a binary-cache-backed `BaseRecording`. If FigPack expects an NWB path, that's a hard incompatibility.
+     - **v1's `RecordingRecompute` machinery**: the v3 equivalent (Phase 2 task) needs an integrity check. If binary cache lives outside `AnalysisNwbfile`, the existing `cache_hash` column on `Recording` handles this — but verify the hash is stable across SI version drift.
+  3. **Decision matrix recorded in `v3-storage-benchmark.md`**:
+     | Outcome | Choice |
+     |---|---|
+     | Binary >2× faster AND all integration checks pass | Keep the binary-cache design as drafted |
+     | Binary <2× faster OR any integration check fails | **Revise Phase 1 to NWB-only storage** — Recording.make() writes the preprocessed recording via `AnalysisNwbfile` (mirroring v1 at `recording.py:475-712`). Sort-time sorters that prefer binary materialize their own tmpdir at sort time via `recording.save(format="binary", folder=tmpdir)`. The dual-storage cost is gone, recompute uses the existing `AnalysisNwbfile` machinery, and the storage decision is grounded in measurement. |
+  4. **Phase 1 cannot ship until this benchmark is run.** The Phase 1 `Recording` design (designs.md § Recording) is conditional on the benchmark outcome — see the "Storage design is provisional" note there. Phase 0's task list includes the script `tests/spikesorting/v3/benchmark_storage.py` that runs the measurements and emits the markdown table.
+
 - **Create the v3 module skeleton.** Make the following empty/stub files; each has a one-line docstring and an empty `# Implemented in Phase N` comment:
   - `src/spyglass/spikesorting/v3/__init__.py`
   - `src/spyglass/spikesorting/v3/recording.py` (Phase 1)

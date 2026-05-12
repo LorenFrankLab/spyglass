@@ -450,7 +450,7 @@ This contract enforces the user's binding constraint: every v3 table is designed
 | `ConcatenatedRecordingSelection` | Declared in Phase 1 (Manual, UUID PK) | Provides the UUID PK that `ConcatenatedRecording` (Computed) inherits. Needed so `SortingSelection` can FK `ConcatenatedRecording` from Phase 1. |
 | `ConcatenatedRecording` | Declared in Phase 1; `make()` body raises `NotImplementedError("Phase 3")` | Final schema; Phase 3 only fills in the `make()` body. Test in Phase 1 asserts `populate()` raises. |
 | `SortingSelection` | Two NULLABLE typed FKs declared in Phase 1: `-> [nullable] Recording`, `-> [nullable] ConcatenatedRecording`. XOR enforced in `insert_selection()`. | Both FK targets exist from Phase 1, so the schema is final. Phase 1's `insert_selection` rejects `concat_recording_id` with `NotImplementedError`; Phase 3 lifts that runtime gate without touching the schema. |
-| `SortingSelection` | `artifact_id: uuid` is nullable (NOT a PK component) | Concat sorts skip artifact detection. |
+| `SortingSelection` | Nullable `-> ArtifactDetection` FK (the inherited `artifact_id` is NOT a PK component) | Concat sorts skip artifact detection. |
 | `Sorting.Unit` | Part table present in Phase 1 | Phase 2 `AnalyzerCuration` reads brain regions from here; Phase 4 `TrackedUnit` per-session region lookup reads from here. |
 | `CurationV3.Unit` | Part table present in Phase 1 | Same downstream consumers; merges shrink `CurationV3.Unit` from `Sorting.Unit` row count. |
 | `CurationV3.object_id` (not `units_object_id`) | Column name matches v1 convention | `SpikeSortingOutput.get_spike_times` dispatch works unchanged. |
